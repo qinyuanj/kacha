@@ -45,4 +45,4 @@ Lite 已停用。旧画板及导入的画板包仍可查看，旧节点、生成
 
 ## 反馈
 
-需求与缺陷请到 [GitHub Issues](https://github.com/TLOBillyQ/kacha/issues) 提交。
+需求与缺陷请到 [GitHub Issues](https://github.com/qinyuanj/kacha/issues) 提交。

@@ -93,7 +93,7 @@ PYTHONPATH=src python3 -m ugc_image_tool.contracts.cli validate contracts/fixtur
 
 ## 2026-10-10 Flash 普通通路与证据准入
 
-按 [Issue #8 最终 Resolution](https://github.com/TLOBillyQ/kacha/issues/8#issuecomment-6093423192)，Flash 官方明确支持能力可在客户端实现及自动化验证完成后开放，无须逐项真实网关冒烟。官方支持、当前网关实测、客户端实现分开记录，详见 [Flash 研究](../research/seedream-flash.md)。路径与有序 `image` 已有真实证据；普通输入/尺寸边界、JPEG、水印、base64、standard 优化按官方规则验证，不冒称网关已测。
+按 [Issue #8 最终 Resolution](https://github.com/qinyuanj/kacha/issues/8#issuecomment-6093423192)，Flash 官方明确支持能力可在客户端实现及自动化验证完成后开放，无须逐项真实网关冒烟。官方支持、当前网关实测、客户端实现分开记录，详见 [Flash 研究](../research/seedream-flash.md)。路径与有序 `image` 已有真实证据；普通输入/尺寸边界、JPEG、水印、base64、standard 优化按官方规则验证，不冒称网关已测。
 
 #15 普通文生图与编辑均使用 `POST /v1/images/generations`：完整模型 ID `doubao-seedream-5-0-flash-260915`，精确 `WxH`，顶层有序 `image`（0 图时省略），默认 url/png/watermark:false，优化仅 standard。最多 10 张；保守字节政策 30000000（官方 30MB 未定义二进制/十进制），实际参考图快照必须通过格式、字节、像素、边长和比例校验；处理失败不可退回违规原字节。不得发送 n、negative_prompt、seed、mask、input.messages、sequential_image_generation、流式或搜索字段。
 

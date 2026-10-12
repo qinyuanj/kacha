@@ -52,7 +52,7 @@
 
 ## 2026-10-10 客户端 #17 区域表达
 
-依据 [最终 Resolution](https://github.com/TLOBillyQ/kacha/issues/8#issuecomment-6093423192) 与 [官方编辑指南](https://docs.volcengine.com/docs/ark/seedream-5-0-pro-editing-guide)：`<point>x y</point>`、`<bbox>x1 y1 x2 y2</bbox>` 为发送文本中的标签，空格分隔，提示坐标范围 **0–999**；与图层 normalized bbox 的0–1000分开。UI 的坐标框按归一化矩形边界乘999取整，坐标点按框中心乘999取整；框中心策略是客户端操作方式，point 的实际影响范围由模型判断。
+依据 [最终 Resolution](https://github.com/qinyuanj/kacha/issues/8#issuecomment-6093423192) 与 [官方编辑指南](https://docs.volcengine.com/docs/ark/seedream-5-0-pro-editing-guide)：`<point>x y</point>`、`<bbox>x1 y1 x2 y2</bbox>` 为发送文本中的标签，空格分隔，提示坐标范围 **0–999**；与图层 normalized bbox 的0–1000分开。UI 的坐标框按归一化矩形边界乘999取整，坐标点按框中心乘999取整；框中心策略是客户端操作方式，point 的实际影响范围由模型判断。
 
 高亮叠加仍为默认：每条有区域的参考图连线发送原图、紧随其后的叠加图。坐标模式只发送原图，并把区域保存在对应参考图快照元数据中；同一任务可以混用，两种方式共用连续区域编号。输入草图、涂画、圈、箭头和框可作为普通参考图配自然语言，不新增独立API字段。
 
@@ -66,7 +66,7 @@ Flash 的中英文发送模板均使用输入顺序的「图1/图2」，支持�
 
 ## 2026-10-10 客户端 #19 / #20 图层与 #21 收口
 
-#19 按 [最终 Resolution](https://github.com/TLOBillyQ/kacha/issues/8#issuecomment-6093423192) 第三节的专用契约实现图层拆分：请求 `layer_decomposition:true`、`size` 仅 `1K`/`1.5K`/`2K`/`auto`（默认 auto，不发 `WxH`）、恰好一张 PNG/JPEG 输入、prompt 可省略；响应按平铺 `z_index` 识别底图（=0）并升序排序图层，`bounding_box.absolute` 定位缩放、`normalized` 0–1000 仅作元数据保存（与提示坐标 0–999 区分）；名称 / 描述按可选元数据处理，关键定位缺失或无效按协议校验错误整体失败，任一图层失败即无结果。全部证据为按官方契约构建的合成响应与合成 PNG，**没有真实 Flash 图层网关夹具**，不宣称网关实测或视觉效果验证。
+#19 按 [最终 Resolution](https://github.com/qinyuanj/kacha/issues/8#issuecomment-6093423192) 第三节的专用契约实现图层拆分：请求 `layer_decomposition:true`、`size` 仅 `1K`/`1.5K`/`2K`/`auto`（默认 auto，不发 `WxH`）、恰好一张 PNG/JPEG 输入、prompt 可省略；响应按平铺 `z_index` 识别底图（=0）并升序排序图层，`bounding_box.absolute` 定位缩放、`normalized` 0–1000 仅作元数据保存（与提示坐标 0–999 区分）；名称 / 描述按可选元数据处理，关键定位缺失或无效按协议校验错误整体失败，任一图层失败即无结果。全部证据为按官方契约构建的合成响应与合成 PNG，**没有真实 Flash 图层网关夹具**，不宣称网关实测或视觉效果验证。
 
 #20 完成图层持久化与流转：任务目录真源保存底图、`layers/` 图层文件与 layers.json（含底图身份、层序、absolute/normalized 定位与可选名称 / 描述）；预览弹窗按 bbox 叠放预览并整体导出；来源图层连线发送所选图层实际字节、谱系指向产出生成结果；重开画板与画板包往返按真源还原图层；图层文件缺失或身份无效明确阻断，不回落底图。均为客户端行为自动化（单元 + 浏览器），与网关协议无关。
 

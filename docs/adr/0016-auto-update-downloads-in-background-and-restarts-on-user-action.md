@@ -1,6 +1,6 @@
 # 自动更新后台下载，由用户主动执行更新重启
 
-规格：[添加自动更新：迁移到 Tauri 官方 updater](https://github.com/TLOBillyQ/kacha/issues/3)。
+规格：[添加自动更新：迁移到 Tauri 官方 updater](https://github.com/qinyuanj/kacha/issues/3)。
 
 应用启动 3 秒后检查一次，持续运行期间每 6 小时检查一次，高级设置提供手动检查。三种入口共享更新流程，合并并发检查；发现更高版本的正式版后后台下载并验证签名。下载完成只提示就绪，不安装，不重启。顶栏与高级设置展示同一版本、说明、进度和错误。
 

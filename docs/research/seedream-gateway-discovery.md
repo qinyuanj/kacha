@@ -1,6 +1,6 @@
 # 当前团队网关 Seedream 模型发现
 
-研究票：[补齐当前网关 Flash/Lite 模型发现与渠道退役事实](https://github.com/TLOBillyQ/kacha/issues/9)。
+研究票：[补齐当前网关 Flash/Lite 模型发现与渠道退役事实](https://github.com/qinyuanj/kacha/issues/9)。
 
 ## 16:28 首次发现（历史快照）
 
@@ -81,6 +81,6 @@ Flash API 页显示通用 `/v1/chat/completions` 示例（messages/temperature�
 - Lite 当期渠道服务状态、退役通知及到期处置；官方两种 Lite 拼写与本地 `-lite-` 别名的覆盖关系。
 - 首次发现到复查之间模型列表变化的原因，如需追踪；当前 Flash 可发现，此项不再作为“当前不可用”的缺口。
 
-此前官方事实及契约差异见[固定研究资产](https://github.com/TLOBillyQ/kacha/blob/9d76473dfbb09507223451c30ec2d1f20f372b1f/docs/research/seedream-flash-contract.md)。本次未重新调查官方公告，不能把此前官方调查或旧 Lite/Pro 夹具视为当前私有渠道事实。
+此前官方事实及契约差异见[固定研究资产](https://github.com/qinyuanj/kacha/blob/9d76473dfbb09507223451c30ec2d1f20f372b1f/docs/research/seedream-flash-contract.md)。本次未重新调查官方公告，不能把此前官方调查或旧 Lite/Pro 夹具视为当前私有渠道事实。
 
-本研究票完成标准尚未满足，应保持 open。拿到维护者资料后继续本票；[Flash 授权实测证据](https://github.com/TLOBillyQ/kacha/issues/10)及后续人工决策仍依赖本票。
+本研究票完成标准尚未满足，应保持 open。拿到维护者资料后继续本票；[Flash 授权实测证据](https://github.com/qinyuanj/kacha/issues/10)及后续人工决策仍依赖本票。
