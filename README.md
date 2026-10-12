@@ -23,7 +23,7 @@
 
 Updater 签名独立于操作系统代码签名。Windows 没有购买代码签名证书，首次安装或运行可能需要在 SmartScreen 点「更多信息 → 仍要运行」；macOS 仅 ad-hoc 签名、未经 Apple 公证，首次需要 Gatekeeper 放行。macOS 真机安装、迁移与自动更新**未验收**。
 
-旧 Windows 免安装版需要手动安装一次；迁移沿用同一用户的数据、系统凭据和输出根目录。首次使用在「高级设置」填团队网关地址与 API 密钥。现有 HTTP Gitea 与网关仅用于可信内网或 VPN，不提供传输加密。
+旧 Windows 免安装版需要手动安装一次；迁移沿用同一用户的数据、系统凭据和自定义输出根目录。0.3.2 起默认输出目录改为系统图片目录下的 `kacha`，旧文件保留在原处，可在高级设置中选择旧目录继续使用。首次使用在「高级设置」填团队网关地址与 API 密钥。现有 HTTP Gitea 与网关仅用于可信内网或 VPN，不提供传输加密。
 
 安装迁移、更新状态及故障恢复见 [自动更新用户指南](docs/release/auto-update-user-guide.md)；已验证事实与待补证据见 [Windows 自动更新验收记录](docs/release/auto-update-windows-acceptance.md)。
 
