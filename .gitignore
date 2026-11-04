@@ -31,3 +31,6 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+
+# Web 服务端构建产物
+/server/target/
