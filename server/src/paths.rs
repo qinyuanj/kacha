@@ -18,13 +18,14 @@ impl PathError {
 
 /// 规范化相对路径并逐段检查真实路径，最终拼出的路径必须仍在用户数据根内。
 ///
-/// - 拒绝空路径、绝对路径（含 Windows 盘符 / UNC）、`..`、反斜杠、盘符冒号与控制字符。
+/// - 空路径指用户数据根本身；拒绝绝对路径（含 Windows 盘符 / UNC）、`..`、反斜杠、盘符冒号与控制字符。
 /// - 已存在的前缀经 canonicalize 消除符号链接，再确认落在根内；写入最后一级允许尚不存在。
 pub fn resolve(root: &Path, rel: &str) -> Result<PathBuf, PathError> {
     let forbidden = |why: &str| PathError::Forbidden(format!("路径越界，只允许用户数据根内的相对路径：{why}"));
     let trimmed = rel.replace('\\', "/");
+    // 空路径指用户数据根本身（列目录用）；文件读写仍由调用方给出具体路径。
     if trimmed.is_empty() {
-        return Err(forbidden("空路径"));
+        return root.canonicalize().map_err(|_| forbidden("用户数据根不存在"));
     }
     let path = Path::new(&trimmed);
     if path.is_absolute() || trimmed.starts_with('/') {
@@ -76,6 +77,12 @@ mod tests {
     }
 
     #[test]
+    fn empty_path_means_user_root() {
+        let r = root();
+        assert_eq!(resolve(r.path(), "").unwrap(), r.path().canonicalize().unwrap());
+    }
+
+    #[test]
     fn accepts_relative_paths_inside_root() {
         let r = root();
         assert_eq!(resolve(r.path(), "画板/本地.ugcboard.json").unwrap(), r.path().join("画板/本地.ugcboard.json"));
@@ -84,7 +91,7 @@ mod tests {
     #[test]
     fn rejects_absolute_parent_and_windows_shapes() {
         let r = root();
-        for bad in ["../outside.txt", "a/../../outside.txt", "/etc/passwd", "C:/Windows/win.ini", "C:win.ini", "//server/share/x", "..", "a\\..\\b", "a:b", ""] {
+        for bad in ["../outside.txt", "a/../../outside.txt", "/etc/passwd", "C:/Windows/win.ini", "C:win.ini", "//server/share/x", "..", "a\\..\\b", "a:b"] {
             assert!(resolve(r.path(), bad).is_err(), "应拒绝 {bad}");
         }
     }

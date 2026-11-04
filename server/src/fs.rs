@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use axum::body::Body;
 use axum::extract::{Query, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
@@ -281,5 +281,3 @@ pub async fn log_event(State(state): State<AppState>, user: User, body: axum::bo
 pub async fn api_not_found() -> Response {
     error(StatusCode::NOT_FOUND, "not_found", "没有这个接口")
 }
-
-pub fn _assert_headers(_: &HeaderMap) {}
