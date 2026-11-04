@@ -1,6 +1,7 @@
 // Web 版壳层：业务调用走同源 HTTP，密钥存 localStorage，网关由浏览器直连（ADR 0018）。
 // 不 import 任何 @tauri-apps/*；UI 与 core 不直接调 HTTP，都经这里的端口。
 import type { FetchLike } from "../core/gateway";
+import { PACK_CANCELLED } from "../core/boardPack";
 import { ApiError } from "./apiError";
 import { DEFAULT_SETTINGS, serializeSettings } from "../core/settings";
 import type { UpdateFlowPorts } from "../core/updateFlow";
@@ -89,6 +90,95 @@ export const sessionApi = {
 
 export const webConfig = () => api<{ version: string; gateway_url: string }>("/api/config");
 
+// ---- 画板包（#24）----
+// 导出 = 服务端边打包边发送的下载流；导入 = 流式上传到服务端临时文件，再判定与合并。
+// 取消与进度按操作 id 隔离（一个用户的取消不影响其他用户 / 其他页面）：runCancellable 先 cancel(false)
+// 复位，这里借此生成新的操作 id；之后同一次导出 / 导入与进度轮询都用它。
+
+const newOpId = () => `op-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+let currentOp: string | null = null;
+const cancelledOps = new Set<string>();
+
+const requireOp = () => (currentOp ??= newOpId());
+
+async function apiResponse(url: string, init: RequestInit): Promise<Response> {
+  let res: Response;
+  try {
+    res = await fetch(url, { credentials: "same-origin", ...init });
+  } catch (e) {
+    throw new ApiError(0, "network", `无法连接服务端：${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (res.status === 401) sessionListeners.forEach((l) => l());
+  if (!res.ok) {
+    let code = "http_error";
+    let message = `服务端返回 HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      if (typeof body?.code === "string") code = body.code;
+      if (typeof body?.message === "string") message = body.message;
+    } catch {
+      // 非 JSON 错误体保留状态码文案。
+    }
+    throw new ApiError(res.status, code, message);
+  }
+  return res;
+}
+
+/** 触发浏览器下载；文件名由前端给定（不依赖 Content-Disposition 的中文编码）。 */
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // 延迟回收：让下载先拿到对象 URL。
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/** 导出下载：响应体即 zip 流。中途取消 / 失败会中止流，blob() 随之 reject。 */
+async function boardPackExport(spec: unknown, target: string): Promise<{ task_dirs: number; bytes: number }> {
+  const op = requireOp();
+  try {
+    const res = await apiResponse(`/api/packs/export?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(spec) });
+    const blob = await res.blob();
+    downloadBlob(blob, target);
+    return { task_dirs: (spec as { task_dirs: string[] }).task_dirs.length, bytes: blob.size };
+  } catch (e) {
+    if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
+    throw e;
+  }
+}
+
+/** 流式上传：请求体是 File 本身（浏览器按流发送），不读进内存。 */
+async function uploadPack(file: File): Promise<string> {
+  const res = await apiResponse("/api/packs/uploads", { method: "POST", headers: { "Content-Type": "application/zip" }, body: file });
+  return ((await res.json()) as { id: string }).id;
+}
+
+const discardUpload = async (id: string) => void (await api(`/api/packs/uploads/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true }));
+
+/** 进度轮询：桌面是事件推送，Web 轮询当前操作的 done/total。 */
+function onPackProgress(handler: (progress: { done: number; total: number }) => void): () => void {
+  let stopped = false;
+  const tick = async () => {
+    if (stopped || !currentOp) return;
+    try {
+      const res = await fetch(`/api/packs/ops/${encodeURIComponent(currentOp)}`, { credentials: "same-origin" });
+      if (res.ok) handler((await res.json()) as { done: number; total: number });
+    } catch {
+      // 网络抖动不当作进度。
+    }
+  };
+  const timer = setInterval(tick, 200);
+  void tick();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
+
 /** Web 版不存在的能力（#24/#28 落地）在这里明确报错，不静默假装成功。 */
 const unsupported = (what: string) => () => Promise.reject(new ApiError(501, "not_implemented", `Web 版暂不支持：${what}`));
 
@@ -123,11 +213,30 @@ export const ipc: Ipc = {
     void (await api("/api/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, fields }) })),
   diagnosticsPreview: unsupported("诊断包（Web 版已移除）"),
   diagnosticsExport: unsupported("诊断包（Web 版已移除）"),
-  boardPackExport: unsupported("画板包导出（#24）"),
-  boardPackEntries: unsupported("画板包导入（#24）"),
-  boardPackReadTexts: unsupported("画板包导入（#24）"),
-  boardPackImport: unsupported("画板包导入（#24）"),
-  boardPackCancel: async () => undefined,
+  // spec.files[].source 是 core 拼出的虚拟根绝对路径：在边界剥成相对用户数据根，服务端只收相对路径。
+  boardPackExport: async (_outputRoot, target, spec) => boardPackExport({ ...spec, files: spec.files.map((f) => ({ ...f, source: stripRoot(f.source) })) }, target),
+  boardPackEntries: (pack) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/entries`),
+  boardPackReadTexts: (pack, names) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/texts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(names) }),
+  boardPackImport: async (pack, _outputRoot, units) => {
+    const op = requireOp();
+    try {
+      return await api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(units) });
+    } catch (e) {
+      // 服务端以 409 cancelled / 文案「已取消」回取消；保持与桌面的文案约定。
+      if (cancelledOps.has(op) || (e instanceof ApiError && e.message === PACK_CANCELLED)) throw new Error(PACK_CANCELLED);
+      throw e;
+    }
+  },
+  boardPackCancel: async (cancelled) => {
+    if (cancelled) {
+      const op = currentOp;
+      if (!op) return;
+      cancelledOps.add(op);
+      await api(`/api/packs/ops/${encodeURIComponent(op)}/cancel`, { method: "POST", keepalive: true });
+    } else {
+      currentOp = newOpId();
+    }
+  },
   // 密钥不再进系统凭据库：留在浏览器 localStorage，供浏览器直接调用网关。
   secretGet: async () => localStorage.getItem(API_KEY_STORAGE),
   secretSet: async (key) => void localStorage.setItem(API_KEY_STORAGE, key),
@@ -157,7 +266,7 @@ const desktop: DesktopPort = {
   destroyWindow: async () => window.close(),
   onCloseRequested: noop,
   onSecondInstance: noop,
-  onPackProgress: noop,
+  onPackProgress: async (handler) => onPackProgress(handler),
   onDropPaths: noop,
   openExternal: (url) => void window.open(url, "_blank", "noopener,noreferrer"),
   version: async () => (await webConfig()).version,
@@ -200,5 +309,5 @@ const relay: RelayPort = {
   discardRelayed: async (relDir) => void (await api(`/api/fs/relay?dir=${encodeURIComponent(stripRoot(relDir))}`, { method: "DELETE", keepalive: true })),
 };
 
-export const shell: ShellImpl = { web: true, ipc, httpFetch, fileUrl, desktop, session, relay, updateFlowPorts };
+export const shell: ShellImpl = { web: true, ipc, httpFetch, fileUrl, desktop, session, relay, updateFlowPorts, pack: { upload: uploadPack, discard: discardUpload } };
 

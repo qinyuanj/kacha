@@ -155,6 +155,9 @@ fn io_response(e: std::io::Error) -> Response {
 
 /// 下载并流式写入 `<任务目录>/.staging/<stem>.<ext>`；返回相对任务目录的文件名与相对用户数据根的路径。
 pub async fn relay(State(state): State<AppState>, user: User, body: Bytes) -> Response {
+    if !state.disk_guard().enough() {
+        return error(StatusCode::INSUFFICIENT_STORAGE, "insufficient_storage", "服务器空间不足，请联系管理员");
+    }
     let Ok(req) = serde_json::from_slice::<RelayRequest>(&body) else {
         return error(StatusCode::BAD_REQUEST, "bad_request", "需要 url、dir 与 stem");
     };
@@ -169,6 +172,8 @@ pub async fn relay(State(state): State<AppState>, user: User, body: Bytes) -> Re
         Ok(d) => d,
         Err(r) => return r,
     };
+    // 大请求：结果图下载计入全局并发，许可覆盖整个下载与落盘。
+    let _permit = state.heavy().acquire().await;
     // 跟随重定向但每一步仍要过允许列表：重定向到列表外即停止，按「地址不被允许」处理。
     let extra: Vec<String> = state.result_hosts().to_vec();
     let client = match reqwest::Client::builder()

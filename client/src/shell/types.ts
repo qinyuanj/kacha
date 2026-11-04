@@ -115,6 +115,8 @@ export interface ShellImpl {
   session: SessionPort;
   /** 结果中转（只有 Web 版有）：url 结果由服务端下载到任务目录暂存区，校验后提交。 */
   relay?: RelayPort;
+  /** 画板包上传（只有 Web 版有）：浏览器选中的文件流式上传到服务端临时位置。 */
+  pack?: PackUploadPort;
   updateFlowPorts(protection: Pick<UpdateFlowPorts, "restartGuard" | "restartReleased">): UpdateFlowPorts;
 }
 
@@ -123,6 +125,12 @@ export interface RelayPort {
   relayResult(args: { url: string; relDir: string; stem: string; signal?: AbortSignal }): Promise<{ file: string; path: string }>;
   commitRelayed(relDir: string, from: string, stem: string): Promise<{ file: string; path: string }>;
   discardRelayed(relDir: string): Promise<void>;
+}
+
+/** 画板包上传端口：返回服务端上传句柄；放弃时删除临时文件。 */
+export interface PackUploadPort {
+  upload(file: File): Promise<string>;
+  discard(id: string): Promise<void>;
 }
 
 /** 进入与身份：只有 Web 版有；桌面实现为占位（旧假壳不经过进入界面）。 */

@@ -232,6 +232,8 @@ export interface PackIo {
   readTexts(pack: string, names: string[]): Promise<Record<string, string>>;
   /** 按合并单元解压合并进输出根目录；取消时以 PACK_CANCELLED reject，已移入的单元保留。 */
   importUnits(pack: string, outputRoot: string, units: MergeUnit[]): Promise<{ outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number }>;
+  /** 判定不通过就放弃：Web 版删掉服务端的临时上传文件（桌面无此步骤）。 */
+  discard?(pack: string): Promise<void>;
 }
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; result: "cancelled" | "failed"; error: string };
@@ -261,7 +263,10 @@ export type ImportResult =
   | { kind: "done"; summary: ImportSummary; written: string[]; writeError: string | null };
 
 export interface ImportOptions {
+  /** 桌面是包路径；Web 是服务端上传句柄 id。 */
   packPath: string;
+  /** 展示与日志用的包文件名（Web 的 packPath 是句柄，不含文件名）。 */
+  displayName?: string;
   outputRoot: string;
   /** 按同名改名规则写入画板目录（并打开），返回实际写入的路径；会话状态归调用方。 */
   addBoard(board: Board): Promise<string>;
@@ -278,12 +283,14 @@ export interface ImportOptions {
  */
 export async function importPack(io: PackIo, opts: ImportOptions): Promise<ImportResult> {
   const { packPath, outputRoot } = opts;
-  const fields = { action: "import", pack_file: basename(packPath) };
+  const packName = opts.displayName ?? basename(packPath);
+  const fields = { action: "import", pack_file: packName };
   const check = await io
     .entries(packPath)
     .then((entries) => inspectPack(entries, (names) => io.readTexts(packPath, names)))
     .catch((e): Rejected => ({ kind: "corrupt", reason: errorText(e) }));
   if (check.kind !== "ok") {
+    await io.discard?.(packPath).catch(() => undefined);
     opts.log("board_pack", { ...fields, result: check.kind });
     return check;
   }

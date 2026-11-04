@@ -31,6 +31,8 @@ pub const EVENT_KINDS: &[&str] = &[
     "rate_limit",
     "queue_dispatch",
     "board_pack",
+    // 服务端每日用量（#24）：各用户数据根大小，只有指纹前缀与字节数。
+    "usage",
 ];
 
 fn segment_path(dir: &Path, index: usize) -> PathBuf {

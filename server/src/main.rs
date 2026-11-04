@@ -39,6 +39,8 @@ async fn main() {
         .map(|w| PathBuf::from(&w[1]))
         .or_else(|| std::env::var("KACHA_STATIC_DIR").ok().map(PathBuf::from));
     // 结果中转允许列表：默认含火山引擎对象存储，部署可用逗号分隔追加主机（如内网对象存储）。
+    // 磁盘余量门槛（GB），低于它写入类接口返回 507。
+    let min_free_gb: u64 = opt("--min-free-gb", "KACHA_MIN_FREE_GB", "20").parse().unwrap_or(20);
     let result_hosts = opt("--result-hosts", "KACHA_RESULT_HOSTS", "")
         .split(',')
         .map(|s| s.trim().to_string())
@@ -50,7 +52,14 @@ async fn main() {
         std::process::exit(1);
     }
     let state = AppState::new(
-        Config { data_root: data_root.clone(), gateway_url: gateway_url.clone(), static_dir, result_hosts },
+        Config {
+            data_root: data_root.clone(),
+            gateway_url: gateway_url.clone(),
+            static_dir,
+            result_hosts,
+            min_free_bytes: min_free_gb.saturating_mul(1024 * 1024 * 1024),
+            free_space_override: None,
+        },
         Arc::new(kacha_server::verify::HttpKeyVerifier::new(gateway_url.clone())),
         Arc::new(SystemTime::now),
     );
@@ -63,5 +72,7 @@ async fn main() {
         std::process::exit(1);
     });
     println!("kacha-server {} 监听 http://{}，数据根 {}", kacha_server::VERSION, listener.local_addr().unwrap(), data_root.display());
+    // 每日一次记录各用户数据根大小（不含密钥与提示词全文）。
+    kacha_server::usage::spawn_daily(std::sync::Arc::new(kacha_server::usage::UsageLogger::new(data_root.clone(), Arc::new(SystemTime::now))));
     axum::serve(listener, router(state)).await.expect("服务端退出");
 }

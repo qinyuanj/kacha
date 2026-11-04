@@ -64,11 +64,27 @@ impl Harness {
     }
 
     pub fn with_result_hosts(result_hosts: Vec<String>) -> Self {
+        Self::build(result_hosts, None)
+    }
+
+    /// 注入固定磁盘余量（None = 读真实文件系统）。
+    pub fn with_free_space(free_space_override: Option<u64>) -> Self {
+        Self::build(Vec::new(), free_space_override)
+    }
+
+    fn build(result_hosts: Vec<String>, free_space_override: Option<u64>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let now = Arc::new(Mutex::new(UNIX_EPOCH + Duration::from_secs(1_800_000_000)));
         let clock_now = now.clone();
         let state = AppState::new(
-            Config { data_root: dir.path().to_path_buf(), gateway_url: "http://gateway.test".into(), static_dir: None, result_hosts },
+            Config {
+                data_root: dir.path().to_path_buf(),
+                gateway_url: "http://gateway.test".into(),
+                static_dir: None,
+                result_hosts,
+                min_free_bytes: kacha_server::limits::DEFAULT_MIN_FREE_BYTES,
+                free_space_override,
+            },
             Arc::new(FakeGateway),
             Arc::new(move || *clock_now.lock().unwrap()),
         );
