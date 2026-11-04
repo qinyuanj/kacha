@@ -7,4 +7,5 @@ export const isWeb = shell.web;
 export const session = shell.session;
 export const relay = shell.relay;
 export const transfer = shell.transfer;
-export type { AppPaths, BoardTexts, DesktopPort, ImageInfo, Ipc, PackageEntry, RelayPort, SessionPort, ShellImpl } from "./types";
+export const usage = shell.usage;
+export type { AppPaths, BoardTexts, DesktopPort, ImageInfo, Ipc, PackageEntry, RelayPort, SessionPort, ShellImpl, TransferPort, Usage, UsageCandidate, UsagePort } from "./types";

@@ -4,7 +4,7 @@ import type { FetchLike } from "../core/gateway";
 import { ApiError } from "./apiError";
 import { DEFAULT_SETTINGS, serializeSettings } from "../core/settings";
 import type { UpdateFlowPorts } from "../core/updateFlow";
-import type { DesktopPort, Ipc, RelayPort, SessionPort, ShellImpl, TransferPort } from "./types";
+import type { DesktopPort, Ipc, RelayPort, SessionPort, ShellImpl, TransferPort, UsagePort } from "./types";
 
 /** core/ 仍按「输出根 + 相对路径」拼路径；Web 版固定一个虚拟根，壳层在边界剥掉。 */
 export const VIRTUAL_ROOT = "/~";
@@ -240,5 +240,10 @@ function triggerDownload(url: string) {
   a.remove();
 }
 
-export const shell: ShellImpl = { web: true, ipc, httpFetch, fileUrl, desktop, session, relay, transfer, updateFlowPorts };
+const usage: UsagePort = {
+  usage: () => api("/api/usage"),
+  cleanupUnreferenced: (dirs) => api("/api/cleanup/unreferenced", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dirs }) }),
+};
+
+export const shell: ShellImpl = { web: true, ipc, httpFetch, fileUrl, desktop, session, relay, transfer, usage, updateFlowPorts };
 

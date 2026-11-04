@@ -16,11 +16,11 @@ async fn main() {
         println!("kacha-server {}", kacha_server::VERSION);
         println!("用法：kacha-server [--listen 0.0.0.0:3004] [--data-root <目录>] [--gateway-url <new-api 地址>] [--static-dir <前端构建目录>]");
         println!("环境变量：KACHA_LISTEN、KACHA_DATA_ROOT、KACHA_GATEWAY_URL、KACHA_STATIC_DIR");
+        println!("清理：kacha-server cleanup --help");
         return;
     }
     if args.first().map(String::as_str) == Some("cleanup") {
-        eprintln!("cleanup 子命令由 #25 实现");
-        std::process::exit(2);
+        std::process::exit(kacha_server::cleanup::run_cli(&args[1..]));
     }
 
     let opt = |flag: &str, env: &str, default: &str| -> String {
