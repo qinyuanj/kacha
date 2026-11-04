@@ -24,6 +24,8 @@ pub fn fingerprint(key: &str) -> String {
 #[derive(Default)]
 pub struct Sessions {
     map: Mutex<HashMap<String, Session>>,
+    /// 每个会话上次落盘最后访问时间的时刻：读图等高频请求不必每次写盘。
+    touched: Mutex<HashMap<String, SystemTime>>,
 }
 
 #[derive(Clone)]
@@ -125,12 +127,28 @@ pub fn logout(state: &AppState, headers: &HeaderMap) -> Response {
         .into_response()
 }
 
-/// 带会话访问时的身份；同时更新最后访问时间（按需节流）。
+/// 最后访问时间的落盘节流：5 分钟内的重复访问不重复写。
+const ACCESS_TOUCH_INTERVAL: Duration = Duration::from_secs(300);
+
+/// 带会话访问时的身份；同时按节流更新最后访问时间。
 pub fn current_user(state: &AppState, headers: &HeaderMap) -> Option<String> {
     let token = session_token(headers)?;
-    let fp = state.sessions().lookup(&token, state.now())?;
-    let root = state.user_root(&fp);
-    let _ = touch_access(&root, &fp, state.now());
+    let now = state.now();
+    let fp = state.sessions().lookup(&token, now)?;
+    let due = {
+        let mut touched = state.sessions().touched.lock().unwrap();
+        match touched.get(&token) {
+            Some(last) if now.duration_since(*last).unwrap_or_default() < ACCESS_TOUCH_INTERVAL => false,
+            _ => {
+                touched.insert(token, now);
+                true
+            }
+        }
+    };
+    if due {
+        let root = state.user_root(&fp);
+        let _ = touch_access(&root, &fp, now);
+    }
     Some(fp)
 }
 
