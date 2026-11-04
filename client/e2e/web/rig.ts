@@ -10,6 +10,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { MODELS, png } from "../common/boards";
 
 const clientDir = fileURLToPath(new URL("../..", import.meta.url));
 const serverBin = path.join(clientDir, "../server/target/debug/kacha-server");
@@ -22,11 +23,20 @@ export const OUTAGE_KEY = "sk-e2e-outage";
 
 export interface Stub {
   url: string;
+  /** 生成请求记录（path + 解析后的 JSON body），供断言请求形状。 */
+  requests: { path: string; body: Record<string, unknown> }[];
+  /** 对象存储内容（不带 CORS，只能由服务端中转）；默认 /objects/result.png 是真 PNG。 */
+  objects: Map<string, Buffer>;
+  /** 自定义生成响应；返回 null 走默认：结果图指向本桩的对象存储（url 形式，走中转）。 */
+  imageResponse: ((path: string, body: Record<string, unknown>) => { status?: number; json?: unknown } | null) | null;
   close(): Promise<void>;
 }
 
-/** 网关：验证密钥（/api/usage/token）与模型列表；对象存储：/objects/result.png。 */
+/** 网关：验证密钥（/api/usage/token）、模型列表与文生图；对象存储：/objects/*（无 CORS）。 */
 export async function startStub(): Promise<Stub> {
+  const objects = new Map<string, Buffer>([["/objects/result.png", Buffer.from(png(64, 64), "base64")]]);
+  const requests: { path: string; body: Record<string, unknown> }[] = [];
+  const stub: Stub = { url: "", requests, objects, imageResponse: null, close: async () => undefined };
   const server = http.createServer((req, res) => {
     const url = req.url ?? "/";
     const isStore = url.startsWith("/objects/");
@@ -42,14 +52,36 @@ export async function startStub(): Promise<Stub> {
       return void res.writeHead(401, { "Content-Type": "application/json" }).end(JSON.stringify({ message: "无效令牌" }));
     }
     if (url === "/v1/models") {
-      return void res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ data: [{ id: "qwen-image-3.0-pro" }, { id: "doubao-seedream-5-0-flash-260915" }] }));
+      return void res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ data: MODELS.map((id) => ({ id })) }));
     }
-    if (isStore) return void res.writeHead(200, { "Content-Type": "image/png" }).end("not-a-real-png");
+    if (isStore) {
+      const bytes = objects.get(url);
+      if (!bytes) return void res.writeHead(404).end("not found");
+      return void res.writeHead(200, { "Content-Type": "image/png" }).end(bytes);
+    }
+    if (url.startsWith("/v1/images/")) {
+      let raw = "";
+      req.on("data", (d) => (raw += String(d)));
+      req.on("end", () => {
+        const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+        requests.push({ path: url, body });
+        const custom = stub.imageResponse?.(url, body);
+        if (custom) return void res.writeHead(custom.status ?? 200, { "Content-Type": "application/json" }).end(JSON.stringify(custom.json ?? {}));
+        const image = `${stub.url}/objects/result.png`;
+        // Seedream（doubao）走 data[]，qwen 走 metadata.output.choices；结果默认 url 形式以覆盖服务端中转。
+        const isSeedream = String(body.model ?? "").startsWith("doubao");
+        const json = isSeedream ? { data: [{ url: image }] } : { metadata: { output: { choices: [{ message: { content: [{ image }] } }] } } };
+        res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(json));
+      });
+      return;
+    }
     res.writeHead(404).end("not mocked");
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  return { url: `http://127.0.0.1:${port}`, close: () => new Promise((resolve) => server.close(() => resolve())) };
+  stub.url = `http://127.0.0.1:${port}`;
+  stub.close = () => new Promise((resolve) => server.close(() => resolve()));
+  return stub;
 }
 
 export interface Rig {
@@ -68,7 +100,7 @@ export const test = base.extend<{ rig: Rig }>({
     const dataRoot = mkdtempSync(path.join(tmpdir(), "kacha-e2e-"));
     const child: ChildProcess = spawn(
       serverBin,
-      ["--listen", "127.0.0.1:0", "--data-root", dataRoot, "--gateway-url", stub.url, "--static-dir", staticDir],
+      ["--listen", "127.0.0.1:0", "--data-root", dataRoot, "--gateway-url", stub.url, "--static-dir", staticDir, "--result-hosts", "127.0.0.1"],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
     let stderr = "";

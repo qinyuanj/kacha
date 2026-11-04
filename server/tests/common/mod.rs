@@ -60,11 +60,15 @@ impl Reply {
 
 impl Harness {
     pub fn new() -> Self {
+        Self::with_result_hosts(Vec::new())
+    }
+
+    pub fn with_result_hosts(result_hosts: Vec<String>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let now = Arc::new(Mutex::new(UNIX_EPOCH + Duration::from_secs(1_800_000_000)));
         let clock_now = now.clone();
         let state = AppState::new(
-            Config { data_root: dir.path().to_path_buf(), gateway_url: "http://gateway.test".into(), static_dir: None },
+            Config { data_root: dir.path().to_path_buf(), gateway_url: "http://gateway.test".into(), static_dir: None, result_hosts },
             Arc::new(FakeGateway),
             Arc::new(move || *clock_now.lock().unwrap()),
         );

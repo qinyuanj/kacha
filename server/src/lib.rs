@@ -16,6 +16,7 @@ pub mod image_info;
 pub mod logger;
 pub mod paths;
 pub mod redact;
+pub mod relay;
 mod session;
 pub mod store;
 pub mod verify;
@@ -35,6 +36,8 @@ pub struct Config {
     pub gateway_url: String,
     /// 前端静态文件目录（vite 构建产物）；None 时只提供 API。
     pub static_dir: Option<PathBuf>,
+    /// 结果中转额外允许的主机（默认列表之外，部署可追加；见 relay::default_result_hosts）。
+    pub result_hosts: Vec<String>,
 }
 
 /// 网关对一把密钥的结论。Unavailable 是服务故障，不能当成密钥无效。
@@ -98,6 +101,10 @@ impl AppState {
     pub fn static_dir(&self) -> Option<&PathBuf> {
         self.inner.config.static_dir.as_ref()
     }
+
+    pub fn result_hosts(&self) -> &[String] {
+        &self.inner.config.result_hosts
+    }
 }
 
 async fn config(axum::extract::State(state): axum::extract::State<AppState>) -> Json<serde_json::Value> {
@@ -152,6 +159,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/fs/is-file", get(fs::is_file))
         .route("/api/fs/sha256", get(fs::file_sha256))
         .route("/api/fs/inspect-image", get(fs::inspect_image))
+        .route("/api/fs/relay", axum::routing::post(relay::relay).delete(relay::discard))
+        .route("/api/fs/relay/commit", axum::routing::post(relay::commit))
         .route("/api/log", axum::routing::post(fs::log_event))
         .route("/api/{*rest}", axum::routing::any(api_fallback))
         .fallback_service(static_service(&state))

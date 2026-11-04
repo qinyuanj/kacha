@@ -34,3 +34,6 @@ dist/
 
 # Web 服务端构建产物
 /server/target/
+
+# e2e 截图与 Playwright 输出（以仓库根为 cwd 运行时产生）
+test-results/

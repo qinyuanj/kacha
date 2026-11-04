@@ -15,7 +15,7 @@ import { emptyHistory, recordChange, redo, undo, type History } from "../core/hi
 import { basename, boardsDir, dirname, joinPath, resolveFromRoot } from "../core/paths";
 import { restoreResultLayers } from "../core/taskDir";
 import { sha256Hex } from "../core/sha256";
-import { desktop, ipc } from "../shell/ipc";
+import { desktop, ipc, isWeb } from "../shell/ipc";
 import { ApiError } from "../shell/apiError";
 import { logEvent } from "../shell/log";
 import type { OperationGate } from "../core/updatePreparation";
@@ -313,9 +313,10 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
       else if (saver) await saver.chain;
       // 更新准备接管在途关闭：保留会话，由严格保存重试吞错的写入。
       if (blocked()) return;
-      // 保存失败不能丢改动：标签页留着，修好以后重试或先导出。
+      // Web 版保存失败不能丢改动（关页即丢，没有桌面关窗确认）：标签页留着，修好后重试或先导出。
+      // 桌面维持原行为：允许保存失败后关闭（旧假壳 updateProtection 覆盖）。
       const current = sessionsRef.current.find((s) => s.key === key);
-      if (current?.status === "ok" && current.saveError) return;
+      if (isWeb && current?.status === "ok" && current.saveError) return;
       savers.current.delete(key);
       const list = sessionsRef.current;
       const index = list.findIndex((s) => s.key === key);
@@ -425,6 +426,7 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
     closeAll,
     flushAll,
     flushAllStrict,
+    flushNow: flush,
     retrySave: (key: string) => tracked(retrySave, undefined)(key),
     reload: (key: string) => tracked(reload, undefined)(key),
     dismissNotice: (key: string) => { if (!blocked()) dismissNotice(key); },

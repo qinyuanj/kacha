@@ -3,14 +3,15 @@
 import type { Board, ResultRecord, TaskNode } from "./board";
 import { findModel, isRetiredModel, LITE_RETIRED_HINT, type CapabilityTable, type InputImageRule, type ModelCapability } from "./capabilities";
 import { fitImage, type FittedBytes, type ImageCodec } from "./fitImage";
-import { ERROR_CATEGORY_LABELS, fetchResultImage, GatewayError, generate, type FetchLike, type GenerationInput, type LayerMetadata, validLayerBox } from "./gateway";
+import { ERROR_CATEGORY_LABELS, categoryForStatus, fetchResultImage, GatewayError, generate, type FetchLike, type GenerationInput, type LayerMetadata, validLayerBox } from "./gateway";
 import { imagePortSlots, imageSources, imageRuleViolations, workflowOf } from "./graph";
 import type { RunResult } from "./layout";
 import { firstRegionOf, slotsFromReferences } from "./region";
 import { planSend } from "./sendPlan";
 import { isAutoRatio, resolveSize } from "./size";
+import { joinPath } from "./paths";
 import { snapshotOf } from "./submission";
-import { LocalError, newTaskId, readSubmission, taskDirOfTaskId, saveLayers, saveResult, sniffImage, writeSubmission, type LayerRecord, type ReferenceSource, type SubmissionPlan, type TaskFs } from "./taskDir";
+import { LocalError, newTaskId, readSubmission, taskDirOfTaskId, saveLayers, saveResult, sniffImage, writeSubmission, layerFileName, layersExportJson, type LayerRecord, type ReferenceSource, type SubmissionPlan, type TaskFs } from "./taskDir";
 
 export type TaskStatus =
   | { kind: "queued" }
@@ -33,6 +34,15 @@ export interface RunDeps extends TaskFs {
   composeOverlay?(image: Uint8Array, rects: [number, number, number, number][], firstRegion: number): Promise<Uint8Array>;
   /** 按模型输入规则缩放 / 转码参考图快照用的解码 / 编码（壳层 canvas 实现）；未注入时原样发送。 */
   imageCodec?: ImageCodec;
+  /**
+   * 结果中转（Web 版，对象存储不允许跨域）：服务端从允许列表内的主机下载并流式写入任务目录的
+   * `.staging/` 暂存区，返回暂存文件名（相对任务目录）与相对输出根的路径。字节由浏览器读回校验。
+   */
+  relayResult?(args: { url: string; relDir: string; stem: string; signal?: AbortSignal }): Promise<{ file: string; path: string }>;
+  /** 把暂存文件提交为成品（只新建不覆盖，扩展名沿用暂存文件）；stem 为 `result` 或 `layers/NN`。 */
+  commitRelayed?(relDir: string, from: string, stem: string): Promise<{ file: string; path: string }>;
+  /** 取消或校验 / 保存失败时清掉任务目录的暂存区，不留半成品。 */
+  discardRelayed?(relDir: string): Promise<void>;
 }
 
 export interface PreparedJob {
@@ -58,6 +68,17 @@ export class CancelledError extends Error {
 export function failureLabel(error: unknown): string {
   if (error instanceof GatewayError) return ERROR_CATEGORY_LABELS[error.category];
   return "本地文件错误";
+}
+
+/** 中转接口的错误按上游状态归回既有网关类别：429 仍可退避重试，下载失败不换模型不重发。
+ *  服务端不回显签名地址，这里也只用服务端文案。 */
+function relayError(e: unknown): Error {
+  const status = (e as { status?: unknown } | null)?.status;
+  const message = e instanceof Error ? e.message : String(e);
+  if (typeof status !== "number") return e instanceof Error ? e : new Error(message);
+  if (status === 422) return new GatewayError("invalid_response", message, status);
+  if (status === 0) return new GatewayError("network", "下载结果图失败：网络不可达");
+  return new GatewayError(categoryForStatus(status), message, status);
 }
 
 /** 发给模型的那份按规则处理；画板上的原文件不动。 */
@@ -316,15 +337,40 @@ export async function executeJob(
   },
 ): Promise<RunResult> {
   const { job, signal } = args;
+  const relay = deps.relayResult && deps.commitRelayed;
+  const discard = async () => {
+    // 取消 / 失败：清掉暂存区。清理本身失败不改变原错误。
+    if (relay) await deps.discardRelayed?.(job.relDir).catch(() => undefined);
+  };
   // 网关侧的计算停不下来；取消只是不再等待、不落结果。
   const { images } = await generate({ baseUrl: args.baseUrl, apiKey: args.apiKey, fetch: deps.fetch }, job.input);
   if (signal?.aborted) throw new CancelledError();
-  const fetched: { bytes: Uint8Array; layer?: LayerMetadata }[] = [];
+  const fetched: { bytes: Uint8Array; layer?: LayerMetadata; staged?: string }[] = [];
   const flashLayers = job.input.model.request_shape === "seedream_flash_images_generations" && job.plan.layerDecomposition;
   let baseSize: { width: number; height: number } | undefined;
   try {
-    for (const image of images) {
-      const bytes = await fetchResultImage(deps.fetch, image);
+    for (const [index, image] of images.entries()) {
+      let bytes: Uint8Array;
+      let staged: string | undefined;
+      if (relay && image.kind === "url") {
+        // 对象存储不允许跨域：浏览器只交地址，服务端下载并嗅探扩展名，再读回字节走同一套校验。
+        let saved: { file: string; path: string };
+        try {
+          saved = await deps.relayResult!({ url: image.url, relDir: job.relDir, stem: String(index), signal });
+        } catch (e) {
+          if (signal?.aborted) throw new CancelledError();
+          throw relayError(e);
+        }
+        if (signal?.aborted) throw new CancelledError();
+        staged = saved.file;
+        try {
+          bytes = await deps.readFile(joinPath(args.outputRoot, saved.path));
+        } catch (e) {
+          throw new LocalError(`读回中转结果失败：${e instanceof Error ? e.message : String(e)}`);
+        }
+      } else {
+        bytes = await fetchResultImage(deps.fetch, image);
+      }
       if (signal?.aborted) throw new CancelledError();
       if (!sniffImage(bytes)) throw new GatewayError("invalid_response", "结果不是可识别的图片");
       if (flashLayers) {
@@ -354,9 +400,10 @@ export async function executeJob(
         } finally { decoded.close(); }
       }
       if (job.input.model.request_shape === "seedream_flash_images_generations" && !job.plan.layerDecomposition && !job.plan.transparentBackground) await validateFlashOrdinaryOutput(deps, bytes);
-      fetched.push({ bytes, layer: image.layer });
+      fetched.push({ bytes, layer: image.layer, ...(staged ? { staged } : {}) });
     }
   } catch (e) {
+    await discard();
     if (!(e instanceof CancelledError)) args.onDownload?.({ ok: false, error: e });
     throw e;
   }
@@ -364,18 +411,51 @@ export async function executeJob(
   let saved: { file: string; path: string };
   let layers: LayerRecord[] | undefined;
   try {
-    // 写底图作为最终成功图片；全部图层验证与保存先完成。
-    if (job.plan.layerDecomposition && (fetched.length > 1 || flashLayers)) {
-      layers = await saveLayers(
-        deps,
-        args.outputRoot,
-        job.relDir,
-        fetched.slice(1).map((f, i) => ({ bytes: f.bytes, zIndex: f.layer?.z_index ?? i + 1, boundingBox: f.layer?.bounding_box ?? [], ...(f.layer?.name !== undefined ? { name: f.layer.name } : {}), ...(f.layer?.description !== undefined ? { description: f.layer.description } : {}) })),
-        flashLayers ? { base: { z_index: 0, ...(fetched[0].layer?.name !== undefined ? { name: fetched[0].layer.name } : {}), ...(fetched[0].layer?.description !== undefined ? { description: fetched[0].layer.description } : {}) } } : undefined,
-      );
+    if (relay && fetched.some((f) => f.staged)) {
+      // 中转：暂存 → 校验已完成 → 提交。顺序与旧流程一致：图层文件、layers.json，最后 result.*。
+      const commitOne = async (f: (typeof fetched)[number], stem: string): Promise<{ file: string; path: string }> => {
+        if (f.staged) return deps.commitRelayed!(job.relDir, f.staged, stem);
+        const kind = sniffImage(f.bytes);
+        if (!kind) throw new Error("结果不是可识别的图片");
+        const file = `${stem}.${kind.ext}`;
+        await deps.writeNewFile(joinPath(args.outputRoot, `${job.relDir}/${file}`), f.bytes);
+        return { file, path: `${job.relDir}/${file}` };
+      };
+      if (job.plan.layerDecomposition && (fetched.length > 1 || flashLayers)) {
+        const ordered = fetched
+          .slice(1)
+          .map((f, i) => ({ f, zIndex: f.layer?.z_index ?? i + 1 }))
+          .sort((a, b) => a.zIndex - b.zIndex);
+        layers = [];
+        for (const [i, item] of ordered.entries()) {
+          const committed = await commitOne(item.f, layerFileName(i + 1).replace(/\.[^.]+$/, ""));
+          layers.push({
+            file: committed.file,
+            z_index: item.zIndex,
+            bounding_box: item.f.layer?.bounding_box ?? [],
+            ...(item.f.layer?.name !== undefined ? { name: item.f.layer.name } : {}),
+            ...(item.f.layer?.description !== undefined ? { description: item.f.layer.description } : {}),
+          });
+        }
+        const base = flashLayers ? { z_index: 0 as const, ...(fetched[0].layer?.name !== undefined ? { name: fetched[0].layer.name } : {}), ...(fetched[0].layer?.description !== undefined ? { description: fetched[0].layer.description } : {}) } : undefined;
+        await deps.writeNewFile(joinPath(args.outputRoot, `${job.relDir}/layers.json`), new TextEncoder().encode(layersExportJson(layers, base)));
+      }
+      saved = await commitOne(fetched[0], "result");
+    } else {
+      // 写底图作为最终成功图片；全部图层验证与保存先完成。
+      if (job.plan.layerDecomposition && (fetched.length > 1 || flashLayers)) {
+        layers = await saveLayers(
+          deps,
+          args.outputRoot,
+          job.relDir,
+          fetched.slice(1).map((f, i) => ({ bytes: f.bytes, zIndex: f.layer?.z_index ?? i + 1, boundingBox: f.layer?.bounding_box ?? [], ...(f.layer?.name !== undefined ? { name: f.layer.name } : {}), ...(f.layer?.description !== undefined ? { description: f.layer.description } : {}) })),
+          flashLayers ? { base: { z_index: 0, ...(fetched[0].layer?.name !== undefined ? { name: fetched[0].layer.name } : {}), ...(fetched[0].layer?.description !== undefined ? { description: fetched[0].layer.description } : {}) } } : undefined,
+        );
+      }
+      saved = await saveResult(deps, args.outputRoot, job.relDir, fetched[0].bytes);
     }
-    saved = await saveResult(deps, args.outputRoot, job.relDir, fetched[0].bytes);
   } catch (e) {
+    await discard();
     throw new LocalError(`保存结果图失败：${e instanceof Error ? e.message : String(e)}`);
   }
   return { taskId: job.taskNodeId, submittedTaskId: job.taskId, file: saved.file, path: saved.path, record: job.record, layers };

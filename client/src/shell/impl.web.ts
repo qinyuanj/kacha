@@ -4,7 +4,7 @@ import type { FetchLike } from "../core/gateway";
 import { ApiError } from "./apiError";
 import { DEFAULT_SETTINGS, serializeSettings } from "../core/settings";
 import type { UpdateFlowPorts } from "../core/updateFlow";
-import type { DesktopPort, Ipc, SessionPort, ShellImpl } from "./types";
+import type { DesktopPort, Ipc, RelayPort, SessionPort, ShellImpl } from "./types";
 
 /** core/ 仍按「输出根 + 相对路径」拼路径；Web 版固定一个虚拟根，壳层在边界剥掉。 */
 export const VIRTUAL_ROOT = "/~";
@@ -191,5 +191,14 @@ export const session: SessionPort = {
   clearStoredKey: () => localStorage.removeItem(API_KEY_STORAGE),
 };
 
-export const shell: ShellImpl = { web: true, ipc, httpFetch, fileUrl, desktop, session, updateFlowPorts };
+/** 结果中转：地址交给服务端，取消经 AbortSignal 传到服务端（断开即中止下载）。 */
+const relay: RelayPort = {
+  relayResult: ({ url, relDir, stem, signal }) =>
+    api("/api/fs/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, dir: stripRoot(relDir), stem }), ...(signal ? { signal } : {}) }),
+  commitRelayed: (relDir, from, stem) =>
+    api("/api/fs/relay/commit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dir: stripRoot(relDir), from, stem }) }),
+  discardRelayed: async (relDir) => void (await api(`/api/fs/relay?dir=${encodeURIComponent(stripRoot(relDir))}`, { method: "DELETE", keepalive: true })),
+};
+
+export const shell: ShellImpl = { web: true, ipc, httpFetch, fileUrl, desktop, session, relay, updateFlowPorts };
 

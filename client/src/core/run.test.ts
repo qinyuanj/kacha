@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { Board, BoardEdge, BoardNode, ResultNode, TaskNode } from "./board";
 import { BUILTIN_TABLE } from "./capabilities";
 import type { FetchLike } from "./gateway";
+import { ERROR_CATEGORY_LABELS, GatewayError } from "./gateway";
+import { LocalError, sniffImage } from "./taskDir";
 import { addResultNode } from "./layout";
 import { createRunner } from "./runner";
 import { settle } from "./testing/runnerHarness";
@@ -35,7 +37,7 @@ function deps(respond: (url: string, init: Parameters<FetchLike>[1]) => { status
     fetch: async (url, init) => {
       requests.push({ url, init });
       const r = respond(url, init);
-      return { status: r.status, headers: { get: () => null }, text: async () => r.body, arrayBuffer: async () => new TextEncoder().encode(r.body).buffer as ArrayBuffer };
+      return { status: r.status, headers: { get: () => null }, text: async () => r.body, arrayBuffer: async () => Uint8Array.from(r.body, (c) => c.charCodeAt(0) & 0xff).buffer as ArrayBuffer };
     },
     now: () => new Date("2026-09-16T09:15:00Z"),
     schedule: () => () => undefined,
@@ -690,5 +692,117 @@ describe("参考图快照按模型规则缩放 / 转码（#116）", () => {
     expect(files.get(`/root/${job.relDir}/reference-1.png`)).toEqual(FITTED);
     expect(readTaskJson(files, first.relDir).references[0]).toHaveProperty("fitted");
     expect(readTaskJson(files, job.relDir).references[0]).not.toHaveProperty("fitted");
+  });
+});
+
+/** 结果中转（Web 版）：url 结果由服务端下载到任务目录暂存区，浏览器读回校验后提交，result.* 最后落盘。 */
+describe("结果中转", () => {
+  const byUrl = (image: string) => (url: string) =>
+    url.startsWith("https://oss") ? { status: 200, body: image } : { status: 200, body: JSON.stringify({ metadata: { output: { choices: [{ message: { content: [{ image: "https://oss/x.png?sig=1" }] } }] } } }) };
+  // 对象存储返回的是原始图片字节（不是 base64 文本；base64 只在网关 JSON 里）。
+  const PNG_BINARY = String.fromCharCode(...PNG);
+
+  /** 伪服务端中转：沿用同一个 fetch 桩下载，写进内存任务目录的 .staging/，提交即移到成品名。 */
+  function withRelay(respond: (url: string) => { status: number; body: string }) {
+    const base = deps((url) => respond(url));
+    const relays: { url: string; relDir: string; stem: string }[] = [];
+    const commits: string[] = [];
+    const discards: string[] = [];
+    base.d.relayResult = async ({ url, relDir, stem }) => {
+      relays.push({ url, relDir, stem });
+      const res = await base.d.fetch(url, { method: "GET", headers: {} });
+      if (res.status >= 400) throw Object.assign(new Error(`下载结果图失败：上游 HTTP ${res.status}`), { status: res.status, code: "download_failed" });
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      const kind = sniffImage(bytes);
+      if (!kind) throw Object.assign(new Error("下载的内容不是可识别的图片"), { status: 422, code: "invalid_image" });
+      const file = `${stem}.${kind.ext}`;
+      await base.d.writeNewFile(`/root/${relDir}/.staging/${file}`, bytes);
+      return { file, path: `${relDir}/.staging/${file}` };
+    };
+    base.d.commitRelayed = async (relDir, from, stem) => {
+      const bytes = await base.d.readFile(`/root/${relDir}/.staging/${from}`);
+      const file = `${stem}.${from.split(".").pop()}`;
+      commits.push(`${relDir}/${file}`);
+      await base.d.writeNewFile(`/root/${relDir}/${file}`, bytes);
+      return { file, path: `${relDir}/${file}` };
+    };
+    base.d.discardRelayed = async (relDir) => {
+      discards.push(relDir);
+    };
+    return { ...base, relays, commits, discards };
+  }
+
+  const preparedJob = async (d: RunDeps) => {
+    const { job } = await prepare(d, { board: board(false), table: BUILTIN_TABLE, tableSha256: "x", outputRoot: "/root", taskNodeId: "t" });
+    return writeJob(d, "/root", job);
+  };
+
+  it("url 结果不经过浏览器直连对象存储；读回校验后提交为 result.<ext>", async () => {
+    const { d, files, requests, relays, commits } = withRelay(byUrl(PNG_BINARY));
+    const job = await preparedJob(d);
+    const result = await executeJob(d, { job, outputRoot: "/root", baseUrl: "http://gw", apiKey: "k" });
+    expect(requests.map((r) => r.url).filter((u) => u.startsWith("https://oss"))).toHaveLength(1);
+    expect(relays).toHaveLength(1);
+    expect(relays[0]).toMatchObject({ url: "https://oss/x.png?sig=1", relDir: job.relDir });
+    expect(commits).toEqual([`${job.relDir}/result.png`]);
+    expect(files.get(`/root/${job.relDir}/result.png`)).toEqual(PNG);
+    expect(result).toMatchObject({ file: "result.png", path: `${job.relDir}/result.png` });
+  });
+
+  it("中转下载失败：按上游状态归类为网关错误，不写成品并清掉暂存", async () => {
+    const { d, files, discards } = withRelay((url) => (url.startsWith("https://oss") ? { status: 403, body: "denied" } : byUrl(PNG_BINARY)(url)));
+    const job = await preparedJob(d);
+    const err = await executeJob(d, { job, outputRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
+    expect(err).toBeInstanceOf(GatewayError);
+    expect(err.status).toBe(403);
+    expect(failureLabel(err)).toBe(ERROR_CATEGORY_LABELS.rejected);
+    expect([...files.keys()].some((k) => k.includes("result."))).toBe(false);
+    expect(discards).toEqual([job.relDir]);
+  });
+
+  it("中转到的字节不是图片：invalid_response，不出现 result.*，暂存清理", async () => {
+    const { d, files, commits, discards } = withRelay(byUrl("not an image"));
+    const job = await preparedJob(d);
+    const err = await executeJob(d, { job, outputRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
+    expect(err).toBeInstanceOf(GatewayError);
+    expect(err.category).toBe("invalid_response");
+    expect(commits).toEqual([]);
+    expect([...files.keys()].some((k) => k.includes("/result."))).toBe(false);
+    expect(discards).toEqual([job.relDir]);
+  });
+
+  it("中转途中取消：不提交成品并清掉暂存", async () => {
+    const { d, files, discards } = withRelay(byUrl(PNG_BINARY));
+    const controller = new AbortController();
+    const job = await preparedJob(d);
+    const relayResult = d.relayResult!;
+    d.relayResult = async (args) => {
+      const saved = await relayResult(args);
+      controller.abort();
+      return saved;
+    };
+    const err = await executeJob(d, { job, outputRoot: "/root", baseUrl: "http://gw", apiKey: "k", signal: controller.signal }).catch((e) => e);
+    expect(err).toBeInstanceOf(CancelledError);
+    expect([...files.keys()].some((k) => k.includes("/result."))).toBe(false);
+    expect(discards).toEqual([job.relDir]);
+  });
+
+  it("b64_json 结果不走中转：仍由浏览器解码后只新建写入", async () => {
+    const { d, files, relays } = withRelay(ok);
+    const job = await preparedJob(d);
+    await executeJob(d, { job, outputRoot: "/root", baseUrl: "http://gw", apiKey: "k" });
+    expect(relays).toEqual([]);
+    expect(files.get(`/root/${job.relDir}/result.png`)).toEqual(PNG);
+  });
+
+  it("中转已存在（409）按冲突报错，不覆盖既有成品", async () => {
+    const { d } = withRelay(byUrl(PNG_BINARY));
+    const job = await preparedJob(d);
+    d.commitRelayed = async () => {
+      throw Object.assign(new Error("目标已存在，只新建不覆盖"), { status: 409, code: "already_exists" });
+    };
+    const err = await executeJob(d, { job, outputRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
+    expect(err).toBeInstanceOf(LocalError);
+    expect(err.message).toContain("目标已存在");
   });
 });

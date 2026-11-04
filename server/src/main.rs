@@ -38,13 +38,19 @@ async fn main() {
         .find(|w| w[0] == "--static-dir")
         .map(|w| PathBuf::from(&w[1]))
         .or_else(|| std::env::var("KACHA_STATIC_DIR").ok().map(PathBuf::from));
+    // 结果中转允许列表：默认含火山引擎对象存储，部署可用逗号分隔追加主机（如内网对象存储）。
+    let result_hosts = opt("--result-hosts", "KACHA_RESULT_HOSTS", "")
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
 
     if let Err(e) = std::fs::create_dir_all(&data_root) {
         eprintln!("创建数据根失败：{e}");
         std::process::exit(1);
     }
     let state = AppState::new(
-        Config { data_root: data_root.clone(), gateway_url: gateway_url.clone(), static_dir },
+        Config { data_root: data_root.clone(), gateway_url: gateway_url.clone(), static_dir, result_hosts },
         Arc::new(kacha_server::verify::HttpKeyVerifier::new(gateway_url.clone())),
         Arc::new(SystemTime::now),
     );

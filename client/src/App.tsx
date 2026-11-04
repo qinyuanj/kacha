@@ -73,8 +73,15 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const guardPreparation = useCallback(() => preparingRef.current, []);
   /** 更新准备期间画板变更入口一律拒绝（runner 产出的系统变更同样不能落地）。 */
   const applyGuarded = useCallback(
-    (key: string, change: BoardChange) => (guardPreparation() ? null : apply(key, change)),
-    [apply, guardPreparation],
+    (key: string, change: BoardChange) => {
+      if (guardPreparation()) return null;
+      const result = apply(key, change);
+      // 任务派发与结果节点立即落盘：浏览器关页 / 刷新没有桌面主进程关窗时的那次 flush，
+      // 1 秒去抖窗口会丢 last_submitted（任务不再显示已中断）或刚到的结果节点。
+      if (result && (change.kind === "submitted" || change.kind === "runResult")) void boards.flushNow(key);
+      return result;
+    },
+    [apply, guardPreparation, boards],
   );
   const { runner, snapshot: runState } = useRunner(applyGuarded, settings.settings.concurrency);
   runnerRef.current = runner;

@@ -1,4 +1,4 @@
-// 手测清单 #17–#26 中与任务状态、设置、重新定位相关的验收（见 docs/research/playwright-e2e-feasibility.md 第 5 节）。
+// 手测清单 #21–#26 中设置与重新定位相关的验收（#17–#20 已迁到新接缝 e2e/web/generation.spec.ts）。
 import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { board, boardPath, boardScenario, edge, GW, openApp, png, promptNode, referenceNode, task, taskNode } from "../app";
@@ -10,109 +10,6 @@ const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => window.__e2e.calls.filter((x) => x.cmd === c).map((x) => x.args), cmd) as Promise<Record<string, unknown>[]>;
 const sha256 = (b64: string) => createHash("sha256").update(Buffer.from(b64, "base64")).digest("hex");
 const toast = (page: Page) => page.locator(".toast");
-
-test.describe("#17 / #18 运行前判定", () => {
-  test("#17 参考图文件缺失：节点标红，运行提示「无法运行：…图片缺失」", async ({ page }) => {
-    const text = board(
-      "缺图",
-      [promptNode("p1", "把图1变成水彩"), referenceNode("r1", "导入参考图/不存在.png"), taskNode("t1", { image_ports: 1 })],
-      [edge("p1", "t1", "positive"), edge("r1", "t1", "image:0")],
-    );
-    await openApp(page, boardScenario("缺图", text));
-    await expect(task(page, "r1")).toContainText("图片缺失");
-    await expect(task(page, "t1").locator(".node-task")).toHaveClass(/node-error/);
-    await task(page, "t1").locator(".task-actions button.primary").click();
-    await expect(toast(page)).toContainText("无法运行：图1 图片缺失");
-    expect(await calls(page, "write_new_file")).toEqual([]);
-  });
-
-  test("#18 透明背景 + 源图不带透明通道：节点标红，运行被拦", async ({ page }) => {
-    const opaque = png(64, 64);
-    const text = board(
-      "透明",
-      [
-        promptNode("p1", "抠出主体"),
-        referenceNode("r1", "导入参考图/opaque.png"),
-        taskNode("t1", { model: "doubao-seedream-5-0-pro-260628", image_ports: 1, transparent_background: true }),
-      ],
-      [edge("p1", "t1", "positive"), edge("r1", "t1", "image:0")],
-    );
-    await openApp(page, boardScenario("透明", text, { files: { [`${OUTPUT_ROOT}/导入参考图/opaque.png`]: { b64: opaque } } }));
-    await expect(task(page, "t1").locator(".node-task")).toHaveClass(/node-error/);
-    await task(page, "t1").locator(".task-actions button.primary").click();
-    await expect(toast(page)).toContainText("无法运行：");
-    await expect(toast(page)).toContainText("透明通道");
-    expect(await calls(page, "write_new_file")).toEqual([]);
-  });
-
-  test("#18 对照：源图带透明通道时不因透明通道被拦", async ({ page }) => {
-    const alpha = png(64, 64, { alpha: true });
-    const text = board(
-      "透明ok",
-      [
-        promptNode("p1", "抠出主体"),
-        referenceNode("r1", "导入参考图/alpha.png"),
-        taskNode("t1", { model: "doubao-seedream-5-0-pro-260628", image_ports: 1, transparent_background: true }),
-      ],
-      [edge("p1", "t1", "positive"), edge("r1", "t1", "image:0")],
-    );
-    await openApp(page, boardScenario("透明ok", text, { files: { [`${OUTPUT_ROOT}/导入参考图/alpha.png`]: { b64: alpha } } }));
-    await expect(task(page, "r1").locator("img.thumb")).toBeVisible();
-    await expect(task(page, "t1").locator(".node-task")).not.toHaveClass(/node-error/);
-    await expect(task(page, "t1")).not.toContainText("透明通道");
-  });
-});
-
-test.describe("#19 / #20 重开画板后的已存状态", () => {
-  const ids = { failed: "20260915T010101Z-aaaa0001", cancelled: "20260915T010102Z-aaaa0002", interrupted: "20260915T010103Z-aaaa0003" };
-  const outcome = (id: string, record: object) => ({ [`${OUTPUT_ROOT}/2026-09-15/${id}/outcome.json`]: { text: JSON.stringify(record) } });
-  const title = "已存状态";
-  const text = board(
-    title,
-    [
-      taskNode("tf", { last_submitted: { task_id: ids.failed } }, [0, 0]),
-      taskNode("tc", { last_submitted: { task_id: ids.cancelled } }, [400, 0]),
-      taskNode("ti", { last_submitted: { task_id: ids.interrupted } }, [800, 0]),
-    ],
-    [],
-  );
-  const scn = () =>
-    boardScenario(title, text, {
-      files: { ...outcome(ids.failed, { outcome: "failed", label: "鉴权失败" }), ...outcome(ids.cancelled, { outcome: "cancelled", gateway_may_continue: false }) },
-    });
-  const interruptedLogs = (page: Page) =>
-    e2e(page, (c) => c.logs.filter((l) => l.kind === "task" && (l.fields as { to_status?: string }).to_status === "interrupted").map((l) => l.fields));
-
-  const expectBadges = async (page: Page) => {
-    await expect(task(page, "tf").locator(".status-failed")).toHaveText("失败 · 鉴权失败");
-    await expect(task(page, "tc").locator(".status")).toHaveText("已取消");
-    await expect(task(page, "ti").locator(".status")).toHaveText("已中断");
-  };
-  const reopen = async (page: Page) => {
-    await page.locator(".tab", { hasText: title }).locator(".tab-close").click();
-    await expect(page.locator(".tab", { hasText: title })).toHaveCount(0);
-    await page.evaluate((p) => window.__e2e.emit("second-instance", [p]), boardPath(title));
-    await expect(page.locator(".tab", { hasText: title })).toHaveCount(1);
-  };
-
-  test("#19 启动与关掉再打开后都显示 失败 / 已取消 / 已中断", async ({ page }) => {
-    await openApp(page, scn());
-    await expectBadges(page);
-    await reopen(page);
-    await expectBadges(page);
-  });
-
-  test("#20 已中断的日志只记一次（反复关开画板）", async ({ page }) => {
-    await openApp(page, scn());
-    await expectBadges(page);
-    for (let i = 0; i < 3; i++) {
-      await reopen(page);
-      await expectBadges(page);
-    }
-    const logs = await interruptedLogs(page);
-    expect(logs).toEqual([{ task_id: ids.interrupted, board_file: expect.any(String), task_node_id: "ti", from_status: "running", to_status: "interrupted" }]);
-  });
-});
 
 test.describe("#21–#24 高级设置", () => {
   const title = "设置";

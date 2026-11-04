@@ -1339,3 +1339,26 @@ button.primary[aria-disabled="true"] {
   border-radius: 6px;
   font-size: 11px;
 }
+
+/* 画板列表（Web 版打开服务端已有画板） */
+.tab-list {
+  align-self: center;
+  margin-left: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.board-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 50vh;
+  overflow: auto;
+}
+.board-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

@@ -6,7 +6,7 @@ import type { SettingsPorts } from "../core/settings";
 import type { ImageProbe } from "../core/submission";
 import type { TaskFs } from "../core/taskDir";
 import { imageCodec } from "./imageCodec";
-import { desktop, httpFetch, ipc } from "./ipc";
+import { desktop, httpFetch, ipc, relay } from "./ipc";
 import { logEvent } from "./log";
 import { composeOverlay } from "./overlay";
 
@@ -27,6 +27,8 @@ export const runDeps: RunDeps = {
   },
   composeOverlay,
   imageCodec,
+  // Web 版：url 结果由服务端中转；桌面 / 旧假壳没有该端口，仍由浏览器直接取字节。
+  ...(relay ? { relayResult: relay.relayResult, commitRelayed: relay.commitRelayed, discardRelayed: relay.discardRelayed } : {}),
 };
 
 /** 哈希走 fileSha256（原始字节，不要求可解码）；候选已按扩展名过滤。 */

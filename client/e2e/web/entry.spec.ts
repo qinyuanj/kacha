@@ -68,6 +68,8 @@ test("会话失效时提示重新粘贴密钥，页面上的改动不丢", async
   await page.getByRole("dialog", { name: "高级设置" }).getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByText("会话已失效，请重新粘贴 API 密钥", { exact: false })).toBeVisible();
   await expect(page.locator(".tab").first()).toBeVisible();
+  // 只模拟一次会话失效；恢复后撤销拦截，否则重新进入时的设置读取仍会被拦成 401。
+  await page.unroute("**/api/settings");
   await page.getByLabel("API 密钥", { exact: true }).fill(GOOD_KEY);
   await page.getByRole("button", { name: "进入工作台" }).click();
   await expect(page.getByText("会话已失效，请重新粘贴 API 密钥", { exact: false })).toHaveCount(0);

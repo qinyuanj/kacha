@@ -5,4 +5,5 @@ import { shell } from "kacha/shell-impl";
 export const { ipc, httpFetch, fileUrl, desktop, updateFlowPorts } = shell;
 export const isWeb = shell.web;
 export const session = shell.session;
-export type { AppPaths, BoardTexts, DesktopPort, ImageInfo, Ipc, PackageEntry, SessionPort, ShellImpl } from "./types";
+export const relay = shell.relay;
+export type { AppPaths, BoardTexts, DesktopPort, ImageInfo, Ipc, PackageEntry, RelayPort, SessionPort, ShellImpl } from "./types";

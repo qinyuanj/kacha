@@ -113,7 +113,16 @@ export interface ShellImpl {
   fileUrl(path: string): string;
   desktop: DesktopPort;
   session: SessionPort;
+  /** 结果中转（只有 Web 版有）：url 结果由服务端下载到任务目录暂存区，校验后提交。 */
+  relay?: RelayPort;
   updateFlowPorts(protection: Pick<UpdateFlowPorts, "restartGuard" | "restartReleased">): UpdateFlowPorts;
+}
+
+/** 结果中转端口：相对路径都相对输出根（虚拟根由实现剥掉）。 */
+export interface RelayPort {
+  relayResult(args: { url: string; relDir: string; stem: string; signal?: AbortSignal }): Promise<{ file: string; path: string }>;
+  commitRelayed(relDir: string, from: string, stem: string): Promise<{ file: string; path: string }>;
+  discardRelayed(relDir: string): Promise<void>;
 }
 
 /** 进入与身份：只有 Web 版有；桌面实现为占位（旧假壳不经过进入界面）。 */
