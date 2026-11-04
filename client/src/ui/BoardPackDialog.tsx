@@ -1,5 +1,5 @@
 // 画板包（ADR 0013）的模态：导出前确认（含完整提示词、缺图清单）、可取消的进度、导入后的冲突清单。
-import { listen } from "@tauri-apps/api/event";
+import { desktop } from "../shell/ipc";
 import { useEffect, useState } from "react";
 import type { ExportPlan } from "../core/boardPack";
 
@@ -22,7 +22,7 @@ function Progress({ title, onCancel }: { title: string; onCancel: () => void }) 
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [cancelling, setCancelling] = useState(false);
   useEffect(() => {
-    const unlisten = listen<{ done: number; total: number }>("board-pack-progress", (e) => setProgress(e.payload));
+    const unlisten = desktop.onPackProgress(setProgress);
     return () => void unlisten.then((fn) => fn());
   }, []);
   return (

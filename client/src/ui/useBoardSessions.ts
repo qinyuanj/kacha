@@ -1,5 +1,4 @@
 // 多画板标签页：打开 / 新建 / 关闭 / 重命名 / 去抖自动保存 / 另存到。
-import { save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useRef, useState } from "react";
 import {
   BOARD_EXTENSION,
@@ -11,10 +10,11 @@ import {
   type Board,
 } from "../core/board";
 import { editBoard, type BoardChange, type EditEnv, type EditResult } from "../core/edit";
+import { newId } from "../core/ids";
 import { emptyHistory, recordChange, redo, undo, type History } from "../core/history";
 import { basename, boardsDir, dirname, joinPath, resolveFromRoot } from "../core/paths";
 import { restoreResultLayers } from "../core/taskDir";
-import { ipc } from "../shell/ipc";
+import { desktop, ipc } from "../shell/ipc";
 import { logEvent } from "../shell/log";
 import type { OperationGate } from "../core/updatePreparation";
 import { knownImageInfo } from "./context";
@@ -126,7 +126,7 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
         const info = root ? knownImageInfo(resolveFromRoot(root, path)) : undefined;
         return info ? [info.width, info.height] : undefined;
       },
-      newId: () => crypto.randomUUID(),
+      newId,
     }),
     [],
   );
@@ -243,7 +243,7 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
           throw new Error(`打开画板失败：${errorText(e)}`);
         }
       }
-      const key = crypto.randomUUID();
+      const key = newId();
       const session: Session =
         opened.kind === "ok"
           ? {
@@ -271,7 +271,7 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
     const onDisk = await ipc.listBoardNames(dir).catch(() => [] as string[]);
     const openHere = sessionsRef.current.filter((s) => samePath(dirname(s.path), dir)).map((s) => basename(s.path));
     const path = joinPath(dir, uniqueBoardFileName(DEFAULT_BOARD_TITLE, [...onDisk, ...openHere]));
-    const key = crypto.randomUUID();
+    const key = newId();
     setSessions([...sessionsRef.current, { key, path, status: "ok", board: newBoard(), history: emptyHistory(), notice: null, saveError: null }]);
     setActiveKey(key);
     // 立即落盘占住文件名。
@@ -343,7 +343,7 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
     async (key: string) => {
       const s = sessionsRef.current.find((x) => x.key === key);
       if (!s || s.status !== "ok") return;
-      const target = await save({
+      const target = await desktop.save({
         defaultPath: basename(s.path),
         filters: [{ name: "画板", extensions: [BOARD_EXTENSION.slice(1)] }],
       });

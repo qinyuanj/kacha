@@ -1,7 +1,6 @@
 // 把画布上的图片另存到用户选的位置：只新建不覆盖。
-import { save } from "@tauri-apps/plugin-dialog";
 import { basename, dirname, joinPath } from "../core/paths";
-import { ipc } from "./ipc";
+import { desktop, ipc } from "./ipc";
 
 function suffixed(path: string, n: number): string {
   const name = basename(path);
@@ -28,7 +27,7 @@ export async function writeNew(bytes: Uint8Array, target: string): Promise<strin
 
 /** 弹保存对话框把 absPath 另存一份；取消返回 null，否则返回实际写入的路径。 */
 export async function saveCopyAs(absPath: string): Promise<string | null> {
-  const target = await save({ defaultPath: basename(absPath) });
+  const target = await desktop.save({ defaultPath: basename(absPath) });
   if (!target) return null;
   return writeNew(await ipc.readFileBytes(absPath), target);
 }

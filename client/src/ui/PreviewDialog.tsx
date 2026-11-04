@@ -1,6 +1,6 @@
 // 放大预览弹窗：纯预览、编辑图片连线的指示区域（拖拽画矩形）、结果节点的图层侧栏与导出。
 // 弹窗必须挂在画布根（BoardCanvas），不能挂进 React Flow 节点内：变换容器里 position:fixed 会失效。
-import { open } from "@tauri-apps/plugin-dialog";
+import { desktop } from "../shell/ipc";
 import { useEffect, useRef, useState } from "react";
 import type { PortRef, RegionRender } from "../core/board";
 import { MAX_REGIONS, regionCss } from "../core/overlay";
@@ -177,7 +177,7 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
     });
   const exportAll = () =>
     runExport(async () => {
-      const dir = await open({ directory: true });
+      const dir = await desktop.open({ directory: true }).then((p) => (Array.isArray(p) ? p[0] : p));
       if (!dir) return null;
       // 元数据真源是任务目录的 layers.json：可读且层数与当前一致时按它出（含底图名称 / 描述）；读不到（旧结果没有 layers.json）退回节点记录。损坏则明确失败，不静默降级。
       const truth = await ipc.readFileBytes(joinPath(dirname(req.absPath), "layers.json")).then(parseLayersFile, () => null);

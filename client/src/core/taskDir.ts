@@ -78,10 +78,9 @@ export function sniffImage(bytes: Uint8Array): { ext: string; mediaType: string 
   return null;
 }
 
-export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes.slice().buffer);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
+import { sha256Hex } from "./sha256";
+
+export { sha256Hex };
 
 /** 生效能力表（内置 + 覆盖合并后）的摘要，记入 task.json 便于追溯当时的能力判断。 */
 export function tableDigest(table: CapabilityTable): Promise<string> {

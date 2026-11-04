@@ -1,21 +1,16 @@
 // core 端口的真适配器集中在这里（#128）：ui 只 import 使用，不在调用点就地拼。测试侧各自就地拼伪实现。
-import { getVersion } from "@tauri-apps/api/app";
-import { invoke } from "@tauri-apps/api/core";
-import { Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import type { PackFs, PackIo } from "../core/boardPack";
 import type { RelocateFs } from "../core/relocate";
 import type { RunDeps } from "../core/run";
 import type { SettingsPorts } from "../core/settings";
 import type { ImageProbe } from "../core/submission";
 import type { TaskFs } from "../core/taskDir";
-import type { UpdateFlowPorts } from "../core/updateFlow";
-import { detectPlatform, LATEST_RELEASE_API_URL, selectUpdateRelease, type Platform } from "../core/update";
 import { imageCodec } from "./imageCodec";
-import { httpFetch, ipc } from "./ipc";
+import { desktop, httpFetch, ipc } from "./ipc";
 import { logEvent } from "./log";
 import { composeOverlay } from "./overlay";
+
+export { updateFlowPorts } from "./ipc";
 
 export const taskFs: TaskFs = {
   writeNewFile: ipc.writeNewFile,
@@ -70,37 +65,4 @@ export const settingsPorts: SettingsPorts = {
   log: logEvent,
 };
 
-/** 统一更新流程的真端口（#12）。 */
-export function updateFlowPorts(protection: Pick<UpdateFlowPorts, "restartGuard" | "restartReleased">): UpdateFlowPorts {
-  const platform: Platform = detectPlatform(navigator.userAgent);
-  return {
-    currentVersion: () => getVersion(),
-    platform: () => platform,
-    schedule: (ms, fn) => {
-      const id = setTimeout(fn, ms);
-      return () => clearTimeout(id);
-    },
-    log: (kind, fields) => void ipc.logEvent(kind, fields).catch(() => undefined),
-    release: {
-      fetchLatest: async () => {
-        const res = await httpFetch(LATEST_RELEASE_API_URL, { method: "GET", headers: { Accept: "application/json" } });
-        if (res.status === 404) return null;
-        if (res.status < 200 || res.status >= 300) throw new Error(`发布服务器返回 HTTP ${res.status}`);
-        return selectUpdateRelease(JSON.parse(await res.text()), platform);
-      },
-    },
-    updater: {
-      // 静态端点：官方 updater 直接请求描述 URL；target 固定平台名。
-      check: async (descriptorUrl, target) => {
-        const metadata = await invoke<ConstructorParameters<typeof Update>[0] | null>("check_update", {
-          endpoints: [descriptorUrl], target,
-        });
-        return metadata ? new Update(metadata) : null;
-      },
-    },
-    ...protection,
-    restart: relaunch,
-  };
-}
-
-export const openExternal = (url: string) => void openUrl(url).catch(() => undefined);
+export const openExternal = desktop.openExternal;

@@ -1,6 +1,5 @@
 // 高级设置模态面板：网关地址、API 密钥、连接测试、输出根目录、并发上限、检查更新、诊断包导出。
-import { getVersion } from "@tauri-apps/api/app";
-import { open } from "@tauri-apps/plugin-dialog";
+import { desktop, isWeb } from "../shell/ipc";
 import { useEffect, useState } from "react";
 import {
   DEFAULT_SETTINGS,
@@ -45,7 +44,7 @@ export function SettingsPanel({ settings, outputRoot, defaultOutputRoot, openBoa
   // 版本号唯一来源是 Cargo.toml（tauri.conf.json 不写 version 即沿用），经 Tauri 读出。
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
-    void getVersion().then(setVersion, () => undefined);
+    void desktop.version().then(setVersion, () => undefined);
   }, []);
 
   const urlError = validateBaseUrl(baseUrl);
@@ -61,7 +60,7 @@ export function SettingsPanel({ settings, outputRoot, defaultOutputRoot, openBoa
   };
 
   const pickRoot = async () => {
-    const picked = await open({ directory: true, defaultPath: root });
+    const picked = await desktop.open({ directory: true, defaultPath: root });
     if (typeof picked === "string") setRoot(picked);
   };
 
@@ -114,6 +113,12 @@ export function SettingsPanel({ settings, outputRoot, defaultOutputRoot, openBoa
           <div className="notice notice-warn">明文 HTTP：密钥与图片不加密传输，仅限可信内网使用。</div>
         )}
 
+        {isWeb ? (
+          <div className="form-row">
+            <span>API 密钥</span>
+            <span className="muted small">密钥由进入界面管理；换密钥即视为新用户，看不到原来的画板与结果。要换密钥请先退出。</span>
+          </div>
+        ) : <>
         <label className="form-row">
           <span>API 密钥</span>
           <input
@@ -128,6 +133,7 @@ export function SettingsPanel({ settings, outputRoot, defaultOutputRoot, openBoa
           </button>
         </label>
         {settings.keyPersistence === "session" && <div className="notice notice-warn">系统凭据库不可用：密钥未持久化，重启需重填。</div>}
+        </>}
 
         <div className="form-row">
           <span>连接测试</span>
@@ -146,6 +152,7 @@ export function SettingsPanel({ settings, outputRoot, defaultOutputRoot, openBoa
           {discovery.source === "none" && "模型列表：尚未从网关获取，暂按上架清单显示"}
         </div>
 
+        {!isWeb && <>
         <div className="form-row">
           <span>输出根目录</span>
           <input value={root} readOnly className="mono" title={root} />
@@ -160,6 +167,7 @@ export function SettingsPanel({ settings, outputRoot, defaultOutputRoot, openBoa
         </div>
         {busy && <div className="muted small form-hint">有任务在排队或执行，或正在准备更新，暂不能切换输出根目录。</div>}
         {rootChanged && <div className="notice notice-warn">切换不搬文件，新目录的画板列表为空；保存后会关闭当前打开的画板。</div>}
+        </>}
 
         <label className="form-row">
           <span>并发上限</span>
@@ -174,6 +182,7 @@ export function SettingsPanel({ settings, outputRoot, defaultOutputRoot, openBoa
         </label>
         {concurrency > 5 && <div className="muted small form-hint">qwen 模型曾在 6 个以上并发时触发网关限流；限流时整条队列会暂停等待。</div>}
 
+        {!isWeb && <>
         <div className="form-row">
           <span>检查更新</span>
           <button onClick={() => void update.check().catch(() => undefined)} disabled={update.checking}>
@@ -211,6 +220,7 @@ export function SettingsPanel({ settings, outputRoot, defaultOutputRoot, openBoa
         <div className="muted small form-hint">发现新版自动后台下载；就绪后由你点击重启并更新，不会自动安装或重启。</div>
 
         <DiagnosticsSection outputRoot={outputRoot} openBoards={openBoards} />
+        </>}
 
         {error && <div className="form-error">{error}</div>}
         <div className="modal-foot">

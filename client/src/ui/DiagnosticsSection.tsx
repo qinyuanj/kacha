@@ -1,5 +1,5 @@
 // 诊断包导出：默认含日志、清单、脱敏设置与能力覆盖文件；画板与任务目录 JSON 含提示词，需逐项勾选。
-import { save } from "@tauri-apps/plugin-dialog";
+import { desktop } from "../shell/ipc";
 import { useEffect, useState } from "react";
 import { ipc, type PackageEntry } from "../shell/ipc";
 import { logEvent } from "../shell/log";
@@ -40,7 +40,7 @@ export function DiagnosticsSection({ outputRoot, openBoards }: { outputRoot: str
     });
 
   const exportPackage = async () => {
-    const picked = await save({ defaultPath: `kacha-diagnostics-${stamp(new Date())}.zip`, filters: [{ name: "诊断包", extensions: ["zip"] }] });
+    const picked = await desktop.save({ defaultPath: `kacha-diagnostics-${stamp(new Date())}.zip`, filters: [{ name: "诊断包", extensions: ["zip"] }] });
     if (!picked) return;
     const target = picked.toLowerCase().endsWith(".zip") ? picked : `${picked}.zip`;
     setExporting(true);

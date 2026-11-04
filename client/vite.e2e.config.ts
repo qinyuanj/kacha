@@ -7,6 +7,9 @@ export default mergeConfig(
   base,
   defineConfig({
     server: { port: 1421, strictPort: true },
-    resolve: { alias: { "@tauri-apps/plugin-http": fileURLToPath(new URL("./e2e/shim/http.ts", import.meta.url)) } },
+    resolve: { alias: {
+      "@tauri-apps/plugin-http": fileURLToPath(new URL("./e2e/shim/http.ts", import.meta.url)),
+      "kacha/shell-impl": fileURLToPath(new URL("./src/shell/impl.tauri.ts", import.meta.url)),
+    } },
   }),
 );

@@ -589,7 +589,7 @@ describe("任务运行器：提交守护（更新准备）", () => {
   });
 
   it("守护在 tableDigest 期间挂上：异步间隙里的提交也不入队", async () => {
-    // crypto.subtle 摘要是真异步：守护在摘要算完后才挂上时，这次提交必须被拦在入队前。
+    // 摘要是真异步（纯 JS SHA-256，见 core/sha256.ts）：守护在摘要算完后才挂上时，这次提交必须被拦在入队前。
     const h = harness();
     const submitting = h.runner.submit(h.target(), board(), ["t1"]);
     h.runner.setSubmissionGuard(() => undefined);

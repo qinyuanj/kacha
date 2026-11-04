@@ -1,6 +1,4 @@
 // 单个画板的画布：React Flow 视图完全由画板文件模型派生；选中、测量尺寸只在本地，不落盘。
-import { ask, open } from "@tauri-apps/plugin-dialog";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   Background,
   Controls,
@@ -50,7 +48,7 @@ import { findReferenceFile, findResultFile, IMAGE_EXTENSIONS } from "../core/rel
 import type { SnapshotImage } from "../core/submission";
 import { taskView } from "../core/taskView";
 import { relocateFs } from "../shell/adapters";
-import { ipc } from "../shell/ipc";
+import { desktop, ipc } from "../shell/ipc";
 import { logEvent } from "../shell/log";
 import { saveCopyAs } from "../shell/saveFile";
 import { ActionBar } from "./ActionBar";
@@ -315,10 +313,10 @@ export function BoardCanvas({
           if (node?.type !== "reference" && node?.type !== "result") return;
           const logRelocate = (outcome: { ok: true } | { ok: false; reason: "not_found" | "unreadable" }) =>
             logEvent("relocate", { board_file: boardFile, node_id: nodeId, node_type: node.type, mode, ...outcome });
-          let abs: string | null;
+          let abs: string | string[] | null;
           if (mode === "pick") {
-            const picked = await open({ multiple: false, filters: [{ name: "图片", extensions: IMAGE_EXTENSIONS }] });
-            if (!picked) return;
+            const picked = await desktop.open({ multiple: false, filters: [{ name: "图片", extensions: IMAGE_EXTENSIONS }] });
+            if (!picked || typeof picked !== "string") return;
             abs = picked;
           } else {
             abs =
@@ -611,7 +609,7 @@ export function BoardCanvas({
         return false;
       }
       if (running.length) {
-        const confirmed = await ask(`${running.length} 个任务正在排队 / 执行。先取消再删除？\n已在执行的只停止本地等待，网关侧计算可能仍在继续。`, {
+        const confirmed = await desktop.ask(`${running.length} 个任务正在排队 / 执行。先取消再删除？\n已在执行的只停止本地等待，网关侧计算可能仍在继续。`, {
           title: "删除任务节点",
           kind: "warning",
           okLabel: "取消并删除",
@@ -688,7 +686,7 @@ export function BoardCanvas({
 
   /** attachTo = 任务节点 id：只选一张，接到该任务的空图片端口（从图片端口反向拖线建节点）。 */
   const pickReferences = async (at?: { x: number; y: number }, attachTo?: string) => {
-    const picked = await open({ multiple: !attachTo, filters: [{ name: "图片", extensions: IMAGE_EXTENSIONS }] });
+    const picked = await desktop.open({ multiple: !attachTo, filters: [{ name: "图片", extensions: IMAGE_EXTENSIONS }] });
     if (!picked) return;
     await importReferences(Array.isArray(picked) ? picked : [picked], at ?? centerPosition(), attachTo ? { taskId: attachTo, place: "asIs" } : undefined);
   };
@@ -806,10 +804,8 @@ export function BoardCanvas({
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | null = null;
-    void getCurrentWebview()
-      .onDragDropEvent((event) => {
-        if (event.payload.type !== "drop") return;
-        const { paths, position } = event.payload;
+    void desktop
+      .onDropPaths((paths, position) => {
         const scale = window.devicePixelRatio || 1;
         const at = flow.screenToFlowPosition({ x: position.x / scale, y: position.y / scale });
         const boards = paths.filter((p) => p.toLowerCase().endsWith(BOARD_EXTENSION));

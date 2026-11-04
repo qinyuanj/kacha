@@ -109,7 +109,7 @@ export function harness(opts: { concurrency?: number; imageCodec?: RunDeps["imag
   };
 }
 
-/** 让挂起的 promise 链（含 crypto.subtle 摘要）走完。 */
+/** 让挂起的 promise 链（含 SHA-256 摘要）走完。 */
 export async function settle() {
   for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
 }

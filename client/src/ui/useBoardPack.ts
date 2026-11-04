@@ -1,7 +1,6 @@
 // 画板包（ADR 0013）的界面流程：导出确认 → 选位置 → 可取消的进度；导入选包 → 判版本与布局 → 进度 → 写画板并打开。
 // 包格式规则与导入流程（含取消竞态与脱敏日志）在 core/boardPack.ts，字节搬运在 Rust 壳；这里只管弹窗、进度与提示文案。
-import { getVersion } from "@tauri-apps/api/app";
-import { message, open, save } from "@tauri-apps/plugin-dialog";
+import { desktop } from "../shell/ipc";
 import { useCallback, useRef, useState } from "react";
 import { BOARD_EXTENSION, type Board } from "../core/board";
 import { buildExportSpec, importPack as importPackIn, PACK_EXTENSION, PACK_FILE_FILTER, planExport, runCancellable } from "../core/boardPack";
@@ -58,10 +57,10 @@ export function useBoardPack(outputRoot: string | null, boards: PackBoards, toas
     if (!outputRoot || dialog?.stage !== "confirmExport" || gateRef.current?.blocked()) return;
     const { boardFile, plan } = dialog;
     const stem = boardFile.slice(0, -BOARD_EXTENSION.length);
-    const picked = await save({ defaultPath: `${stem}${PACK_EXTENSION}`, filters: [PACK_FILE_FILTER] });
+    const picked = await desktop.save({ defaultPath: `${stem}${PACK_EXTENSION}`, filters: [PACK_FILE_FILTER] });
     if (!picked) return;
     const target = picked.toLowerCase().endsWith(PACK_EXTENSION) ? picked : `${picked}${PACK_EXTENSION}`;
-    const spec = buildExportSpec(await getVersion(), boardFile, plan);
+    const spec = buildExportSpec(await desktop.version(), boardFile, plan);
     const fields = { action: "export", board_file: boardFile, task_dirs: plan.taskDirs.length, missing: plan.missing.length };
     const outcome = await runCancellable(packIo, progress(`正在导出画板包：${stem}`), () => ipc.boardPackExport(outputRoot, target, spec));
     setDialog(null);
@@ -79,7 +78,7 @@ export function useBoardPack(outputRoot: string | null, boards: PackBoards, toas
     if (!outputRoot) return;
     if (gateRef.current?.blocked()) return;
     const token = gateRef.current?.generation();
-    const picked = await open({ multiple: false, directory: false, filters: [PACK_FILE_FILTER] });
+    const picked = await desktop.open({ multiple: false, directory: false, filters: [PACK_FILE_FILTER] });
     if (typeof picked !== "string" || gateRef.current?.blocked() || token !== gateRef.current?.generation()) return;
     const work = importPackIn(packIo, {
       packPath: picked,
@@ -97,7 +96,7 @@ export function useBoardPack(outputRoot: string | null, boards: PackBoards, toas
     }
     switch (result.kind) {
       case "newer":
-        await message(result.message, { title: "无法导入画板包", kind: "warning" });
+        await desktop.message(result.message, { title: "无法导入画板包", kind: "warning" });
         return;
       case "corrupt":
         return toast(`无法导入画板包：${result.reason}`);

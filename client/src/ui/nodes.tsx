@@ -1,5 +1,5 @@
 // 节点四型的渲染。节点数据只来自画板文件模型；派生信息（露出端口、标红原因、校验规则）由画布计算后传入。
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openExternal } from "../shell/adapters";
 import { NodeResizer, Position, useUpdateNodeInternals, type Node, type NodeProps } from "@xyflow/react";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import type {
@@ -409,7 +409,7 @@ function ModelInfo({ modelId, onClose }: { modelId: string; onClose: () => void 
         </>
       )}
       {model.help_url && (
-        <button className="link" onClick={() => void openUrl(model.help_url!)}>
+        <button className="link" onClick={() => void openExternal(model.help_url!)}>
           查看官方文档
         </button>
       )}

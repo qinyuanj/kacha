@@ -1,6 +1,3 @@
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { ask } from "@tauri-apps/plugin-dialog";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BOARD_EXTENSION, type Board } from "./core/board";
@@ -13,7 +10,8 @@ import { runDispatch, runScope, buildConfirmItems, collectRunFacts, type Confirm
 import { parseUiState, serializeUiState, type UiState } from "./core/uiState";
 import { createUpdatePreparation, type UpdatePreparation } from "./core/updatePreparation";
 import { imageProbe } from "./shell/adapters";
-import { ipc } from "./shell/ipc";
+import { copyTextToClipboard } from "./shell/clipboard";
+import { desktop, ipc, isWeb } from "./shell/ipc";
 import { BoardPackDialog } from "./ui/BoardPackDialog";
 import { BoardToolbar } from "./ui/BoardToolbar";
 import { ContextMenu } from "./ui/ContextMenu";
@@ -31,7 +29,7 @@ import { useBoardSessions } from "./ui/useBoardSessions";
 
 const isBoardPath = (p: string) => p.toLowerCase().endsWith(BOARD_EXTENSION);
 
-export function App() {
+export function App({ onLogout, version }: { onLogout?: () => void; version?: string | null } = {}) {
   const [outputRoot, setOutputRoot] = useState<string | null>(null);
   const [defaultRoot, setDefaultRoot] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -145,7 +143,7 @@ export function App() {
         const ui = parseUiState(await ipc.readUiState().catch(() => null));
         initialUi.current = ui;
         windowSize.current = ui.window;
-        if (ui.window) await getCurrentWindow().setSize(new LogicalSize(ui.window.width, ui.window.height));
+        if (ui.window) await desktop.setWindowSize(ui.window);
         setDefaultRoot(paths.default_output_root);
       } catch (e) {
         setFatal(String(e));
@@ -231,11 +229,8 @@ export function App() {
   );
 
   const copyText = useCallback(
-    (text: string) =>
-      void navigator.clipboard.writeText(text).then(
-        () => toast("已复制发送文本"),
-        (e) => toast(`复制失败：${e}`),
-      ),
+    // 内网 HTTP 不是安全上下文，navigator.clipboard 不可用；壳层用 textarea 回退。
+    (text: string) => void copyTextToClipboard(text).then(() => toast("已复制发送文本"), (e) => toast(`复制失败：${e}`)),
     [toast],
   );
 
@@ -263,7 +258,7 @@ export function App() {
 
   /** 画板还有排队 / 执行中的任务时，关闭前阻断式二选一；不后台续跑。 */
   const confirmStopTasks = (count: number) =>
-    ask(`还有 ${count} 个任务在排队或执行。关闭后不会在后台继续；已在执行的只停止本地等待，网关侧计算可能仍在继续。`, {
+    desktop.ask(`还有 ${count} 个任务在排队或执行。关闭后不会在后台继续；已在执行的只停止本地等待，网关侧计算可能仍在继续。`, {
       title: "任务未完成",
       kind: "warning",
       okLabel: "取消全部并关闭",
@@ -317,8 +312,8 @@ export function App() {
 
   // 第二实例把参数转交过来。
   useEffect(() => {
-    const unlisten = listen<string[]>("second-instance", (event) => {
-      event.payload.filter(isBoardPath).forEach((p) => void openOrWarn(p));
+    const unlisten = desktop.onSecondInstance((paths) => {
+      paths.filter(isBoardPath).forEach((p) => void openOrWarn(p));
     });
     return () => void unlisten.then((fn) => fn());
   }, [openOrWarn]);
@@ -348,13 +343,12 @@ export function App() {
   }, [ready, uiSignature]);
 
   useEffect(() => {
-    const win = getCurrentWindow();
-    const resized = win.onResized(({ payload }) => {
+    const resized = desktop.onResized((readSize) => {
       if (guardPreparation()) return;
       const work = (async () => {
-        if (await win.isMaximized()) return;
-        const logical = payload.toLogical(await win.scaleFactor());
-        windowSize.current = { width: Math.round(logical.width), height: Math.round(logical.height) };
+        const size = await readSize();
+        if (!size) return;
+        windowSize.current = size;
         clearTimeout(resizeTimerRef.current);
         resizeTimerRef.current = setTimeout(() => void persistRef.current(), 500);
       })();
@@ -364,7 +358,7 @@ export function App() {
     // 注册了关闭监听后由前端调用 destroy 关窗（需 core:window:allow-destroy）；保存出错也不能挡住关窗。
     // 有未完成任务时先阻断式确认，全局只弹一次。
     let asking = false;
-    const closing = win.onCloseRequested(async (event) => {
+    const closing = desktop.onCloseRequested(async (event) => {
       // 更新准备期间一律挡住关窗：保存与检查不能被中途截断。
       if (guardPreparation()) {
         event.preventDefault();
@@ -390,7 +384,7 @@ export function App() {
         event.preventDefault();
         return;
       }
-      if (count > 0) await win.destroy();
+      if (count > 0) await desktop.destroyWindow();
     });
     return () => {
       clearTimeout(resizeTimerRef.current);
@@ -472,9 +466,15 @@ export function App() {
               <button className="link" onClick={update.openDownload}>手动下载</button>
             </span>
           )}
+          {isWeb && version && <span className="muted small topbar-version">Kacha {version}</span>}
           <button className="topbar-button" onClick={() => setSettingsOpen(true)} disabled={!settings.loaded || !outputRoot}>
             ⚙ 高级设置
           </button>
+          {isWeb && onLogout && (
+            <button className="topbar-button" onClick={onLogout} title="退出当前会话；换密钥即视为新用户">
+              退出
+            </button>
+          )}
         </div>
       </div>
       {packMenu && (
