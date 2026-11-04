@@ -11,14 +11,17 @@ use axum::routing::get;
 use axum::{Json, Router};
 
 pub mod board_pack;
+pub mod cleanup;
 pub mod fs;
 pub mod image_info;
 pub mod logger;
 pub mod paths;
 pub mod redact;
+pub mod references;
 pub mod relay;
 mod session;
 pub mod store;
+pub mod usage;
 pub mod verify;
 
 pub use session::{fingerprint, SESSION_COOKIE};
@@ -161,6 +164,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/fs/inspect-image", get(fs::inspect_image))
         .route("/api/fs/relay", axum::routing::post(relay::relay).delete(relay::discard))
         .route("/api/fs/relay/commit", axum::routing::post(relay::commit))
+        .route("/api/usage", get(usage::usage))
+        .route("/api/cleanup/unreferenced", axum::routing::post(usage::cleanup_unreferenced))
         .route("/api/log", axum::routing::post(fs::log_event))
         .route("/api/{*rest}", axum::routing::any(api_fallback))
         .fallback_service(static_service(&state))

@@ -105,6 +105,32 @@ export interface DesktopPort {
   version(): Promise<string>;
 }
 
+export interface UsageCandidate {
+  /** 相对用户数据根的任务目录（`<日期>/<task_id>`）。 */
+  dir: string;
+  bytes: number;
+  /** Unix 秒：目录内最新修改时间。 */
+  last_write: number;
+}
+
+export interface Usage {
+  total_bytes: number;
+  boards_bytes: number;
+  meta_bytes: number;
+  /** Unix 秒：服务端记的最后访问时间。 */
+  last_access: number;
+  by_date: { date: string; bytes: number }[];
+  /** 有画板读不懂时为 null（不给清单）。 */
+  unreferenced: UsageCandidate[] | null;
+  unreadable_board: string | null;
+}
+
+/** 用量与自助清理（只有 Web 版有；旧假壳没有）。 */
+export interface UsagePort {
+  usage(): Promise<Usage>;
+  cleanupUnreferenced(dirs: string[]): Promise<{ moved: UsageCandidate[]; skipped: string[] }>;
+}
+
 export interface ShellImpl {
   /** Web 版为 true：禁用自动更新、诊断包等桌面能力。 */
   web: boolean;
@@ -115,6 +141,8 @@ export interface ShellImpl {
   session: SessionPort;
   /** 结果中转（只有 Web 版有）：url 结果由服务端下载到任务目录暂存区，校验后提交。 */
   relay?: RelayPort;
+  /** 用量与自助清理（只有 Web 版有）。 */
+  usage?: UsagePort;
   updateFlowPorts(protection: Pick<UpdateFlowPorts, "restartGuard" | "restartReleased">): UpdateFlowPorts;
 }
 

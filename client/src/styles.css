@@ -654,6 +654,19 @@ body[data-port-drag="ok"] * {
   background: #e6e9ee;
   border-bottom: 1px solid var(--border);
 }
+.topbar-backup-hint {
+  align-self: center;
+  padding: 0 10px;
+  color: #8a6d1f;
+  white-space: nowrap;
+}
+.usage-candidates {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
 .topbar .tabs {
   flex: 1;
   border-bottom: none;
