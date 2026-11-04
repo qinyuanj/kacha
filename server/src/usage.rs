@@ -1,126 +1,115 @@
-//! 每日一次的各用户数据根大小日志（#24）：只记密钥指纹前缀与字节数，不含 API 密钥与提示词全文。
-//! 写到数据根下的服务端日志目录（不属于任何用户的诊断日志）。
+//! 当前用户用量与自助清理：只处理自己的用户数据根，规则与管理员 `cleanup` 命令一致。
+//!
+//! 用户只能移走未引用任务目录（闲置用户只能由管理员处理）；删除同样先进回收区。
+//! 不缓存引用判断：每次请求重读画板，接受 O(画板文件) 的扫描换取「读不懂就拒绝」的保守语义。
 
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::SystemTime;
+use axum::body::Bytes;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::Response;
+use axum::Json;
+use serde::Deserialize;
+use serde_json::{json, Value};
 
-use crate::Clock;
+use crate::cleanup::{self, TaskDirCandidate, UnreadableBoard};
+use crate::session::error;
+use crate::{AppState, User};
 
-/// 服务端日志目录：与用户目录并列，避免被用户清理 / 画板包导出当成内容。
-const SERVER_LOG_DIR: &str = "server-log";
+#[derive(Deserialize)]
+struct CleanupRequest {
+    dirs: Vec<String>,
+}
 
-/// 目录大小（递归，跟随普通文件与目录；读不了的条目跳过）。
-pub fn dir_size(path: &Path) -> u64 {
-    let mut total = 0;
-    let mut stack = vec![path.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                if let Ok(meta) = entry.metadata() {
-                    if meta.is_dir() {
-                        stack.push(entry.path());
-                    } else {
-                        total += meta.len();
-                    }
-                }
+fn blocking<F, T>(f: F) -> impl std::future::Future<Output = Result<T, Response>>
+where
+    F: FnOnce() -> Result<T, Response> + Send + 'static,
+    T: Send + 'static,
+{
+    async move { tokio::task::spawn_blocking(f).await.unwrap_or_else(|e| Err(error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()))) }
+}
+
+fn candidate_json(d: &TaskDirCandidate) -> Value {
+    json!({
+        "dir": d.dir,
+        "bytes": d.bytes,
+        "last_write": d.last_write.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
+    })
+}
+
+/// GET /api/usage：总量、按日期目录汇总、画板与元数据量、最后访问时间，以及未引用任务目录清单。
+pub async fn usage(State(state): State<AppState>, user: User) -> Response {
+    let root = state.user_root(&user.fingerprint);
+    let now = state.now();
+    match blocking(move || {
+        let total = cleanup::tree_bytes(&root);
+        let mut by_date: Vec<(String, u64)> = Vec::new();
+        for dir in cleanup::task_dirs(&root).map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()))? {
+            let (date, _) = dir.split_once('/').unwrap();
+            let bytes = cleanup::tree_bytes(&root.join(&dir));
+            if let Some(row) = by_date.iter_mut().find(|(d, _)| d == date) {
+                row.1 += bytes;
+            } else {
+                by_date.push((date.to_string(), bytes));
             }
         }
+        let access = cleanup::last_access(&root).duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+        let (unreferenced, unreadable) = match cleanup::unreferenced_task_dirs(&root, now).map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()))? {
+            Ok(dirs) => (json!(dirs.iter().map(candidate_json).collect::<Vec<_>>()), Value::Null),
+            Err(UnreadableBoard(board)) => (Value::Null, json!(board)),
+        };
+        Ok(Json(json!({
+            "total_bytes": total,
+            "boards_bytes": cleanup::tree_bytes(&root.join(cleanup::BOARDS_DIR)),
+            "meta_bytes": cleanup::tree_bytes(&root.join(crate::META_DIR)),
+            "last_access": access,
+            "by_date": by_date.iter().map(|(date, bytes)| json!({ "date": date, "bytes": bytes })).collect::<Vec<_>>(),
+            "unreferenced": unreferenced,
+            "unreadable_board": unreadable,
+        }))
+        .into_response())
+    })
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => e,
     }
-    total
 }
 
-/// 每天记一次。`last_day` 记录上次落账的 UTC 日序号，进程内去重。
-pub struct UsageLogger {
-    data_root: PathBuf,
-    clock: Clock,
-    last_day: Mutex<Option<i64>>,
-}
-
-impl UsageLogger {
-    pub fn new(data_root: PathBuf, clock: Clock) -> Self {
-        Self { data_root, clock, last_day: Mutex::new(None) }
-    }
-
-    fn day(now: SystemTime) -> i64 {
-        (now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() / 86_400) as i64
-    }
-
-    /// 到点（或首次调用）就记录一轮；同一天内的重复调用不写。
-    pub fn maybe_log(&self) {
-        let today = Self::day((self.clock)());
-        {
-            let mut last = self.last_day.lock().unwrap();
-            if *last == Some(today) {
-                return;
+/// POST /api/cleanup/unreferenced {dirs:[…]}：逐条重算候选资格，合格的移入回收区。
+pub async fn cleanup_unreferenced(State(state): State<AppState>, user: User, body: Bytes) -> Response {
+    let req = match serde_json::from_slice::<CleanupRequest>(&body) {
+        Ok(r) => r,
+        Err(_) => return error(StatusCode::BAD_REQUEST, "bad_request", "请求体需要 { \"dirs\": [\"<日期>/<task_id>\", …] }"),
+    };
+    let data_root = state.data_root();
+    let root = state.user_root(&user.fingerprint);
+    let rel_prefix = format!("users/{}", user.fingerprint);
+    let now = state.now();
+    match blocking(move || {
+        let dirs = match cleanup::unreferenced_task_dirs(&root, now).map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()))? {
+            Ok(dirs) => dirs,
+            Err(UnreadableBoard(board)) => {
+                return Err(error(StatusCode::CONFLICT, "board_unreadable", &format!("画板读不懂（{board}），为避免误删暂不清理；请先修好或导出画板包")))
             }
-            *last = Some(today);
+        };
+        let mut moved = Vec::new();
+        let mut skipped = Vec::new();
+        for want in req.dirs {
+            match dirs.iter().find(|d| d.dir == want) {
+                Some(d) => match cleanup::move_to_recycle(&data_root, &format!("{rel_prefix}/{}", d.dir), now) {
+                    Ok(()) => moved.push(candidate_json(d)),
+                    Err(e) => return Err(error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string())),
+                },
+                None => skipped.push(want),
+            }
         }
-        let root = self.data_root.clone();
-        let data_root = self.data_root.clone();
-        // 遍历用户目录是阻塞 IO：不占异步线程。
-        tokio::task::spawn_blocking(move || log_all(&data_root, &root));
+        Ok(Json(json!({ "moved": moved, "skipped": skipped })).into_response())
+    })
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => e,
     }
 }
 
-fn log_all(_data_root: &Path, root: &Path) {
-    let users = root.join("users");
-    let Ok(entries) = std::fs::read_dir(&users) else { return };
-    let log_dir = root.join(SERVER_LOG_DIR);
-    for entry in entries.flatten() {
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            continue;
-        }
-        let fingerprint = entry.file_name().to_string_lossy().into_owned();
-        let bytes = dir_size(&entry.path());
-        // 指纹不是密钥（单向 SHA-256），只取前缀便于对账；绝不写密钥与提示词。
-        let _ = crate::logger::Logger::new(log_dir.clone(), crate::VERSION).log(
-            "usage",
-            &serde_json::json!({ "user": &fingerprint[..fingerprint.len().min(12)], "bytes": bytes })
-                .as_object()
-                .cloned()
-                .unwrap_or_default(),
-        );
-    }
-}
-
-/// 后台任务：每小时检查一次是否该记今日用量。
-pub fn spawn_daily(logger: std::sync::Arc<UsageLogger>) {
-    tokio::spawn(async move {
-        loop {
-            logger.maybe_log();
-            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
-        }
-    });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Arc;
-
-    #[tokio::test]
-    async fn logs_each_user_size_once_per_day_without_secrets() {
-        let tmp = tempfile::tempdir().unwrap();
-        let users = tmp.path().join("users");
-        std::fs::create_dir_all(users.join("abcdef1234567890").join("2026-11-05/t")).unwrap();
-        std::fs::write(users.join("abcdef1234567890").join("2026-11-05/t/result.png"), vec![0u8; 100]).unwrap();
-        std::fs::write(users.join("abcdef1234567890").join("2026-11-05/t/task.json"), "{\"prompt\":\"秘密提示词\"}".as_bytes()).unwrap();
-        let now = Arc::new(Mutex::new(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000)));
-        let clock_now = now.clone();
-        let logger = UsageLogger::new(tmp.path().to_path_buf(), Arc::new(move || *clock_now.lock().unwrap()));
-        logger.maybe_log();
-        logger.maybe_log(); // 同一天第二次不写
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let log = std::fs::read_to_string(tmp.path().join(SERVER_LOG_DIR).join("diagnostics.log")).unwrap();
-        assert_eq!(log.lines().count(), 1, "{log}");
-        assert!(log.contains("\"event\":\"usage\"") && log.contains("abcdef123456"), "{log}");
-        assert!(log.contains("\"bytes\":"), "{log}");
-        assert!(!log.contains("秘密提示词"), "日志不含提示词全文：{log}");
-        // 跨天后会再记一次。
-        *now.lock().unwrap() += std::time::Duration::from_secs(86_400);
-        logger.maybe_log();
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        assert_eq!(std::fs::read_to_string(tmp.path().join(SERVER_LOG_DIR).join("diagnostics.log")).unwrap().lines().count(), 2);
-    }
-}
+use axum::response::IntoResponse;

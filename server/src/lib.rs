@@ -11,6 +11,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 
 pub mod board_pack;
+pub mod cleanup;
 pub mod fs;
 pub mod image_info;
 pub mod limits;
@@ -18,10 +19,12 @@ pub mod logger;
 pub mod packs;
 pub mod paths;
 pub mod redact;
+pub mod references;
 pub mod relay;
 mod session;
 pub mod store;
 pub mod usage;
+pub mod usage_log;
 pub mod verify;
 
 pub use session::{fingerprint, SESSION_COOKIE};
@@ -207,6 +210,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/fs/inspect-image", get(fs::inspect_image))
         .route("/api/fs/relay", axum::routing::post(relay::relay).delete(relay::discard))
         .route("/api/fs/relay/commit", axum::routing::post(relay::commit))
+        .route("/api/usage", get(usage::usage))
+        .route("/api/cleanup/unreferenced", axum::routing::post(usage::cleanup_unreferenced))
         .route("/api/log", axum::routing::post(fs::log_event))
         // 画板包：导出为下载流；导入先流式上传（不受单文件 64 MB 限制），再判定、合并。
         .route("/api/packs/export", axum::routing::post(packs::export))

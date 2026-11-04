@@ -16,11 +16,11 @@ async fn main() {
         println!("kacha-server {}", kacha_server::VERSION);
         println!("用法：kacha-server [--listen 0.0.0.0:3004] [--data-root <目录>] [--gateway-url <new-api 地址>] [--static-dir <前端构建目录>]");
         println!("环境变量：KACHA_LISTEN、KACHA_DATA_ROOT、KACHA_GATEWAY_URL、KACHA_STATIC_DIR");
+        println!("清理：kacha-server cleanup --help");
         return;
     }
     if args.first().map(String::as_str) == Some("cleanup") {
-        eprintln!("cleanup 子命令由 #25 实现");
-        std::process::exit(2);
+        std::process::exit(kacha_server::cleanup::run_cli(&args[1..]));
     }
 
     let opt = |flag: &str, env: &str, default: &str| -> String {
@@ -73,6 +73,6 @@ async fn main() {
     });
     println!("kacha-server {} 监听 http://{}，数据根 {}", kacha_server::VERSION, listener.local_addr().unwrap(), data_root.display());
     // 每日一次记录各用户数据根大小（不含密钥与提示词全文）。
-    kacha_server::usage::spawn_daily(std::sync::Arc::new(kacha_server::usage::UsageLogger::new(data_root.clone(), Arc::new(SystemTime::now))));
+    kacha_server::usage_log::spawn_daily(std::sync::Arc::new(kacha_server::usage_log::UsageLogger::new(data_root.clone(), Arc::new(SystemTime::now))));
     axum::serve(listener, router(state)).await.expect("服务端退出");
 }

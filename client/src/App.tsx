@@ -411,6 +411,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   return (
     <div className="app">
       <div className="topbar">
+        {isWeb && <div className="muted small topbar-backup-hint">服务端不备份；60 天未使用的数据可能被清理，请定期导出画板包</div>}
         <TabBar
           sessions={sessions}
           activeKey={activeKey}

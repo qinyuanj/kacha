@@ -12,6 +12,7 @@ import {
 } from "../core/settings";
 import type { OperationGate } from "../core/updatePreparation";
 import { DiagnosticsSection } from "./DiagnosticsSection";
+import { UsageSection } from "./UsageSection";
 import type { ConnectionResult, useSettings } from "./useSettings";
 import type { useUpdateCheck } from "./useUpdateCheck";
 
@@ -221,6 +222,8 @@ export function SettingsPanel({ settings, outputRoot, defaultOutputRoot, openBoa
 
         <DiagnosticsSection outputRoot={outputRoot} openBoards={openBoards} />
         </>}
+
+        {isWeb && <UsageSection />}
 
         {error && <div className="form-error">{error}</div>}
         <div className="modal-foot">

@@ -1,0 +1,133 @@
+{
+  "description": "画板文件 → 它引用的任务目录（相对用户数据根，<UTC 日期>/<task_id>）。服务端清理（server/src/references.rs）与前端引用解析（client/src/core/references.ts）都跑这组夹具，结论必须一致。readable=false 表示画板读不懂（损坏 / 版本更高）：该用户本轮不清理，不能当成没有引用。",
+  "cases": [
+    {
+      "name": "结果节点：path 与 task_id 指向同一任务目录",
+      "board": {
+        "format_version": 1, "title": "a", "viewport": { "zoom": 1, "x": 0, "y": 0 }, "edges": [],
+        "nodes": [
+          { "id": "r1", "type": "result", "pos": [0, 0], "size": [1, 1], "task_id": "20260916T091500Z-3f9c2a1b", "file": "result.png",
+            "path": "2026-09-16/20260916T091500Z-3f9c2a1b/result.png", "layer_count": 2,
+            "record": { "model": "m", "prompt": "", "negative_prompt": "", "size_spec": {}, "submitted_at": "2026-09-16T09:15:00Z",
+                        "layers": [{ "file": "layers/01.png", "z_index": 0, "bounding_box": [0, 0, 1, 1] }] } }
+        ]
+      },
+      "expected": { "readable": true, "task_dirs": ["2026-09-16/20260916T091500Z-3f9c2a1b"] }
+    },
+    {
+      "name": "结果节点：path 在任务目录外时仍按 task_id 引用",
+      "board": {
+        "format_version": 1, "title": "a", "viewport": { "zoom": 1, "x": 0, "y": 0 }, "edges": [],
+        "nodes": [
+          { "id": "r1", "type": "result", "pos": [0, 0], "size": [1, 1], "task_id": "20260801T000000Z-00000001", "file": "result.png",
+            "path": "导入参考图/abc.png", "layer_count": 0, "record": {} }
+        ]
+      },
+      "expected": { "readable": true, "task_dirs": ["2026-08-01/20260801T000000Z-00000001"] }
+    },
+    {
+      "name": "参考图节点：落在任务目录里的算引用，任务目录外与绝对路径不算",
+      "board": {
+        "format_version": 1, "title": "a", "viewport": { "zoom": 1, "x": 0, "y": 0 }, "edges": [],
+        "nodes": [
+          { "id": "a", "type": "reference", "pos": [0, 0], "size": [1, 1], "path": "2026-07-02/20260702T101010Z-0000abcd/result.png", "sha256": "x", "display_name": "a" },
+          { "id": "b", "type": "reference", "pos": [0, 0], "size": [1, 1], "path": "导入参考图/0123.png", "sha256": "x", "display_name": "b" },
+          { "id": "c", "type": "reference", "pos": [0, 0], "size": [1, 1], "path": "/home/someone/2026-07-03/x/y.png", "sha256": "x", "display_name": "c" },
+          { "id": "d", "type": "reference", "pos": [0, 0], "size": [1, 1], "path": "C:\\Users\\a\\2026-07-04\\x\\y.png", "sha256": "x", "display_name": "d" }
+        ]
+      },
+      "expected": { "readable": true, "task_dirs": ["2026-07-02/20260702T101010Z-0000abcd"] }
+    },
+    {
+      "name": "非本工具编号的任务目录：只能靠 path 认出",
+      "board": {
+        "format_version": 1, "title": "a", "viewport": { "zoom": 1, "x": 0, "y": 0 }, "edges": [],
+        "nodes": [
+          { "id": "r", "type": "result", "pos": [0, 0], "size": [1, 1], "task_id": "legacy-42", "file": "result.png", "path": "2025-01-01/legacy-42/result.png", "layer_count": 0, "record": {} }
+        ]
+      },
+      "expected": { "readable": true, "task_dirs": ["2025-01-01/legacy-42"] }
+    },
+    {
+      "name": "任务节点：失败 / 已取消 / 已中断只靠 last_submitted.task_id 引用，快照图片的 task_id 与 path 也算",
+      "board": {
+        "format_version": 1, "title": "a", "viewport": { "zoom": 1, "x": 0, "y": 0 }, "edges": [],
+        "nodes": [
+          { "id": "t", "type": "task", "pos": [0, 0], "size": [1, 1], "model": "m", "size_spec": {}, "image_ports": 2,
+            "layer_decomposition": false, "transparent_background": false,
+            "last_submitted": {
+              "task_id": "20260610T120000Z-deadbeef",
+              "images": [
+                { "kind": "result", "task_id": "20260601T000000Z-00000002", "file": "result.png", "source_layer": null, "region": null },
+                { "kind": "reference", "path": "2026-05-20/20260520T000000Z-00000003/layers/01.png", "sha256": "x", "region": null },
+                { "kind": "reference", "path": "导入参考图/zz.png", "sha256": "x", "region": null }
+              ]
+            } },
+          { "id": "t2", "type": "task", "pos": [0, 0], "size": [1, 1], "model": "m", "size_spec": {}, "image_ports": 0,
+            "layer_decomposition": false, "transparent_background": false, "last_submitted": null }
+        ]
+      },
+      "expected": { "readable": true, "task_dirs": ["2026-05-20/20260520T000000Z-00000003", "2026-06-01/20260601T000000Z-00000002", "2026-06-10/20260610T120000Z-deadbeef"] }
+    },
+    {
+      "name": "提示词文本像路径也不算引用",
+      "board": {
+        "format_version": 1, "title": "a", "viewport": { "zoom": 1, "x": 0, "y": 0 }, "edges": [],
+        "nodes": [
+          { "id": "p", "type": "prompt", "pos": [0, 0], "size": [1, 1], "text": "2026-01-01/20260101T000000Z-00000009/result.png" }
+        ]
+      },
+      "expected": { "readable": true, "task_dirs": [] }
+    },
+    {
+      "name": "不认识的节点类型：读不懂其字段，保守地把其中任何像任务目录路径或任务编号的字符串都算引用",
+      "board": {
+        "format_version": 1, "title": "a", "viewport": { "zoom": 1, "x": 0, "y": 0 }, "edges": [],
+        "nodes": [
+          { "id": "u", "type": "video", "pos": [0, 0], "size": [1, 1],
+            "clips": [{ "src": "2026-04-04/20260404T040404Z-00000004/out.mp4" }, { "from_task": "20260405T050505Z-00000005" }],
+            "note": "随便写的文字" },
+          "2026-04-06/20260406T060606Z-00000006/x.png"
+        ]
+      },
+      "expected": { "readable": true, "task_dirs": ["2026-04-04/20260404T040404Z-00000004", "2026-04-05/20260405T050505Z-00000005", "2026-04-06/20260406T060606Z-00000006"] }
+    },
+    {
+      "name": "多个节点引用同一任务目录只列一次，按字典序",
+      "board": {
+        "format_version": 1, "title": "a", "viewport": { "zoom": 1, "x": 0, "y": 0 }, "edges": [],
+        "nodes": [
+          { "id": "r2", "type": "result", "pos": [0, 0], "size": [1, 1], "task_id": "20261001T000000Z-0000000b", "file": "result.png", "path": "2026-10-01/20261001T000000Z-0000000b/result.png", "layer_count": 0, "record": {} },
+          { "id": "r1", "type": "result", "pos": [0, 0], "size": [1, 1], "task_id": "20260901T000000Z-0000000a", "file": "result.png", "path": "2026-09-01/20260901T000000Z-0000000a/result.png", "layer_count": 0, "record": {} },
+          { "id": "x", "type": "reference", "pos": [0, 0], "size": [1, 1], "path": "2026-09-01/20260901T000000Z-0000000a/result.png", "sha256": "x", "display_name": "x" }
+        ]
+      },
+      "expected": { "readable": true, "task_dirs": ["2026-09-01/20260901T000000Z-0000000a", "2026-10-01/20261001T000000Z-0000000b"] }
+    },
+    {
+      "name": "版本更高的画板读不懂",
+      "board": { "format_version": 2, "title": "a", "nodes": [] },
+      "expected": { "readable": false }
+    },
+    {
+      "name": "缺 format_version 算损坏",
+      "board": { "title": "a", "nodes": [] },
+      "expected": { "readable": false }
+    },
+    {
+      "name": "nodes 不是数组算损坏",
+      "board": { "format_version": 1, "title": "a", "nodes": {} },
+      "expected": { "readable": false }
+    },
+    {
+      "name": "不是有效 JSON 算损坏",
+      "board_text": "{ \"format_version\": 1, \"nodes\": [",
+      "expected": { "readable": false }
+    },
+    {
+      "name": "顶层不是对象算损坏",
+      "board_text": "[]",
+      "expected": { "readable": false }
+    }
+  ]
+}
