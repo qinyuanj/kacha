@@ -38,6 +38,10 @@ struct DirEntry {
 }
 
 /// 把 io 错误映射成 HTTP：不存在 404、已存在 409、其他 500。越界由 paths 单独给出 403。
+pub fn io_error_pub(e: std::io::Error) -> Response {
+    io_error(e)
+}
+
 fn io_error(e: std::io::Error) -> Response {
     match e.kind() {
         ErrorKind::NotFound => error(StatusCode::NOT_FOUND, "not_found", "文件不存在"),
@@ -48,6 +52,15 @@ fn io_error(e: std::io::Error) -> Response {
 
 fn resolve(state: &AppState, user: &User, rel: &str) -> Result<PathBuf, Response> {
     paths::resolve(&state.user_root(&user.fingerprint), rel).map_err(|e| error(StatusCode::FORBIDDEN, "forbidden", e.message()))
+}
+
+/// 写入类接口的磁盘余量检查：不足 507。
+fn ensure_space(state: &AppState) -> Result<(), Response> {
+    if state.disk_guard().enough() {
+        Ok(())
+    } else {
+        Err(error(StatusCode::INSUFFICIENT_STORAGE, "insufficient_storage", "服务器空间不足，请联系管理员"))
+    }
 }
 
 fn blocking<F, T>(f: F) -> impl std::future::Future<Output = Result<T, Response>>
@@ -92,6 +105,9 @@ async fn read_meta(state: AppState, user: User, name: &'static str) -> Response 
 }
 
 async fn write_meta(state: AppState, user: User, name: &'static str, body: axum::body::Bytes) -> Response {
+    if let Err(r) = ensure_space(&state) {
+        return r;
+    }
     match resolve(&state, &user, &format!("{META_DIR}/{name}")) {
         Err(r) => r,
         Ok(path) => match blocking(move || store::atomic_write(&path, &body)).await {
@@ -142,6 +158,9 @@ pub struct BoardQuery {
 }
 
 pub async fn write_board(State(state): State<AppState>, user: User, Query(q): Query<BoardQuery>, body: axum::body::Bytes) -> Response {
+    if let Err(r) = ensure_space(&state) {
+        return r;
+    }
     let guard = if q.create_only.unwrap_or(false) {
         store::BoardWriteGuard::CreateOnly
     } else if let Some(version) = q.version {
@@ -235,10 +254,15 @@ fn content_type(path: &str) -> String {
 
 /// 只新建不覆盖：已存在 409。请求体即文件字节。
 pub async fn write_new_file(State(state): State<AppState>, user: User, Query(q): Query<PathQuery>, body: axum::body::Bytes) -> Response {
+    if let Err(r) = ensure_space(&state) {
+        return r;
+    }
     let path = match resolve(&state, &user, &q.path) {
         Err(r) => return r,
         Ok(p) => p,
     };
+    // 大请求：文件写入计入全局并发，阻塞 IO 在 spawn_blocking。
+    let _permit = state.heavy().acquire().await;
     match blocking(move || store::write_new_file(&path, &body)).await {
         Ok(()) => StatusCode::CREATED.into_response(),
         Err(r) => r,
@@ -277,20 +301,26 @@ pub async fn list_dir(State(state): State<AppState>, user: User, Query(q): Query
 pub async fn file_sha256(State(state): State<AppState>, user: User, Query(q): Query<PathQuery>) -> Response {
     match resolve(&state, &user, &q.path) {
         Err(r) => r,
-        Ok(path) => match blocking(move || crate::board_pack::sha256_file(&path)).await {
+        Ok(path) => {
+            let _permit = state.heavy().acquire().await;
+            match blocking(move || crate::board_pack::sha256_file(&path)).await {
             Ok(sha) => Json(sha).into_response(),
             Err(r) => r,
-        },
+            }
+        }
     }
 }
 
 pub async fn inspect_image(State(state): State<AppState>, user: User, Query(q): Query<PathQuery>) -> Response {
     match resolve(&state, &user, &q.path) {
         Err(r) => r,
-        Ok(path) => match blocking(move || crate::image_info::inspect(&path)).await {
+        Ok(path) => {
+            let _permit = state.heavy().acquire().await;
+            match blocking(move || crate::image_info::inspect(&path)).await {
             Ok(info) => Json(info).into_response(),
             Err(r) => r,
-        },
+            }
+        }
     }
 }
 

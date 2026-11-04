@@ -14,7 +14,9 @@ pub mod board_pack;
 pub mod cleanup;
 pub mod fs;
 pub mod image_info;
+pub mod limits;
 pub mod logger;
+pub mod packs;
 pub mod paths;
 pub mod redact;
 pub mod references;
@@ -23,6 +25,7 @@ mod session;
 pub mod store;
 pub mod transfer;
 pub mod usage;
+pub mod usage_log;
 pub mod verify;
 
 pub use session::{fingerprint, SESSION_COOKIE};
@@ -31,6 +34,9 @@ pub use session::{fingerprint, SESSION_COOKIE};
 pub const META_DIR: &str = ".kacha";
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// 单文件请求体上限：64 MB。
+pub const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -42,6 +48,10 @@ pub struct Config {
     pub static_dir: Option<PathBuf>,
     /// 结果中转额外允许的主机（默认列表之外，部署可追加；见 relay::default_result_hosts）。
     pub result_hosts: Vec<String>,
+    /// 剩余磁盘低于该值时写入类接口返回 507（默认 20 GB）。
+    pub min_free_bytes: u64,
+    /// 注入固定的磁盘余量（测试用）；None 时读真实文件系统。
+    pub free_space_override: Option<u64>,
 }
 
 /// 网关对一把密钥的结论。Unavailable 是服务故障，不能当成密钥无效。
@@ -70,11 +80,47 @@ struct Inner {
     sessions: session::Sessions,
     /// 画板读-比较-写与改名的互斥：版本校验必须整体串行，否则两页同时写都通过。
     board_lock: tokio::sync::Mutex<()>,
+    /// 全局大请求并发上限（文件写入、结果图下载、SHA、图片解析、画板包导入导出）。
+    heavy: limits::HeavyGate,
+    /// 磁盘余量守卫：写入类接口余量不足返回 507。
+    disk: limits::DiskGuard,
+    /// 画板包操作的取消标记与进度，按 (用户, 操作 id) 隔离。
+    pack_ops: Arc<packs::PackOps>,
 }
 
 impl AppState {
     pub fn new(config: Config, verifier: Arc<dyn KeyVerifier>, clock: Clock) -> Self {
-        AppState { inner: Arc::new(Inner { config, verifier, clock, sessions: session::Sessions::default(), board_lock: tokio::sync::Mutex::new(()) }) }
+        let free_space: limits::FreeSpace = match config.free_space_override {
+            Some(bytes) => Arc::new(move || Ok(bytes)),
+            None => {
+                let root = config.data_root.clone();
+                Arc::new(move || limits::filesystem_free_space(&root))
+            }
+        };
+        AppState {
+            inner: Arc::new(Inner {
+                disk: limits::DiskGuard::new(free_space, config.min_free_bytes),
+                config,
+                verifier,
+                clock,
+                sessions: session::Sessions::default(),
+                board_lock: tokio::sync::Mutex::new(()),
+                heavy: limits::HeavyGate::default(),
+                pack_ops: Arc::new(packs::PackOps::default()),
+            }),
+        }
+    }
+
+    pub fn heavy(&self) -> &limits::HeavyGate {
+        &self.inner.heavy
+    }
+
+    pub fn disk_guard(&self) -> &limits::DiskGuard {
+        &self.inner.disk
+    }
+
+    pub fn pack_ops(&self) -> &Arc<packs::PackOps> {
+        &self.inner.pack_ops
     }
 
     pub fn board_lock(&self) -> &tokio::sync::Mutex<()> {
@@ -169,7 +215,18 @@ pub fn router(state: AppState) -> Router {
         .route("/api/usage", get(usage::usage))
         .route("/api/cleanup/unreferenced", axum::routing::post(usage::cleanup_unreferenced))
         .route("/api/log", axum::routing::post(fs::log_event))
+        // 画板包：导出为下载流；导入先流式上传（不受单文件 64 MB 限制），再判定、合并。
+        .route("/api/packs/export", axum::routing::post(packs::export))
+        .route("/api/packs/uploads", axum::routing::post(packs::upload).layer(axum::extract::DefaultBodyLimit::disable()))
+        .route("/api/packs/uploads/{id}/entries", get(packs::upload_entries))
+        .route("/api/packs/uploads/{id}/texts", axum::routing::post(packs::upload_texts))
+        .route("/api/packs/uploads/{id}/import", axum::routing::post(packs::import))
+        .route("/api/packs/uploads/{id}", axum::routing::delete(packs::discard_upload))
+        .route("/api/packs/ops/{op}", get(packs::op_progress))
+        .route("/api/packs/ops/{op}/cancel", axum::routing::post(packs::op_cancel))
         .route("/api/{*rest}", axum::routing::any(api_fallback))
+        // 单文件请求体上限（ADR 0018）：超过 413；画板包上传走单独的流式路径，不受此限。
+        .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
         .fallback_service(static_service(&state))
         .with_state(state)
 }

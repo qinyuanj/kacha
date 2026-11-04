@@ -1,5 +1,5 @@
 // 画板包（ADR 0013）的模态：导出前确认（含完整提示词、缺图清单）、可取消的进度、导入后的冲突清单。
-import { desktop } from "../shell/ipc";
+import { desktop, isWeb } from "../shell/ipc";
 import { useEffect, useState } from "react";
 import type { ExportPlan } from "../core/boardPack";
 
@@ -79,7 +79,7 @@ export function BoardPackDialog({ state, onExport, onCancelProgress, onClose }: 
             <div className="modal-foot">
               <button onClick={onClose}>取消</button>
               <button className="primary" onClick={onExport}>
-                {state.plan.missing.length ? "仍然导出…" : "选择位置并导出…"}
+                {state.plan.missing.length ? "仍然导出…" : isWeb ? "导出并下载…" : "选择位置并导出…"}
               </button>
             </div>
           </>

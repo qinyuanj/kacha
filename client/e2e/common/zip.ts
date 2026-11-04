@@ -1,14 +1,16 @@
-// e2e 读取下载的 zip：只支持服务端打出的普通条目（stored / deflate），不引入额外依赖。
+// 在 Node 侧读 zip 的条目名与内容（画板包与结果下载断言用）：解析中央目录，不依赖第三方库。
+// 只支持本仓库打包用到的 deflate / store 与无加密条目。
 import { inflateRawSync } from "node:zlib";
 
-export interface ZipEntry {
+interface Entry {
   name: string;
-  bytes: Buffer;
+  method: number;
+  compressed: number;
+  offset: number;
 }
 
-/** 从中央目录取条目，逐条按本地头读内容。 */
-export function unzip(buf: Buffer): ZipEntry[] {
-  // EOCD：签名 0x06054b50，从尾部找。
+function centralEntries(buf: Buffer): Entry[] {
+  // End of Central Directory：从尾部找签名 0x06054b50。
   let eocd = -1;
   for (let i = buf.length - 22; i >= 0; i--) {
     if (buf.readUInt32LE(i) === 0x06054b50) {
@@ -16,26 +18,52 @@ export function unzip(buf: Buffer): ZipEntry[] {
       break;
     }
   }
-  if (eocd < 0) throw new Error("不是 zip：没有中央目录");
+  if (eocd < 0) throw new Error("不是有效的 zip（找不到中央目录结尾）");
   const count = buf.readUInt16LE(eocd + 10);
-  let offset = buf.readUInt32LE(eocd + 16);
-  const out: ZipEntry[] = [];
+  let p = buf.readUInt32LE(eocd + 16);
+  const out: Entry[] = [];
   for (let i = 0; i < count; i++) {
-    if (buf.readUInt32LE(offset) !== 0x02014b50) throw new Error("中央目录损坏");
-    const method = buf.readUInt16LE(offset + 10);
-    const compressed = buf.readUInt32LE(offset + 20);
-    const nameLen = buf.readUInt16LE(offset + 28);
-    const extraLen = buf.readUInt16LE(offset + 30);
-    const commentLen = buf.readUInt16LE(offset + 32);
-    const local = buf.readUInt32LE(offset + 42);
-    const name = buf.subarray(offset + 46, offset + 46 + nameLen).toString("utf8");
-    if (buf.readUInt32LE(local) !== 0x04034b50) throw new Error("本地头损坏");
-    const localNameLen = buf.readUInt16LE(local + 26);
-    const localExtraLen = buf.readUInt16LE(local + 28);
-    const start = local + 30 + localNameLen + localExtraLen;
-    const raw = buf.subarray(start, start + compressed);
-    out.push({ name, bytes: method === 8 ? inflateRawSync(raw) : Buffer.from(raw) });
-    offset += 46 + nameLen + extraLen + commentLen;
+    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error("中央目录损坏");
+    const method = buf.readUInt16LE(p + 10);
+    const compressed = buf.readUInt32LE(p + 20);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    const offset = buf.readUInt32LE(p + 42);
+    out.push({ name: buf.subarray(p + 46, p + 46 + nameLen).toString("utf8"), method, compressed, offset });
+    p += 46 + nameLen + extraLen + commentLen;
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+export function zipNames(buf: Buffer): string[] {
+  return centralEntries(buf).map((e) => e.name);
+}
+
+export function zipText(buf: Buffer, name: string): string {
+  return zipBytes(buf, name).toString("utf8");
+}
+
+export function zipBytes(buf: Buffer, name: string): Buffer {
+  const entry = centralEntries(buf).find((e) => e.name === name);
+  if (!entry) throw new Error(`包内没有条目 ${name}`);
+  const p = entry.offset;
+  if (buf.readUInt32LE(p) !== 0x04034b50) throw new Error("本地文件头损坏");
+  const nameLen = buf.readUInt16LE(p + 26);
+  const extraLen = buf.readUInt16LE(p + 28);
+  const start = p + 30 + nameLen + extraLen;
+  const data = buf.subarray(start, start + entry.compressed);
+  return entry.method === 8 ? inflateRawSync(data) : data;
+}
+
+export interface ZipEntry {
+  name: string;
+  bytes: Buffer;
+}
+
+/** 全部条目（按名字排序）：结果下载断言用。 */
+export function unzip(buf: Buffer): ZipEntry[] {
+  return centralEntries(buf)
+    .map((e) => ({ name: e.name, bytes: zipBytes(buf, e.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }

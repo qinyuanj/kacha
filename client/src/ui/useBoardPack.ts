@@ -1,6 +1,7 @@
 // 画板包（ADR 0013）的界面流程：导出确认 → 选位置 → 可取消的进度；导入选包 → 判版本与布局 → 进度 → 写画板并打开。
 // 包格式规则与导入流程（含取消竞态与脱敏日志）在 core/boardPack.ts，字节搬运在 Rust 壳；这里只管弹窗、进度与提示文案。
-import { desktop } from "../shell/ipc";
+import { desktop, isWeb } from "../shell/ipc";
+import { pickAndUploadPack } from "../shell/packFile";
 import { useCallback, useRef, useState } from "react";
 import { BOARD_EXTENSION, type Board } from "../core/board";
 import { buildExportSpec, importPack as importPackIn, PACK_EXTENSION, PACK_FILE_FILTER, planExport, runCancellable } from "../core/boardPack";
@@ -57,7 +58,8 @@ export function useBoardPack(outputRoot: string | null, boards: PackBoards, toas
     if (!outputRoot || dialog?.stage !== "confirmExport" || gateRef.current?.blocked()) return;
     const { boardFile, plan } = dialog;
     const stem = boardFile.slice(0, -BOARD_EXTENSION.length);
-    const picked = await desktop.save({ defaultPath: `${stem}${PACK_EXTENSION}`, filters: [PACK_FILE_FILTER] });
+    // Web：没有系统保存对话框，直接由浏览器下载；文件名沿用画板名。
+    const picked = isWeb ? `${stem}${PACK_EXTENSION}` : await desktop.save({ defaultPath: `${stem}${PACK_EXTENSION}`, filters: [PACK_FILE_FILTER] });
     if (!picked) return;
     const target = picked.toLowerCase().endsWith(PACK_EXTENSION) ? picked : `${picked}${PACK_EXTENSION}`;
     const spec = buildExportSpec(await desktop.version(), boardFile, plan);
@@ -66,7 +68,7 @@ export function useBoardPack(outputRoot: string | null, boards: PackBoards, toas
     setDialog(null);
     if (outcome.ok) {
       logEvent("board_pack", { ...fields, task_dirs: outcome.value.task_dirs, bytes: outcome.value.bytes, result: "ok" });
-      toast(`已导出画板包到 ${target}`);
+      toast(isWeb ? `已导出画板包 ${target}` : `已导出画板包到 ${target}`);
     } else {
       logEvent("board_pack", { ...fields, result: outcome.result });
       toast(outcome.result === "cancelled" ? "已取消导出画板包" : `导出画板包失败：${outcome.error}`);
@@ -78,13 +80,19 @@ export function useBoardPack(outputRoot: string | null, boards: PackBoards, toas
     if (!outputRoot) return;
     if (gateRef.current?.blocked()) return;
     const token = gateRef.current?.generation();
-    const picked = await desktop.open({ multiple: false, directory: false, filters: [PACK_FILE_FILTER] });
-    if (typeof picked !== "string" || gateRef.current?.blocked() || token !== gateRef.current?.generation()) return;
+    const picked = isWeb ? await pickAndUploadPack() : await desktop.open({ multiple: false, directory: false, filters: [PACK_FILE_FILTER] });
+    if (gateRef.current?.blocked() || token !== gateRef.current?.generation()) return;
+    if (isWeb) {
+      if (!picked) return;
+    } else if (typeof picked !== "string") return;
+    const packPath = isWeb ? (picked as { id: string; name: string }).id : (picked as string);
+    const displayName = isWeb ? (picked as { id: string; name: string }).name : basename(picked as string);
     const work = importPackIn(packIo, {
-      packPath: picked,
+      packPath,
+      displayName,
       outputRoot,
       addBoard: (board) => boards.addImportedBoard(board),
-      onStage: progress(`正在导入画板包：${basename(picked)}`),
+      onStage: progress(`正在导入画板包：${displayName}`),
       log: logEvent,
     });
     const result = await work;

@@ -1,7 +1,7 @@
 // Lite 停用（迁移自旧假壳 specs/retirement.spec.ts 的普通打开分支；画板包导入分支随 #24 迁移）。
 import { expect } from "@playwright/test";
 import { board, edge, png, promptNode, taskNode } from "../common/boards";
-import { test, type Rig } from "./rig";
+import { enterWithKey, OTHER_KEY, test, type Rig } from "./rig";
 import { openApp, task, taskRecords } from "./kit";
 
 const FLASH = "doubao-seedream-5-0-flash-260915";
@@ -72,4 +72,29 @@ test("缺 Flash 缓存先刷新，失败明确不可用，用户可显式选择�
   await select.selectOption("qwen-image-3.0");
   await expect(select).toHaveValue("qwen-image-3.0");
   expect(await select.locator(`option[value='${LITE}']`).count()).toBe(0);
+});
+
+test("Lite 画板包导入：导出的真包导入到另一把密钥后，仍阻止运行并提示切换 Flash", async ({ page, rig, browser }) => {
+  await openApp(page, rig, { title: "旧Lite", boardText: oldBoard(), files });
+  await page.getByRole("button", { name: "画板包 ▾" }).click();
+  await page.getByRole("menuitem", { name: "导出画板包…" }).click();
+  const downloading = page.waitForEvent("download");
+  await page.getByRole("dialog", { name: "画板包" }).getByRole("button", { name: "导出并下载…" }).click();
+  const pack = await downloading;
+  const file = (await pack.path())!;
+
+  // 另一把密钥 = 另一个用户：空数据根，只有导入来的画板。
+  const other = await browser.newContext();
+  const page2 = await other.newPage();
+  await enterWithKey(page2, rig.baseURL, OTHER_KEY);
+  const chooser = page2.waitForEvent("filechooser");
+  await page2.getByRole("button", { name: "画板包 ▾" }).click();
+  await page2.getByRole("menuitem", { name: "导入画板包…" }).click();
+  await (await chooser).setFiles(file);
+  await expect(page2.locator(".toast")).toContainText("导入 1 个任务");
+  await expect(task(page2, "t")).toBeVisible();
+  await task(page2, "t").locator(".task-actions button.primary").click();
+  await expect(page2.locator(".toast")).toContainText("Lite 已停用，请切换到 Flash");
+  expect(rig.stub.requests.filter((r) => r.path.startsWith("/v1/images/"))).toHaveLength(0);
+  await other.close();
 });

@@ -23,7 +23,7 @@ const CHUNK: usize = 1 << 20;
 /// 导入临时目录名 `.ugcpack-import.<pid>-<纳秒>-<序号>.tmp`（由 store::temp_path_for 生成）。
 const IMPORT_TEMP_STEM: &str = "ugcpack-import";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct PackText {
     pub entry: String,
     pub text: String,
@@ -31,7 +31,7 @@ pub struct PackText {
 
 #[derive(Debug, Deserialize)]
 pub struct PackFile {
-    /// 本机绝对路径。
+    /// 相对用户数据根的路径（Web 版接口不收绝对路径；绝对路径 / 越界 / 符号链接越界一律拒绝）。
     pub source: String,
     /// 包内路径（正斜杠）。
     pub entry: String,
@@ -152,25 +152,75 @@ pub fn sha256_file(path: &Path) -> io::Result<String> {
     }
 }
 
-pub fn export(root: &Path, spec: &ExportSpec, target: &Path, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ExportReport> {
+/// 收集导出要读的本机文件：任务目录整目录 + 单文件，全部相对 root 解析（含符号链接越界检查）。
+fn export_sources(root: &Path, spec: &ExportSpec) -> io::Result<(Vec<(String, PathBuf)>, usize)> {
     let mut sources: Vec<(String, PathBuf)> = Vec::new();
     let mut task_dirs = 0;
     for dir in &spec.task_dirs {
-        let path = safe_join(root, dir)?;
+        let path = resolve_in(root, dir)?;
         if !path.is_dir() {
             continue;
         }
         task_dirs += 1;
         sources.extend(files_under(&path)?.into_iter().map(|(name, p)| (format!("{dir}/{name}"), p)));
     }
-    sources.extend(spec.files.iter().map(|f| (f.entry.clone(), PathBuf::from(&f.source))));
+    for f in &spec.files {
+        let path = resolve_in(root, &f.source)?;
+        sources.push((f.entry.clone(), path));
+    }
+    Ok((sources, task_dirs))
+}
+
+/// 相对用户数据根解析：拒绝绝对路径、`..` 与符号链接越界（board_pack 不再接受浏览器传来的本机绝对路径）。
+fn resolve_in(root: &Path, rel: &str) -> io::Result<PathBuf> {
+    crate::paths::resolve(root, rel).map_err(|e| invalid(e.message()))
+}
+
+fn check_entry_names(texts: &[PackText], sources: &[(String, PathBuf)]) -> io::Result<()> {
     let mut names = BTreeSet::new();
-    for name in spec.texts.iter().map(|t| &t.entry).chain(sources.iter().map(|(n, _)| n)) {
+    for name in texts.iter().map(|t| &t.entry).chain(sources.iter().map(|(n, _)| n)) {
         safe_join(Path::new(""), name)?;
         if !names.insert(name.as_str()) {
             return Err(invalid(format!("包内路径重复：{name}")));
         }
     }
+    Ok(())
+}
+
+/// 导出预检：在开始发送下载流之前发现路径越界 / 条目非法，此时还能回 HTTP 错误状态。
+pub fn validate_export(root: &Path, spec: &ExportSpec) -> io::Result<()> {
+    let (sources, _) = export_sources(root, spec)?;
+    check_entry_names(&spec.texts, &sources)
+}
+
+/// 边打包边写进 writer（HTTP 下载流用 ZipWriter::new_stream；落盘用 File）。不创建临时文件。
+pub fn export_to_writer<W: Write>(root: &Path, spec: &ExportSpec, writer: W, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ExportReport> {
+    let (sources, task_dirs) = export_sources(root, spec)?;
+    check_entry_names(&spec.texts, &sources)?;
+    let total = sources.iter().map(|(_, p)| fs::metadata(p).map(|m| m.len()).unwrap_or(0)).sum::<u64>();
+    let mut zip = zip::ZipWriter::new_stream(writer);
+    let deflate = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let store = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for text in &spec.texts {
+        zip.start_file(text.entry.as_str(), deflate).map_err(zip_err)?;
+        zip.write_all(text.text.as_bytes())?;
+    }
+    let mut done = 0;
+    for (name, path) in &sources {
+        let mut file = File::open(path)?;
+        let size = file.metadata()?.len();
+        let options = if name.to_lowercase().ends_with(".json") { deflate } else { store };
+        zip.start_file(name.as_str(), options.large_file(size >= u32::MAX as u64)).map_err(zip_err)?;
+        copy_chunks(&mut file, &mut zip, &mut done, total, progress, cancel)?;
+    }
+    zip.finish().map_err(zip_err)?;
+    Ok(ExportReport { task_dirs, bytes: done })
+}
+
+pub fn export(root: &Path, spec: &ExportSpec, target: &Path, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ExportReport> {
+    // 先解析并校验条目，再创建临时文件：路径非法时不留任何文件。
+    let (sources, task_dirs) = export_sources(root, spec)?;
+    check_entry_names(&spec.texts, &sources)?;
     let total = sources.iter().map(|(_, p)| fs::metadata(p).map(|m| m.len()).unwrap_or(0)).sum::<u64>();
 
     if let Some(dir) = target.parent() {
@@ -241,12 +291,20 @@ impl Drop for TempDir {
     }
 }
 
-/// 清理进程被杀时留下的导入临时目录。单实例应用、导入是模态的，开始导入时不会有别的导入在进行。
+/// 导入临时目录超过这个时间才被当作「进程被杀留下的」清理：并发导入互不删对方的目录。
+const STALE_IMPORT_AGE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// 清理进程被杀时留下的导入临时目录。多页面 / 多用户可同时导入，只删确认过期的（按目录 mtime）。
 fn sweep_stale_imports(root: &Path) {
     let prefix = format!(".{IMPORT_TEMP_STEM}.");
+    let now = std::time::SystemTime::now();
     for entry in fs::read_dir(root).into_iter().flatten().flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with(&prefix) && name.ends_with(".tmp") && entry.file_type().is_ok_and(|t| t.is_dir()) {
+        if !(name.starts_with(&prefix) && name.ends_with(".tmp") && entry.file_type().is_ok_and(|t| t.is_dir())) {
+            continue;
+        }
+        let stale = entry.metadata().and_then(|m| m.modified()).map(|m| now.duration_since(m).map(|d| d >= STALE_IMPORT_AGE).unwrap_or(false)).unwrap_or(false);
+        if stale {
             let _ = fs::remove_dir_all(entry.path());
         }
     }
@@ -279,10 +337,11 @@ fn belongs_to_unit(units: &[MergeUnit], name: &str) -> bool {
 }
 
 pub fn import(pack: &Path, root: &Path, units: &[MergeUnit], progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
+    fs::create_dir_all(root)?;
     for unit in units {
-        safe_join(root, &unit.path)?;
+        resolve_in(root, &unit.path)?;
         if let Some(identity) = &unit.identity {
-            safe_join(root, identity)?;
+            safe_join(Path::new(""), identity)?;
         }
     }
     let mut archive = open_archive(pack)?;
@@ -330,7 +389,7 @@ pub fn import(pack: &Path, root: &Path, units: &[MergeUnit], progress: &dyn Fn(u
     for unit in units {
         check_cancel(cancel)?;
         let from = safe_join(&temp.0, &unit.path)?;
-        let to = safe_join(root, &unit.path)?;
+        let to = resolve_in(root, &unit.path)?;
         let outcome = if to.exists() {
             let same = match &unit.identity {
                 Some(identity) => same_file(&safe_join(&from, identity)?, &safe_join(&to, identity)?),
@@ -360,6 +419,7 @@ mod tests {
     const TASK_A: &str = "2026-09-16/20260916T010000Z-0000000a";
     const TASK_B: &str = "2026-09-16/20260916T020000Z-0000000b";
     const REF: &str = "导入参考图/abc.png";
+    const REF_SOURCE: &str = "别处/猫.png";
 
     fn no_progress(_: u64, _: u64) {}
 
@@ -383,8 +443,9 @@ mod tests {
         }
         write(&root.join(TASK_B).join("layers/01.png"), b"layer");
         write(&root.join("2026-09-16/20260916T030000Z-0000000c/task.json"), b"{}");
-        let external = tmp.path().join("别处/猫.png");
-        write(&external, b"cat");
+        // 根内但不在任务目录里的参考图（v0.3.x 的「根外」在 Web 版一律相对用户数据根）。
+        write(&root.join(REF_SOURCE), b"cat");
+        let external = root.join(REF_SOURCE);
         Fixture { tmp, root, external }
     }
 
@@ -396,7 +457,7 @@ mod tests {
         ExportSpec {
             texts: vec![text("manifest.json", "{\"pack_format_version\":1}"), text("画板/千问测试.ugcboard.json", "{\"title\":\"千问测试\"}")],
             task_dirs: vec![TASK_A.into(), TASK_B.into(), "2026-09-17/20260917T000000Z-missing".into()],
-            files: vec![PackFile { source: f.external.to_string_lossy().into_owned(), entry: REF.into() }],
+            files: vec![PackFile { source: REF_SOURCE.into(), entry: REF.into() }],
         }
     }
 
@@ -471,7 +532,7 @@ mod tests {
         traversal.task_dirs = vec!["../outside".into()];
         assert!(export(&f.root, &traversal, &target, &no_progress, &AtomicBool::new(false)).is_err());
         let mut duplicate = spec(&f);
-        duplicate.files.push(PackFile { source: f.external.to_string_lossy().into_owned(), entry: "manifest.json".into() });
+        duplicate.files.push(PackFile { source: REF_SOURCE.into(), entry: "manifest.json".into() });
         let err = export(&f.root, &duplicate, &target, &no_progress, &AtomicBool::new(false)).unwrap_err();
         assert!(err.to_string().contains("重复"), "{err}");
         assert!(!target.exists());
@@ -572,10 +633,92 @@ mod tests {
         let f = fixture();
         let pack = exported(&f);
         let other = f.tmp.path().join("输出 B");
-        write(&other.join(".ugcpack-import.123-456-0.tmp/导入参考图/abc.png"), b"cat");
+        let stale = other.join(".ugcpack-import.123-456-0.tmp");
+        write(&stale.join("导入参考图/abc.png"), b"cat");
+        // 进程被杀留下的目录：mtime 早于过期门槛才会被清理。
+        let old = filetime::FileTime::from_system_time(std::time::SystemTime::now() - STALE_IMPORT_AGE * 2);
+        filetime::set_file_times(&stale, old, old).unwrap();
         write(&other.join(".别的.tmp/x"), b"x");
         import(&pack, &other, &units(), &no_progress, &AtomicBool::new(false)).unwrap();
         assert_eq!(names_in(&other), vec![".别的.tmp", "2026-09-16", "导入参考图"]);
+    }
+
+    #[test]
+    fn concurrent_import_does_not_delete_a_fresh_temp_dir() {
+        let f = fixture();
+        let pack = exported(&f);
+        let other = f.tmp.path().join("输出 B");
+        // 另一页面正在导入：临时目录是新鲜的，不能被这次导入清掉。
+        let active = other.join(".ugcpack-import.999-111-0.tmp");
+        write(&active.join("导入参考图/abc.png"), b"cat");
+        import(&pack, &other, &units(), &no_progress, &AtomicBool::new(false)).unwrap();
+        assert!(active.join("导入参考图/abc.png").is_file(), "并发导入的临时目录被误删");
+    }
+
+    #[test]
+    fn export_rejects_absolute_source_outside_root() {
+        let f = fixture();
+        let target = f.tmp.path().join("x.ugcpack");
+        let mut s = spec(&f);
+        s.files = vec![PackFile { source: "/etc/hostname".into(), entry: "导入参考图/x.png".into() }];
+        let err = export(&f.root, &s, &target, &no_progress, &AtomicBool::new(false)).unwrap_err();
+        assert!(err.to_string().contains("越界"), "{err}");
+        assert!(!target.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn export_rejects_symlink_escaping_root() {
+        let f = fixture();
+        let target = f.tmp.path().join("x.ugcpack");
+        std::os::unix::fs::symlink(f.tmp.path(), f.root.join("link")).unwrap();
+        let mut s = spec(&f);
+        s.files = vec![PackFile { source: "link/root/别处/猫.png".into(), entry: "导入参考图/x.png".into() }];
+        // link 指向用户数据根之外（root 的父目录的父目录），解析后越界。
+        assert!(export(&f.root, &s, &target, &no_progress, &AtomicBool::new(false)).is_err());
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn export_to_writer_streams_same_zip_as_file_export() {
+        let f = fixture();
+        let mut buf = Vec::new();
+        let report = export_to_writer(&f.root, &spec(&f), &mut buf, &no_progress, &AtomicBool::new(false)).unwrap();
+        assert_eq!(report.task_dirs, 2);
+        let file = tempfile::NamedTempFile::new().unwrap();
+        fs::write(file.path(), &buf).unwrap();
+        let names: Vec<String> = entries(file.path()).unwrap();
+        assert!(names.contains(&"manifest.json".to_string()));
+        assert!(names.contains(&REF.to_string()));
+        assert_eq!(names.len(), 8);
+    }
+
+    /// 用 tag v0.3.2 的代码生成的桌面版画板包（Flash 图层结果 + layers.json + 根外参考图）。
+    fn v032_pack() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../client/fixtures/packs/v0.3.2-flash-layers.ugcpack")
+    }
+
+    #[test]
+    fn imports_pack_generated_by_desktop_v0_3_2() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("输出");
+        let units = vec![
+            MergeUnit { path: "2026-09-16/20260916T010000Z-0000000a".into(), identity: Some("task.json".into()) },
+            MergeUnit { path: "导入参考图/5e4b079355f5f06363744c0778c5174040645713e06e6877eae22f573d46e6b0.png".into(), identity: None },
+        ];
+        let report = import(&v032_pack(), &root, &units, &no_progress, &AtomicBool::new(false)).unwrap();
+        assert_eq!(outcomes(&report), vec![(units[0].path.as_str(), MergeOutcome::Moved), (units[1].path.as_str(), MergeOutcome::Moved)]);
+        let dir = root.join("2026-09-16/20260916T010000Z-0000000a");
+        // 图层文件与 layers.json 都在；导入后按任务目录真源继续迭代。
+        let layers: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("layers.json")).unwrap()).unwrap();
+        assert_eq!(layers["layers"].as_array().unwrap().len(), 2);
+        for file in ["layers/01.png", "layers/02.png", "result.png"] {
+            assert!(dir.join(file).is_file(), "缺 {file}");
+        }
+        let record: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("task.json")).unwrap()).unwrap();
+        assert_eq!(record["task_id"], "20260916T010000Z-0000000a");
+        let board = read_texts(&v032_pack(), &["画板/旧版画板.ugcboard.json".into()]).unwrap();
+        assert!(board["画板/旧版画板.ugcboard.json"].contains("旧版画板"));
     }
 
     #[test]

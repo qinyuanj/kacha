@@ -143,6 +143,8 @@ export interface ShellImpl {
   relay?: RelayPort;
   /** 浏览器上传 / 下载（只有 Web 版有；桌面仍走系统对话框）。 */
   transfer?: TransferPort;
+  /** 画板包上传（只有 Web 版有）：浏览器选中的文件流式上传到服务端临时位置。 */
+  pack?: PackUploadPort;
   /** 用量与自助清理（只有 Web 版有）。 */
   usage?: UsagePort;
   updateFlowPorts(protection: Pick<UpdateFlowPorts, "restartGuard" | "restartReleased">): UpdateFlowPorts;
@@ -165,6 +167,12 @@ export interface TransferPort {
   downloadImage(path: string, name?: string): void;
   /** 下载整张画板的全部结果 zip。 */
   downloadBoardResults(boardPath: string): void;
+}
+
+/** 画板包上传端口：返回服务端上传句柄；放弃时删除临时文件。 */
+export interface PackUploadPort {
+  upload(file: File): Promise<string>;
+  discard(id: string): Promise<void>;
 }
 
 /** 进入与身份：只有 Web 版有；桌面实现为占位（旧假壳不经过进入界面）。 */

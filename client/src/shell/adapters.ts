@@ -6,7 +6,7 @@ import type { SettingsPorts } from "../core/settings";
 import type { ImageProbe } from "../core/submission";
 import type { TaskFs } from "../core/taskDir";
 import { imageCodec } from "./imageCodec";
-import { desktop, httpFetch, ipc, relay } from "./ipc";
+import { desktop, httpFetch, ipc, packUpload, relay } from "./ipc";
 import { logEvent } from "./log";
 import { composeOverlay } from "./overlay";
 
@@ -48,6 +48,7 @@ export const packIo: PackIo = {
   entries: ipc.boardPackEntries,
   readTexts: ipc.boardPackReadTexts,
   importUnits: ipc.boardPackImport,
+  discard: (pack) => packUpload?.discard(pack) ?? Promise.resolve(),
 };
 
 export const imageProbe: ImageProbe = {
