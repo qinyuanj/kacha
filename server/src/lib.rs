@@ -19,6 +19,7 @@ pub mod redact;
 pub mod relay;
 mod session;
 pub mod store;
+pub mod transfer;
 pub mod verify;
 
 pub use session::{fingerprint, SESSION_COOKIE};
@@ -161,6 +162,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/fs/inspect-image", get(fs::inspect_image))
         .route("/api/fs/relay", axum::routing::post(relay::relay).delete(relay::discard))
         .route("/api/fs/relay/commit", axum::routing::post(relay::commit))
+        .merge(transfer::routes())
         .route("/api/log", axum::routing::post(fs::log_event))
         .route("/api/{*rest}", axum::routing::any(api_fallback))
         .fallback_service(static_service(&state))
