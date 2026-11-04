@@ -7,3 +7,5 @@
 > v2 补记（#94）：结论不变。版本号唯一来源改为 `client/src-tauri/Cargo.toml`（`tauri.conf.json` 不写 version 即沿用），发布脚本重写为 `packaging/build_release.py` 与 `packaging/publish_release.py`；签名代码路径（`sign.ps1`、`--cert`）未随 v2 移植。
 
 > 2026-10-10 补记：上文「这两个说明必须写进发布说明」的放行为目的不变，载体按用户要求调整——发布说明（Release 正文与 updater 更新说明）只保留连同标题 200 字以内的摘要，SmartScreen / Gatekeeper 放行、校验与恢复等完整步骤统一放在 [自动更新用户指南](../release/auto-update-user-guide.md)，发布说明摘要指向指南。首个带 updater 签名的正式版 Windows `v0.3.0` 已于 2026-10-09 发布（macOS 尚未发布），实际验收证据见 [Windows 验收记录](../release/auto-update-windows-acceptance.md)。
+
+> 2026-11-04 补记：已被 [ADR 0018](0018-web-app-replaces-desktop-client-with-server-side-task-directories.md) 取代，桌面客户端退役，不再发布更新。
