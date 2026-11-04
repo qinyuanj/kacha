@@ -2,6 +2,7 @@
 // 不 import 任何 @tauri-apps/*；UI 与 core 不直接调 HTTP，都经这里的端口。
 import type { FetchLike } from "../core/gateway";
 import { ApiError } from "./apiError";
+import { DEFAULT_SETTINGS, serializeSettings } from "../core/settings";
 import type { UpdateFlowPorts } from "../core/updateFlow";
 import type { DesktopPort, Ipc, SessionPort, ShellImpl } from "./types";
 
@@ -88,7 +89,13 @@ export const ipc: Ipc = {
   writeUiState: async (text) => void (await api("/api/ui-state", textBody(text))),
   readCapabilityOverride: () => api<string | null>("/api/capability-override"),
   inspectImage: (path) => api(`/api/fs/inspect-image?${query(path)}`),
-  readSettings: () => api<string | null>("/api/settings"),
+  // 首次使用（服务端还没有 settings.json）时以服务端下发的网关地址为默认，避免两端默认不一致。
+  readSettings: async () => {
+    const text = await api<string | null>("/api/settings");
+    if (text !== null) return text;
+    const config = await webConfig();
+    return serializeSettings({ ...DEFAULT_SETTINGS, base_url: config.gateway_url });
+  },
   writeSettings: async (text) => void (await api("/api/settings", textBody(text))),
   readModelsCache: () => api<string | null>("/api/models-cache"),
   writeModelsCache: async (text) => void (await api("/api/models-cache", textBody(text))),
