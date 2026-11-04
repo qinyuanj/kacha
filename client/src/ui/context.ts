@@ -132,7 +132,8 @@ export function useMissingImages(board: Board, outputRoot: string): ReadonlySet<
   return missing;
 }
 
-// 按路径缓存读文件（含读不到）：只交给 storedStatuses 读结局记录——结局记录只写一次，读过就不再读。
+// 按路径缓存读到的文件：只交给 storedStatuses 读结局记录——结局记录只写一次，读过就不再读。
+// 失败不缓存：401 / 断网恢复后要能重读，否则一次故障就永久显示成已中断。
 const fileReads = new Map<string, Promise<Uint8Array>>();
 const cachedReadFs: Pick<TaskFs, "readFile"> = {
   readFile: (path) => {
@@ -140,6 +141,7 @@ const cachedReadFs: Pick<TaskFs, "readFile"> = {
     if (!pending) {
       pending = taskFs.readFile(path);
       fileReads.set(path, pending);
+      void pending.catch(() => fileReads.delete(path));
     }
     return pending;
   },
@@ -159,6 +161,8 @@ export function useStoredStatuses(board: Board, boardFile: string, outputRoot: s
     void storedStatuses(cachedReadFs, board, handled, outputRoot, boardFile).then(({ statuses, interruptedEvents }) => {
       for (const event of interruptedLog.take(interruptedEvents)) logEvent("task", { ...event });
       if (alive) setStatuses(statuses);
+    }, () => {
+      // 结局记录读失败（401 / 5xx / 断网）：保持原状态，不虚构「已中断」。下一次签名变化会重试。
     });
     return () => {
       alive = false;

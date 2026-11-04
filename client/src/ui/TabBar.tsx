@@ -10,12 +10,14 @@ interface Props {
   onClose: (key: string) => void;
   onRename: (key: string, title: string) => void;
   onCreate: () => void;
+  /** 打开服务端画板列表（Web 版重新打开已有关掉的画板）。 */
+  onOpenList?: () => void;
   onExportPack: (key: string) => void;
 }
 
 const titleOf = (s: Session) => (s.status === "ok" ? s.board.title : basename(s.path));
 
-export function TabBar({ sessions, activeKey, onActivate, onClose, onRename, onCreate, onExportPack }: Props) {
+export function TabBar({ sessions, activeKey, onActivate, onClose, onRename, onCreate, onOpenList, onExportPack }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<{ key: string; at: { x: number; y: number } } | null>(null);
@@ -74,6 +76,11 @@ export function TabBar({ sessions, activeKey, onActivate, onClose, onRename, onC
       <button className="tab-new" title="新建画板" onClick={onCreate}>
         ＋
       </button>
+      {onOpenList && (
+        <button className="tab-list" title="列出服务端已有画板并打开" onClick={onOpenList}>
+          画板列表
+        </button>
+      )}
       {menuSession && menu && (
         <ContextMenu
           at={menu.at}

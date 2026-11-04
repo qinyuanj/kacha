@@ -81,10 +81,70 @@ pub fn write_board(path: &Path, text: &str) -> io::Result<()> {
     atomic_write(path, text.as_bytes())
 }
 
+/// 画板的并发写入约定：无版本 = 旧行为（直接覆盖）；版本 = 内容必须与读到的一致；只新建 = 目标必须不存在。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoardWriteGuard {
+    Any,
+    Version(String),
+    CreateOnly,
+}
+
+/// 带版本写画板时的失败；409 的三种语义分开，前端据此提示重新载入或改名。
+#[derive(Debug)]
+pub enum BoardSaveError {
+    Io(io::Error),
+    /// 内容版本已变化：画板已在别处修改。
+    Conflict,
+    /// 带了版本但文件不存在（多半是另一页面已重命名），不能凭空新建旧名画板。
+    Missing,
+    AlreadyExists,
+}
+
+impl From<io::Error> for BoardSaveError {
+    fn from(e: io::Error) -> Self {
+        BoardSaveError::Io(e)
+    }
+}
+
+/// 画板版本 = 主文件内容的 SHA-256（小写十六进制）；主文件不存在为 None。版本不写进画板 JSON。
+pub fn content_version(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+pub fn board_version(path: &Path) -> io::Result<Option<String>> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(content_version(&bytes))),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// 读、比较、写必须整体在调用方持有的锁内完成（HTTP 层按画板写操作串行）。
+pub fn write_board_guarded(path: &Path, text: &str, guard: BoardWriteGuard) -> Result<(), BoardSaveError> {
+    match guard {
+        BoardWriteGuard::Any => {}
+        BoardWriteGuard::CreateOnly => {
+            if path.exists() || bak_path(path).exists() {
+                return Err(BoardSaveError::AlreadyExists);
+            }
+        }
+        BoardWriteGuard::Version(expected) => match board_version(path)? {
+            None => return Err(BoardSaveError::Missing),
+            Some(actual) if actual != expected => return Err(BoardSaveError::Conflict),
+            Some(_) => {}
+        },
+    }
+    write_board(path, text)?;
+    Ok(())
+}
+
 #[derive(Debug, Serialize, PartialEq)]
 pub struct BoardTexts {
     pub main: Option<String>,
     pub bak: Option<String>,
+    /// 主文件内容版本；没有主文件为 null。
+    pub version: Option<String>,
 }
 
 fn read_optional(path: &Path) -> io::Result<Option<String>> {
@@ -98,7 +158,7 @@ fn read_optional(path: &Path) -> io::Result<Option<String>> {
 
 /// 读主文件与 `.bak` 原文；是否损坏、是否回退由前端按格式判断。
 pub fn read_board(path: &Path) -> io::Result<BoardTexts> {
-    Ok(BoardTexts { main: read_optional(path)?, bak: read_optional(&bak_path(path))? })
+    Ok(BoardTexts { main: read_optional(path)?, bak: read_optional(&bak_path(path))?, version: board_version(path)? })
 }
 
 pub fn read_text(path: &Path) -> io::Result<Option<String>> {
@@ -106,7 +166,21 @@ pub fn read_text(path: &Path) -> io::Result<Option<String>> {
 }
 
 /// 重命名画板文件（连同 `.bak`）；目标已存在时拒绝，不覆盖别的画板。
+/// 源文件不存在是明确错误：另一页面已改名时，旧名再改名必须报错而不是静默成功。
 pub fn rename_board(from: &Path, to: &Path) -> io::Result<()> {
+    rename_board_guarded(from, to, None)
+}
+
+pub fn rename_board_guarded(from: &Path, to: &Path, version: Option<&str>) -> io::Result<()> {
+    if !from.exists() && !bak_path(from).exists() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, format!("画板不存在，可能已在别处改名或删除：{}", from.display())));
+    }
+    if let Some(expected) = version {
+        match board_version(from)? {
+            Some(actual) if actual == expected => {}
+            _ => return Err(io::Error::new(io::ErrorKind::InvalidInput, "board_conflict")),
+        }
+    }
     if from == to {
         return Ok(());
     }
@@ -240,12 +314,12 @@ mod tests {
     fn read_board_returns_main_and_bak() {
         let dir = tmpdir();
         let board = dir.path().join("a.ugcboard.json");
-        assert_eq!(read_board(&board).unwrap(), BoardTexts { main: None, bak: None });
+        assert_eq!(read_board(&dir.path().join("none.ugcboard.json")).unwrap(), BoardTexts { main: None, bak: None, version: None });
         write_board(&board, "{\"v\":1}").unwrap();
         write_board(&board, "{\"v\":2}").unwrap();
         assert_eq!(
             read_board(&board).unwrap(),
-            BoardTexts { main: Some("{\"v\":2}".into()), bak: Some("{\"v\":1}".into()) }
+            BoardTexts { main: Some("{\"v\":2}".into()), bak: Some("{\"v\":1}".into()), version: Some(content_version(b"{\"v\":2}")) }
         );
     }
 

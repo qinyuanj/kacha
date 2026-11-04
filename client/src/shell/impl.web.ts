@@ -49,6 +49,21 @@ async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** 元数据接口（settings / ui-state / models-cache / capability-override）回的是 JSON 原文，不是 JSON 字符串：
+ *  必须按文本读，否则 res.json() 会把内容解析成对象，前端当成损坏而静默重置。 */
+async function apiText(url: string): Promise<string | null> {
+  let res: Response;
+  try {
+    res = await fetch(url, { credentials: "same-origin" });
+  } catch (e) {
+    throw new ApiError(0, "network", `无法连接服务端：${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (res.status === 401) sessionListeners.forEach((l) => l());
+  if (!res.ok) throw new ApiError(res.status, "read_failed", `读取失败（HTTP ${res.status}）：${url}`);
+  const text = await res.text();
+  return text.trim() === "null" || text === "" ? null : text;
+}
+
 const textBody = (text: string): RequestInit => ({ method: "PUT", headers: { "Content-Type": "application/json" }, body: text });
 
 async function readBytes(path: string): Promise<Uint8Array> {
@@ -81,23 +96,28 @@ export const ipc: Ipc = {
   appPaths: async () => ({ default_output_root: VIRTUAL_ROOT, app_data_dir: VIRTUAL_ROOT }),
   startupArgs: async () => [],
   readBoard: (path) => api(`/api/boards?${query(path)}`),
-  writeBoard: async (path, text) => void (await api(`/api/boards?${query(path)}`, textBody(text))),
-  renameBoard: async (from, to) =>
-    void (await api("/api/boards/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: stripRoot(from), to: stripRoot(to) }) })),
+  writeBoard: async (path, text, options) => {
+    const params = new URLSearchParams({ path: stripRoot(path) });
+    if (options?.createOnly) params.set("create_only", "true");
+    else if (options?.version) params.set("version", options.version);
+    await api(`/api/boards?${params}`, textBody(text));
+  },
+  renameBoard: async (from, to, version) =>
+    void (await api("/api/boards/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: stripRoot(from), to: stripRoot(to), ...(version ? { version } : {}) }) })),
   listBoardNames: (dir) => api(`/api/boards/names?dir=${encodeURIComponent(stripRoot(dir))}`),
-  readUiState: () => api<string | null>("/api/ui-state"),
+  readUiState: () => apiText("/api/ui-state"),
   writeUiState: async (text) => void (await api("/api/ui-state", textBody(text))),
-  readCapabilityOverride: () => api<string | null>("/api/capability-override"),
+  readCapabilityOverride: () => apiText("/api/capability-override"),
   inspectImage: (path) => api(`/api/fs/inspect-image?${query(path)}`),
   // 首次使用（服务端还没有 settings.json）时以服务端下发的网关地址为默认，避免两端默认不一致。
   readSettings: async () => {
-    const text = await api<string | null>("/api/settings");
+    const text = await apiText("/api/settings");
     if (text !== null) return text;
     const config = await webConfig();
     return serializeSettings({ ...DEFAULT_SETTINGS, base_url: config.gateway_url });
   },
   writeSettings: async (text) => void (await api("/api/settings", textBody(text))),
-  readModelsCache: () => api<string | null>("/api/models-cache"),
+  readModelsCache: () => apiText("/api/models-cache"),
   writeModelsCache: async (text) => void (await api("/api/models-cache", textBody(text))),
   logEvent: async (kind, fields) =>
     void (await api("/api/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, fields }) })),

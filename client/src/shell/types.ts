@@ -12,6 +12,14 @@ export interface AppPaths {
 export interface BoardTexts {
   main: string | null;
   bak: string | null;
+  /** 主文件内容版本（Web 版服务端返回）；桌面实现没有版本概念。 */
+  version?: string | null;
+}
+
+/** 画板写入约定：带版本 = 过期保存 409；createOnly = 只新建不覆盖（两页同时建同名）。 */
+export interface BoardWriteOptions {
+  version?: string;
+  createOnly?: boolean;
 }
 
 export interface ImageInfo {
@@ -35,8 +43,8 @@ export interface Ipc {
   appPaths(): Promise<AppPaths>;
   startupArgs(): Promise<string[]>;
   readBoard(path: string): Promise<BoardTexts>;
-  writeBoard(path: string, text: string): Promise<void>;
-  renameBoard(from: string, to: string): Promise<void>;
+  writeBoard(path: string, text: string, options?: BoardWriteOptions): Promise<void>;
+  renameBoard(from: string, to: string, version?: string): Promise<void>;
   listBoardNames(dir: string): Promise<string[]>;
   readUiState(): Promise<string | null>;
   writeUiState(text: string): Promise<void>;

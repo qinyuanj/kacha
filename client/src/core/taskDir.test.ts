@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Board, BoardNode } from "./board";
+import type { TaskFs } from "./taskDir";
 import { BUILTIN_TABLE } from "./capabilities";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
 import { layerFileName, layersExportJson, LocalError, newTaskId, parseLayersFile, parseOutcome, readLayers, readOutcome, readSubmission, restoreResultLayers, saveLayers, saveResult, sha256Hex, sniffImage, tableDigest, taskDirOfRelPath, taskDirOfTaskId, taskFilePath, writeOutcome, writeSubmission, type SubmissionPlan } from "./taskDir";
@@ -374,6 +375,18 @@ describe("结局记录 outcome.json", () => {
     expect(await readOutcome(fs, "/root", cancelled)).toEqual({ kind: "cancelled", gatewayMayContinue: true });
     expect(await readOutcome(fs, "/root", "20260916T091500Z-00000003")).toBeNull();
     expect(await readOutcome(fs, "/root", "not-a-task")).toBeNull();
+  });
+
+  it("HTTP 下只有 404 是没有记录；401 / 5xx / 断网是读失败，不能当成已中断", async () => {
+    const failing = (status: number): Pick<TaskFs, "readFile"> => ({
+      readFile: async () => {
+        throw Object.assign(new Error(`HTTP ${status}`), { status });
+      },
+    });
+    expect(await readOutcome(failing(404), "/root", "20260916T091500Z-00000001")).toBeNull();
+    for (const status of [0, 401, 500]) {
+      await expect(readOutcome(failing(status), "/root", "20260916T091500Z-00000001")).rejects.toThrow(`HTTP ${status}`);
+    }
   });
 
   it("读不懂的内容当作没有记录", () => {

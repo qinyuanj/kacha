@@ -14,7 +14,9 @@ import { newId } from "../core/ids";
 import { emptyHistory, recordChange, redo, undo, type History } from "../core/history";
 import { basename, boardsDir, dirname, joinPath, resolveFromRoot } from "../core/paths";
 import { restoreResultLayers } from "../core/taskDir";
+import { sha256Hex } from "../core/sha256";
 import { desktop, ipc } from "../shell/ipc";
+import { ApiError } from "../shell/apiError";
 import { logEvent } from "../shell/log";
 import type { OperationGate } from "../core/updatePreparation";
 import { knownImageInfo } from "./context";
@@ -22,7 +24,7 @@ import { knownImageInfo } from "./context";
 export const AUTOSAVE_DEBOUNCE_MS = 1000;
 
 export type Session =
-  | { key: string; path: string; status: "ok"; board: Board; history: History; notice: string | null; saveError: string | null }
+  | { key: string; path: string; status: "ok"; board: Board; history: History; notice: string | null; saveError: string | null; version: string | null; conflicted: boolean }
   | { key: string; path: string; status: "newer"; version: number }
   | { key: string; path: string; status: "corrupt"; reason: string };
 
@@ -82,6 +84,17 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
     return saver;
   };
 
+  /** 409 = 过期保存 / 旧名已改名 / 同名已存在：不自动合并，也不再自动重试，等用户重新载入或改名。 */
+  const isConflict = (e: unknown) => e instanceof ApiError && e.status === 409;
+
+  /** 唯一写入实现：带内容版本（新建则只新建不覆盖），成功后用同一算法回写新版本。 */
+  const writeSession = async (key: string, s: OkSession) => {
+    const text = serializeBoard(s.board);
+    await ipc.writeBoard(s.path, text, s.version ? { version: s.version } : { createOnly: true });
+    const version = await sha256Hex(new TextEncoder().encode(text));
+    patch(key, (x) => (samePath(x.path, s.path) ? { ...x, version, saveError: null } : x));
+  };
+
   const flush = useCallback(
     (key: string): Promise<void> => {
       const saver = saverOf(key);
@@ -90,13 +103,12 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
       saver.chain = saver.chain.then(async () => {
         // 写入时再取最新会话：路径可能刚被重命名或另存。
         const s = sessionsRef.current.find((x) => x.key === key);
-        if (!s || s.status !== "ok") return;
+        if (!s || s.status !== "ok" || s.conflicted) return;
         try {
-          await ipc.writeBoard(s.path, serializeBoard(s.board));
-          if (s.saveError) patch(key, (x) => ({ ...x, saveError: null }));
+          await writeSession(key, s);
         } catch (e) {
           logEvent("board_save_failed", { board_file: basename(s.path), reason: "autosave", message: errorText(e) });
-          patch(key, (x) => ({ ...x, saveError: `未能保存到 ${s.path}：${errorText(e)}` }));
+          patch(key, (x) => ({ ...x, saveError: `未能保存到 ${s.path}：${errorText(e)}`, ...(isConflict(e) ? { conflicted: true } : {}) }));
         }
       });
       return saver.chain;
@@ -200,10 +212,9 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
     saver.timer = null;
     const write = saver.chain.then(async () => {
       const s = sessionsRef.current.find((x) => x.key === key);
-      if (!s || s.status !== "ok") return;
+      if (!s || s.status !== "ok" || s.conflicted) return;
       try {
-        await ipc.writeBoard(s.path, serializeBoard(s.board));
-        if (s.saveError) patch(key, (x) => ({ ...x, saveError: null }));
+        await writeSession(key, s);
       } catch (e) {
         const message = `未能保存到 ${s.path}：${errorText(e)}`;
         logEvent("board_save_failed", { board_file: basename(s.path), reason: "update_prepare", message: errorText(e) });
@@ -254,6 +265,8 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
               history: emptyHistory(),
               notice: opened.recoveredFromBak ? "画板主文件已损坏，已从备份 .bak 恢复；下次保存会写回主文件。" : null,
               saveError: null,
+              version: texts.version ?? null,
+              conflicted: false,
             }
           : opened.kind === "newer"
             ? { key, path, status: "newer", version: opened.version }
@@ -272,7 +285,7 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
     const openHere = sessionsRef.current.filter((s) => samePath(dirname(s.path), dir)).map((s) => basename(s.path));
     const path = joinPath(dir, uniqueBoardFileName(DEFAULT_BOARD_TITLE, [...onDisk, ...openHere]));
     const key = newId();
-    setSessions([...sessionsRef.current, { key, path, status: "ok", board: newBoard(), history: emptyHistory(), notice: null, saveError: null }]);
+    setSessions([...sessionsRef.current, { key, path, status: "ok", board: newBoard(), history: emptyHistory(), notice: null, saveError: null, version: null, conflicted: false }]);
     setActiveKey(key);
     // 立即落盘占住文件名。
     await flush(key);
@@ -300,6 +313,9 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
       else if (saver) await saver.chain;
       // 更新准备接管在途关闭：保留会话，由严格保存重试吞错的写入。
       if (blocked()) return;
+      // 保存失败不能丢改动：标签页留着，修好以后重试或先导出。
+      const current = sessionsRef.current.find((s) => s.key === key);
+      if (current?.status === "ok" && current.saveError) return;
       savers.current.delete(key);
       const list = sessionsRef.current;
       const index = list.findIndex((s) => s.key === key);
@@ -327,7 +343,7 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
       const openHere = sessionsRef.current.filter((x) => x.key !== key && samePath(dirname(x.path), dir)).map((x) => basename(x.path));
       const nextPath = joinPath(dir, uniqueBoardFileName(title, [...onDisk, ...openHere], self));
       try {
-        if (nextPath !== s.path) await ipc.renameBoard(s.path, nextPath);
+        if (nextPath !== s.path) await ipc.renameBoard(s.path, nextPath, s.version ?? undefined);
       } catch (e) {
         patch(key, (x) => ({ ...x, notice: `重命名失败：${errorText(e)}` }));
         return;
@@ -362,6 +378,29 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
 
   const dismissNotice = useCallback((key: string) => patch(key, (x) => ({ ...x, notice: null })), [patch]);
 
+  /** 保存失败后显式重试：改动一直在页面里，这里只是再写一次。 */
+  const retrySave = useCallback(async (key: string) => {
+    await flush(key);
+  }, [flush]);
+
+  /** 冲突后由用户显式重新载入服务端的画板；本页未保存的改动随之放弃（不做自动合并）。 */
+  const reload = useCallback(async (key: string) => {
+    const s = sessionsRef.current.find((x) => x.key === key);
+    if (!s || s.status !== "ok") return;
+    try {
+      const texts = await ipc.readBoard(s.path);
+      const opened = openBoard(texts.main, texts.bak);
+      if (opened.kind !== "ok") {
+        patch(key, (x) => ({ ...x, notice: `重新载入失败：${opened.kind === "newer" ? `画板格式版本 ${opened.version} 高于本应用` : opened.reason}` }));
+        return;
+      }
+      if (outputRootRef.current) opened.board = await restoreResultLayers({ readFile: ipc.readFileBytes }, outputRootRef.current, opened.board);
+      patch(key, (x) => ({ ...x, board: opened.board, history: emptyHistory(), version: texts.version ?? null, saveError: null, conflicted: false, notice: null }));
+    } catch (e) {
+      patch(key, (x) => ({ ...x, notice: `重新载入失败：${errorText(e)}` }));
+    }
+  }, [patch]);
+
   return {
     sessions,
     activeKey,
@@ -386,6 +425,8 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
     closeAll,
     flushAll,
     flushAllStrict,
+    retrySave: (key: string) => tracked(retrySave, undefined)(key),
+    reload: (key: string) => tracked(reload, undefined)(key),
     dismissNotice: (key: string) => { if (!blocked()) dismissNotice(key); },
     snapshot: () => ({ sessions: sessionsRef.current, activeKey: activeKeyRef.current }),
   };

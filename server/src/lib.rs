@@ -61,11 +61,17 @@ struct Inner {
     verifier: Arc<dyn KeyVerifier>,
     clock: Clock,
     sessions: session::Sessions,
+    /// 画板读-比较-写与改名的互斥：版本校验必须整体串行，否则两页同时写都通过。
+    board_lock: tokio::sync::Mutex<()>,
 }
 
 impl AppState {
     pub fn new(config: Config, verifier: Arc<dyn KeyVerifier>, clock: Clock) -> Self {
-        AppState { inner: Arc::new(Inner { config, verifier, clock, sessions: session::Sessions::default() }) }
+        AppState { inner: Arc::new(Inner { config, verifier, clock, sessions: session::Sessions::default(), board_lock: tokio::sync::Mutex::new(()) }) }
+    }
+
+    pub fn board_lock(&self) -> &tokio::sync::Mutex<()> {
+        &self.inner.board_lock
     }
 
     pub fn verifier(&self) -> &Arc<dyn KeyVerifier> {

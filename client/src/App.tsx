@@ -4,7 +4,7 @@ import { BOARD_EXTENSION, type Board } from "./core/board";
 import { BUILTIN_TABLE, effectiveTable, type CapabilityTable } from "./core/capabilities";
 import type { BoardChange } from "./core/edit";
 import { redoLabel, undoLabel } from "./core/history";
-import { basename } from "./core/paths";
+import { basename, boardsDir } from "./core/paths";
 import type { Runner, RunTarget } from "./core/runner";
 import { runDispatch, runScope, buildConfirmItems, collectRunFacts, type ConfirmItem } from "./core/submission";
 import { parseUiState, serializeUiState, type UiState } from "./core/uiState";
@@ -13,6 +13,7 @@ import { imageProbe } from "./shell/adapters";
 import { copyTextToClipboard } from "./shell/clipboard";
 import { desktop, ipc, isWeb } from "./shell/ipc";
 import { BoardPackDialog } from "./ui/BoardPackDialog";
+import { BoardListDialog } from "./ui/BoardListDialog";
 import { BoardToolbar } from "./ui/BoardToolbar";
 import { ContextMenu } from "./ui/ContextMenu";
 import { BoardCanvas } from "./ui/BoardCanvas";
@@ -33,6 +34,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const [outputRoot, setOutputRoot] = useState<string | null>(null);
   const [defaultRoot, setDefaultRoot] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [boardListOpen, setBoardListOpen] = useState(false);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
   const [packMenu, setPackMenu] = useState<{ x: number; y: number } | null>(null);
   const [confirm, setConfirm] = useState<{ boardKey: string; board: Board; items: ConfirmItem[]; scope: "selection" | "board" } | null>(null);
@@ -412,9 +414,22 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           onClose={(key) => void closeBoard(key)}
           onRename={(key, title) => void boards.renameBoard(key, title)}
           onCreate={() => void (!guardPreparation() && createBoard())}
+          onOpenList={isWeb && outputRoot ? () => setBoardListOpen(true) : undefined}
           onExportPack={(key) => void pack.prepareExport(key)}
         />
       </div>
+      {boardListOpen && outputRoot && (
+        <BoardListDialog
+          dir={boardsDir(outputRoot)}
+          openPaths={sessions.map((s) => s.path)}
+          onOpen={(path) => {
+            void openPath(path, true).then((opened) => {
+              if (!opened) toast("画板不存在，可能已在别处改名；请刷新列表");
+            }, (e) => toast(e instanceof Error ? e.message : String(e)));
+          }}
+          onClose={() => setBoardListOpen(false)}
+        />
+      )}
       <div className="board-toolbar">
         {/* 有画板时画布把工具栏 portal 进这个容器；没有时放置灰占位，布局不跳。 */}
         <div ref={setToolbarSlot} className="board-toolbar-slot">
@@ -497,9 +512,11 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           s.status === "ok" && (
             <div key={s.key} className="bar bar-error">
               <span>
-                「{s.board.title}」{s.saveError}（之后每次修改都会重试）
+                「{s.board.title}」{s.saveError}
+                {s.conflicted ? "（改动保留在本页，不会自动合并）" : "（之后每次修改都会重试）"}
               </span>
-              <button onClick={() => void boards.saveAs(s.key)}>另存到…</button>
+              {s.conflicted ? <button onClick={() => void boards.reload(s.key)}>重新载入</button> : <button onClick={() => void boards.retrySave(s.key)}>重试保存</button>}
+              {!isWeb && <button onClick={() => void boards.saveAs(s.key)}>另存到…</button>}
             </div>
           ),
       )}

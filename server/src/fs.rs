@@ -28,6 +28,7 @@ pub struct DirQuery {
 pub struct RenameRequest {
     from: String,
     to: String,
+    version: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -58,6 +59,21 @@ where
         match tokio::task::spawn_blocking(f).await {
             Ok(result) => result.map_err(io_error),
             Err(e) => Err(error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string())),
+        }
+    }
+}
+
+/// 与 blocking 相同，但保留领域错误（画板版本冲突等），由调用方映射成 HTTP。
+fn blocking_with<F, T, E>(f: F) -> impl std::future::Future<Output = Result<T, E>>
+where
+    F: FnOnce() -> Result<T, E> + Send + 'static,
+    T: Send + 'static,
+    E: From<std::io::Error> + Send + 'static,
+{
+    async move {
+        match tokio::task::spawn_blocking(f).await {
+            Ok(result) => result,
+            Err(e) => Err(E::from(std::io::Error::other(e))),
         }
     }
 }
@@ -116,13 +132,41 @@ pub async fn read_board(State(state): State<AppState>, user: User, Query(q): Que
     }
 }
 
-pub async fn write_board(State(state): State<AppState>, user: User, Query(q): Query<PathQuery>, body: axum::body::Bytes) -> Response {
-    match resolve(&state, &user, &q.path) {
-        Err(r) => r,
-        Ok(path) => match blocking(move || String::from_utf8(body.to_vec()).map_err(|e| std::io::Error::new(ErrorKind::InvalidData, e)).and_then(|text| store::write_board(&path, &text))).await {
-            Ok(()) => StatusCode::NO_CONTENT.into_response(),
-            Err(r) => r,
-        },
+#[derive(Deserialize)]
+pub struct BoardQuery {
+    path: String,
+    /// 带版本写：内容已变返回 409 board_conflict；文件已不存在返回 409 board_missing。
+    version: Option<String>,
+    /// 只新建不覆盖：两页同时建同名画板时后到者 409。
+    create_only: Option<bool>,
+}
+
+pub async fn write_board(State(state): State<AppState>, user: User, Query(q): Query<BoardQuery>, body: axum::body::Bytes) -> Response {
+    let guard = if q.create_only.unwrap_or(false) {
+        store::BoardWriteGuard::CreateOnly
+    } else if let Some(version) = q.version {
+        store::BoardWriteGuard::Version(version)
+    } else {
+        store::BoardWriteGuard::Any
+    };
+    let path = match resolve(&state, &user, &q.path) {
+        Err(r) => return r,
+        Ok(p) => p,
+    };
+    // 读、比较、写之间不能插进另一个写：同进程内画板写与改名串行。
+    let _lock = state.board_lock().lock().await;
+    match blocking_with(move || String::from_utf8(body.to_vec()).map_err(|e| std::io::Error::new(ErrorKind::InvalidData, e)).map_err(store::BoardSaveError::from).and_then(|text| store::write_board_guarded(&path, &text, guard))).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => board_save_error(e),
+    }
+}
+
+fn board_save_error(e: store::BoardSaveError) -> Response {
+    match e {
+        store::BoardSaveError::Conflict => error(StatusCode::CONFLICT, "board_conflict", "画板已在别处修改，请重新载入"),
+        store::BoardSaveError::Missing => error(StatusCode::CONFLICT, "board_missing", "画板已在别处改名或删除，请重新载入；未保存的改动仍在本页，可先导出"),
+        store::BoardSaveError::AlreadyExists => error(StatusCode::CONFLICT, "already_exists", "同名画板已存在，请换一个名字"),
+        store::BoardSaveError::Io(e) => io_error(e),
     }
 }
 
@@ -134,9 +178,12 @@ pub async fn rename_board(State(state): State<AppState>, user: User, body: axum:
         (Ok(f), Ok(t)) => (f, t),
         (Err(r), _) | (_, Err(r)) => return r,
     };
-    match blocking(move || store::rename_board(&from, &to)).await {
+    let _lock = state.board_lock().lock().await;
+    match blocking_with(move || store::rename_board_guarded(&from, &to, req.version.as_deref())).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(r) => r,
+        Err(e) if e.kind() == ErrorKind::NotFound => error(StatusCode::NOT_FOUND, "not_found", "画板不存在，可能已在别处改名或删除；请重新载入画板列表"),
+        Err(e) if e.kind() == ErrorKind::InvalidInput => error(StatusCode::CONFLICT, "board_conflict", "画板已在别处修改，请重新载入"),
+        Err(r) => io_error(r),
     }
 }
 

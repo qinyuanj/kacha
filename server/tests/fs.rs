@@ -68,7 +68,7 @@ async fn boards_roundtrip_rename_and_names() {
     let path = "画板/测试.ugcboard.json";
     let read = h.get(&format!("/api/boards?path={}", q(path)), Some(&cookie)).await;
     assert_eq!(read.status, 200);
-    assert_eq!(read.json(), serde_json::json!({ "main": null, "bak": null }));
+    assert_eq!(read.json(), serde_json::json!({ "main": null, "bak": null, "version": null }));
     assert_eq!(h.put(&format!("/api/boards?path={}", q(path)), &cookie, r#"{"format_version":1}"#).await.status, 204);
     assert_eq!(h.get(&format!("/api/boards?path={}", q(path)), Some(&cookie)).await.json()["main"], r#"{"format_version":1}"#);
     assert_eq!(h.get(&format!("/api/boards/names?dir={}", q("画板")), Some(&cookie)).await.json(), serde_json::json!(["测试.ugcboard.json"]));
@@ -130,4 +130,73 @@ async fn log_event_accepts_known_kind_and_rejects_unknown() {
     assert!(h.user_root(GOOD_KEY).join(".kacha").join("diagnostics.log").exists());
     let bad = h.send(Method::POST, "/api/log", Some(&cookie), serde_json::json!({ "kind": "bogus", "fields": {} }).to_string()).await;
     assert_eq!(bad.status, 400);
+}
+
+// ---- #27：画板版本校验与过期保存 ----
+
+#[tokio::test]
+async fn board_read_returns_content_version_and_stale_write_is_409() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let path = "画板/协作.ugcboard.json";
+    let uri = format!("/api/boards?path={}", q(path));
+    assert_eq!(h.get(&uri, Some(&cookie)).await.json(), serde_json::json!({ "main": null, "bak": null, "version": null }));
+
+    assert_eq!(h.put(&uri, &cookie, r#"{"format_version":1,"title":"一页"}"#).await.status, 204);
+    let v1 = h.get(&uri, Some(&cookie)).await.json()["version"].as_str().unwrap().to_string();
+    assert_eq!(v1.len(), 64, "版本是内容 SHA-256");
+
+    assert_eq!(h.put(&format!("{uri}&version={v1}"), &cookie, r#"{"format_version":1,"title":"A 页"}"#).await.status, 204);
+    let stale = h.put(&format!("{uri}&version={v1}"), &cookie, r#"{"format_version":1,"title":"B 页"}"#).await;
+    assert_eq!(stale.status, 409, "{}", stale.text());
+    assert_eq!(stale.json()["code"], "board_conflict");
+    assert!(stale.json()["message"].as_str().unwrap().contains("画板已在别处修改，请重新载入"));
+    assert_eq!(h.get(&uri, Some(&cookie)).await.json()["main"], r#"{"format_version":1,"title":"A 页"}"#);
+    assert_eq!(h.get(&format!("/api/boards/names?dir={}", q("画板")), Some(&cookie)).await.json(), serde_json::json!(["协作.ugcboard.json"]));
+}
+
+#[tokio::test]
+async fn versioned_write_to_missing_board_is_conflict_not_recreate() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let old = format!("/api/boards?path={}&version={}", q("画板/旧名.ugcboard.json"), "00".repeat(32));
+    let res = h.put(&old, &cookie, r#"{"format_version":1}"#).await;
+    assert_eq!(res.status, 409, "旧名已改名时不能再凭空新建：{}", res.text());
+    assert_eq!(res.json()["code"], "board_missing");
+    assert_eq!(h.get(&format!("/api/boards/names?dir={}", q("画板")), Some(&cookie)).await.json(), serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn create_only_board_write_conflicts_instead_of_overwriting() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let uri = format!("/api/boards?path={}&create_only=true", q("画板/新建.ugcboard.json"));
+    assert_eq!(h.put(&uri, &cookie, r#"{"format_version":1}"#).await.status, 204);
+    let again = h.put(&uri, &cookie, r#"{"format_version":2}"#).await;
+    assert_eq!(again.status, 409);
+    assert_eq!(again.json()["code"], "already_exists");
+    assert_eq!(h.get(&format!("/api/boards?path={}", q("画板/新建.ugcboard.json")), Some(&cookie)).await.json()["main"], r#"{"format_version":1}"#);
+}
+
+#[tokio::test]
+async fn rename_missing_board_is_clear_error_and_version_guarded() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let missing = h
+        .send(Method::POST, "/api/boards/rename", Some(&cookie), serde_json::json!({ "from": "画板/旧名.ugcboard.json", "to": "画板/又改名.ugcboard.json" }).to_string())
+        .await;
+    assert_eq!(missing.status, 404, "源文件不存在不能静默成功：{}", missing.text());
+    assert_eq!(missing.json()["code"], "not_found");
+
+    let path = "画板/原名.ugcboard.json";
+    h.put(&format!("/api/boards?path={}", q(path)), &cookie, r#"{"v":1}"#).await;
+    let v1 = h.get(&format!("/api/boards?path={}", q(path)), Some(&cookie)).await.json()["version"].as_str().unwrap().to_string();
+    h.put(&format!("/api/boards?path={}&version={v1}", q(path)), &cookie, r#"{"v":2}"#).await;
+    let stale = h
+        .send(Method::POST, "/api/boards/rename", Some(&cookie), serde_json::json!({ "from": path, "to": "画板/新名.ugcboard.json", "version": v1 }).to_string())
+        .await;
+    assert_eq!(stale.status, 409, "{}", stale.text());
+    assert_eq!(stale.json()["code"], "board_conflict");
+    assert!(h.user_root(GOOD_KEY).join(path).exists(), "过期改名不能移动文件");
+    assert!(!h.user_root(GOOD_KEY).join("画板/新名.ugcboard.json").exists());
 }
