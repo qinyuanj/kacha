@@ -5,27 +5,18 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "build:desktop": "tauri build --debug --config src-tauri/tauri.dev.conf.json",
-    "build:release": "python ../packaging/build_release.py",
+    "build:release": "python ../packaging/build_web.py",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
-    "test:e2e": "playwright test",
-    "tauri": "tauri"
+    "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-dialog": "^2.7.3",
-    "@tauri-apps/plugin-http": "^2.6.1",
-    "@tauri-apps/plugin-opener": "^2.5.5",
-    "@tauri-apps/plugin-process": "^2.4.0",
-    "@tauri-apps/plugin-updater": "^2.13.2",
     "@xyflow/react": "^12.11.6",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
-    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^22.20.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

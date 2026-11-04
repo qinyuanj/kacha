@@ -52,6 +52,15 @@ impl Root {
             .unwrap();
         (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
     }
+    fn run_restore(&self, entry: Option<&str>) -> (i32, String, String) {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_kacha-server"));
+        command.args(["cleanup", "restore", "--data-root", self.path().to_str().unwrap()]);
+        if let Some(entry) = entry {
+            command.arg(entry);
+        }
+        let out = command.output().unwrap();
+        (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
+    }
     /// 整棵树（相对路径 + 大小），用于断言磁盘没被改动。
     fn tree(&self) -> Vec<(String, u64)> {
         let mut out = Vec::new();
@@ -183,6 +192,31 @@ fn purge_skips_the_recycle_area() {
     assert!(!r.user("active").join(OLD).exists());
     assert!(r.user("active").join(OLD_B).exists());
     assert!(!r.path().join("recycle").exists() || std::fs::read_dir(r.path().join("recycle")).unwrap().next().is_none());
+}
+
+#[test]
+fn restore_lists_recycled_entries_and_moves_the_selected_entry_back() {
+    let r = scenario();
+    let (code, _, err) = r.run(&[], NOW);
+    assert_eq!(code, 0, "{err}");
+
+    let (code, out, err) = r.run_restore(None);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("20270115T080000Z/users/idle"), "{out}");
+    let task_entry = format!("20270115T080000Z/users/active/{OLD}");
+    assert!(out.contains(&task_entry), "{out}");
+    assert!(r.user("active").join(OLD).exists() == false);
+
+    let (code, out, err) = r.run_restore(Some(&task_entry));
+    assert_eq!(code, 0, "{err}\n{out}");
+    assert!(r.user("active").join(OLD).join("layers/01.png").exists());
+    assert!(!r.path().join("recycle").join(&task_entry).exists());
+
+    let idle_entry = "20270115T080000Z/users/idle";
+    let (code, _, err) = r.run_restore(Some(idle_entry));
+    assert_eq!(code, 0, "{err}");
+    assert!(r.user("idle").join(".kacha/user.json").exists());
+    assert!(!r.path().join("recycle").join(idle_entry).exists());
 }
 
 #[test]

@@ -1,7 +1,6 @@
 // 多画板标签页：打开 / 新建 / 关闭 / 重命名 / 去抖自动保存 / 另存到。
 import { useCallback, useRef, useState } from "react";
 import {
-  BOARD_EXTENSION,
   DEFAULT_BOARD_TITLE,
   newBoard,
   openBoard,
@@ -15,10 +14,9 @@ import { emptyHistory, recordChange, redo, undo, type History } from "../core/hi
 import { basename, boardsDir, dirname, joinPath, resolveFromRoot } from "../core/paths";
 import { restoreResultLayers } from "../core/taskDir";
 import { sha256Hex } from "../core/sha256";
-import { desktop, ipc, isWeb } from "../shell/ipc";
+import { ipc } from "../shell/ipc";
 import { ApiError } from "../shell/apiError";
 import { logEvent } from "../shell/log";
-import type { OperationGate } from "../core/updatePreparation";
 import { knownImageInfo } from "./context";
 
 export const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -42,7 +40,7 @@ const samePath = (a: string, b: string) => a.replace(/\\/g, "/").toLowerCase() =
 /** 编辑环境里随应用状态变化的部分：能力表、网关发现、该画板的锁定集（排队 / 执行 / 限流退避中的任务节点）。 */
 export type EnvSource = (key: string) => Pick<EditEnv, "table" | "discovery" | "locked">;
 
-export function useBoardSessions(outputRoot: string | null, envSource: EnvSource, gate?: OperationGate) {
+export function useBoardSessions(outputRoot: string | null, envSource: EnvSource) {
   const [sessions, setSessionsState] = useState<Session[]>([]);
   const [activeKey, setActiveKeyState] = useState<string | null>(null);
   const activeKeyRef = useRef<string | null>(null);
@@ -52,17 +50,6 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
   }, []);
   const sessionsRef = useRef<Session[]>([]);
   const savers = useRef(new Map<string, Saver>());
-  const gateRef = useRef(gate);
-  gateRef.current = gate;
-  const blocked = () => gateRef.current?.blocked() ?? false;
-  const tracked = <A extends unknown[], R,>(operation: (...args: A) => Promise<R>, fallback: R) =>
-    (...args: A): Promise<R> => {
-      if (blocked()) return Promise.resolve(fallback);
-      const work = operation(...args);
-      gateRef.current?.track(work);
-      return work;
-    };
-
   const setSessions = useCallback((next: Session[]) => {
     sessionsRef.current = next;
     setSessionsState(next);
@@ -205,36 +192,6 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
     await Promise.all([...pending, ...[...savers.current.values()].map((s) => s.chain)]);
   }, [flush]);
 
-  /** 单画板严格写入（更新准备用）：清空计时器，写入当前画板，失败 reject 真实原因。 */
-  const flushStrictOne = useCallback(async (key: string) => {
-    const saver = saverOf(key);
-    if (saver.timer) clearTimeout(saver.timer);
-    saver.timer = null;
-    const write = saver.chain.then(async () => {
-      const s = sessionsRef.current.find((x) => x.key === key);
-      if (!s || s.status !== "ok" || s.conflicted) return;
-      try {
-        await writeSession(key, s);
-      } catch (e) {
-        const message = `未能保存到 ${s.path}：${errorText(e)}`;
-        logEvent("board_save_failed", { board_file: basename(s.path), reason: "update_prepare", message: errorText(e) });
-        patch(key, (x) => ({ ...x, saveError: message }));
-        throw new Error(message);
-      }
-    });
-    saver.chain = write.catch(() => undefined);
-    return write;
-  }, [patch]);
-
-  /** 严格保存全部已打开画板（ADR 0016）：每个可编辑会话都重新写一遍并等待真实结果，
-   *  覆盖未到期计时器、在途写入与此前失败的保存；一个失败也等其余写完再抛错。 */
-  const flushAllStrict = useCallback(async () => {
-    const keys = sessionsRef.current.filter((s) => s.status === "ok").map((s) => s.key);
-    const results = await Promise.allSettled(keys.map((key) => flushStrictOne(key)));
-    const failed = results.find((r) => r.status === "rejected");
-    if (failed) throw (failed as PromiseRejectedResult).reason;
-  }, [flushStrictOne]);
-
   /** 打开画板文件；已打开则切过去。主文件与 .bak 都不存在时返回 false。 */
   const openPath = useCallback(
     async (path: string, activate = true): Promise<boolean> => {
@@ -311,12 +268,9 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
       const saver = savers.current.get(key);
       if (saver?.timer) await flush(key);
       else if (saver) await saver.chain;
-      // 更新准备接管在途关闭：保留会话，由严格保存重试吞错的写入。
-      if (blocked()) return;
-      // Web 版保存失败不能丢改动（关页即丢，没有桌面关窗确认）：标签页留着，修好后重试或先导出。
-      // 桌面维持原行为：允许保存失败后关闭（旧假壳 updateProtection 覆盖）。
+      // 保存失败不能丢改动：标签页留着，修好后重试或先导出画板包。
       const current = sessionsRef.current.find((s) => s.key === key);
-      if (isWeb && current?.status === "ok" && current.saveError) return;
+      if (current?.status === "ok" && current.saveError) return;
       savers.current.delete(key);
       const list = sessionsRef.current;
       const index = list.findIndex((s) => s.key === key);
@@ -356,27 +310,6 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
     [flush, patch, apply],
   );
 
-  const saveAs = useCallback(
-    async (key: string) => {
-      const s = sessionsRef.current.find((x) => x.key === key);
-      if (!s || s.status !== "ok") return;
-      const target = await desktop.save({
-        defaultPath: basename(s.path),
-        filters: [{ name: "画板", extensions: [BOARD_EXTENSION.slice(1)] }],
-      });
-      if (!target) return;
-      const path = target.toLowerCase().endsWith(BOARD_EXTENSION) ? target : `${target.replace(/\.json$/i, "")}${BOARD_EXTENSION}`;
-      try {
-        await ipc.writeBoard(path, serializeBoard(s.board));
-        patch(key, (x) => ({ ...x, path, saveError: null }));
-      } catch (e) {
-        logEvent("board_save_failed", { board_file: basename(path), reason: "save_as", message: errorText(e) });
-        patch(key, (x) => ({ ...x, saveError: `未能保存到 ${path}：${errorText(e)}` }));
-      }
-    },
-    [patch],
-  );
-
   const dismissNotice = useCallback((key: string) => patch(key, (x) => ({ ...x, notice: null })), [patch]);
 
   /** 保存失败后显式重试：改动一直在页面里，这里只是再写一次。 */
@@ -405,31 +338,24 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
   return {
     sessions,
     activeKey,
-    setActiveKey: (key: string | null) => { if (!blocked()) setActiveKey(key); },
-    openPath: tracked(openPath, false),
-    createBoard: tracked(createBoard, undefined),
-    addImportedBoard: (board: Board) => {
-      if (blocked()) return Promise.reject(new Error("正在准备更新，暂不能导入画板"));
-      const work = addImportedBoard(board);
-      gateRef.current?.track(work);
-      return work;
-    },
-    closeBoard: tracked(closeBoard, undefined),
-    renameBoard: tracked(renameBoard, undefined),
-    saveAs: tracked(saveAs, undefined),
-    apply: (key: string, change: BoardChange) => blocked() ? null : apply(key, change),
+    setActiveKey,
+    openPath,
+    createBoard,
+    addImportedBoard,
+    closeBoard,
+    renameBoard,
+    apply,
     check,
-    undoBoard: (key: string) => { if (!blocked()) undoBoard(key); },
-    redoBoard: (key: string) => { if (!blocked()) redoBoard(key); },
+    undoBoard,
+    redoBoard,
     getBoard,
     boardFileName,
     closeAll,
     flushAll,
-    flushAllStrict,
     flushNow: flush,
-    retrySave: (key: string) => tracked(retrySave, undefined)(key),
-    reload: (key: string) => tracked(reload, undefined)(key),
-    dismissNotice: (key: string) => { if (!blocked()) dismissNotice(key); },
+    retrySave,
+    reload,
+    dismissNotice,
     snapshot: () => ({ sessions: sessionsRef.current, activeKey: activeKeyRef.current }),
   };
 }

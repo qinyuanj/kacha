@@ -1130,29 +1130,6 @@ button.primary[aria-disabled="true"] {
   background: #fff8c5;
   border: 1px solid var(--yellow);
 }
-.diagnostics {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-}
-.diagnostics-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 200px;
-  margin: 0;
-  padding: 0;
-  overflow: auto;
-  list-style: none;
-}
-.diagnostics-list li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .context-menu {
   position: fixed;
   z-index: 1000;

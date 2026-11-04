@@ -1,11 +1,10 @@
 // Web 版壳层：业务调用走同源 HTTP，密钥存 localStorage，网关由浏览器直连（ADR 0018）。
-// 不 import 任何 @tauri-apps/*；UI 与 core 不直接调 HTTP，都经这里的端口。
+// UI 与 core 不直接调业务 HTTP，都经这里的端口。
 import type { FetchLike } from "../core/gateway";
 import { PACK_CANCELLED } from "../core/boardPack";
 import { ApiError } from "./apiError";
 import { DEFAULT_SETTINGS, serializeSettings } from "../core/settings";
-import type { UpdateFlowPorts } from "../core/updateFlow";
-import type { DesktopPort, Ipc, RelayPort, SessionPort, ShellImpl, TransferPort, UsagePort } from "./types";
+import type { BrowserPort, Ipc, RelayPort, SessionPort, ShellImpl, TransferPort, UsagePort } from "./types";
 
 /** core/ 仍按「输出根 + 相对路径」拼路径；Web 版固定一个虚拟根，壳层在边界剥掉。 */
 export const VIRTUAL_ROOT = "/~";
@@ -159,7 +158,7 @@ async function uploadPack(file: File): Promise<string> {
 
 const discardUpload = async (id: string) => void (await api(`/api/packs/uploads/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true }));
 
-/** 进度轮询：桌面是事件推送，Web 轮询当前操作的 done/total。 */
+/** 进度轮询：画板包服务端按操作 id 报告 done/total。 */
 function onPackProgress(handler: (progress: { done: number; total: number }) => void): () => void {
   let stopped = false;
   const tick = async () => {
@@ -179,12 +178,7 @@ function onPackProgress(handler: (progress: { done: number; total: number }) => 
   };
 }
 
-/** Web 版不存在的能力（#24/#28 落地）在这里明确报错，不静默假装成功。 */
-const unsupported = (what: string) => () => Promise.reject(new ApiError(501, "not_implemented", `Web 版暂不支持：${what}`));
-
 export const ipc: Ipc = {
-  appPaths: async () => ({ default_output_root: VIRTUAL_ROOT, app_data_dir: VIRTUAL_ROOT }),
-  startupArgs: async () => [],
   readBoard: (path) => api(`/api/boards?${query(path)}`),
   writeBoard: async (path, text, options) => {
     const params = new URLSearchParams({ path: stripRoot(path) });
@@ -211,8 +205,6 @@ export const ipc: Ipc = {
   writeModelsCache: async (text) => void (await api("/api/models-cache", textBody(text))),
   logEvent: async (kind, fields) =>
     void (await api("/api/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, fields }) })),
-  diagnosticsPreview: unsupported("诊断包（Web 版已移除）"),
-  diagnosticsExport: unsupported("诊断包（Web 版已移除）"),
   // spec.files[].source 是 core 拼出的虚拟根绝对路径：在边界剥成相对用户数据根，服务端只收相对路径。
   boardPackExport: async (_outputRoot, target, spec) => boardPackExport({ ...spec, files: spec.files.map((f) => ({ ...f, source: stripRoot(f.source) })) }, target),
   boardPackEntries: (pack) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/entries`),
@@ -237,10 +229,6 @@ export const ipc: Ipc = {
       currentOp = newOpId();
     }
   },
-  // 密钥不再进系统凭据库：留在浏览器 localStorage，供浏览器直接调用网关。
-  secretGet: async () => localStorage.getItem(API_KEY_STORAGE),
-  secretSet: async (key) => void localStorage.setItem(API_KEY_STORAGE, key),
-  secretDelete: async () => void localStorage.removeItem(API_KEY_STORAGE),
   listDir: (path) => api(`/api/fs/dir?${query(path)}`),
   fileSha256: (path) => api(`/api/fs/sha256?${query(path)}`),
   isFile: (path) => api(`/api/fs/is-file?${query(path)}`),
@@ -254,40 +242,13 @@ export const httpFetch: FetchLike = (url, init) => fetch(url, init);
 /** 图片地址走同源读文件接口，靠会话 cookie 认人。 */
 export const fileUrl = (path: string) => `/api/fs/file?${query(path)}`;
 
-const noop = async () => () => undefined;
-
-const desktop: DesktopPort = {
+const browser: BrowserPort = {
   ask: async (text, options) => window.confirm(options?.title ? `${options.title}\n\n${text}` : text),
-  message: async (text) => void window.alert(text),
-  open: unsupported("系统文件对话框（#28 改为浏览器上传）"),
-  save: unsupported("系统保存对话框（#24/#28 改为浏览器下载）"),
-  setWindowSize: async () => undefined,
-  onResized: noop,
-  destroyWindow: async () => window.close(),
-  onCloseRequested: noop,
-  onSecondInstance: noop,
+  message: async (text, options) => void window.alert(options?.title ? `${options.title}\n\n${text}` : text),
   onPackProgress: async (handler) => onPackProgress(handler),
-  onDropPaths: noop,
   openExternal: (url) => void window.open(url, "_blank", "noopener,noreferrer"),
   version: async () => (await webConfig()).version,
 };
-
-/** Web 版没有自动更新：流程照常构造，但发布检查恒为「没有新版本」，不发出请求。 */
-function updateFlowPorts(protection: Pick<UpdateFlowPorts, "restartGuard" | "restartReleased">): UpdateFlowPorts {
-  return {
-    currentVersion: () => desktop.version(),
-    platform: () => "web" as never,
-    schedule: (ms, fn) => {
-      const id = setTimeout(fn, ms);
-      return () => clearTimeout(id);
-    },
-    log: () => undefined,
-    release: { fetchLatest: async () => null },
-    updater: { check: async () => null },
-    ...protection,
-    restart: async () => undefined,
-  };
-}
 
 export const session: SessionPort = {
   login: sessionApi.login,
@@ -354,5 +315,5 @@ const usage: UsagePort = {
   cleanupUnreferenced: (dirs) => api("/api/cleanup/unreferenced", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dirs }) }),
 };
 
-export const shell: ShellImpl = { web: true, ipc, httpFetch, fileUrl, desktop, session, relay, transfer, usage, updateFlowPorts, pack: { upload: uploadPack, discard: discardUpload } };
+export const shell: ShellImpl = { outputRoot: VIRTUAL_ROOT, ipc, httpFetch, fileUrl, browser, session, relay, transfer, usage, pack: { upload: uploadPack, discard: discardUpload } };
 

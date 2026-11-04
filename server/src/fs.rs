@@ -282,7 +282,7 @@ pub async fn list_dir(State(state): State<AppState>, user: User, Query(q): Query
         Ok(p) => p,
     };
     match blocking(move || {
-        // 与原 Tauri 命令一致：不跟随符号链接进目录。
+        // 不跟随符号链接进目录。
         std::fs::read_dir(&path)?
             .filter_map(|e| e.ok())
             .map(|e| Ok(DirEntry { name: e.file_name().to_string_lossy().into_owned(), is_dir: e.file_type().map(|t| t.is_dir()).unwrap_or(false) }))

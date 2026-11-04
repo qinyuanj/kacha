@@ -8,7 +8,7 @@ import type { TaskNode } from "./board";
 import { createRunner } from "./runner";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
 import { settle } from "./testing/runnerHarness";
-import { png as makePng } from "../../e2e/app";
+import { png as makePng } from "../../e2e/common/boards";
 import type { RunDeps } from "./run";
 import { editBoard } from "./edit";
 

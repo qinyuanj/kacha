@@ -20,16 +20,16 @@ import {
 
 /** 内存里的设置端口：记下每次写入；stub 可让某个端口抛错。 */
 function memoryPorts(stub: Partial<SettingsPorts> = {}) {
-  const writes = { settings: [] as string[], cache: [] as string[], secretSet: [] as string[], secretDelete: 0 };
+  const writes = { settings: [] as string[], cache: [] as string[], writeApiKey: [] as string[], deleteApiKey: 0 };
   const logs: { kind: string; fields: Record<string, unknown> }[] = [];
   const ports: SettingsPorts = {
     readSettings: async () => null,
     writeSettings: async (text) => void writes.settings.push(text),
     readModelsCache: async () => null,
     writeModelsCache: async (text) => void writes.cache.push(text),
-    secretGet: async () => null,
-    secretSet: async (key) => void writes.secretSet.push(key),
-    secretDelete: async () => void writes.secretDelete++,
+    readApiKey: async () => null,
+    writeApiKey: async (key) => void writes.writeApiKey.push(key),
+    deleteApiKey: async () => void writes.deleteApiKey++,
     fetch: async () => {
       throw new Error("未联网");
     },
@@ -153,7 +153,7 @@ describe("保存设置", () => {
     const result = await saveSettings(ports, { fileKind: "newer", apiKey: "", keyPersistence: "persisted" }, next, "sk-new");
     expect(result).toEqual({ ok: true, settingsWritten: false, keyPersistence: "persisted" });
     expect(writes.settings).toEqual([]);
-    expect(writes.secretSet).toEqual(["sk-new"]);
+    expect(writes.writeApiKey).toEqual(["sk-new"]);
   });
 
   it("文件正常时写 settings.json；密钥未变且已存入凭据库时不碰凭据库", async () => {
@@ -161,13 +161,13 @@ describe("保存设置", () => {
     const result = await saveSettings(ports, { fileKind: "ok", apiKey: "sk", keyPersistence: "persisted" }, next, "sk");
     expect(result).toEqual({ ok: true, settingsWritten: true, keyPersistence: "persisted" });
     expect(JSON.parse(writes.settings[0])).toMatchObject({ base_url: "http://other:3001" });
-    expect(writes.secretSet).toEqual([]);
-    expect(writes.secretDelete).toBe(0);
+    expect(writes.writeApiKey).toEqual([]);
+    expect(writes.deleteApiKey).toBe(0);
   });
 
   it("凭据库 set 抛错时密钥退回会话内存（session）", async () => {
     const { ports } = memoryPorts({
-      secretSet: async () => {
+      writeApiKey: async () => {
         throw new Error("凭据库不可用");
       },
     });
@@ -178,15 +178,15 @@ describe("保存设置", () => {
   it("当前为 session 时即使密钥未变也重试写入凭据库，成功后回到 persisted", async () => {
     const { ports, writes } = memoryPorts();
     const result = await saveSettings(ports, { fileKind: "ok", apiKey: "sk", keyPersistence: "session" }, next, "sk");
-    expect(writes.secretSet).toEqual(["sk"]);
+    expect(writes.writeApiKey).toEqual(["sk"]);
     expect(result).toMatchObject({ ok: true, keyPersistence: "persisted" });
   });
 
   it("清空密钥走删除", async () => {
     const { ports, writes } = memoryPorts();
     await saveSettings(ports, { fileKind: "ok", apiKey: "sk", keyPersistence: "persisted" }, next, "");
-    expect(writes.secretDelete).toBe(1);
-    expect(writes.secretSet).toEqual([]);
+    expect(writes.deleteApiKey).toBe(1);
+    expect(writes.writeApiKey).toEqual([]);
   });
 
   it("写 settings.json 失败时返回报错原文，不再碰凭据库", async () => {
@@ -197,7 +197,7 @@ describe("保存设置", () => {
     });
     const result = await saveSettings(ports, { fileKind: "ok", apiKey: "", keyPersistence: "persisted" }, next, "sk-new");
     expect(result).toEqual({ ok: false, error: "磁盘已满" });
-    expect(writes.secretSet).toEqual([]);
+    expect(writes.writeApiKey).toEqual([]);
   });
 });
 
@@ -208,7 +208,7 @@ describe("载入设置", () => {
     const { ports } = memoryPorts({
       readSettings: async () => serializeSettings({ ...DEFAULT_SETTINGS, concurrency: 2 }),
       readModelsCache: async () => cacheText,
-      secretGet: async () => "sk",
+      readApiKey: async () => "sk",
     });
     const loaded = await loadSettings(ports);
     expect(loaded.file).toMatchObject({ kind: "ok", settings: { concurrency: 2 } });
@@ -217,7 +217,7 @@ describe("载入设置", () => {
 
   it("凭据库 get 抛错时密钥为空、退回 session", async () => {
     const { ports } = memoryPorts({
-      secretGet: async () => {
+      readApiKey: async () => {
         throw new Error("凭据库不可用");
       },
     });

@@ -1,6 +1,7 @@
 // 画板存服务端：新建 / 列出 / 打开 / 重命名、跨浏览器同密钥可见、两页面版本冲突、旧名保存报错。
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { zipText } from "../common/zip";
 import { enterWithKey, expect, GOOD_KEY, metaFile, readMeta, test, type Rig } from "./rig";
 
 /** 界面状态去抖落盘：等它记住当前打开的画板，再开第二个页面。 */
@@ -87,6 +88,31 @@ test("另一页面已重命名时，旧名保存明确报错且不多出旧名�
   expect(boardFiles(rig.userRoot(GOOD_KEY))).toEqual(["新名.ugcboard.json"]);
   // 改动保留在页面上，可重试。
   await expect(page2.locator(".react-flow__node")).toHaveCount(1);
+});
+
+test("保存失败后可先导出当前页面改动，不必等保存恢复", async ({ page, rig }) => {
+  await enterWithKey(page, rig.baseURL, GOOD_KEY);
+  await expect(page.locator(".tab").first()).toBeVisible();
+  await renameActiveTab(page, "待备份");
+  await expect.poll(() => boardFiles(rig.userRoot(GOOD_KEY))).toEqual(["待备份.ugcboard.json"]);
+  await page.route("**/api/boards?*", (route) => (route.request().method() === "PUT" ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ code: "io", message: "保存失败（模拟）" }) }) : route.continue()));
+  await page.getByRole("button", { name: "＋ 提示词", exact: true }).click();
+  const errorBar = page.locator(".bar-error");
+  await expect(errorBar).toContainText("保存失败（模拟）");
+  await expect(errorBar.locator(".react-flow__node")).toHaveCount(0);
+  await expect(page.locator(".react-flow__node")).toHaveCount(1);
+
+  await errorBar.getByRole("button", { name: "导出画板包", exact: true }).click();
+  const packDialog = page.getByRole("dialog", { name: "画板包" });
+  await expect(packDialog).toBeVisible();
+  const download = page.waitForEvent("download");
+  await packDialog.getByRole("button", { name: "导出并下载…" }).click();
+  const bytes = readFileSync((await (await download).path())!);
+  const packed = JSON.parse(zipText(bytes, "画板/待备份.ugcboard.json"));
+  expect(packed.nodes).toHaveLength(1);
+  expect(packed.nodes[0].type).toBe("prompt");
+  await expect(page.locator(".toast")).toHaveText("已导出画板包 待备份.ugcpack");
+  await expect(errorBar).toContainText("保存失败（模拟）");
 });
 
 test("保存失败时改动保留，恢复后可重试成功", async ({ page, rig }) => {

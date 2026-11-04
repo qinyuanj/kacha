@@ -1,12 +1,10 @@
-// 壳层入口：具体实现由构建选择（vite alias `kacha/shell-impl`）。
-// 生产 / 新 e2e 接缝 = impl.web.ts；旧假壳 e2e = impl.tauri.ts。
-import { shell } from "kacha/shell-impl";
+// 唯一壳层实现：同源 HTTP + 浏览器上传 / 下载。
+import { shell } from "./impl.web";
 
-export const { ipc, httpFetch, fileUrl, desktop, updateFlowPorts } = shell;
-export const isWeb = shell.web;
+export const { ipc, httpFetch, fileUrl, browser, outputRoot } = shell;
 export const session = shell.session;
 export const relay = shell.relay;
 export const transfer = shell.transfer;
 export const packUpload = shell.pack;
 export const usage = shell.usage;
-export type { AppPaths, BoardTexts, DesktopPort, ImageInfo, Ipc, PackageEntry, PackUploadPort, RelayPort, SessionPort, ShellImpl, TransferPort, Usage, UsageCandidate, UsagePort } from "./types";
+export type { BoardTexts, BrowserPort, ImageInfo, Ipc, PackUploadPort, RelayPort, SessionPort, ShellImpl, TransferPort, Usage, UsageCandidate, UsagePort } from "./types";

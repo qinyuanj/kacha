@@ -4,7 +4,7 @@
 
 ## 构建与打包
 
-日常验证与本地打包使用 dev/debug 构建；正式发布才使用 release 构建。保留 Cargo 默认并行策略。执行桌面打包或发布前，先读 `packaging/README.md` 并使用对应入口。
+日常验证使用 dev/debug 构建；正式部署才使用 release 构建。保留 Cargo 默认并行策略。执行部署构建前，先读 `packaging/README.md` 并使用 `packaging/build_web.py` 入口。
 
 ## Agent skills
 

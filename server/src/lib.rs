@@ -235,8 +235,7 @@ async fn api_fallback() -> axum::response::Response {
     fs::api_not_found().await
 }
 
-/// 前端静态文件 + CSP。桌面版 CSP 在 tauri.conf.json，Web 版由服务端下发；
-/// connect-src 必须放行浏览器直连的网关地址。
+/// 前端静态文件 + CSP；connect-src 必须放行浏览器直连的网关地址。
 fn static_service(
     state: &AppState,
 ) -> tower_http::set_header::SetResponseHeader<tower_http::services::ServeDir, axum::http::HeaderValue> {

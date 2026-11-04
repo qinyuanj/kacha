@@ -1,13 +1,11 @@
 // 放大预览弹窗：纯预览、编辑图片连线的指示区域（拖拽画矩形）、结果节点的图层侧栏与导出。
 // 弹窗必须挂在画布根（BoardCanvas），不能挂进 React Flow 节点内：变换容器里 position:fixed 会失效。
-import { desktop } from "../shell/ipc";
 import { useEffect, useRef, useState } from "react";
 import type { PortRef, RegionRender } from "../core/board";
 import { MAX_REGIONS, regionCss } from "../core/overlay";
-import { basename, dirname, joinPath } from "../core/paths";
-import { layersExportJson, parseLayersFile, type LayerRecord } from "../core/taskDir";
-import { fileUrl, ipc, isWeb, transfer } from "../shell/ipc";
-import { saveCopyAs, writeNew } from "../shell/saveFile";
+import { type LayerRecord } from "../core/taskDir";
+import { fileUrl, transfer } from "../shell/ipc";
+import { saveCopyAs } from "../shell/saveFile";
 import { useBoardActions, useImageInfos } from "./context";
 import { dragRect, isMeaningful, moveRect, resizeRect, type Corner, type Point01, type Rect01 } from "./rects";
 
@@ -172,35 +170,13 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
   };
   const exportOne = (absPath: string) =>
     runExport(async () => {
-      const saved = await saveCopyAs(absPath);
-      return saved && `已保存：${saved}`;
+      await saveCopyAs(absPath);
+      return "已开始下载";
     });
   const exportAll = () =>
     runExport(async () => {
-      // Web：底图 + 图层 + layers.json 由服务端打成 zip 下载（用户数据根里的真源文件，不经浏览器拼包）。
-      if (isWeb && transfer) {
-        transfer.downloadImage(req.absPath);
-        return "已开始下载：底图、全部图层与 layers.json（zip）";
-      }
-      const dir = await desktop.open({ directory: true }).then((p) => (Array.isArray(p) ? p[0] : p));
-      if (!dir) return null;
-      // 元数据真源是任务目录的 layers.json：可读且层数与当前一致时按它出（含底图名称 / 描述）；读不到（旧结果没有 layers.json）退回节点记录。损坏则明确失败，不静默降级。
-      const truth = await ipc.readFileBytes(joinPath(dirname(req.absPath), "layers.json")).then(parseLayersFile, () => null);
-      const source = truth && truth.layers.length === layers.length ? truth : null;
-      const records = source?.layers ?? layers.map((l) => l.record);
-      const basePath = await writeNew(await ipc.readFileBytes(req.absPath), joinPath(dir, basename(req.absPath)));
-      // 图层保持 layers/NN.png 布局写进 layers/ 子目录；重名改名的以实际写出的文件名为准。
-      const written: string[] = [];
-      for (const layer of layers) {
-        const path = await writeNew(await ipc.readFileBytes(layer.absPath), joinPath(dir, "layers", basename(layer.record.file)));
-        written.push(`layers/${basename(path)}`);
-      }
-      const json = await writeNew(
-        new TextEncoder().encode(layersExportJson(records.map((r, i) => ({ ...r, file: written[i] })), { ...(source?.base ?? {}), file: basename(basePath), z_index: 0 })),
-        joinPath(dir, "layers.json"),
-      );
-
-      return `已保存底图、${layers.length} 个图层与 ${basename(json)}`;
+      transfer.downloadImage(req.absPath);
+      return "已开始下载：底图、全部图层与 layers.json（zip）";
     });
 
   const layerIndex = pickSource > 0 && pickSource <= layers.length ? pickSource : null;

@@ -1,19 +1,12 @@
-// 壳层端口类型：UI 只认这些接口，具体实现见 impl.tauri.ts（旧假壳 e2e）与 impl.web.ts（Web 版）。
+// Web 壳层端口：UI 只认这些接口，同源 HTTP 与浏览器能力都在 impl.web.ts 中实现。
 import type { FetchLike } from "../core/gateway";
 import type { MergeOutcome, MergeUnit, PackExportSpec } from "../core/boardPack";
 import type { DirEntry } from "../core/relocate";
-import type { UpdateFlowPorts } from "../core/updateFlow";
-
-export interface AppPaths {
-  default_output_root: string;
-  app_data_dir: string;
-}
 
 export interface BoardTexts {
   main: string | null;
   bak: string | null;
-  /** 主文件内容版本（Web 版服务端返回）；桌面实现没有版本概念。 */
-  version?: string | null;
+  version: string | null;
 }
 
 /** 画板写入约定：带版本 = 过期保存 409；createOnly = 只新建不覆盖（两页同时建同名）。 */
@@ -31,17 +24,7 @@ export interface ImageInfo {
   has_alpha: boolean;
 }
 
-export interface PackageEntry {
-  name: string;
-  description: string;
-  size: number;
-  optional: boolean;
-  contains_prompt: boolean;
-}
-
 export interface Ipc {
-  appPaths(): Promise<AppPaths>;
-  startupArgs(): Promise<string[]>;
   readBoard(path: string): Promise<BoardTexts>;
   writeBoard(path: string, text: string, options?: BoardWriteOptions): Promise<void>;
   renameBoard(from: string, to: string, version?: string): Promise<void>;
@@ -55,16 +38,11 @@ export interface Ipc {
   readModelsCache(): Promise<string | null>;
   writeModelsCache(text: string): Promise<void>;
   logEvent(kind: string, fields: Record<string, unknown>): Promise<void>;
-  diagnosticsPreview(outputRoot: string | null, openBoards: string[]): Promise<PackageEntry[]>;
-  diagnosticsExport(outputRoot: string | null, openBoards: string[], target: string, include: string[]): Promise<PackageEntry[]>;
   boardPackExport(outputRoot: string, target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number }>;
   boardPackEntries(pack: string): Promise<string[]>;
   boardPackReadTexts(pack: string, names: string[]): Promise<Record<string, string>>;
   boardPackImport(pack: string, outputRoot: string, units: MergeUnit[]): Promise<{ outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number }>;
   boardPackCancel(cancelled: boolean): Promise<void>;
-  secretGet(): Promise<string | null>;
-  secretSet(key: string): Promise<void>;
-  secretDelete(): Promise<void>;
   listDir(path: string): Promise<DirEntry[]>;
   fileSha256(path: string): Promise<string>;
   isFile(path: string): Promise<boolean>;
@@ -72,44 +50,24 @@ export interface Ipc {
   writeNewFile(path: string, bytes: Uint8Array): Promise<void>;
 }
 
-export interface AskOptions {
+export interface BrowserOptions {
   title?: string;
   kind?: "error" | "info" | "warning";
   okLabel?: string;
   cancelLabel?: string;
 }
 
-export interface OpenOptions {
-  multiple?: boolean;
-  directory?: boolean;
-  defaultPath?: string;
-  filters?: { name: string; extensions: string[] }[];
-}
-
-/** 系统对话框与窗口行为：桌面是原生 API，Web 由浏览器上传 / 下载与自绘确认替代。 */
-export interface DesktopPort {
-  ask(message: string, options?: AskOptions): Promise<boolean>;
-  message(text: string, options?: AskOptions): Promise<void>;
-  open(options?: OpenOptions): Promise<string | string[] | null>;
-  save(options?: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;
-  setWindowSize(size: { width: number; height: number }): Promise<void>;
-  /** 尺寸在回调里异步读取（最大化时返回 null）；调用方在 await 之前就把工作纳入更新准备闸。 */
-  onResized(handler: (readSize: () => Promise<{ width: number; height: number } | null>) => void): Promise<() => void>;
-  destroyWindow(): Promise<void>;
-  onCloseRequested(handler: (event: { preventDefault(): void }) => Promise<void>): Promise<() => void>;
-  onSecondInstance(handler: (paths: string[]) => void): Promise<() => void>;
+export interface BrowserPort {
+  ask(message: string, options?: BrowserOptions): Promise<boolean>;
+  message(text: string, options?: BrowserOptions): Promise<void>;
   onPackProgress(handler: (progress: { done: number; total: number }) => void): Promise<() => void>;
-  /** 拖入画板文件 / 参考图（Web 版由 #28 用 HTML5 drop 实现）。 */
-  onDropPaths(handler: (paths: string[], position: { x: number; y: number }) => void): Promise<() => void>;
   openExternal(url: string): void;
   version(): Promise<string>;
 }
 
 export interface UsageCandidate {
-  /** 相对用户数据根的任务目录（`<日期>/<task_id>`）。 */
   dir: string;
   bytes: number;
-  /** Unix 秒：目录内最新修改时间。 */
   last_write: number;
 }
 
@@ -117,65 +75,49 @@ export interface Usage {
   total_bytes: number;
   boards_bytes: number;
   meta_bytes: number;
-  /** Unix 秒：服务端记的最后访问时间。 */
   last_access: number;
   by_date: { date: string; bytes: number }[];
-  /** 有画板读不懂时为 null（不给清单）。 */
   unreferenced: UsageCandidate[] | null;
   unreadable_board: string | null;
 }
 
-/** 用量与自助清理（只有 Web 版有；旧假壳没有）。 */
 export interface UsagePort {
   usage(): Promise<Usage>;
   cleanupUnreferenced(dirs: string[]): Promise<{ moved: UsageCandidate[]; skipped: string[] }>;
 }
 
 export interface ShellImpl {
-  /** Web 版为 true：禁用自动更新、诊断包等桌面能力。 */
-  web: boolean;
+  outputRoot: string;
   ipc: Ipc;
   httpFetch: FetchLike;
   fileUrl(path: string): string;
-  desktop: DesktopPort;
+  browser: BrowserPort;
   session: SessionPort;
-  /** 结果中转（只有 Web 版有）：url 结果由服务端下载到任务目录暂存区，校验后提交。 */
-  relay?: RelayPort;
-  /** 浏览器上传 / 下载（只有 Web 版有；桌面仍走系统对话框）。 */
-  transfer?: TransferPort;
-  /** 画板包上传（只有 Web 版有）：浏览器选中的文件流式上传到服务端临时位置。 */
-  pack?: PackUploadPort;
-  /** 用量与自助清理（只有 Web 版有）。 */
-  usage?: UsagePort;
-  updateFlowPorts(protection: Pick<UpdateFlowPorts, "restartGuard" | "restartReleased">): UpdateFlowPorts;
+  relay: RelayPort;
+  transfer: TransferPort;
+  pack: PackUploadPort;
+  usage: UsagePort;
 }
 
-/** 结果中转端口：相对路径都相对输出根（虚拟根由实现剥掉）。 */
+/** 结果中转：相对路径都相对用户数据根（虚拟根由实现剥掉）。 */
 export interface RelayPort {
   relayResult(args: { url: string; relDir: string; stem: string; signal?: AbortSignal }): Promise<{ file: string; path: string }>;
   commitRelayed(relDir: string, from: string, stem: string): Promise<{ file: string; path: string }>;
   discardRelayed(relDir: string): Promise<void>;
 }
 
-/** 浏览器文件传输端口（#28）：本机 → 用户数据根的上传，用户数据根 → 本机的下载。 */
 export interface TransferPort {
-  /** 选本机图片；取消返回空数组。multiple=false 时最多一张。 */
   pickLocalImages(multiple: boolean): Promise<File[]>;
-  /** 上传一张参考图，返回相对用户数据根的落盘路径（`导入参考图/<sha256>.<ext>`）。 */
   uploadReference(file: File): Promise<{ path: string; sha256: string }>;
-  /** 下载单张图片：结果带图层时服务端给 zip。 */
   downloadImage(path: string, name?: string): void;
-  /** 下载整张画板的全部结果 zip。 */
   downloadBoardResults(boardPath: string): void;
 }
 
-/** 画板包上传端口：返回服务端上传句柄；放弃时删除临时文件。 */
 export interface PackUploadPort {
   upload(file: File): Promise<string>;
   discard(id: string): Promise<void>;
 }
 
-/** 进入与身份：只有 Web 版有；桌面实现为占位（旧假壳不经过进入界面）。 */
 export interface SessionPort {
   login(key: string): Promise<{ fingerprint: string }>;
   current(): Promise<{ fingerprint: string }>;

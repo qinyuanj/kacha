@@ -1,7 +1,7 @@
 // 画板包（ADR 0013）：把一块画板连同它直接引用的任务目录与图片打成单个 .ugcpack，供另一台机器导入。
 // 包格式的全部规则在这里：导出计划（带哪些任务目录 / 参考图、画板路径改写）、清单、导入前的版本与布局判定、
 // 合并单元（任务目录按 task.json 比对，参考图按整文件比对）与结果文案。
-// Rust 壳（src-tauri/src/board_pack.rs）只按给定条目与合并单元搬字节。文件系统由调用方注入。
+// server/src/board_pack.rs 只按给定条目与合并单元搬字节。文件系统由调用方注入。
 import { parseBoard, serializeBoard, type Board, type BoardNode } from "./board";
 import { BOARDS_DIR_NAME, basename, resolveFromRoot, toRootRelative } from "./paths";
 import { TASK_RECORD_FILE, taskDirOfRelPath } from "./taskDir";
@@ -219,7 +219,7 @@ export function importSummary(units: MergeUnit[], outcomes: { path: string; outc
 
 // ---- 可取消的包命令 ----
 
-/** 与 src-tauri/src/board_pack.rs 的 CANCELLED 一致：取消时命令以此 reject。 */
+/** 与 server/src/board_pack.rs 的 CANCELLED 一致：取消时请求以此失败。 */
 export const PACK_CANCELLED = "已取消";
 
 /** 画板包命令的端口（壳层 ipc 实现，见 shell/adapters.ts）。 */

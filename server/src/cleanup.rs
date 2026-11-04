@@ -386,10 +386,137 @@ const USAGE: &str = "用法：kacha-server cleanup [--dry-run | --purge] [--data
   --dry-run  只列候选（类别、路径、大小、最后访问时间）与将彻底删除的回收区批次，不改动磁盘\n\
   --purge    跳过回收区直接删除（磁盘紧急时）\n\
   默认       候选移入 <数据根>/recycle/<UTC 时刻>/，超过 14 天的批次彻底删除\n\
-  数据根也可用环境变量 KACHA_DATA_ROOT；--now 只供测试与演练";
+  数据根也可用环境变量 KACHA_DATA_ROOT；--now 只供测试与演练\n\
+  恢复：kacha-server cleanup restore [--data-root <目录>] [<批次>/<原路径>]\n\
+  恢复     不带条目时列出回收区；带条目时把它搬回原位置，目标已存在则拒绝";
+
+const RESTORE_USAGE: &str = "用法：kacha-server cleanup restore [--data-root <目录>] [<批次>/<原路径>]";
+
+/// 回收区里可独立恢复的条目：整个闲置用户数据根，或一个未引用任务目录。
+fn recycle_entries(data_root: &Path) -> io::Result<Vec<String>> {
+    let mut entries = Vec::new();
+    let recycle = data_root.join(RECYCLE_DIR);
+    if !recycle.is_dir() {
+        return Ok(entries);
+    }
+    for batch in dir_names(&recycle)? {
+        let batch_root = recycle.join(&batch);
+        let users = batch_root.join(USERS_DIR);
+        if !users.is_dir() {
+            continue;
+        }
+        for fp in dir_names(&users)? {
+            let user = users.join(&fp);
+            let prefix = format!("{batch}/{USERS_DIR}/{fp}");
+            if user.join(crate::META_DIR).is_dir() {
+                entries.push(prefix);
+                continue;
+            }
+            for date in dir_names(&user)? {
+                if !is_date_dir(&date) {
+                    continue;
+                }
+                for task in dir_names(&user.join(&date))? {
+                    entries.push(format!("{prefix}/{date}/{task}"));
+                }
+            }
+        }
+    }
+    entries.sort();
+    Ok(entries)
+}
+
+fn restore_entry(data_root: &Path, entry: &str) -> io::Result<()> {
+    if entry.contains('\\') {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "条目必须使用正斜杠相对路径"));
+    }
+    let path = Path::new(entry);
+    let mut components = path.components();
+    let Some(std::path::Component::Normal(batch)) = components.next() else {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "条目必须包含回收区批次"));
+    };
+    if parse_stamp(&batch.to_string_lossy()).is_none() || components.clone().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "回收区条目无效"));
+    }
+    let original = components.as_path();
+    if !original.starts_with(USERS_DIR) || original.components().count() < 2 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "回收区条目必须来自 users/"));
+    }
+    let source = data_root.join(RECYCLE_DIR).join(path);
+    if !source.exists() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "回收区条目不存在"));
+    }
+    let target = data_root.join(original);
+    if target.exists() {
+        return Err(io::Error::new(io::ErrorKind::AlreadyExists, "原位置已存在，未覆盖"));
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::rename(source, target)
+}
+
+fn run_restore_cli(args: &[String]) -> i32 {
+    let mut data_root = std::env::var("KACHA_DATA_ROOT").ok().unwrap_or_else(|| "./kacha-data".into());
+    let mut entry = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--data-root" => {
+                let Some(v) = it.next() else {
+                    eprintln!("--data-root 缺少取值\n{RESTORE_USAGE}");
+                    return 2;
+                };
+                data_root = v.clone();
+            }
+            "-h" | "--help" => {
+                println!("{RESTORE_USAGE}");
+                return 0;
+            }
+            other if other.starts_with('-') || entry.is_some() => {
+                eprintln!("未知或重复参数：{other}\n{RESTORE_USAGE}");
+                return 2;
+            }
+            other => entry = Some(other),
+        }
+    }
+    let root = PathBuf::from(data_root);
+    let entries = match recycle_entries(&root) {
+        Ok(entries) => entries,
+        Err(e) => {
+            eprintln!("读取回收区失败：{e}");
+            return 1;
+        }
+    };
+    let Some(selected) = entry else {
+        println!("# 批次/原路径（相对 recycle）\t字节");
+        for item in &entries {
+            println!("{item}\t{}", tree_bytes(&root.join(RECYCLE_DIR).join(item)));
+        }
+        println!("# 可回收条目 {} 项；用 cleanup restore <条目> 恢复", entries.len());
+        return 0;
+    };
+    if !entries.iter().any(|item| item == selected) {
+        eprintln!("回收区条目不存在或不可独立恢复：{selected}");
+        return 1;
+    }
+    match restore_entry(&root, selected) {
+        Ok(()) => {
+            println!("已恢复 {selected}");
+            0
+        }
+        Err(e) => {
+            eprintln!("恢复 {selected} 失败：{e}");
+            1
+        }
+    }
+}
 
 /// `kacha-server cleanup …`；返回进程退出码（0 成功，1 有条目失败或读数据根失败，2 参数错误）。
 pub fn run_cli(args: &[String]) -> i32 {
+    if args.first().map(String::as_str) == Some("restore") {
+        return run_restore_cli(&args[1..]);
+    }
     let mut dry_run = false;
     let mut purge = false;
     let mut data_root = std::env::var("KACHA_DATA_ROOT").ok().unwrap_or_else(|| "./kacha-data".into());

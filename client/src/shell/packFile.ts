@@ -1,11 +1,9 @@
-// Web 版画板包入口：系统文件对话框换成浏览器的文件选择与上传（桌面仍走 desktop.open/save）。
+// 画板包入口：浏览器选择文件并流式上传到服务端。
 import { PACK_FILE_FILTER } from "../core/boardPack";
 import { packUpload } from "./ipc";
 
 /** 弹浏览器文件选择，选中后流式上传到服务端临时位置；取消选择返回 null。 */
 export function pickAndUploadPack(): Promise<{ id: string; name: string } | null> {
-  const port = packUpload;
-  if (!port) return Promise.resolve(null);
   return new Promise((resolve, reject) => {
     const input = document.createElement("input");
     input.type = "file";
@@ -29,7 +27,7 @@ export function pickAndUploadPack(): Promise<{ id: string; name: string } | null
     input.addEventListener("change", () => {
       const file = input.files?.[0];
       if (!file) return done(null);
-      port.upload(file).then((id) => done({ id, name: file.name }), (e) => {
+      packUpload.upload(file).then((id) => done({ id, name: file.name }), (e) => {
         cleanup();
         reject(e);
       });

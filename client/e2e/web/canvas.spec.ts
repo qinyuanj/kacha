@@ -25,6 +25,8 @@ test("撤销 / 重做、右键菜单、悬浮动作条、平移与拖线建节�
   await expect(page.locator(".react-flow__node")).toHaveCount(2);
   await toolbar.getByRole("button", { name: "重做", exact: true }).click();
   await expect(page.locator(".react-flow__node")).toHaveCount(3);
+  // 等自动保存完成再按 Escape 关菜单；否则 Chromium 可能中止刚发出的 PUT，错误条会改变后续布局。
+  await page.waitForResponse((r) => r.url().includes("/api/boards?") && r.request().method() === "PUT" && r.status() === 204);
 
   // 右键菜单。
   await task(page, "t1").locator(".node-title").click({ button: "right" });
@@ -45,11 +47,11 @@ test("撤销 / 重做、右键菜单、悬浮动作条、平移与拖线建节�
   await page.mouse.up();
   await expect(page.locator(".node-task")).toHaveCount(tasksBefore + 1);
 
-  // 平移：拖动画布空白处改变视口。
+  // 平移：右键拖动画布空白处（左键是框选）。
   const before = await page.locator(".react-flow__viewport").getAttribute("style");
   await page.mouse.move(1100, 700);
-  await page.mouse.down();
+  await page.mouse.down({ button: "right" });
   await page.mouse.move(1250, 780, { steps: 8 });
-  await page.mouse.up();
-  expect(await page.locator(".react-flow__viewport").getAttribute("style")).not.toBe(before);
+  await page.mouse.up({ button: "right" });
+  await expect(page.locator(".react-flow__viewport")).not.toHaveAttribute("style", before!);
 });

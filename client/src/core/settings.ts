@@ -167,7 +167,7 @@ export function defaultEditModel(table: CapabilityTable, discovery: Discovery, l
 
 // ---- 载入 / 保存 / 模型刷新（#128）：经端口注入的无状态函数，不弹窗、不含文案；React 状态与提示在 ui/useSettings.ts ----
 
-/** persisted = 已存入系统凭据库；session = 凭据库不可用，只在本次运行的内存里。 */
+/** persisted = 已存入浏览器本地存储；session = 本地存储不可用，只在本次页面内。 */
 export type KeyPersistence = "persisted" | "session";
 
 export interface SettingsPorts {
@@ -175,16 +175,16 @@ export interface SettingsPorts {
   writeSettings(text: string): Promise<void>;
   readModelsCache(): Promise<string | null>;
   writeModelsCache(text: string): Promise<void>;
-  /** 系统凭据库；不可用时抛错。 */
-  secretGet(): Promise<string | null>;
-  secretSet(key: string): Promise<void>;
-  secretDelete(): Promise<void>;
+  /** 浏览器本地存储；不可用时抛错。 */
+  readApiKey(): Promise<string | null>;
+  writeApiKey(key: string): Promise<void>;
+  deleteApiKey(): Promise<void>;
   fetch: FetchLike;
   now(): Date;
   log(kind: "connection", fields: Record<string, unknown>): void;
 }
 
-/** 保存前的现状：决定写不写 settings.json、要不要碰凭据库。 */
+/** 保存前的现状：决定写不写 settings.json、要不要更新浏览器里的密钥。 */
 export interface SaveBaseline {
   fileKind: LoadedSettings["kind"];
   apiKey: string;
@@ -200,12 +200,12 @@ export interface InitialSettings {
   cache: ModelsCache | null;
 }
 
-/** 读 settings.json、模型缓存与凭据库密钥；读文件失败按缺失处理，凭据库抛错退回 session。 */
+/** 读 settings.json、模型缓存与浏览器密钥；读文件失败按缺失处理，本地存储抛错退回 session。 */
 export async function loadSettings(ports: SettingsPorts): Promise<InitialSettings> {
   const file = parseSettings(await ports.readSettings().catch(() => null));
   const cache = parseModelsCache(await ports.readModelsCache().catch(() => null));
   try {
-    return { file, apiKey: (await ports.secretGet()) ?? "", keyPersistence: "persisted", cache };
+    return { file, apiKey: (await ports.readApiKey()) ?? "", keyPersistence: "persisted", cache };
   } catch {
     return { file, apiKey: "", keyPersistence: "session", cache };
   }
@@ -213,7 +213,7 @@ export async function loadSettings(ports: SettingsPorts): Promise<InitialSetting
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** 保存设置与密钥。newer 时不覆盖 settings.json 但仍存密钥；密钥变了或当前为 session 才写凭据库，凭据库抛错退回 session。 */
+/** 保存设置与密钥。newer 时不覆盖 settings.json 但仍存密钥；密钥变了或当前为 session 才写本地存储，失败退回 session。 */
 export async function saveSettings(ports: SettingsPorts, current: SaveBaseline, next: Settings, apiKey: string): Promise<SaveResult> {
   const settingsWritten = current.fileKind !== "newer";
   if (settingsWritten) {
@@ -226,8 +226,8 @@ export async function saveSettings(ports: SettingsPorts, current: SaveBaseline, 
   let keyPersistence: KeyPersistence = "persisted";
   if (apiKey !== current.apiKey || current.keyPersistence === "session") {
     try {
-      if (apiKey) await ports.secretSet(apiKey);
-      else await ports.secretDelete();
+      if (apiKey) await ports.writeApiKey(apiKey);
+      else await ports.deleteApiKey();
     } catch {
       keyPersistence = "session";
     }

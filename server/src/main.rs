@@ -12,15 +12,15 @@ use kacha_server::{router, AppState, Config};
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!("kacha-server {}", kacha_server::VERSION);
-        println!("用法：kacha-server [--listen 0.0.0.0:3004] [--data-root <目录>] [--gateway-url <new-api 地址>] [--static-dir <前端构建目录>]");
-        println!("环境变量：KACHA_LISTEN、KACHA_DATA_ROOT、KACHA_GATEWAY_URL、KACHA_STATIC_DIR");
-        println!("清理：kacha-server cleanup --help");
-        return;
-    }
     if args.first().map(String::as_str) == Some("cleanup") {
         std::process::exit(kacha_server::cleanup::run_cli(&args[1..]));
+    }
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("kacha-server {}", kacha_server::VERSION);
+        println!("用法：kacha-server [--listen 0.0.0.0:3004] [--data-root <目录>] [--gateway-url <new-api 地址>] [--static-dir <前端构建目录>] [--result-hosts <逗号分隔主机>] [--min-free-gb 20]");
+        println!("环境变量：KACHA_LISTEN、KACHA_DATA_ROOT、KACHA_GATEWAY_URL、KACHA_STATIC_DIR、KACHA_RESULT_HOSTS、KACHA_MIN_FREE_GB");
+        println!("清理与恢复：kacha-server cleanup --help；kacha-server cleanup restore --help");
+        return;
     }
 
     let opt = |flag: &str, env: &str, default: &str| -> String {

@@ -1,126 +1,115 @@
-# 发布打包与分发（v2）
+# Kacha Web 部署与运维
 
-把 v2 Tauri 客户端构建为官方 updater 可安装的双端发布物，并经
-`publish_release.py` 发布到 Gitea Release。Windows 使用按当前用户安装的 NSIS 安装器；
-macOS（Apple Silicon）保留首次安装 zip，并发布官方 updater 使用的 `.app.tar.gz`。
-分发与 updater 决策见 `docs/adr/0007-gitea-release-as-sole-distribution-channel.md`、
-`docs/adr/0017-tauri-official-updater-for-desktop-updates.md`。脚本只依赖 Python 3.11+ 标准库。
+Kacha 由一个 `kacha-server` 进程同时托管前端静态文件和 API，默认地址为 `http://lzxsvn:3004/`。桌面安装器、自动更新与 Gitea 发布脚本已退役；旧版本只从 tag `v0.3.2` 查阅。
 
-## 发布产物
+## 构建与复制
 
-Gitea Release（tag `v<版本>`）按平台挂以下附件：
-
-    kacha-<版本>-win-x64-setup.exe          # NSIS，当前用户安装；首次安装与更新共用
-    kacha-<版本>-win-x64-setup.exe.sig      # updater minisign 签名
-    updater-win-x64.json                    # Windows 平台描述
-    kacha-<版本>-macos-arm64.zip            # 内含 Kacha.app（ad-hoc 签名，首次安装）
-    kacha-<版本>-macos-arm64.app.tar.gz     # macOS updater 更新包
-    kacha-<版本>-macos-arm64.app.tar.gz.sig # updater minisign 签名
-    updater-macos-arm64.json                # macOS 平台描述
-    SHA256SUMS                              # 覆盖实际发布产物
-
-平台描述采用 Tauri 静态 JSON 协议，只声明本端平台键：
-`windows-x86_64` 或 `darwin-aarch64`；每个平台集合中的描述最后发布，重复发布时先撤下本端旧描述，
-完成附件替换后重新发布。描述里的 `url` 使用 Gitea 附件上传后返回的 `browser_download_url`，
-`signature` 是 `.sig` 文件的原始 base64 文本。
-
-本地输出在仓库根目录 `release/`（已被 .gitignore 忽略）。
-
-## 文件
-
-| 文件 | 作用 |
-| --- | --- |
-| `release_meta.py` | 版本号唯一来源（`client/src-tauri/Cargo.toml`，`tauri.conf.json` 若有 version 必须一致）、产物命名、SHA256SUMS 工具 |
-| `build_release.py` | 在目标机器上 `npm ci` + `npx tauri build`，收集安装器、官方更新包与签名；macOS 校验应用签名后用 `ditto` 制作首次安装 zip，写 SHA256SUMS |
-| `publish_release.py` | 创建或复用 tag `v<版本>` 的 Release，核对后上传/替换附件，SHA256SUMS 与远端合并 |
-| `tests/` | 标准库 unittest（临时目录 + 内存假 Gitea，不联网） |
-
-## 用法
-
-日常本地打包在 `client/` 下执行：
-
-    npm run build:desktop
-
-该入口使用 Rust dev/debug profile（`tauri build --debug --config src-tauri/tauri.dev.conf.json`），
-默认安装包位于 `client/src-tauri/target/debug/bundle/`；不生成 updater 更新包与签名。
-前端仍执行 `npm run build`，让安装包内含可独立运行的静态资源。
-`npm run tauri -- dev` 用于交互开发，不生成安装包。
-
-正式发布才使用 release 构建。在 `client/` 下执行 `npm run build:release`，
-或在仓库根目录执行 `packaging/build_release.py`；继续使用 release 优化及 updater 签名发布产物。
-
-发版前在 `client/src-tauri/Cargo.toml` bump 版本。Tauri 不能交叉构建，两个平台各在对应机器上执行：
-
-    python3 packaging/build_release.py            # 自动识别 win-x64 / macos-arm64，其他机器拒绝
-    python3 packaging/build_release.py --skip-npm-ci
-
-    export GITEA_TOKEN=***                        # Windows PowerShell：$env:GITEA_TOKEN = "***"
-    python3 packaging/publish_release.py          # 可重复执行，幂等合并到同一 Release
-
-Tauri 原始产物与本脚本输出名称不同。Windows 从
-`client/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Kacha_<版本>_x64-setup.exe`
-及其 `.sig` 复制到 `release/kacha-<版本>-win-x64-setup.exe(.sig)`。
-macOS 从 `client/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/` 收集
-`Kacha.app` 同目录的 `Kacha.app.tar.gz` 与 `Kacha.app.tar.gz.sig`，复制并命名为
-`release/kacha-<版本>-macos-arm64.app.tar.gz(.sig)`；首次安装 zip 是
-`release/kacha-<版本>-macos-arm64.zip`。
-
-`bundle.macOS.signingIdentity: "-"` 让 Tauri 在生成 updater archive 前完成 ad-hoc 签名。
-构建脚本随后只执行 `codesign --verify --deep --strict`，不重新签名应用或重建 updater archive，
-使首次安装 zip 与更新包使用同一份已签名应用；updater archive 与 `.sig` 按字节原样复制。
-依据为 Tauri CLI 2.11.4 官方源码：
-[macOS 应用签名](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.4/crates/tauri-bundler/src/bundle/macos/app.rs)、
-[bundler 顺序](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.4/crates/tauri-bundler/src/bundle.rs)、
-[macOS updater 归档路径](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.4/crates/tauri-bundler/src/bundle/updater_bundle.rs)、
-[CLI updater 签名](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.4/crates/tauri-cli/src/bundle.rs)。
-
-## updater 签名密钥
-
-两端共用一套长期、无密码的 minisign 密钥。密钥生成一次并保存在当前用户目录下的项目专用位置：
-
-    # Windows PowerShell；macOS/Linux 用 ~/.kacha/updater/signing.key
-    $env:USERPROFILE\.kacha\updater\signing.key
-
-公钥已内置 `client/src-tauri/tauri.conf.json`；私钥绝不提交仓库、不写入日志或聊天。Windows 构建机的
-私钥复制到 macOS 构建机的同一相对位置后，两端分别设置：
-
-```powershell
-$env:TAURI_SIGNING_PRIVATE_KEY = "$env:USERPROFILE\.kacha\updater\signing.key"
-$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
-```
+在开发机安装 Rust、Node 与 Python 3.11+，在仓库根目录执行：
 
 ```sh
-export TAURI_SIGNING_PRIVATE_KEY="$HOME/.kacha/updater/signing.key"
-export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+python3 packaging/build_web.py
+# 已按锁文件安装依赖时可跳过 npm ci：
+python3 packaging/build_web.py --skip-npm-ci
 ```
 
-密钥文件应随项目发布材料备份到受限位置；丢失后必须更换公钥并发布一次只供手动安装的新版本。
+Windows 开发机可执行 `python packaging\build_web.py`。脚本运行前端 release 构建和 `cargo build --release`，输出：
 
-发布前需先按 `docs/release/release-notes-template.md` 撰写 `docs/release/release-notes-<版本>.md`，
-其全文即 Release 正文与 updater 更新说明。更新说明只写本版变化摘要，连同标题控制在 200 字以内；
-安装、系统放行、校验与故障恢复步骤保留在 `docs/release/auto-update-user-guide.md`，不重复写进更新说明。
-发布脚本的安全闸门：token 只从环境变量读取；`release/`
-有其他版本的发布产物、缺少 updater 签名、SHA256SUMS 不一致或未列出本端发布集合、缺少发布说明时，
-一律不发起任何上传。
+```text
+release/kacha-web/
+  kacha-server[.exe]
+  static/
+    index.html
+    assets/...
+  SHA256SUMS
+```
 
-## 测试
+把整个 `kacha-web` 目录复制到部署机，例如 `C:\kacha`。运行环境不需要 Rust、Node 或 Python；只需服务端程序和 `static/`。`index.html` 使用相对资源路径。SHA256SUMS 可用于复制后核对文件。
 
-在仓库根目录执行：
+本次已在 WSL Linux 实际完成 release 构建并检查 Linux 产物；未在 Windows 编译或运行 `.exe`。
 
-    python3 -m unittest discover -s packaging/tests
+## 配置
 
-构建测试通过完整 `build_release.main()` 调用，在临时仓库中模拟 subprocess 生成官方目录布局的
-Windows NSIS 与 macOS `.app`、`.app.tar.gz`、`.sig`，核对收集、重命名及 SHA256SUMS；
-macOS 测试还比较首次安装 zip 与更新包内的应用内容，捕获归档后重新签名造成的分歧。
-这些是假产物测试，不验证真实 codesign、minisign、macOS 扩展属性或安装更新。
-发布测试使用内存假 Gitea，不执行真实上传；macOS 真机安装、迁移及自动更新未验收。
+命令行参数优先于环境变量。Windows 服务建议使用下面的绝对路径参数，避免服务工作目录影响相对路径。
 
-## 用户侧提示（见用户指南）
+| 参数 | 环境变量 | 默认值 | 用途 |
+| --- | --- | --- | --- |
+| `--listen` | `KACHA_LISTEN` | `0.0.0.0:3004` | 监听地址与端口；部署前确认端口空闲 |
+| `--data-root` | `KACHA_DATA_ROOT` | `./kacha-data` | 所有用户数据根、回收区与服务端日志的位置 |
+| `--gateway-url` | `KACHA_GATEWAY_URL` | `http://lzxsvn:3001` | 服务端验证密钥的网关地址，也是前端初始网关地址与 CSP 允许地址 |
+| `--static-dir` | `KACHA_STATIC_DIR` | 无 | 前端构建目录；部署时指到复制后的 `static` |
+| `--result-hosts` | `KACHA_RESULT_HOSTS` | 空 | 逗号分隔的额外结果对象存储主机或后缀；默认已含 `.volces.com`、`.volccdn.com`、`.bytepluses.com` |
+| `--min-free-gb` | `KACHA_MIN_FREE_GB` | `20` | 数据盘最低余量（GiB）；低于它时写入接口返回 507 |
 
-- Windows 安装器未购买代码签名：SmartScreen「更多信息 → 仍要运行」；按当前用户安装，
-  通常不需要管理员权限；依赖 WebView2（Win10 21H2+/Win11 预装）。
-- HTTP Gitea 只在可信内网或 VPN 使用；updater 显式允许非 HTTPS 端点，但强制验证 minisign 签名。
-- 打开画板：在应用内画板列表中打开，或把 `.ugcboard.json` 文件拖到应用窗口 / exe 图标上。不登记双击关联：系统按最后一段扩展名识别文件，`.ugcboard.json` 会被当作 `.json`，登记即抢占所有 JSON 文件。
-- macOS 包仅 ad-hoc 签名、未公证、只支持 Apple Silicon：首次右键「打开」。
+结果下载只允许 HTTP/HTTPS 与允许列表中的主机，重定向也逐次校验。不要把不可信内网主机加入列表。若允许用户把前端网关改为非 `KACHA_GATEWAY_URL` 的地址，还需同步调整服务端 CSP；当前部署应保持一致。
 
-完整验收流程见 `docs/release/release-checklist.md`。
+数据根建议放在空间充足的 NTFS 数据盘。服务端只存密钥指纹和会话，不存密钥；日志不应包含密钥、提示词全文或签名结果地址。服务端不做备份，也不自动清理。
+
+## Windows 服务
+
+以下命令需管理员 PowerShell。按实际路径与域名调整；`--result-hosts` 只填需要追加的主机。
+
+```powershell
+$bin = '"C:\kacha\kacha-server.exe" --listen 0.0.0.0:3004 --data-root "D:\kacha-data" --gateway-url "http://lzxsvn:3001" --static-dir "C:\kacha\static" --min-free-gb 20'
+sc.exe create Kacha binPath= $bin start= auto
+sc.exe failure Kacha reset= 86400 actions= restart/5000/restart/5000/restart/5000
+sc.exe failureflag Kacha 1
+sc.exe start Kacha
+sc.exe query Kacha
+```
+
+`start= auto` 配置开机自启；`failure` 配置三次失败均在 5 秒后重启，`failureflag 1` 让非服务正常退出的崩溃也触发恢复。开放防火墙 3004 端口时只限可信内网。升级前 `sc.exe stop Kacha`，替换程序和 `static/` 后再启动。
+
+本机为 Linux，以上 Windows 注册、自启与崩溃重启步骤**未实测**；上线前需在 lzxsvn 验证服务状态、重启恢复、端口与磁盘余量。实际上线、qwen 结果域名实测和 Gitea Release 页更新不属于本票。
+
+## 清理与恢复
+
+先预览，再执行；不要在服务端处理同一用户写入时并发运行清理：
+
+```powershell
+C:\kacha\kacha-server.exe cleanup --data-root D:\kacha-data --dry-run
+C:\kacha\kacha-server.exe cleanup --data-root D:\kacha-data
+# 磁盘紧急时跳过回收区，直接删除：
+C:\kacha\kacha-server.exe cleanup --data-root D:\kacha-data --purge
+```
+
+候选只有连续 60 天无访问的闲置用户，以及所有画板均不引用且建立超过 30 天的任务目录。默认移入 `<数据根>\recycle\<批次>`，后续清理会彻底删除超过 14 天的批次。
+
+列出回收区并恢复误删条目：
+
+```powershell
+C:\kacha\kacha-server.exe cleanup restore --data-root D:\kacha-data
+C:\kacha\kacha-server.exe cleanup restore --data-root D:\kacha-data "<批次>/users/<指纹>/<原相对路径>"
+```
+
+恢复整个闲置用户时条目到 `users/<指纹>`；恢复任务目录时还包括日期与任务 id。命令搬回原位置，原位置已存在会拒绝覆盖。没有恢复界面。
+
+## 换密钥后的管理员迁移
+
+换密钥即新用户。若只需迁移部分画板，优先让旧用户导出画板包，再用新密钥导入。必须搬整份数据时：
+
+1. 通知用户暂停操作并停止 Kacha 服务。
+2. 用新密钥登录一次以建立新用户数据根，再停止服务。
+3. 把 `users/<旧指纹>/` 下的 `画板/`、日期任务目录和 `导入参考图/` 移到 `users/<新指纹>/`。不要覆盖新目录的 `.kacha/user.json` 等会话元数据。
+4. 确认目标路径仍在配置的数据根内，重新启动服务并让用户核对画板、结果和图层。
+
+服务端没有备份，搬移失败时只能靠用户导出的画板包与已下载结果恢复。
+
+## 30 人并发内存实测
+
+脚本用真实 release 服务端和本地网关桩，30 个线程分别执行写结果、读图、上传并导入 v0.3.2 画板包、导出画板包；每 20 ms 从 Linux `/proc/<pid>/status` 采样 `VmRSS`：
+
+```sh
+python3 packaging/load_30_users.py --output release/memory-30-users.json
+```
+
+2026-11-05 本机 WSL Linux 实测：30 人全部操作成功，1.62 秒完成，58 次采样，**服务端峰值 RSS 22.15 MiB**，低于约 **512 MiB** 预算。该结果使用仓库的小型画板包夹具，不是 Windows 实测，也未计入 lzxsvn 上 Gitea、new-api、学习站等进程的内存。
+
+## 验证
+
+```sh
+python3 -m unittest discover -s packaging/tests
+npm --prefix client test
+npm --prefix client run typecheck
+npm --prefix client run test:e2e -- --workers=4
+cargo test --manifest-path server/Cargo.toml
+```
