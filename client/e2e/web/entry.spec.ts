@@ -90,7 +90,8 @@ test("设置按用户隔离，换密钥即新用户", async ({ page, rig, browse
   await expect(dialog.getByText("输出根目录")).toHaveCount(0);
   await dialog.getByLabel("并发上限").fill("7");
   await dialog.getByRole("button", { name: "保存", exact: true }).click();
-  expect(readMeta(rig, GOOD_KEY, "settings.json").concurrency).toBe(7);
+  // 保存是异步 HTTP：等服务端真正落盘再读，避免竞态。
+  await expect.poll(() => (existsSync(metaFile(rig, GOOD_KEY, "settings.json")) ? readMeta(rig, GOOD_KEY, "settings.json").concurrency : null)).toBe(7);
 
   const other = await browser.newContext();
   const page2 = await other.newPage();
