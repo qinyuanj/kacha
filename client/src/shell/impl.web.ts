@@ -4,7 +4,7 @@ import type { FetchLike } from "../core/gateway";
 import { ApiError } from "./apiError";
 import { DEFAULT_SETTINGS, serializeSettings } from "../core/settings";
 import type { UpdateFlowPorts } from "../core/updateFlow";
-import type { DesktopPort, Ipc, RelayPort, SessionPort, ShellImpl } from "./types";
+import type { DesktopPort, Ipc, RelayPort, SessionPort, ShellImpl, TransferPort } from "./types";
 
 /** core/ 仍按「输出根 + 相对路径」拼路径；Web 版固定一个虚拟根，壳层在边界剥掉。 */
 export const VIRTUAL_ROOT = "/~";
@@ -200,5 +200,45 @@ const relay: RelayPort = {
   discardRelayed: async (relDir) => void (await api(`/api/fs/relay?dir=${encodeURIComponent(stripRoot(relDir))}`, { method: "DELETE", keepalive: true })),
 };
 
-export const shell: ShellImpl = { web: true, ipc, httpFetch, fileUrl, desktop, session, relay, updateFlowPorts };
+/** 浏览器文件传输（#28）：本机图片经隐藏 input 选择 / HTML5 拖入，上传后由服务端按内容哈希落盘；
+ *  下载用隐藏 <a> 指向附件接口（响应带 Content-Disposition，浏览器另存为）。 */
+export const transfer: TransferPort = {
+  pickLocalImages: (multiple) =>
+    new Promise((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "image/*,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff,.heic,.heif";
+      input.multiple = multiple;
+      // 必须留在文档里：部分浏览器对脱离文档的 input 不弹选择器。
+      input.style.position = "fixed";
+      input.style.left = "-10000px";
+      const done = (files: File[]) => {
+        input.remove();
+        resolve(files);
+      };
+      input.addEventListener("change", () => done([...(input.files ?? [])]));
+      input.addEventListener("cancel", () => done([]));
+      document.body.append(input);
+      input.click();
+    }),
+  uploadReference: (file) => api<{ path: string; sha256: string }>("/api/upload/reference", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file }),
+  downloadImage: (path, name) => {
+    const params = new URLSearchParams({ path: stripRoot(path) });
+    if (name) params.set("name", name);
+    triggerDownload(`/api/download/result?${params}`);
+  },
+  downloadBoardResults: (boardPath) => triggerDownload(`/api/download/board-results?path=${encodeURIComponent(stripRoot(boardPath))}`),
+};
+
+function triggerDownload(url: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  // 真正的保存对话框由 Content-Disposition 触发；download 属性只兜底。
+  a.download = "";
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
+export const shell: ShellImpl = { web: true, ipc, httpFetch, fileUrl, desktop, session, relay, transfer, updateFlowPorts };
 

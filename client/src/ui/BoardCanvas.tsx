@@ -48,7 +48,7 @@ import { findReferenceFile, findResultFile, IMAGE_EXTENSIONS } from "../core/rel
 import type { SnapshotImage } from "../core/submission";
 import { taskView } from "../core/taskView";
 import { relocateFs } from "../shell/adapters";
-import { desktop, ipc } from "../shell/ipc";
+import { desktop, ipc, isWeb, transfer } from "../shell/ipc";
 import { logEvent } from "../shell/log";
 import { saveCopyAs } from "../shell/saveFile";
 import { ActionBar } from "./ActionBar";
@@ -313,6 +313,24 @@ export function BoardCanvas({
           if (node?.type !== "reference" && node?.type !== "result") return;
           const logRelocate = (outcome: { ok: true } | { ok: false; reason: "not_found" | "unreadable" }) =>
             logEvent("relocate", { board_file: boardFile, node_id: nodeId, node_type: node.type, mode, ...outcome });
+          if (mode === "pick" && isWeb && transfer) {
+            // Web 没有本机路径：上传后把节点指向用户数据根内的新文件（保留原显示名）。
+            const files = await transfer.pickLocalImages(false);
+            if (!files.length) return;
+            const file = files[0];
+            try {
+              const uploaded = await transfer.uploadReference(file);
+              const abs = resolveFromRoot(outputRoot, uploaded.path);
+              const info = await ipc.inspectImage(abs);
+              primeImageInfo(abs, info);
+              apply({ kind: "relocate", nodeId, path: uploaded.path, sha256: info.sha256, fileName: file.name, picked: true });
+              logRelocate({ ok: true });
+            } catch (e) {
+              logRelocate({ ok: false, reason: "unreadable" });
+              toast(`无法读取 ${file.name}：${e instanceof Error ? e.message : String(e)}`);
+            }
+            return;
+          }
           let abs: string | string[] | null;
           if (mode === "pick") {
             const picked = await desktop.open({ multiple: false, filters: [{ name: "图片", extensions: IMAGE_EXTENSIONS }] });
@@ -684,8 +702,35 @@ export function BoardCanvas({
     [apply, outputRoot, toast],
   );
 
+  /** Web：本机图片先上传到用户数据根的 导入参考图/，再按服务端给出的路径导入。 */
+  const importLocalFiles = useCallback(
+    async (files: File[], at: { x: number; y: number }, attach?: { taskId: string; place: "asIs" | "left" }) => {
+      if (!transfer) return;
+      const images: ImportedImage[] = [];
+      for (const file of files) {
+        try {
+          const uploaded = await transfer.uploadReference(file);
+          const abs = resolveFromRoot(outputRoot, uploaded.path);
+          const info = await ipc.inspectImage(abs);
+          primeImageInfo(abs, info);
+          images.push({ path: uploaded.path, sha256: info.sha256, display_name: file.name, width: info.width, height: info.height });
+        } catch (e) {
+          toast(`无法导入 ${file.name}：${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      if (images.length) apply({ kind: "addReferences", images, at: [at.x, at.y], attach: attach ?? null });
+    },
+    [apply, outputRoot, toast],
+  );
+
   /** attachTo = 任务节点 id：只选一张，接到该任务的空图片端口（从图片端口反向拖线建节点）。 */
   const pickReferences = async (at?: { x: number; y: number }, attachTo?: string) => {
+    if (isWeb && transfer) {
+      const files = await transfer.pickLocalImages(!attachTo);
+      if (!files.length) return;
+      await importLocalFiles(files, at ?? centerPosition(), attachTo ? { taskId: attachTo, place: "asIs" } : undefined);
+      return;
+    }
     const picked = await desktop.open({ multiple: !attachTo, filters: [{ name: "图片", extensions: IMAGE_EXTENSIONS }] });
     if (!picked) return;
     await importReferences(Array.isArray(picked) ? picked : [picked], at ?? centerPosition(), attachTo ? { taskId: attachTo, place: "asIs" } : undefined);
@@ -735,7 +780,7 @@ export function BoardCanvas({
     if (node?.type !== "reference" && node?.type !== "result") return;
     try {
       const saved = await saveCopyAs(resolveFromRoot(outputRoot, node.path));
-      if (saved) toast(`已保存：${saved}`);
+      if (saved) toast(isWeb ? "已开始下载（结果带图层时为 zip）" : `已保存：${saved}`);
     } catch (e) {
       toast(`另存失败：${e instanceof Error ? e.message : String(e)}`);
     }
@@ -802,6 +847,7 @@ export function BoardCanvas({
 
   // 从资源管理器拖入：画板文件打开为标签页，其余当参考图导入。
   useEffect(() => {
+    if (isWeb) return;
     let disposed = false;
     let unlisten: (() => void) | null = null;
     void desktop
@@ -823,6 +869,33 @@ export function BoardCanvas({
       unlisten?.();
     };
   }, [flow, importReferences, openBoardPath]);
+
+  // Web：HTML5 拖放。只接受图片（画板 .ugcboard.json 由画板包导入承担，不解析本机路径）。
+  useEffect(() => {
+    if (!isWeb || !transfer) return;
+    const el = wrapper.current;
+    if (!el) return;
+    const over = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    };
+    const drop = (e: DragEvent) => {
+      if (!e.dataTransfer?.files.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/") || IMAGE_EXTENSIONS.some((ext) => f.name.toLowerCase().endsWith(`.${ext}`)));
+      if (!files.length) return toast("只支持拖入图片文件");
+      const hit = dropTargetAt({ x: e.clientX, y: e.clientY });
+      const card = hit?.kind === "node" ? boardRef.current.nodes.find((n) => n.id === hit.nodeId) : undefined;
+      void importLocalFiles(files, at, card?.type === "task" ? { taskId: card.id, place: "left" } : undefined);
+    };
+    el.addEventListener("dragover", over);
+    el.addEventListener("drop", drop);
+    return () => {
+      el.removeEventListener("dragover", over);
+      el.removeEventListener("drop", drop);
+    };
+  }, [flow, importLocalFiles, toast]);
 
   return (
     <BoardContext.Provider value={actions}>

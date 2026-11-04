@@ -115,6 +115,8 @@ export interface ShellImpl {
   session: SessionPort;
   /** 结果中转（只有 Web 版有）：url 结果由服务端下载到任务目录暂存区，校验后提交。 */
   relay?: RelayPort;
+  /** 浏览器上传 / 下载（只有 Web 版有；桌面仍走系统对话框）。 */
+  transfer?: TransferPort;
   updateFlowPorts(protection: Pick<UpdateFlowPorts, "restartGuard" | "restartReleased">): UpdateFlowPorts;
 }
 
@@ -123,6 +125,18 @@ export interface RelayPort {
   relayResult(args: { url: string; relDir: string; stem: string; signal?: AbortSignal }): Promise<{ file: string; path: string }>;
   commitRelayed(relDir: string, from: string, stem: string): Promise<{ file: string; path: string }>;
   discardRelayed(relDir: string): Promise<void>;
+}
+
+/** 浏览器文件传输端口（#28）：本机 → 用户数据根的上传，用户数据根 → 本机的下载。 */
+export interface TransferPort {
+  /** 选本机图片；取消返回空数组。multiple=false 时最多一张。 */
+  pickLocalImages(multiple: boolean): Promise<File[]>;
+  /** 上传一张参考图，返回相对用户数据根的落盘路径（`导入参考图/<sha256>.<ext>`）。 */
+  uploadReference(file: File): Promise<{ path: string; sha256: string }>;
+  /** 下载单张图片：结果带图层时服务端给 zip。 */
+  downloadImage(path: string, name?: string): void;
+  /** 下载整张画板的全部结果 zip。 */
+  downloadBoardResults(boardPath: string): void;
 }
 
 /** 进入与身份：只有 Web 版有；桌面实现为占位（旧假壳不经过进入界面）。 */

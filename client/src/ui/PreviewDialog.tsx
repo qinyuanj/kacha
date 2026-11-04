@@ -6,7 +6,7 @@ import type { PortRef, RegionRender } from "../core/board";
 import { MAX_REGIONS, regionCss } from "../core/overlay";
 import { basename, dirname, joinPath } from "../core/paths";
 import { layersExportJson, parseLayersFile, type LayerRecord } from "../core/taskDir";
-import { fileUrl, ipc } from "../shell/ipc";
+import { fileUrl, ipc, isWeb, transfer } from "../shell/ipc";
 import { saveCopyAs, writeNew } from "../shell/saveFile";
 import { useBoardActions, useImageInfos } from "./context";
 import { dragRect, isMeaningful, moveRect, resizeRect, type Corner, type Point01, type Rect01 } from "./rects";
@@ -177,6 +177,11 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
     });
   const exportAll = () =>
     runExport(async () => {
+      // Web：底图 + 图层 + layers.json 由服务端打成 zip 下载（用户数据根里的真源文件，不经浏览器拼包）。
+      if (isWeb && transfer) {
+        transfer.downloadImage(req.absPath);
+        return "已开始下载：底图、全部图层与 layers.json（zip）";
+      }
       const dir = await desktop.open({ directory: true }).then((p) => (Array.isArray(p) ? p[0] : p));
       if (!dir) return null;
       // 元数据真源是任务目录的 layers.json：可读且层数与当前一致时按它出（含底图名称 / 描述）；读不到（旧结果没有 layers.json）退回节点记录。损坏则明确失败，不静默降级。

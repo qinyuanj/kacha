@@ -29,6 +29,8 @@ export type BoardAction =
   | "disconnect"
   | "editRegion"
   | "exportPack"
+  /** Web 版：整板全部结果由服务端打成 zip 下载（#28）。 */
+  | "downloadResults"
   | "importPack";
 
 export interface MenuItem {

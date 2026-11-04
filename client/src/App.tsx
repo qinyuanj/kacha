@@ -11,7 +11,7 @@ import { parseUiState, serializeUiState, type UiState } from "./core/uiState";
 import { createUpdatePreparation, type UpdatePreparation } from "./core/updatePreparation";
 import { imageProbe } from "./shell/adapters";
 import { copyTextToClipboard } from "./shell/clipboard";
-import { desktop, ipc, isWeb } from "./shell/ipc";
+import { desktop, ipc, isWeb, transfer } from "./shell/ipc";
 import { BoardPackDialog } from "./ui/BoardPackDialog";
 import { BoardListDialog } from "./ui/BoardListDialog";
 import { BoardToolbar } from "./ui/BoardToolbar";
@@ -299,6 +299,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
         // 恢复失败（如图层元数据损坏）提示真实原因，不静默跳过。
         try {
           if (await openPath(p, false)) opened.push(p);
+          else toast(`找不到画板文件：${p}`);
         } catch (e) {
           toast(e instanceof Error ? e.message : String(e));
         }
@@ -505,11 +506,16 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           items={[
             { action: "importPack", label: "导入画板包…", disabledReason: null },
             { action: "exportPack", label: "导出画板包…", disabledReason: active?.status === "ok" ? null : active ? "画板无法打开，不能导出" : "没有打开的画板" },
+            ...(isWeb && transfer ? [{ action: "downloadResults" as const, label: "下载整板结果（zip）", disabledReason: active?.status === "ok" ? null : active ? "画板无法打开，不能下载" : "没有打开的画板" }] : []),
           ]}
           onPick={(action) => {
             setPackMenu(null);
             if (action === "importPack") void pack.importPack();
             else if (action === "exportPack" && active) void pack.prepareExport(active.key);
+            else if (action === "downloadResults" && active) {
+              transfer?.downloadBoardResults(active.path);
+              toast("已开始下载整板结果（含各结果的图层），缺失的结果列在包内 缺失文件.txt");
+            }
           }}
           onClose={() => setPackMenu(null)}
         />

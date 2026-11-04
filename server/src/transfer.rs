@@ -201,13 +201,13 @@ fn write_zip(items: Vec<ZipItem>, out: ChannelWriter) -> std::io::Result<()> {
     let to_io = |e: zip::result::ZipError| std::io::Error::other(e.to_string());
     let mut zip = zip::ZipWriter::new_stream(out);
     // 图片本身已压缩：原样存放；文本 deflate。
-    let stored = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored).large_file(true);
+    let stored = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let deflated = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     for item in items {
         match item {
             ZipItem::File(name, path) => {
                 let mut file = std::fs::File::open(&path)?;
-                let options = if name.ends_with(".json") { deflated.large_file(true) } else { stored };
+                let options = if name.ends_with(".json") { deflated } else { stored };
                 zip.start_file(name.as_str(), options).map_err(to_io)?;
                 std::io::copy(&mut file, &mut zip)?;
             }
