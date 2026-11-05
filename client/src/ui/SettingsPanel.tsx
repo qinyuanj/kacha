@@ -37,7 +37,7 @@ export function SettingsPanel({ settings, onClose }: Props) {
     if (urlError) return;
     setSaving(true);
     setError(null);
-    const next: Settings = { ...settings.settings, base_url: normalizeBaseUrl(baseUrl), output_root: null, concurrency };
+    const next: Settings = { ...settings.settings, base_url: normalizeBaseUrl(baseUrl), concurrency };
     const problem = await settings.save(next, settings.apiKey);
     setSaving(false);
     if (problem) return setError(problem);

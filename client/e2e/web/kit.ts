@@ -35,7 +35,7 @@ export function seed(rig: Rig, scn: WebScenario): string {
   const rel = boardRelPath(scn.title);
   write(root, rel, scn.boardText);
   for (const [p, content] of Object.entries(scn.files ?? {})) write(root, p, "text" in content ? content.text : Buffer.from(content.b64, "base64"));
-  const settings = scn.settings ?? JSON.stringify({ format_version: 1, base_url: rig.stub.url, output_root: null, concurrency: 4 });
+  const settings = scn.settings ?? JSON.stringify({ format_version: 1, base_url: rig.stub.url, concurrency: 4 });
   write(root, ".kacha/settings.json", settings);
   write(root, ".kacha/models-cache.json", scn.modelsCache ?? JSON.stringify({ base_url: rig.stub.url, model_ids: MODELS, fetched_at: new Date().toISOString() }));
   if (scn.capabilityOverride) write(root, ".kacha/capabilities.override.json", scn.capabilityOverride);

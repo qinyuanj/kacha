@@ -41,13 +41,18 @@ function memoryPorts(stub: Partial<SettingsPorts> = {}) {
 }
 
 describe("高级设置 settings.json", () => {
-  it("缺失时用默认值：v1 网关地址、用户数据根跟随默认、并发 4", () => {
+  it("缺失时用默认值：v1 网关地址、并发 4", () => {
     expect(parseSettings(null)).toEqual({ kind: "ok", settings: DEFAULT_SETTINGS });
-    expect(DEFAULT_SETTINGS).toMatchObject({ format_version: 1, base_url: "http://lzxsvn:3001", output_root: null, concurrency: 4 });
+    expect(DEFAULT_SETTINGS).toMatchObject({ format_version: 1, base_url: "http://lzxsvn:3001", concurrency: 4 });
+  });
+
+  it("旧桌面版的 output_root 不再是设置项，原样留在未知字段里", () => {
+    const loaded = parseSettings(JSON.stringify({ format_version: 1, output_root: "D:\\出图" }));
+    expect(loaded).toEqual({ kind: "ok", settings: { ...DEFAULT_SETTINGS, extra: { output_root: "D:\\出图" } } });
   });
 
   it("往返并保留未知字段", () => {
-    const settings = { ...DEFAULT_SETTINGS, base_url: "https://gw.example", output_root: "D:\\出图", concurrency: 5, extra: { future: [1] } };
+    const settings = { ...DEFAULT_SETTINGS, base_url: "https://gw.example", concurrency: 5, extra: { future: [1] } };
     const text = serializeSettings(settings);
     expect(JSON.parse(text)).toMatchObject({ format_version: 1, future: [1] });
     expect(parseSettings(text)).toEqual({ kind: "ok", settings });
