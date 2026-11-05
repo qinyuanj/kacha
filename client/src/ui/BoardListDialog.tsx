@@ -5,7 +5,7 @@ import { joinPath } from "../core/paths";
 import { ipc } from "../shell/ipc";
 
 interface Props {
-  /** 画板目录（绝对路径，含输出根）。 */
+  /** 画板目录（绝对路径，含用户数据根）。 */
   dir: string;
   /** 本页已打开的画板路径：列表里标注，不重复开。 */
   openPaths: string[];

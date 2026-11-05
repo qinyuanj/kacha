@@ -135,13 +135,13 @@ export async function storedStatuses(
   fs: Pick<TaskFs, "readFile">,
   board: Board,
   handled: ReadonlySet<string>,
-  outputRoot: string,
+  userRoot: string,
   boardFile: string,
 ): Promise<{ statuses: Map<string, StoredStatus>; interruptedEvents: InterruptedEvent[] }> {
   const interruptedEvents: InterruptedEvent[] = [];
   const entries = await Promise.all(
     interruptedCandidates(board, handled).map(async ([nodeId, taskId]) => {
-      const outcome = await readOutcome(fs, outputRoot, taskId);
+      const outcome = await readOutcome(fs, userRoot, taskId);
       if (!outcome) interruptedEvents.push({ task_id: taskId, board_file: boardFile, task_node_id: nodeId, from_status: "running", to_status: "interrupted" });
       return [nodeId, outcome ?? { kind: "interrupted" as const }] as const;
     }),
@@ -203,13 +203,13 @@ export async function collectRunFacts(
   probe: ImageProbe,
   board: Board,
   taskIds: string[],
-  outputRoot: string,
+  userRoot: string,
 ): Promise<{ missingNodes: Set<string>; alphaByNode: Map<string, boolean> }> {
   const missingNodes = new Set<string>();
   const alphaByNode = new Map<string, boolean>();
   await Promise.all(
     taskIds
-      .flatMap((id) => imageSources(board, id, outputRoot).map((src) => ({ ...src, key: src.sourceLayer === null ? src.nodeId : `${src.nodeId}:layer:${src.sourceLayer}` })))
+      .flatMap((id) => imageSources(board, id, userRoot).map((src) => ({ ...src, key: src.sourceLayer === null ? src.nodeId : `${src.nodeId}:layer:${src.sourceLayer}` })))
       .map((src) =>
         // 无效来源图层身份（absPath 为 null）不探测也不算缺图：任务视图给出「来源图层无效」的明确原因。
         src.absPath === null

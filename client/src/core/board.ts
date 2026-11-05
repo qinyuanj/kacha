@@ -1,4 +1,4 @@
-// 画板文件：输出根目录/画板/<标题>.ugcboard.json。
+// 画板文件：用户数据根/画板/<标题>.ugcboard.json。
 // 任务目录是真源、画板只是视图；本模块只负责文件格式的读写、版本与未知字段保留、文件名派生。
 import type { OutputOptions } from "./gateway";
 import type { AutoRatio, SizeSpec } from "./size";
@@ -34,7 +34,7 @@ export interface PromptNode extends NodeBase {
 
 export interface ReferenceNode extends NodeBase {
   type: "reference";
-  /** 输出根目录内为相对路径，根目录外为绝对路径。 */
+  /** 用户数据根内为相对路径，根目录外为绝对路径。 */
   path: string;
   sha256: string;
   display_name: string;
@@ -80,7 +80,7 @@ export interface ResultNode extends NodeBase {
   type: "result";
   task_id: string;
   file: string;
-  /** 相对输出根目录，主引用。 */
+  /** 相对用户数据根，主引用。 */
   path: string;
   layer_count: number;
   record: ResultRecord;

@@ -10,7 +10,7 @@ import { runDispatch, runScope, buildConfirmItems, collectRunFacts, type Confirm
 import { parseUiState, serializeUiState, type UiState } from "./core/uiState";
 import { imageProbe } from "./shell/adapters";
 import { copyTextToClipboard } from "./shell/clipboard";
-import { browser, ipc, outputRoot as userRoot, transfer } from "./shell/ipc";
+import { browser, ipc, transfer, userRoot } from "./shell/ipc";
 import { BoardPackDialog } from "./ui/BoardPackDialog";
 import { BoardListDialog } from "./ui/BoardListDialog";
 import { BoardToolbar } from "./ui/BoardToolbar";
@@ -27,7 +27,6 @@ import { useBoardPack } from "./ui/useBoardPack";
 import { useBoardSessions } from "./ui/useBoardSessions";
 
 export function App({ onLogout, version }: { onLogout?: () => void; version?: string | null } = {}) {
-  const outputRoot = userRoot;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [boardListOpen, setBoardListOpen] = useState(false);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
@@ -48,7 +47,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   envRef.current = { table, discovery: settings.discovery };
   const runnerRef = useRef<Runner | null>(null);
   const boards = useBoardSessions(
-    outputRoot,
+    userRoot,
     useCallback((key: string) => ({ ...envRef.current, locked: runnerRef.current!.getSnapshot().board(key).locked }), []),
   );
   const { sessions, activeKey, openPath, createBoard } = boards;
@@ -71,7 +70,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const undoActive = useCallback(() => activeKey && undoBoard(activeKey), [activeKey, undoBoard]);
   const redoActive = useCallback(() => activeKey && redoBoard(activeKey), [activeKey, redoBoard]);
   const toast = useCallback((message: string) => setToastText(message), []);
-  const pack = useBoardPack(outputRoot, boards, toast);
+  const pack = useBoardPack(userRoot, boards, toast);
   useEffect(() => {
     if (!toastText) return;
     const timer = setTimeout(() => setToastText(null), 4000);
@@ -108,23 +107,23 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const startRun = useCallback(
     async (boardKey: string, board: Board, taskIds: string[]) => {
       setConfirm(null);
-      if (!outputRoot) return;
-      const target: RunTarget = { boardKey, boardFile: boards.boardFileName(boardKey), table, outputRoot, baseUrl: settings.settings.base_url, apiKey: settings.apiKey };
+      if (!userRoot) return;
+      const target: RunTarget = { boardKey, boardFile: boards.boardFileName(boardKey), table, userRoot, baseUrl: settings.settings.base_url, apiKey: settings.apiKey };
       const problems = await runner.submit(target, board, taskIds);
       if (problems.length) toast(`${problems.length} 个任务提交失败：${problems[0]}`);
     },
-    [outputRoot, runner, boards, table, settings.settings.base_url, settings.apiKey, toast],
+    [userRoot, runner, boards, table, settings.settings.base_url, settings.apiKey, toast],
   );
 
   // 单个干净任务直接提交，单个标红 / 没有任务只提示；其余弹二次确认（分派规则见 runDispatch）。
   const openRunConfirm = useCallback(
     async (selectedIds: string[]) => {
-      if (!activeKey || !outputRoot) return;
+      if (!activeKey || !userRoot) return;
       await boards.flushAll();
       const board = boards.getBoard(activeKey);
       if (!board) return;
       const busy = runner.getSnapshot().board(activeKey).locked;
-      const items = await confirmItemsOf(board, runScope(board, selectedIds, busy), outputRoot);
+      const items = await confirmItemsOf(board, runScope(board, selectedIds, busy), userRoot);
       const dispatch = runDispatch(items);
       // 没有可提交的任务时先说明原因；真要提交或弹确认窗才需要密钥。
       if (dispatch.kind === "toast") return toast(dispatch.message);
@@ -136,18 +135,18 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       if (dispatch.kind === "submit") void startRun(activeKey, board, [dispatch.taskId]);
       else setConfirm({ boardKey: activeKey, board, items, scope: selectedIds.length ? "selection" : "board" });
     },
-    [activeKey, outputRoot, settings.apiKey, boards, runner, confirmItemsOf, startRun, toast],
+    [activeKey, userRoot, settings.apiKey, boards, runner, confirmItemsOf, startRun, toast],
   );
 
   const viewSendText = useCallback(
     async (taskNodeId: string) => {
-      if (!activeKey || !outputRoot) return;
+      if (!activeKey || !userRoot) return;
       const board = boards.getBoard(activeKey);
       if (!board) return;
-      const [item] = await confirmItemsOf(board, [taskNodeId], outputRoot);
+      const [item] = await confirmItemsOf(board, [taskNodeId], userRoot);
       if (item) setSendText(item);
     },
-    [activeKey, outputRoot, boards, confirmItemsOf],
+    [activeKey, userRoot, boards, confirmItemsOf],
   );
 
   const copyText = useCallback(
@@ -158,7 +157,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
 
   const regenerate = useCallback(
     async (taskNodeId: string, fromTaskId?: string) => {
-      if (!activeKey || !outputRoot) return;
+      if (!activeKey || !userRoot) return;
       if (!settings.apiKey) {
         toast("请先在高级设置中填写 API 密钥");
         setSettingsOpen(true);
@@ -166,11 +165,11 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       }
       const board = boards.getBoard(activeKey);
       if (!board) return;
-      const target: RunTarget = { boardKey: activeKey, boardFile: boards.boardFileName(activeKey), table, outputRoot, baseUrl: settings.settings.base_url, apiKey: settings.apiKey };
+      const target: RunTarget = { boardKey: activeKey, boardFile: boards.boardFileName(activeKey), table, userRoot, baseUrl: settings.settings.base_url, apiKey: settings.apiKey };
       const problem = await runner.regenerate(target, board, taskNodeId, fromTaskId);
       if (problem) toast(`${fromTaskId ? "生成变体" : "重新生成"}失败：${problem}`);
     },
-    [activeKey, outputRoot, boards, runner, settings.apiKey, settings.settings.base_url, table, toast],
+    [activeKey, userRoot, boards, runner, settings.apiKey, settings.settings.base_url, table, toast],
   );
 
   const cancelTask = useCallback((taskNodeId: string) => activeKey && runner.cancel({ kind: "task", boardKey: activeKey, taskNodeId }), [activeKey, runner]);
@@ -241,7 +240,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const active = sessions.find((s) => s.key === activeKey);
   const failing = sessions.filter((s) => s.status === "ok" && s.saveError);
 
-  const canvasReady = active?.status === "ok" && !!outputRoot;
+  const canvasReady = active?.status === "ok" && !!userRoot;
   return (
     <div className="app">
       <div className="topbar">
@@ -260,9 +259,9 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           onExportPack={(key) => void pack.prepareExport(key)}
         />
       </div>
-      {boardListOpen && outputRoot && (
+      {boardListOpen && userRoot && (
         <BoardListDialog
-          dir={boardsDir(outputRoot)}
+          dir={boardsDir(userRoot)}
           openPaths={sessions.map((s) => s.path)}
           onOpen={(path) => {
             void openPath(path, true).then((opened) => {
@@ -294,7 +293,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
             className="topbar-button"
             aria-haspopup="menu"
             aria-expanded={packMenu !== null}
-            disabled={!outputRoot}
+            disabled={!userRoot}
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
               setPackMenu((m) => (m ? null : { x: r.left, y: r.bottom + 2 }));
@@ -303,7 +302,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
             画板包 ▾
           </button>
           {version && <span className="muted small topbar-version">Kacha {version}</span>}
-          <button className="topbar-button" onClick={() => setSettingsOpen(true)} disabled={!settings.loaded || !outputRoot}>
+          <button className="topbar-button" onClick={() => setSettingsOpen(true)} disabled={!settings.loaded || !userRoot}>
             ⚙ 高级设置
           </button>
           {onLogout && (
@@ -365,16 +364,16 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
         </div>
       )}
       <main className="workspace">
-        {!active || !outputRoot ? (
+        {!active || !userRoot ? (
           <div className="empty">
             {ready ? (
               <>
                 <div>没有打开的画板</div>
                 <div className="empty-actions">
-                  <button className="primary" onClick={() => void createBoard()} disabled={!outputRoot}>
+                  <button className="primary" onClick={() => void createBoard()} disabled={!userRoot}>
                     新建画板
                   </button>
-                  <button onClick={() => void pack.importPack()} disabled={!outputRoot}>
+                  <button onClick={() => void pack.importPack()} disabled={!userRoot}>
                     导入画板包…
                   </button>
                 </div>
@@ -399,7 +398,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               board={active.board}
               boardFile={basename(active.path)}
               table={table}
-              outputRoot={outputRoot}
+              userRoot={userRoot}
               apply={applyActive}
               check={checkActive}
               locked={runState.board(active.key).locked}

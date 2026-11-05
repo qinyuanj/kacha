@@ -65,10 +65,6 @@ fn staging_file_name(name: &str) -> bool {
     name.contains('.') && !name.contains(['/', '\\']) && !name.starts_with('.') && name.len() <= 80
 }
 
-fn resolve_dir(state: &AppState, user: &User, dir: &str) -> Result<PathBuf, Response> {
-    paths::resolve(&state.user_root(&user.fingerprint), dir).map_err(|e| error(StatusCode::FORBIDDEN, "forbidden", e.message()))
-}
-
 /// 与前端 sniffImage 一致的扩展名嗅探：扩展名由字节决定，浏览器不传。
 pub fn sniff_extension(head: &[u8]) -> Option<&'static str> {
     let starts = |sig: &[u8]| head.len() >= sig.len() && &head[..sig.len()] == sig;
@@ -155,8 +151,8 @@ fn io_response(e: std::io::Error) -> Response {
 
 /// 下载并流式写入 `<任务目录>/.staging/<stem>.<ext>`；返回相对任务目录的文件名与相对用户数据根的路径。
 pub async fn relay(State(state): State<AppState>, user: User, body: Bytes) -> Response {
-    if !state.disk_guard().enough() {
-        return error(StatusCode::INSUFFICIENT_STORAGE, "insufficient_storage", "服务器空间不足，请联系管理员");
+    if let Err(r) = crate::fs::ensure_space(&state) {
+        return r;
     }
     let Ok(req) = serde_json::from_slice::<RelayRequest>(&body) else {
         return error(StatusCode::BAD_REQUEST, "bad_request", "需要 url、dir 与 stem");
@@ -168,7 +164,7 @@ pub async fn relay(State(state): State<AppState>, user: User, body: Bytes) -> Re
         Ok(u) => u,
         Err(r) => return r,
     };
-    let dir = match resolve_dir(&state, &user, &req.dir) {
+    let dir = match crate::fs::resolve(&state, &user, &req.dir) {
         Ok(d) => d,
         Err(r) => return r,
     };
@@ -260,7 +256,7 @@ pub async fn commit(State(state): State<AppState>, user: User, body: Bytes) -> R
     if !valid_product_stem(&req.stem) || !staging_file_name(&req.from) {
         return error(StatusCode::FORBIDDEN, "forbidden", "成品只能是 result 或 layers/NN，来源只能是暂存区文件");
     }
-    let dir = match resolve_dir(&state, &user, &req.dir) {
+    let dir = match crate::fs::resolve(&state, &user, &req.dir) {
         Ok(d) => d,
         Err(r) => return r,
     };
@@ -291,7 +287,7 @@ pub async fn commit(State(state): State<AppState>, user: User, body: Bytes) -> R
 
 /// 取消或校验失败：清掉任务目录的暂存区，不留半成品。
 pub async fn discard(State(state): State<AppState>, user: User, Query(q): Query<DirQuery>) -> Response {
-    let dir = match resolve_dir(&state, &user, &q.dir) {
+    let dir = match crate::fs::resolve(&state, &user, &q.dir) {
         Ok(d) => d,
         Err(r) => return r,
     };

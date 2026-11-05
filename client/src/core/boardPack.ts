@@ -39,7 +39,7 @@ function extensionOf(path: string): string {
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "png";
 }
 
-export async function planExport(board: Board, outputRoot: string, fs: PackFs): Promise<ExportPlan> {
+export async function planExport(board: Board, userRoot: string, fs: PackFs): Promise<ExportPlan> {
   const taskDirs = new Set<string>();
   const files = new Map<string, string>();
   const missing: ExportPlan["missing"] = [];
@@ -49,8 +49,8 @@ export async function planExport(board: Board, outputRoot: string, fs: PackFs): 
       nodes.push(node);
       continue;
     }
-    const rel = toRootRelative(outputRoot, node.path);
-    const absPath = resolveFromRoot(outputRoot, rel);
+    const rel = toRootRelative(userRoot, node.path);
+    const absPath = resolveFromRoot(userRoot, rel);
     const dir = isAbsolute(rel) ? null : taskDirOfRelPath(rel);
     if (dir) {
       taskDirs.add(dir);
@@ -59,7 +59,7 @@ export async function planExport(board: Board, outputRoot: string, fs: PackFs): 
       if (node.type === "result") {
         for (const layer of node.record.layers ?? []) {
           const layerRel = `${dir}/${layer.file}`;
-          if (!(await fs.isFile(resolveFromRoot(outputRoot, layerRel)).catch(() => false))) missing.push({ nodeId: node.id, path: layerRel });
+          if (!(await fs.isFile(resolveFromRoot(userRoot, layerRel)).catch(() => false))) missing.push({ nodeId: node.id, path: layerRel });
         }
       }
       nodes.push(rel === node.path ? node : { ...node, path: rel });
@@ -230,8 +230,8 @@ export interface PackIo {
   entries(pack: string): Promise<string[]>;
   /** 读指定条目的文本；不存在的条目不出现在结果里。 */
   readTexts(pack: string, names: string[]): Promise<Record<string, string>>;
-  /** 按合并单元解压合并进输出根目录；取消时以 PACK_CANCELLED reject，已移入的单元保留。 */
-  importUnits(pack: string, outputRoot: string, units: MergeUnit[]): Promise<{ outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number }>;
+  /** 按合并单元解压合并进用户数据根；取消时以 PACK_CANCELLED reject，已移入的单元保留。 */
+  importUnits(pack: string, units: MergeUnit[]): Promise<{ outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number }>;
   /** 判定不通过就放弃：Web 版删掉服务端的临时上传文件（桌面无此步骤）。 */
   discard?(pack: string): Promise<void>;
 }
@@ -267,7 +267,6 @@ export interface ImportOptions {
   packPath: string;
   /** 展示与日志用的包文件名（Web 的 packPath 是句柄，不含文件名）。 */
   displayName?: string;
-  outputRoot: string;
   /** 按同名改名规则写入画板目录（并打开），返回实际写入的路径；会话状态归调用方。 */
   addBoard(board: Board): Promise<string>;
   /** 复位取消标记之后进入进度阶段。 */
@@ -282,7 +281,7 @@ export interface ImportOptions {
  * 取消或失败时已移入的任务目录保留；写画板第一个失败即停，已写的保留。
  */
 export async function importPack(io: PackIo, opts: ImportOptions): Promise<ImportResult> {
-  const { packPath, outputRoot } = opts;
+  const { packPath } = opts;
   const packName = opts.displayName ?? basename(packPath);
   const fields = { action: "import", pack_file: packName };
   const check = await io
@@ -295,7 +294,7 @@ export async function importPack(io: PackIo, opts: ImportOptions): Promise<Impor
     return check;
   }
   const packBoards = check.boards.map((b) => basename(b.entry)).join(", ");
-  const outcome = await runCancellable(io, opts.onStage, () => io.importUnits(packPath, outputRoot, check.units));
+  const outcome = await runCancellable(io, opts.onStage, () => io.importUnits(packPath, check.units));
   if (!outcome.ok) {
     opts.log("board_pack", { ...fields, board_file: packBoards, result: outcome.result });
     return outcome.result === "cancelled" ? { kind: "cancelled" } : { kind: "failed", error: outcome.error };

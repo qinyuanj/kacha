@@ -20,14 +20,6 @@ struct CleanupRequest {
     dirs: Vec<String>,
 }
 
-fn blocking<F, T>(f: F) -> impl std::future::Future<Output = Result<T, Response>>
-where
-    F: FnOnce() -> Result<T, Response> + Send + 'static,
-    T: Send + 'static,
-{
-    async move { tokio::task::spawn_blocking(f).await.unwrap_or_else(|e| Err(error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()))) }
-}
-
 fn candidate_json(d: &TaskDirCandidate) -> Value {
     json!({
         "dir": d.dir,
@@ -40,7 +32,7 @@ fn candidate_json(d: &TaskDirCandidate) -> Value {
 pub async fn usage(State(state): State<AppState>, user: User) -> Response {
     let root = state.user_root(&user.fingerprint);
     let now = state.now();
-    match blocking(move || {
+    match crate::fs::off_thread(move || {
         let total = cleanup::tree_bytes(&root);
         let mut by_date: Vec<(String, u64)> = Vec::new();
         for dir in cleanup::task_dirs(&root).map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()))? {
@@ -70,8 +62,7 @@ pub async fn usage(State(state): State<AppState>, user: User) -> Response {
     })
     .await
     {
-        Ok(r) => r,
-        Err(e) => e,
+        Ok(Ok(r)) | Ok(Err(r)) | Err(r) => r,
     }
 }
 
@@ -85,7 +76,7 @@ pub async fn cleanup_unreferenced(State(state): State<AppState>, user: User, bod
     let root = state.user_root(&user.fingerprint);
     let rel_prefix = format!("users/{}", user.fingerprint);
     let now = state.now();
-    match blocking(move || {
+    match crate::fs::off_thread(move || {
         let dirs = match cleanup::unreferenced_task_dirs(&root, now).map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()))? {
             Ok(dirs) => dirs,
             Err(UnreadableBoard(board)) => {
@@ -107,8 +98,7 @@ pub async fn cleanup_unreferenced(State(state): State<AppState>, user: User, bod
     })
     .await
     {
-        Ok(r) => r,
-        Err(e) => e,
+        Ok(Ok(r)) | Ok(Err(r)) | Err(r) => r,
     }
 }
 

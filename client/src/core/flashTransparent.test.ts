@@ -34,7 +34,7 @@ function runnerSetup(alpha: boolean | undefined = true) {
       return { status: httpStatus, headers: { get: () => null }, text: async () => JSON.stringify({ data: [downloadFails ? { url: "https://result.test/transparent.png" } : { b64_json: Buffer.from(badOutput ? opaqueBytes : bytes).toString("base64") }] }), arrayBuffer: async () => bytes.slice().buffer };
     } };
   const runner = createRunner({ deps, apply: (_key, change) => { b = editBoard(b, change, { table: BUILTIN_TABLE, discovery: { source: "none" }, locked: new Set(), imageSize: () => undefined, newId: () => "result" }).board; }, log: () => {}, concurrency: 1 });
-  const target = { boardKey: "A", boardFile: "A", table: BUILTIN_TABLE, outputRoot: "/root", baseUrl: "http://gw", apiKey: "k" };
+  const target = { boardKey: "A", boardFile: "A", table: BUILTIN_TABLE, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" };
   return { fs, bytes, bodies, runner, target, board: () => b, unknownAlpha: () => { alpha = undefined; }, opaqueOutput: () => { badOutput = true; }, reject: () => { httpStatus = 400; }, failDownload: () => { downloadFails = true; } };
 }
 

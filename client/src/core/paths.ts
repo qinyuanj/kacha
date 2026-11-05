@@ -21,8 +21,8 @@ export function dirname(p: string): string {
 
 export const BOARDS_DIR_NAME = "画板";
 
-export function boardsDir(outputRoot: string): string {
-  return joinPath(outputRoot, BOARDS_DIR_NAME);
+export function boardsDir(userRoot: string): string {
+  return joinPath(userRoot, BOARDS_DIR_NAME);
 }
 
 /** 根目录内的文件记为相对路径（正斜杠，跨平台可读），根目录外保留绝对路径。 */

@@ -69,7 +69,7 @@ interface Props {
   /** 画板文件名，只用于日志。 */
   boardFile: string;
   table: CapabilityTable;
-  outputRoot: string;
+  userRoot: string;
   /** 画板写入的唯一入口（见 core/edit）；会话不可编辑时为 null。 */
   apply: (change: BoardChange) => EditResult | null;
   /** 按当前画板试算一次变更，不写入。 */
@@ -111,7 +111,7 @@ export function BoardCanvas({
   board,
   boardFile,
   table,
-  outputRoot,
+  userRoot,
   apply: applyChange,
   check,
   locked,
@@ -165,7 +165,7 @@ export function BoardCanvas({
   const selectedEdgesRef = useRef(selectedEdges);
   selectedEdgesRef.current = selectedEdges;
   const [focusPrompt, setFocusPrompt] = useState<string | null>(null);
-  const missing = useMissingImages(board, outputRoot);
+  const missing = useMissingImages(board, userRoot);
   const [preview, setPreview] = useState<{ req: PreviewRequest; nonce: number } | null>(null);
   // 上下文菜单：client = 弹出处的窗口坐标，at = 同一点的画布坐标（新建节点落点）。
   const [menu, setMenu] = useState<{ target: MenuTarget; client: { x: number; y: number }; at: { x: number; y: number } } | null>(null);
@@ -200,20 +200,20 @@ export function BoardCanvas({
 
   // 每个图片源节点的透明通道（导入 / 定位时已有缓存，未读的批量补读）；未知不进入 Map。
   const imageNodes = useMemo(() => board.nodes.filter((n) => n.type === "reference" || n.type === "result"), [board.nodes]);
-  const imageAbsPaths = useMemo(() => imageNodes.flatMap((n) => [resolveFromRoot(outputRoot, n.path), ...(n.type === "result" ? (n.record.layers ?? []).map(layer => resolveFromRoot(outputRoot, `${n.path.slice(0, n.path.length - n.file.length)}${layer.file}`)) : [])]), [imageNodes, outputRoot]);
+  const imageAbsPaths = useMemo(() => imageNodes.flatMap((n) => [resolveFromRoot(userRoot, n.path), ...(n.type === "result" ? (n.record.layers ?? []).map(layer => resolveFromRoot(userRoot, `${n.path.slice(0, n.path.length - n.file.length)}${layer.file}`)) : [])]), [imageNodes, userRoot]);
   const imageInfos = useImageInfos(imageAbsPaths);
-  // 图片宽高晚于画板变更读到（刚打开画板、刚重新定位）、任务结束解除锁定、能力表或输出根目录变化时补算自动宽高比：
+  // 图片宽高晚于画板变更读到（刚打开画板、刚重新定位）、任务结束解除锁定、能力表或用户数据根变化时补算自动宽高比：
   // 系统变更，不构成撤销步；环境经 apply 取最新，这里的依赖只决定何时补算。
   useEffect(() => {
     applyChange({ kind: "syncAutoRatios" });
-  }, [board, imageInfos, locked, table, outputRoot, applyChange]);
+  }, [board, imageInfos, locked, table, userRoot, applyChange]);
   const alphaByNode = useMemo(() => {
     const map = new Map<string, boolean>();
     imageNodes.forEach((n) => {
-      const info = imageInfos.get(resolveFromRoot(outputRoot, n.path));
+      const info = imageInfos.get(resolveFromRoot(userRoot, n.path));
       if (info) map.set(n.id, info.has_alpha);
       if (n.type === "result") (n.record.layers ?? []).forEach((layer, i) => {
-        const layerInfo = imageInfos.get(resolveFromRoot(outputRoot, `${n.path.slice(0, n.path.length - n.file.length)}${layer.file}`));
+        const layerInfo = imageInfos.get(resolveFromRoot(userRoot, `${n.path.slice(0, n.path.length - n.file.length)}${layer.file}`));
         if (layerInfo) map.set(`${n.id}:layer:${i + 1}`, layerInfo.has_alpha);
       });
     });
@@ -241,7 +241,7 @@ export function BoardCanvas({
     (nodeId: string) => {
       const node = boardRef.current.nodes.find((n) => n.id === nodeId);
       if (node?.type !== "reference" && node?.type !== "result") return;
-      const abs = resolveFromRoot(outputRoot, node.path);
+      const abs = resolveFromRoot(userRoot, node.path);
       const recordLayers = node.type === "result" ? (node.record.layers ?? []) : [];
       // 本次编辑用到的区域轮廓：产出任务的提交快照（任务已删 / 快照无区域 = 没有可回显的轮廓）。
       const producer = node.type === "result" ? producerOf(boardRef.current, node.id) : undefined;
@@ -257,10 +257,10 @@ export function BoardCanvas({
       };
       setPreview({ req, nonce: ++previewNonce.current });
     },
-    [outputRoot, regionTargetsOf],
+    [userRoot, regionTargetsOf],
   );
 
-  const stored = useStoredStatuses(board, boardFile, outputRoot, handled);
+  const stored = useStoredStatuses(board, boardFile, userRoot, handled);
   const statusOf = useCallback((taskId: string): TaskStatus | null => statuses.get(taskId) ?? stored.get(taskId) ?? null, [statuses, stored]);
 
   // perform 依赖每次渲染重建的新建类函数，经 ref 取最新一版，actions 保持稳定。
@@ -269,7 +269,7 @@ export function BoardCanvas({
     () => ({
       perform: (action, target, at) => performRef.current(action, target, at),
       table,
-      outputRoot,
+      userRoot,
       availableModels: availableModels(table, discovery),
       apply: (change) => void apply(change),
       continueEditing: (nodeId, sourceLayer = null, at) => {
@@ -292,7 +292,7 @@ export function BoardCanvas({
         const name = src.type === "reference" ? src.display_name : src.file;
         const req: PreviewRequest = {
           title: `框选修改区域 · ${name}`,
-          absPath: resolveFromRoot(outputRoot, src.path),
+          absPath: resolveFromRoot(userRoot, src.path),
           edit: target,
           regionTargets: [target],
         };
@@ -318,7 +318,7 @@ export function BoardCanvas({
             const file = files[0];
             try {
               const uploaded = await transfer.uploadReference(file);
-              const abs = resolveFromRoot(outputRoot, uploaded.path);
+              const abs = resolveFromRoot(userRoot, uploaded.path);
               const info = await ipc.inspectImage(abs);
               primeImageInfo(abs, info);
               apply({ kind: "relocate", nodeId, path: uploaded.path, sha256: info.sha256, fileName: file.name, picked: true });
@@ -331,16 +331,16 @@ export function BoardCanvas({
           }
           const abs =
             node.type === "result"
-              ? await findResultFile(relocateFs, outputRoot, { task_id: node.task_id, file: node.file })
-              : await findReferenceFile(relocateFs, outputRoot, { sha256: node.sha256, display_name: node.display_name });
+              ? await findResultFile(relocateFs, userRoot, { task_id: node.task_id, file: node.file })
+              : await findReferenceFile(relocateFs, userRoot, { sha256: node.sha256, display_name: node.display_name });
           if (!abs) {
             logRelocate({ ok: false, reason: "not_found" });
-            return toast(`在输出根目录内没有找到 ${node.type === "result" ? node.file : node.display_name}，可改为手动选择文件`);
+            return toast(`在用户数据根内没有找到 ${node.type === "result" ? node.file : node.display_name}，可改为手动选择文件`);
           }
           try {
             const info = await ipc.inspectImage(abs);
             primeImageInfo(abs, info);
-            apply({ kind: "relocate", nodeId, path: toRootRelative(outputRoot, abs), sha256: info.sha256, fileName: basename(abs), picked: false });
+            apply({ kind: "relocate", nodeId, path: toRootRelative(userRoot, abs), sha256: info.sha256, fileName: basename(abs), picked: false });
             logRelocate({ ok: true });
           } catch (e) {
             logRelocate({ ok: false, reason: "unreadable" });
@@ -348,7 +348,7 @@ export function BoardCanvas({
           }
         })(),
     }),
-    [table, boardFile, outputRoot, discovery, apply, onRegenerate, toast, openNodePreview, regionTargetsOf],
+    [table, boardFile, userRoot, discovery, apply, onRegenerate, toast, openNodePreview, regionTargetsOf],
   );
 
   // 选中任一节点即高亮其谱系。
@@ -380,8 +380,8 @@ export function BoardCanvas({
     const fallback = defaultModel(table);
     const labelOf = (id: string): ImagePortInfo => {
       const src = board.nodes.find((n) => n.id === id);
-      if (src?.type === "reference") return { label: src.display_name, absPath: resolveFromRoot(outputRoot, src.path) };
-      if (src?.type === "result") return { label: src.file, absPath: resolveFromRoot(outputRoot, src.path) };
+      if (src?.type === "reference") return { label: src.display_name, absPath: resolveFromRoot(userRoot, src.path) };
+      if (src?.type === "result") return { label: src.file, absPath: resolveFromRoot(userRoot, src.path) };
       return { label: "?", absPath: null };
     };
     const downstreamModels = (id: string) => {
@@ -417,7 +417,7 @@ export function BoardCanvas({
       };
       // 图片节点按存的宽度与图片比例显示（不回写 size）；缺图时高度随占位内容。
       const imageBox = (path: string) => {
-        const [width, height] = renderedImageSize(n.size, imageInfos.get(resolveFromRoot(outputRoot, path)));
+        const [width, height] = renderedImageSize(n.size, imageInfos.get(resolveFromRoot(userRoot, path)));
         return missing.has(n.id) ? { width } : { width, height };
       };
       switch (n.type) {
@@ -475,7 +475,7 @@ export function BoardCanvas({
         }
       }
     });
-  }, [board, table, outputRoot, selectedNodes, measured, statusOf, locked, discovery, highlighted, missing, focusPrompt, alphaByNode, imageInfos, expanded, menuFacts, drag]);
+  }, [board, table, userRoot, selectedNodes, measured, statusOf, locked, discovery, highlighted, missing, focusPrompt, alphaByNode, imageInfos, expanded, menuFacts, drag]);
 
   const dragging = drag !== null;
   const edges = useMemo<Edge[]>(
@@ -677,7 +677,7 @@ export function BoardCanvas({
       for (const file of files) {
         try {
           const uploaded = await transfer.uploadReference(file);
-          const abs = resolveFromRoot(outputRoot, uploaded.path);
+          const abs = resolveFromRoot(userRoot, uploaded.path);
           const info = await ipc.inspectImage(abs);
           primeImageInfo(abs, info);
           images.push({ path: uploaded.path, sha256: info.sha256, display_name: file.name, width: info.width, height: info.height });
@@ -687,7 +687,7 @@ export function BoardCanvas({
       }
       if (images.length) apply({ kind: "addReferences", images, at: [at.x, at.y], attach: attach ?? null });
     },
-    [apply, outputRoot, toast],
+    [apply, userRoot, toast],
   );
 
   /** attachTo = 任务节点 id：只选一张，接到该任务的空图片端口（从图片端口反向拖线建节点）。 */
@@ -740,7 +740,7 @@ export function BoardCanvas({
     const node = boardRef.current.nodes.find((n) => n.id === nodeId);
     if (node?.type !== "reference" && node?.type !== "result") return;
     try {
-      await saveCopyAs(resolveFromRoot(outputRoot, node.path));
+      await saveCopyAs(resolveFromRoot(userRoot, node.path));
       toast("已开始下载（结果带图层时为 zip）");
     } catch (e) {
       toast(`另存失败：${e instanceof Error ? e.message : String(e)}`);

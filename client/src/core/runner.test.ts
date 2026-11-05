@@ -21,7 +21,7 @@ describe("Flash 图层运行器：官方契约合成回放", () => {
     const b = board(["t1"], true);
     b.edges = b.edges.filter((e) => e.to[1] !== "positive");
     for (const n of b.nodes) if (n.type === "task") { n.model = "doubao-seedream-5-0-flash-260915"; n.layer_decomposition = true; }
-    const target = { boardKey: "A", boardFile: null, table: BUILTIN_TABLE, outputRoot: "/root", baseUrl: "https://synthetic.test", apiKey: "test" };
+    const target = { boardKey: "A", boardFile: null, table: BUILTIN_TABLE, userRoot: "/root", baseUrl: "https://synthetic.test", apiKey: "test" };
     return { fs, changes, payloads, runner, b, target, setAlpha: (v: boolean) => { alpha = v; } };
   };
   it.each([{ width: 511, height: 512 }, { width: 6001, height: 6000 }, { width: 16001, height: 1000 }, { input: new Uint8Array(30000001) }, { input: new Uint8Array([82, 73, 70, 70, 0, 0, 0, 0, 87, 69, 66, 80]) }, { decodeFails: true }])("专用输入非法时不发送网关 %#", async (opts) => {
@@ -73,7 +73,7 @@ it("Flash 区域发送文本、原图/叠加图顺序及任务记录经runner保
     imageCodec: { decode: async () => ({ width: 1024, height: 1024, hasAlpha: () => true, encode: async () => png, close() {} }) },
     fetch: async (_, init) => { bodies.push(JSON.parse(String(init?.body))); return { status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ data: [{ b64_json: btoa(String.fromCharCode(...png)) }] }), arrayBuffer: async () => png.buffer as ArrayBuffer }; },
   }});
-  const target = { boardKey: "A", boardFile: "A", table: BUILTIN_TABLE, outputRoot: "/root", baseUrl: "http://gw", apiKey: "k" };
+  const target = { boardKey: "A", boardFile: "A", table: BUILTIN_TABLE, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" };
   const shown = sendPlanOf(b, BUILTIN_TABLE, "t1")!;
   expect(await r.submit(target, b, ["t1"])).toEqual([]);
   await settle();

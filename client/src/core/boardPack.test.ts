@@ -318,7 +318,7 @@ describe("导入画板包", () => {
       cancel: async (cancelled) => void steps.push(`cancel(${cancelled})`),
       entries: async () => Object.keys(pack),
       readTexts: async (_pack, names) => Object.fromEntries(names.filter((n) => n in pack).map((n) => [n, pack[n]])),
-      importUnits: async (_pack, _root, units) => {
+      importUnits: async (_pack, units) => {
         steps.push("import");
         for (const unit of units) {
           moved.push(unit.path);
@@ -336,7 +336,6 @@ describe("导入画板包", () => {
     const stages: string[] = [];
     const outcome = importPack(io, {
       packPath: PACK,
-      outputRoot: ROOT,
       addBoard: async (board) => {
         added.push(board.title);
         return addBoard(board);

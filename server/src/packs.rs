@@ -119,8 +119,8 @@ pub struct OpQuery {
 /// 把阻塞的 zip 写入接到 HTTP 响应体：worker 在 spawn_blocking 里写，bounded channel 背压，
 /// 客户端断开时 receiver 被 drop，writer 的下一次写出错即中止，不占异步线程也不留文件。
 pub async fn export(State(state): State<AppState>, user: User, Query(q): Query<OpQuery>, body: axum::body::Bytes) -> Response {
-    if !state.disk_guard().enough() {
-        return error(StatusCode::INSUFFICIENT_STORAGE, "insufficient_storage", "服务器空间不足，请联系管理员");
+    if let Err(r) = crate::fs::ensure_space(&state) {
+        return r;
     }
     let Ok(spec) = serde_json::from_slice::<ExportSpec>(&body) else {
         return error(StatusCode::BAD_REQUEST, "bad_request", "需要画板包导出规格");
@@ -204,20 +204,20 @@ fn upload_path(root: &Path, id: &str) -> PathBuf {
 }
 
 pub async fn upload(State(state): State<AppState>, user: User, body: Body) -> Response {
-    if !state.disk_guard().enough() {
-        return error(StatusCode::INSUFFICIENT_STORAGE, "insufficient_storage", "服务器空间不足，请联系管理员");
+    if let Err(r) = crate::fs::ensure_space(&state) {
+        return r;
     }
     let root = state.user_root(&user.fingerprint);
     let _permit = state.heavy().acquire().await;
     let id = format!("{:x}", rand_u64());
     let file = upload_path(&root, &id);
     if let Err(e) = std::fs::create_dir_all(file.parent().unwrap()) {
-        return crate::fs::io_error_pub(e);
+        return crate::fs::io_error(e);
     }
     let mut guard = UploadGuard { file: file.clone(), keep: false };
     let mut out = match tokio::fs::OpenOptions::new().write(true).create_new(true).open(&file).await {
         Ok(f) => f,
-        Err(e) => return crate::fs::io_error_pub(e),
+        Err(e) => return crate::fs::io_error(e),
     };
     let mut stream = body.into_data_stream();
     while let Some(chunk) = stream.next().await {
@@ -226,11 +226,11 @@ pub async fn upload(State(state): State<AppState>, user: User, body: Body) -> Re
             Err(_) => return error(StatusCode::BAD_REQUEST, "upload_failed", "上传中断"),
         };
         if let Err(e) = out.write_all(&chunk).await {
-            return crate::fs::io_error_pub(e);
+            return crate::fs::io_error(e);
         }
     }
     if let Err(e) = out.sync_all().await {
-        return crate::fs::io_error_pub(e);
+        return crate::fs::io_error(e);
     }
     drop(out);
     guard.keep = true;
@@ -283,8 +283,8 @@ pub async fn upload_texts(State(state): State<AppState>, user: User, AxPath(id):
 
 /// 执行导入：结束后无论结局都删除上传临时文件（已移入的单元保留）。
 pub async fn import(State(state): State<AppState>, user: User, AxPath(id): AxPath<String>, Query(q): Query<OpQuery>, body: axum::body::Bytes) -> Response {
-    if !state.disk_guard().enough() {
-        return error(StatusCode::INSUFFICIENT_STORAGE, "insufficient_storage", "服务器空间不足，请联系管理员");
+    if let Err(r) = crate::fs::ensure_space(&state) {
+        return r;
     }
     let Ok(units) = serde_json::from_slice::<Vec<MergeUnit>>(&body) else {
         return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表");
@@ -309,7 +309,7 @@ pub async fn import(State(state): State<AppState>, user: User, AxPath(id): AxPat
         Ok(Ok(report)) => Json(report).into_response(),
         Ok(Err(e)) if e.kind() == std::io::ErrorKind::Interrupted => error(StatusCode::CONFLICT, "cancelled", CANCELLED),
         Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidData => error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_pack", &e.to_string()),
-        Ok(Err(e)) => crate::fs::io_error_pub(e),
+        Ok(Err(e)) => crate::fs::io_error(e),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
     }
 }

@@ -17,36 +17,36 @@ interface PackBoards {
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export function useBoardPack(outputRoot: string | null, boards: PackBoards, toast: (message: string) => void) {
+export function useBoardPack(userRoot: string | null, boards: PackBoards, toast: (message: string) => void) {
   const [dialog, setDialog] = useState<PackDialogState | null>(null);
 
   const progress = (title: string) => () => setDialog({ stage: "progress", title });
 
   const prepareExport = useCallback(
     async (key: string) => {
-      if (!outputRoot) return;
+      if (!userRoot) return;
       // 保存失败也继续：导出规格携带当前页面的画板文本，不能因 flushAll 的失败而丢掉备份入口。
       await boards.flushAll();
       const board = boards.getBoard(key);
       const boardFile = boards.boardFileName(key);
       if (!board || !boardFile) return;
       try {
-        setDialog({ stage: "confirmExport", boardFile, plan: await planExport(board, outputRoot, packFs) });
+        setDialog({ stage: "confirmExport", boardFile, plan: await planExport(board, userRoot, packFs) });
       } catch (e) {
         toast(`无法导出画板包：${errorText(e)}`);
       }
     },
-    [outputRoot, boards, toast],
+    [userRoot, boards, toast],
   );
 
   const confirmExport = useCallback(async () => {
-    if (!outputRoot || dialog?.stage !== "confirmExport") return;
+    if (!userRoot || dialog?.stage !== "confirmExport") return;
     const { boardFile, plan } = dialog;
     const stem = boardFile.slice(0, -BOARD_EXTENSION.length);
     const target = `${stem}${PACK_EXTENSION}`;
     const spec = buildExportSpec(await browser.version(), boardFile, plan);
     const fields = { action: "export", board_file: boardFile, task_dirs: plan.taskDirs.length, missing: plan.missing.length };
-    const outcome = await runCancellable(packIo, progress(`正在导出画板包：${stem}`), () => ipc.boardPackExport(outputRoot, target, spec));
+    const outcome = await runCancellable(packIo, progress(`正在导出画板包：${stem}`), () => ipc.boardPackExport(target, spec));
     setDialog(null);
     if (outcome.ok) {
       logEvent("board_pack", { ...fields, task_dirs: outcome.value.task_dirs, bytes: outcome.value.bytes, result: "ok" });
@@ -55,17 +55,16 @@ export function useBoardPack(outputRoot: string | null, boards: PackBoards, toas
       logEvent("board_pack", { ...fields, result: outcome.result });
       toast(outcome.result === "cancelled" ? "已取消导出画板包" : `导出画板包失败：${outcome.error}`);
     }
-  }, [outputRoot, dialog, toast]);
+  }, [userRoot, dialog, toast]);
 
   const importPack = useCallback(async () => {
-    if (!outputRoot) return;
+    if (!userRoot) return;
     try {
       const picked = await pickAndUploadPack();
       if (!picked) return;
       const result = await importPackIn(packIo, {
         packPath: picked.id,
         displayName: picked.name,
-        outputRoot,
         addBoard: (board) => boards.addImportedBoard(board),
         onStage: progress(`正在导入画板包：${picked.name}`),
         log: logEvent,
@@ -94,7 +93,7 @@ export function useBoardPack(outputRoot: string | null, boards: PackBoards, toas
     } catch (e) {
       toast(`导入画板包失败：${errorText(e)}`);
     }
-  }, [outputRoot, boards, toast]);
+  }, [userRoot, boards, toast]);
 
   return {
     prepareExport,

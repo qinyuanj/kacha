@@ -13,7 +13,7 @@ import { logEvent } from "../shell/log";
 
 export interface BoardActions {
   table: CapabilityTable;
-  outputRoot: string;
+  userRoot: string;
   /** 任务节点模型下拉：网关发现 ∩ 上架清单。 */
   availableModels: ModelCapability[];
   /** 画板变更的唯一写入口（见 core/edit）：被拒或需告知时提示原因。 */
@@ -22,7 +22,7 @@ export interface BoardActions {
   continueEditing: (nodeId: string, sourceLayer?: number | null, at?: { x: number; y: number }) => void;
   addAsReference: (resultId: string, sourceLayer?: number | null) => void;
   generateVariant: (resultId: string) => void;
-  /** 缺图节点：pick = 选文件，search = 在输出根目录内按身份找。 */
+  /** 缺图节点：pick = 选文件，search = 在用户数据根内按身份找。 */
   relocate: (nodeId: string, mode: "pick" | "search") => void;
   /** 参考图 / 结果节点的「放大预览」：弹窗里可再选扇出任务编辑区域。 */
   previewNode: (nodeId: string) => void;
@@ -109,14 +109,14 @@ function cachedImageInfo(absPath: string): Promise<ImageInfo | null> {
 }
 
 /** 图片文件读不到的参考图 / 结果节点 id；读完之前为空（不闪缺图占位）。结果节点的图层文件按 `节点id:layer:序号` 分键，与底图互不株连。 */
-export function useMissingImages(board: Board, outputRoot: string): ReadonlySet<string> {
+export function useMissingImages(board: Board, userRoot: string): ReadonlySet<string> {
   const [missing, setMissing] = useState<ReadonlySet<string>>(new Set());
   const images = board.nodes.flatMap((n): (readonly [string, string])[] => {
     if (n.type !== "reference" && n.type !== "result") return [];
-    const main = [[n.id, resolveFromRoot(outputRoot, n.path)] as const];
+    const main = [[n.id, resolveFromRoot(userRoot, n.path)] as const];
     if (n.type !== "result") return main;
     const dir = n.path.slice(0, n.path.length - n.file.length);
-    return [...main, ...(n.record.layers ?? []).map((l, i) => [`${n.id}:layer:${i + 1}`, resolveFromRoot(outputRoot, `${dir}${l.file}`)] as const)];
+    return [...main, ...(n.record.layers ?? []).map((l, i) => [`${n.id}:layer:${i + 1}`, resolveFromRoot(userRoot, `${dir}${l.file}`)] as const)];
   });
   const signature = JSON.stringify(images);
   useEffect(() => {
@@ -153,12 +153,12 @@ const interruptedLog = createInterruptedLog();
 /**
  * 本次运行没经手过、提交过却没有结果的任务的状态（规则在 core/submission.ts 的 storedStatuses）。读完之前不显示徽标。
  */
-export function useStoredStatuses(board: Board, boardFile: string, outputRoot: string, handled: ReadonlySet<string>): ReadonlyMap<string, TaskStatus> {
+export function useStoredStatuses(board: Board, boardFile: string, userRoot: string, handled: ReadonlySet<string>): ReadonlyMap<string, TaskStatus> {
   const [statuses, setStatuses] = useState<ReadonlyMap<string, TaskStatus>>(new Map());
-  const signature = JSON.stringify([outputRoot, boardFile, interruptedCandidates(board, handled)]);
+  const signature = JSON.stringify([userRoot, boardFile, interruptedCandidates(board, handled)]);
   useEffect(() => {
     let alive = true;
-    void storedStatuses(cachedReadFs, board, handled, outputRoot, boardFile).then(({ statuses, interruptedEvents }) => {
+    void storedStatuses(cachedReadFs, board, handled, userRoot, boardFile).then(({ statuses, interruptedEvents }) => {
       for (const event of interruptedLog.take(interruptedEvents)) logEvent("task", { ...event });
       if (alive) setStatuses(statuses);
     }, () => {

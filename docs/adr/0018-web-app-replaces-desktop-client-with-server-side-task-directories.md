@@ -6,6 +6,8 @@ status: accepted
 
 2026-11-04 决定：Kacha 改为部署在 lzxsvn 上的 Web 应用，桌面客户端立即退役，已安装的 `v0.3.x` 可继续使用但不再发布更新。`client/src-tauri` 改造为 `server/`（Rust + axum），移除 Tauri 依赖，`store.rs`、`board_pack.rs`、`image_info.rs` 等与 Tauri 无耦合的模块原样迁入；前端 `client/src/shell` 的 IPC 改为 HTTP。旧桌面代码与 `packaging/` 从 main 删除，靠 tag `v0.3.2` 找回。本决定取代 ADR 0007、0008、0016、0017。
 
+> 2026-11-05 补记：上文「旧桌面代码与 `packaging/` 从 main 删除」只对桌面代码成立。桌面打包脚本已删除，`packaging/` 目录保留并改作 Web 版的 release 构建与部署入口（`packaging/build_web.py`、`packaging/README.md`）；桌面版仍靠 tag `v0.3.2` 找回。
+
 任务目录与画板仍是 ADR 0010 的形状，但存放在服务端按用户隔离的用户数据根下，用户不能自己设置位置。没有登录流程，也没有准入名单：用户在页面粘贴自己的 new-api API 密钥，服务端先向网关验证密钥有效，再以密钥指纹（哈希）作为用户身份并发放 7 天会话 cookie（页面加载结果图的请求只能靠 cookie 认人）；服务端只存指纹，不存密钥。密钥只能读到令牌名与额度，解析不出 new-api 用户（2026-11-04 实测），而生成本就需要用户自己的密钥，再加账号登录是多余的。预期规模约 30 人。生成请求与任务队列仍在浏览器里，由浏览器直接调用网关（网关 CORS 已放开）；结果图所在的对象存储不允许跨域（实测无 `Access-Control-Allow-Origin`，预检 403），因此浏览器把结果地址交给服务端，由服务端只从已知对象存储域名下载并流式写入任务目录。
 
 ## Considered Options

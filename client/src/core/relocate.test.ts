@@ -55,7 +55,7 @@ describe("重新定位：结果按 task_id 找", () => {
 });
 
 describe("重新定位：参考图按 sha256 找", () => {
-  it("只在输出根目录内递归找图片文件，同名文件先算哈希", async () => {
+  it("只在用户数据根内递归找图片文件，同名文件先算哈希", async () => {
     const { fs, hashed } = memoryFs({
       "/out/a/other.png": "zzz",
       "/out/b/deep/cat.png": "want",

@@ -1,5 +1,4 @@
-// Web 壳层端口：UI 只认这些接口，同源 HTTP 与浏览器能力都在 impl.web.ts 中实现。
-import type { FetchLike } from "../core/gateway";
+// Web 壳层端口：UI 只认这些接口，同源 HTTP 与浏览器能力都在 ipc.ts 中实现。
 import type { MergeOutcome, MergeUnit, PackExportSpec } from "../core/boardPack";
 import type { DirEntry } from "../core/relocate";
 
@@ -38,10 +37,10 @@ export interface Ipc {
   readModelsCache(): Promise<string | null>;
   writeModelsCache(text: string): Promise<void>;
   logEvent(kind: string, fields: Record<string, unknown>): Promise<void>;
-  boardPackExport(outputRoot: string, target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number }>;
+  boardPackExport(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number }>;
   boardPackEntries(pack: string): Promise<string[]>;
   boardPackReadTexts(pack: string, names: string[]): Promise<Record<string, string>>;
-  boardPackImport(pack: string, outputRoot: string, units: MergeUnit[]): Promise<{ outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number }>;
+  boardPackImport(pack: string, units: MergeUnit[]): Promise<{ outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number }>;
   boardPackCancel(cancelled: boolean): Promise<void>;
   listDir(path: string): Promise<DirEntry[]>;
   fileSha256(path: string): Promise<string>;
@@ -84,19 +83,6 @@ export interface Usage {
 export interface UsagePort {
   usage(): Promise<Usage>;
   cleanupUnreferenced(dirs: string[]): Promise<{ moved: UsageCandidate[]; skipped: string[] }>;
-}
-
-export interface ShellImpl {
-  outputRoot: string;
-  ipc: Ipc;
-  httpFetch: FetchLike;
-  fileUrl(path: string): string;
-  browser: BrowserPort;
-  session: SessionPort;
-  relay: RelayPort;
-  transfer: TransferPort;
-  pack: PackUploadPort;
-  usage: UsagePort;
 }
 
 /** 结果中转：相对路径都相对用户数据根（虚拟根由实现剥掉）。 */

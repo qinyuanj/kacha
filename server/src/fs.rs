@@ -38,11 +38,7 @@ struct DirEntry {
 }
 
 /// 把 io 错误映射成 HTTP：不存在 404、已存在 409、其他 500。越界由 paths 单独给出 403。
-pub fn io_error_pub(e: std::io::Error) -> Response {
-    io_error(e)
-}
-
-fn io_error(e: std::io::Error) -> Response {
+pub(crate) fn io_error(e: std::io::Error) -> Response {
     match e.kind() {
         ErrorKind::NotFound => error(StatusCode::NOT_FOUND, "not_found", "文件不存在"),
         ErrorKind::AlreadyExists => error(StatusCode::CONFLICT, "already_exists", "目标已存在，本接口只新建不覆盖"),
@@ -50,12 +46,13 @@ fn io_error(e: std::io::Error) -> Response {
     }
 }
 
-fn resolve(state: &AppState, user: &User, rel: &str) -> Result<PathBuf, Response> {
+/// 请求里的相对路径 → 当前用户数据根内的绝对路径；越界 403。
+pub(crate) fn resolve(state: &AppState, user: &User, rel: &str) -> Result<PathBuf, Response> {
     paths::resolve(&state.user_root(&user.fingerprint), rel).map_err(|e| error(StatusCode::FORBIDDEN, "forbidden", e.message()))
 }
 
 /// 写入类接口的磁盘余量检查：不足 507。
-fn ensure_space(state: &AppState) -> Result<(), Response> {
+pub(crate) fn ensure_space(state: &AppState) -> Result<(), Response> {
     if state.disk_guard().enough() {
         Ok(())
     } else {
@@ -63,32 +60,14 @@ fn ensure_space(state: &AppState) -> Result<(), Response> {
     }
 }
 
-fn blocking<F, T>(f: F) -> impl std::future::Future<Output = Result<T, Response>>
-where
-    F: FnOnce() -> std::io::Result<T> + Send + 'static,
-    T: Send + 'static,
-{
-    async move {
-        match tokio::task::spawn_blocking(f).await {
-            Ok(result) => result.map_err(io_error),
-            Err(e) => Err(error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string())),
-        }
-    }
+/// 阻塞工作放进 spawn_blocking；任务本身 panic 时回 500。领域错误留在 T 里由调用方映射。
+pub(crate) async fn off_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, Response> {
+    tokio::task::spawn_blocking(f).await.map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()))
 }
 
-/// 与 blocking 相同，但保留领域错误（画板版本冲突等），由调用方映射成 HTTP。
-fn blocking_with<F, T, E>(f: F) -> impl std::future::Future<Output = Result<T, E>>
-where
-    F: FnOnce() -> Result<T, E> + Send + 'static,
-    T: Send + 'static,
-    E: From<std::io::Error> + Send + 'static,
-{
-    async move {
-        match tokio::task::spawn_blocking(f).await {
-            Ok(result) => result,
-            Err(e) => Err(E::from(std::io::Error::other(e))),
-        }
-    }
+/// 阻塞 IO：io 错误按 io_error 映射。
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> std::io::Result<T> + Send + 'static) -> Result<T, Response> {
+    off_thread(f).await?.map_err(io_error)
 }
 
 // ---- 文本元数据（设置 / 界面状态 / 模型缓存 / 能力表覆盖）----
@@ -174,9 +153,10 @@ pub async fn write_board(State(state): State<AppState>, user: User, Query(q): Qu
     };
     // 读、比较、写之间不能插进另一个写：同进程内画板写与改名串行。
     let _lock = state.board_lock().lock().await;
-    match blocking_with(move || String::from_utf8(body.to_vec()).map_err(|e| std::io::Error::new(ErrorKind::InvalidData, e)).map_err(store::BoardSaveError::from).and_then(|text| store::write_board_guarded(&path, &text, guard))).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => board_save_error(e),
+    match off_thread(move || String::from_utf8(body.to_vec()).map_err(|e| std::io::Error::new(ErrorKind::InvalidData, e)).map_err(store::BoardSaveError::from).and_then(|text| store::write_board_guarded(&path, &text, guard))).await {
+        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(e)) => board_save_error(e),
+        Err(r) => r,
     }
 }
 
@@ -198,11 +178,12 @@ pub async fn rename_board(State(state): State<AppState>, user: User, body: axum:
         (Err(r), _) | (_, Err(r)) => return r,
     };
     let _lock = state.board_lock().lock().await;
-    match blocking_with(move || store::rename_board_guarded(&from, &to, req.version.as_deref())).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) if e.kind() == ErrorKind::NotFound => error(StatusCode::NOT_FOUND, "not_found", "画板不存在，可能已在别处改名或删除；请重新载入画板列表"),
-        Err(e) if e.kind() == ErrorKind::InvalidInput => error(StatusCode::CONFLICT, "board_conflict", "画板已在别处修改，请重新载入"),
-        Err(r) => io_error(r),
+    match off_thread(move || store::rename_board_guarded(&from, &to, req.version.as_deref())).await {
+        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(e)) if e.kind() == ErrorKind::NotFound => error(StatusCode::NOT_FOUND, "not_found", "画板不存在，可能已在别处改名或删除；请重新载入画板列表"),
+        Ok(Err(e)) if e.kind() == ErrorKind::InvalidInput => error(StatusCode::CONFLICT, "board_conflict", "画板已在别处修改，请重新载入"),
+        Ok(Err(e)) => io_error(e),
+        Err(r) => r,
     }
 }
 

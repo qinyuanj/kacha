@@ -83,7 +83,7 @@ export function harness(opts: { concurrency?: number; imageCodec?: RunDeps["imag
   const changes: { boardKey: string; change: RunnerChange }[] = [];
   const logs: { kind: string; fields: Record<string, unknown> }[] = [];
   const runner = createRunner({ deps, apply: (boardKey, change) => changes.push({ boardKey, change }), log: (kind, fields) => logs.push({ kind, fields }), concurrency: opts.concurrency ?? 3 });
-  const target = (boardKey = "A"): RunTarget => ({ boardKey, boardFile: `${boardKey}.ugcboard`, table: BUILTIN_TABLE, outputRoot: "/root", baseUrl: "http://gw", apiKey: "k" });
+  const target = (boardKey = "A"): RunTarget => ({ boardKey, boardFile: `${boardKey}.ugcboard`, table: BUILTIN_TABLE, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" });
   return {
     runner,
     files,

@@ -41,7 +41,7 @@ function memoryPorts(stub: Partial<SettingsPorts> = {}) {
 }
 
 describe("高级设置 settings.json", () => {
-  it("缺失时用默认值：v1 网关地址、输出根目录跟随默认、并发 4", () => {
+  it("缺失时用默认值：v1 网关地址、用户数据根跟随默认、并发 4", () => {
     expect(parseSettings(null)).toEqual({ kind: "ok", settings: DEFAULT_SETTINGS });
     expect(DEFAULT_SETTINGS).toMatchObject({ format_version: 1, base_url: "http://lzxsvn:3001", output_root: null, concurrency: 4 });
   });

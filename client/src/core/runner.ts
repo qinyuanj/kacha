@@ -17,7 +17,7 @@ export interface RunTarget {
   /** 画板文件名（日志用）。 */
   boardFile: string | null;
   table: CapabilityTable;
-  outputRoot: string;
+  userRoot: string;
   baseUrl: string;
   apiKey: string;
 }
@@ -195,7 +195,7 @@ export function createRunner(ports: RunnerPorts): Runner {
 
   /** 任务目录已写的任务没有结果时记下结局，重开时据此区分失败 / 已取消 / 已中断；写不了就算了。 */
   function recordOutcome(job: Job, outcome: TaskOutcome) {
-    if (job.written) void writeOutcome(deps, job.target.outputRoot, job.written.relDir, outcome).catch(() => undefined);
+    if (job.written) void writeOutcome(deps, job.target.userRoot, job.written.relDir, outcome).catch(() => undefined);
   }
 
   function remove(job: Job) {
@@ -237,7 +237,7 @@ export function createRunner(ports: RunnerPorts): Runner {
     const aborted = () => controller.signal.aborted;
     try {
       if (!job.written) {
-        job.written = await writeJob(deps, target.outputRoot, job.prepared!);
+        job.written = await writeJob(deps, target.userRoot, job.prepared!);
         if (job.lastSubmitted !== undefined) ports.apply(target.boardKey, { kind: "submitted", taskId: job.taskNodeId, lastSubmitted: job.lastSubmitted });
         // 写目录期间被取消：取消时目录还没写，这里补记结局。
         if (aborted()) recordOutcome(job, { kind: "cancelled", gatewayMayContinue: false });
@@ -246,7 +246,7 @@ export function createRunner(ports: RunnerPorts): Runner {
       const written = job.written;
       const result = await executeJob(deps, {
         job: written,
-        outputRoot: target.outputRoot,
+        userRoot: target.userRoot,
         baseUrl: target.baseUrl,
         apiKey: target.apiKey,
         signal: controller.signal,
@@ -382,7 +382,7 @@ export function createRunner(ports: RunnerPorts): Runner {
     for (const taskNodeId of taskNodeIds) {
       if (submission.cancelled || closed.has(target.boardKey) || generation !== submissionGeneration) break;
       if (occupied(target.boardKey, taskNodeId)) continue;
-      const problem = await enqueue(target, taskNodeId, submission, () => prepareJob(deps, { board, table: target.table, tableSha256, outputRoot: target.outputRoot, taskNodeId }));
+      const problem = await enqueue(target, taskNodeId, submission, () => prepareJob(deps, { board, table: target.table, tableSha256, userRoot: target.userRoot, taskNodeId }));
       if (problem) problems.push(problem);
     }
     return problems;
@@ -399,7 +399,7 @@ export function createRunner(ports: RunnerPorts): Runner {
     if (generation !== submissionGeneration) return null;
     if (occupied(target.boardKey, taskNodeId)) return null;
     return enqueue(target, taskNodeId, { cancelled: false }, () =>
-      prepareRegenerate(deps, { board, table: target.table, tableSha256, outputRoot: target.outputRoot, taskNodeId, fromTaskId }),
+      prepareRegenerate(deps, { board, table: target.table, tableSha256, userRoot: target.userRoot, taskNodeId, fromTaskId }),
     );
   }
 

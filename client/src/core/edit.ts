@@ -43,7 +43,7 @@ export interface DragRef {
   copies: number;
 }
 
-/** 已读好的参考图文件：path 输出根目录内为相对路径。 */
+/** 已读好的参考图文件：path 用户数据根内为相对路径。 */
 export interface ImportedImage {
   path: string;
   sha256: string;

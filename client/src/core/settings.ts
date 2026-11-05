@@ -11,7 +11,7 @@ type Json = Record<string, unknown>;
 export interface Settings {
   format_version: number;
   base_url: string;
-  /** null = 跟随默认输出根目录（图片目录下）。 */
+  /** 旧桌面版的自选出图位置；Web 版由服务端分配用户数据根，此字段只为兼容旧文件保留，写回为 null。 */
   output_root: string | null;
   /** 全局队列的并发上限。 */
   concurrency: number;
@@ -52,17 +52,17 @@ export function parseSettings(text: string | null): LoadedSettings {
   if (!Number.isInteger(version) || (version as number) < 1) return corrupt("format_version 必须是正整数");
   if ((version as number) > SETTINGS_FORMAT_VERSION) return { kind: "newer", version: version as number, settings: DEFAULT_SETTINGS };
   const baseUrl = raw.base_url ?? DEFAULT_SETTINGS.base_url;
-  const outputRoot = raw.output_root ?? null;
+  const userRoot = raw.output_root ?? null;
   const concurrency = raw.concurrency ?? DEFAULT_SETTINGS.concurrency;
   if (typeof baseUrl !== "string") return corrupt("base_url 必须是字符串");
-  if (outputRoot !== null && (typeof outputRoot !== "string" || !outputRoot)) return corrupt("output_root 必须是非空字符串或 null");
+  if (userRoot !== null && (typeof userRoot !== "string" || !userRoot)) return corrupt("output_root 必须是非空字符串或 null");
   if (!Number.isInteger(concurrency) || (concurrency as number) < MIN_CONCURRENCY || (concurrency as number) > MAX_CONCURRENCY) {
     return corrupt(`concurrency 必须是 ${MIN_CONCURRENCY}～${MAX_CONCURRENCY} 的整数`);
   }
   const extra = Object.fromEntries(Object.entries(raw).filter(([k]) => !KNOWN_KEYS.includes(k)));
   return {
     kind: "ok",
-    settings: { format_version: SETTINGS_FORMAT_VERSION, base_url: baseUrl, output_root: outputRoot as string | null, concurrency: concurrency as number, extra },
+    settings: { format_version: SETTINGS_FORMAT_VERSION, base_url: baseUrl, output_root: userRoot as string | null, concurrency: concurrency as number, extra },
   };
 }
 

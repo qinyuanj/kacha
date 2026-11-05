@@ -52,6 +52,9 @@ struct Uploaded {
 
 /// 上传一张参考图：请求体即文件字节。返回落盘后的相对路径；不是图片 422，超过上限 413。
 pub async fn upload_reference(State(state): State<AppState>, user: User, body: Body) -> Response {
+    if let Err(r) = crate::fs::ensure_space(&state) {
+        return r;
+    }
     let dir = match paths::resolve(&state.user_root(&user.fingerprint), IMPORTED_REFERENCES_DIR) {
         Ok(d) => d,
         Err(e) => return forbidden(e),

@@ -52,14 +52,14 @@ describe("任务编号与目录", () => {
     expect(taskDirOfTaskId("not-a-task")).toBeNull();
   });
 
-  it("任务目录里的文件路径：按输出根目录的分隔符拼接；任务编号不是本工具生成的为 null", () => {
+  it("任务目录里的文件路径：按用户数据根的分隔符拼接；任务编号不是本工具生成的为 null", () => {
     const id = "20260916T091500Z-3f9c2a1b";
     expect(taskFilePath("/root", id, "result.png")).toBe("/root/2026-09-16/20260916T091500Z-3f9c2a1b/result.png");
     expect(taskFilePath("D:\\出图", id, "layers/01.png")).toBe("D:\\出图\\2026-09-16\\20260916T091500Z-3f9c2a1b\\layers\\01.png");
     expect(taskFilePath("/root", "not-a-task", "result.png")).toBeNull();
   });
 
-  it("相对输出根目录的路径落在 <日期>/<task_id>/… 里时还原任务目录", () => {
+  it("相对用户数据根的路径落在 <日期>/<task_id>/… 里时还原任务目录", () => {
     expect(taskDirOfRelPath("2026-09-16/t1/result.png")).toBe("2026-09-16/t1");
     expect(taskDirOfRelPath("2026-09-16/t1/layers/01.png")).toBe("2026-09-16/t1");
     expect(taskDirOfRelPath("2026-09-16/t1")).toBeNull();
@@ -170,7 +170,7 @@ describe("提交时写任务目录", () => {
     expect(fs.files.size).toBe(0);
   });
 
-  it("Windows 输出根目录用反斜杠拼接", async () => {
+  it("Windows 用户数据根用反斜杠拼接", async () => {
     const fs = memoryTaskFs();
     await writeSubmission(fs, "D:\\出图", plan({ references: [] }));
     expect([...fs.files.keys()]).toEqual(["D:\\出图\\2026-09-16\\20260916T091500Z-3f9c2a1b\\task.json"]);
@@ -341,7 +341,7 @@ describe("读回旧任务目录（真实旧夹具，见 __fixtures__/README.md�
 });
 
 describe("保存结果图", () => {
-  it("按文件头定扩展名，返回相对输出根目录的正斜杠路径", async () => {
+  it("按文件头定扩展名，返回相对用户数据根的正斜杠路径", async () => {
     const fs = memoryTaskFs();
     const saved = await saveResult(fs, "D:\\出图", "2026-09-16/t1", PNG);
     expect(saved).toEqual({ file: "result.png", path: "2026-09-16/t1/result.png" });

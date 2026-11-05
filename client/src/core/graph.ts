@@ -87,18 +87,18 @@ export function sourceLayerRecord(record: ResultRecord, sourceLayer: number): La
 }
 
 /** 任务的参考图来源，按端口顺序；结果节点回灌的是文件本身，不带会话参数。 */
-export function imageSources(board: Board, taskId: string, outputRoot: string): ImageSource[] {
+export function imageSources(board: Board, taskId: string, userRoot: string): ImageSource[] {
   return imageEdges(board, taskId).flatMap((e): ImageSource[] => {
     const src = board.nodes.find((n) => n.id === e.from[0]);
-    if (src?.type === "reference") return [{ nodeId: src.id, label: src.display_name, absPath: resolveFromRoot(outputRoot, src.path), sourceLayer: null }];
+    if (src?.type === "reference") return [{ nodeId: src.id, label: src.display_name, absPath: resolveFromRoot(userRoot, src.path), sourceLayer: null }];
     if (src?.type === "result") {
       // 接了某一图层：路径以结果记录里的图层记录为准（记录无效 = 身份无效，不给路径），标签点明图层序号。
       if (e.source_layer !== null) {
         const layer = sourceLayerRecord(src.record, e.source_layer);
         const dir = src.path.slice(0, src.path.length - src.file.length);
-        return [{ nodeId: src.id, label: `${src.file} 图层${e.source_layer}`, absPath: layer ? resolveFromRoot(outputRoot, `${dir}${layer.file}`) : null, sourceLayer: e.source_layer }];
+        return [{ nodeId: src.id, label: `${src.file} 图层${e.source_layer}`, absPath: layer ? resolveFromRoot(userRoot, `${dir}${layer.file}`) : null, sourceLayer: e.source_layer }];
       }
-      return [{ nodeId: src.id, label: src.file, absPath: resolveFromRoot(outputRoot, src.path), sourceLayer: null }];
+      return [{ nodeId: src.id, label: src.file, absPath: resolveFromRoot(userRoot, src.path), sourceLayer: null }];
     }
     return [];
   });

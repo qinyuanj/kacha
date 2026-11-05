@@ -154,6 +154,8 @@ async fn insufficient_disk_returns_507_on_writes_and_packs() {
     assert_eq!(up.status, 507);
     let ex = h.send(Method::POST, "/api/packs/export?op=e9", Some(&cookie), export_spec().to_string()).await;
     assert_eq!(ex.status, 507);
+    let reference = h.send(Method::POST, "/api/upload/reference", Some(&cookie), Body::from(vec![0x89u8, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])).await;
+    assert_eq!(reference.status, 507, "上传参考图也是写入：{}", reference.text());
     // 读接口不受 507 影响。
     assert_eq!(h.get("/api/boards/names?dir=%E7%94%BB%E6%9D%BF", Some(&cookie)).await.status, 200);
     // 余量恢复后可写。

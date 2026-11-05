@@ -36,7 +36,7 @@ export interface RunDeps extends TaskFs {
   imageCodec?: ImageCodec;
   /**
    * 结果中转（Web 版，对象存储不允许跨域）：服务端从允许列表内的主机下载并流式写入任务目录的
-   * `.staging/` 暂存区，返回暂存文件名（相对任务目录）与相对输出根的路径。字节由浏览器读回校验。
+   * `.staging/` 暂存区，返回暂存文件名（相对任务目录）与相对用户数据根的路径。字节由浏览器读回校验。
    */
   relayResult?(args: { url: string; relDir: string; stem: string; signal?: AbortSignal }): Promise<{ file: string; path: string }>;
   /** 把暂存文件提交为成品（只新建不覆盖，扩展名沿用暂存文件）；stem 为 `result` 或 `layers/NN`。 */
@@ -55,7 +55,7 @@ export interface PreparedJob {
   record: ResultRecord;
 }
 
-/** 任务目录已写的任务；relDir 由写提交带出（相对输出根目录）。 */
+/** 任务目录已写的任务；relDir 由写提交带出（相对用户数据根）。 */
 export interface WrittenJob extends PreparedJob {
   relDir: string;
 }
@@ -142,9 +142,9 @@ export interface Prepared {
  */
 export async function prepareJob(
   deps: RunDeps,
-  args: { board: Board; table: CapabilityTable; tableSha256: string; outputRoot: string; taskNodeId: string },
+  args: { board: Board; table: CapabilityTable; tableSha256: string; userRoot: string; taskNodeId: string },
 ): Promise<Prepared> {
-  const { board, table, outputRoot, taskNodeId } = args;
+  const { board, table, userRoot, taskNodeId } = args;
   const task = board.nodes.find((n) => n.id === taskNodeId);
   if (task?.type === "task" && isRetiredModel(task.model)) throw new LocalError(LITE_RETIRED_HINT);
   const snapshot = snapshotOf(board, taskNodeId);
@@ -155,7 +155,7 @@ export async function prepareJob(
   const size = resolveSize(model.workflows[workflowOf(board, taskNodeId)].size_rule, task.size_spec);
   if (!size) throw new LocalError("生成尺寸不在模型尺寸表内");
 
-  const sources = imageSources(board, taskNodeId, outputRoot);
+  const sources = imageSources(board, taskNodeId, userRoot);
   const slots = imagePortSlots(board, table, taskNodeId);
   const send = planSend(model, slots, snapshot.prompt, snapshot.negative_prompt);
   if (model.request_shape === "seedream_flash_images_generations" && send.referenceProblems.issues.length) throw new LocalError(send.referenceProblems.issues.join("；"));
@@ -257,15 +257,15 @@ function jobOf(taskNodeId: string, plan: SubmissionPlan, model: ModelCapability)
  */
 export async function prepareRegenerate(
   deps: RunDeps,
-  args: { board: Board; table: CapabilityTable; tableSha256: string; outputRoot: string; taskNodeId: string; fromTaskId?: string },
+  args: { board: Board; table: CapabilityTable; tableSha256: string; userRoot: string; taskNodeId: string; fromTaskId?: string },
 ): Promise<Prepared> {
-  const { board, outputRoot, taskNodeId } = args;
+  const { board, userRoot, taskNodeId } = args;
   const task = board.nodes.find((n) => n.id === taskNodeId);
   const last = task?.type === "task" ? task.last_submitted : null;
   const fromTaskId = args.fromTaskId ?? last?.task_id;
   if (!last || typeof fromTaskId !== "string" || !taskDirOfTaskId(fromTaskId)) throw new LocalError("任务节点没有可重新生成的提交");
 
-  const { record: previous, references: snapshots } = await readSubmission(deps, outputRoot, fromTaskId);
+  const { record: previous, references: snapshots } = await readSubmission(deps, userRoot, fromTaskId);
   if (isRetiredModel(previous.model)) throw new LocalError(LITE_RETIRED_HINT);
   const model = findModel(args.table, previous.model);
   if (!model) throw new LocalError(`模型 ${previous.model} 已不在能力表内`);
@@ -316,9 +316,9 @@ export async function prepareRegenerate(
 }
 
 /** 派发时写任务目录（不可变）；返回带任务目录与参考图的任务。429 重试不重写。 */
-export async function writeJob(deps: RunDeps, outputRoot: string, job: PreparedJob): Promise<WrittenJob> {
+export async function writeJob(deps: RunDeps, userRoot: string, job: PreparedJob): Promise<WrittenJob> {
   try {
-    const { relDir, references } = await writeSubmission(deps, outputRoot, job.plan);
+    const { relDir, references } = await writeSubmission(deps, userRoot, job.plan);
     return { ...job, relDir, input: { ...job.input, references: references.map(ref => ({ ...ref, ...(job.plan.transparentBackground && job.input.model.request_shape === "seedream_flash_images_generations" ? { hasAlpha: true } : {}) })) } };
   } catch (e) {
     throw new LocalError(`写任务目录失败：${e instanceof Error ? e.message : String(e)}`);
@@ -330,7 +330,7 @@ export async function executeJob(
   deps: RunDeps,
   args: {
     job: WrittenJob;
-    outputRoot: string;
+    userRoot: string;
     baseUrl: string;
     apiKey: string;
     signal?: AbortSignal;
@@ -366,7 +366,7 @@ export async function executeJob(
         if (signal?.aborted) throw new CancelledError();
         staged = saved.file;
         try {
-          bytes = await deps.readFile(joinPath(args.outputRoot, saved.path));
+          bytes = await deps.readFile(joinPath(args.userRoot, saved.path));
         } catch (e) {
           throw new LocalError(`读回中转结果失败：${e instanceof Error ? e.message : String(e)}`);
         }
@@ -420,7 +420,7 @@ export async function executeJob(
         const kind = sniffImage(f.bytes);
         if (!kind) throw new Error("结果不是可识别的图片");
         const file = `${stem}.${kind.ext}`;
-        await deps.writeNewFile(joinPath(args.outputRoot, `${job.relDir}/${file}`), f.bytes);
+        await deps.writeNewFile(joinPath(args.userRoot, `${job.relDir}/${file}`), f.bytes);
         return { file, path: `${job.relDir}/${file}` };
       };
       if (job.plan.layerDecomposition && (fetched.length > 1 || flashLayers)) {
@@ -440,7 +440,7 @@ export async function executeJob(
           });
         }
         const base = flashLayers ? { z_index: 0 as const, ...(fetched[0].layer?.name !== undefined ? { name: fetched[0].layer.name } : {}), ...(fetched[0].layer?.description !== undefined ? { description: fetched[0].layer.description } : {}) } : undefined;
-        await deps.writeNewFile(joinPath(args.outputRoot, `${job.relDir}/layers.json`), new TextEncoder().encode(layersExportJson(layers, base)));
+        await deps.writeNewFile(joinPath(args.userRoot, `${job.relDir}/layers.json`), new TextEncoder().encode(layersExportJson(layers, base)));
       }
       saved = await commitOne(fetched[0], "result");
     } else {
@@ -448,13 +448,13 @@ export async function executeJob(
       if (job.plan.layerDecomposition && (fetched.length > 1 || flashLayers)) {
         layers = await saveLayers(
           deps,
-          args.outputRoot,
+          args.userRoot,
           job.relDir,
           fetched.slice(1).map((f, i) => ({ bytes: f.bytes, zIndex: f.layer?.z_index ?? i + 1, boundingBox: f.layer?.bounding_box ?? [], ...(f.layer?.name !== undefined ? { name: f.layer.name } : {}), ...(f.layer?.description !== undefined ? { description: f.layer.description } : {}) })),
           flashLayers ? { base: { z_index: 0, ...(fetched[0].layer?.name !== undefined ? { name: fetched[0].layer.name } : {}), ...(fetched[0].layer?.description !== undefined ? { description: fetched[0].layer.description } : {}) } } : undefined,
         );
       }
-      saved = await saveResult(deps, args.outputRoot, job.relDir, fetched[0].bytes);
+      saved = await saveResult(deps, args.userRoot, job.relDir, fetched[0].bytes);
     }
   } catch (e) {
     await discard();

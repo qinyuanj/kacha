@@ -1,4 +1,4 @@
-// 任务目录：输出根目录/<UTC 日期>/<task_id>/（ADR 0010，任务目录是真源）。
+// 任务目录：用户数据根/<UTC 日期>/<task_id>/（ADR 0010，任务目录是真源）。
 // 派发时一次写入参考图快照与 task.json，之后不可变；成功后再写结果图，失败 / 取消时写结局记录。文件系统由调用方注入。
 import type { CapabilityTable } from "./capabilities";
 import type { FittedRecord } from "./fitImage";
@@ -35,7 +35,7 @@ export function newTaskId(now: Date, random32: () => number = () => crypto.getRa
   return `${stamp}-${(random32() >>> 0).toString(16).padStart(8, "0")}`;
 }
 
-/** 相对输出根目录的任务目录，正斜杠；日期取提交时刻的 UTC 日期。 */
+/** 相对用户数据根的任务目录，正斜杠；日期取提交时刻的 UTC 日期。 */
 function taskDirOf(submittedAt: Date, taskId: string): string {
   return `${submittedAt.toISOString().slice(0, 10)}/${taskId}`;
 }
@@ -49,16 +49,16 @@ export function taskDirOfTaskId(taskId: string): string | null {
 /** 任务目录的第一层：UTC 日期目录。 */
 const DATE_DIR = /^\d{4}-\d{2}-\d{2}$/;
 
-/** 相对输出根目录的路径（正斜杠）落在 `<日期>/<task_id>/…` 里时返回任务目录，否则 null。 */
+/** 相对用户数据根的路径（正斜杠）落在 `<日期>/<task_id>/…` 里时返回任务目录，否则 null。 */
 export function taskDirOfRelPath(rel: string): string | null {
   const parts = rel.split("/");
   return parts.length >= 3 && DATE_DIR.test(parts[0]) && parts[1] ? `${parts[0]}/${parts[1]}` : null;
 }
 
 /** 任务目录里某个文件（相对任务目录，可含 `layers/` 这类子目录）的绝对路径；任务编号不是本工具生成的时为 null。 */
-export function taskFilePath(outputRoot: string, taskId: string, file: string): string | null {
+export function taskFilePath(userRoot: string, taskId: string, file: string): string | null {
   const dir = taskDirOfTaskId(taskId);
-  return dir ? taskPath(outputRoot, dir, file) : null;
+  return dir ? taskPath(userRoot, dir, file) : null;
 }
 
 export function sniffImage(bytes: Uint8Array): { ext: string; mediaType: string } | null {
@@ -121,8 +121,8 @@ export interface SubmissionPlan {
   references: { bytes: Uint8Array; source: ReferenceSource; region?: ReferenceRegion; fitted?: FittedRecord }[];
 }
 
-function taskPath(outputRoot: string, relDir: string, file: string): string {
-  return joinPath(outputRoot, ...relDir.split("/"), file);
+function taskPath(userRoot: string, relDir: string, file: string): string {
+  return joinPath(userRoot, ...relDir.split("/"), file);
 }
 
 /** task.json 里的一条参考图记录。 */
@@ -159,8 +159,8 @@ export interface TaskRecord {
   references: TaskRecordReference[];
 }
 
-/** 写参考图快照 reference-N.ext 与 task.json；返回任务目录（相对输出根目录，正斜杠）与发给网关的参考图。 */
-export async function writeSubmission(fs: Pick<TaskFs, "writeNewFile">, outputRoot: string, plan: SubmissionPlan): Promise<{ relDir: string; references: ReferenceImage[] }> {
+/** 写参考图快照 reference-N.ext 与 task.json；返回任务目录（相对用户数据根，正斜杠）与发给网关的参考图。 */
+export async function writeSubmission(fs: Pick<TaskFs, "writeNewFile">, userRoot: string, plan: SubmissionPlan): Promise<{ relDir: string; references: ReferenceImage[] }> {
   const kinds = plan.references.map((ref, i) => {
     const kind = sniffImage(ref.bytes);
     if (!kind) throw new Error(`图${i + 1} 不是可识别的图片格式`);
@@ -170,7 +170,7 @@ export async function writeSubmission(fs: Pick<TaskFs, "writeNewFile">, outputRo
   const references: TaskRecordReference[] = [];
   for (const [i, ref] of plan.references.entries()) {
     const file = `reference-${i + 1}.${kinds[i].ext}`;
-    await fs.writeNewFile(taskPath(outputRoot, dir, file), ref.bytes);
+    await fs.writeNewFile(taskPath(userRoot, dir, file), ref.bytes);
     references.push({ file, media_type: kinds[i].mediaType, sha256: await sha256Hex(ref.bytes), source: ref.source, ...(ref.region ? { region: ref.region } : {}), ...(ref.fitted ? { fitted: ref.fitted } : {}) });
   }
   const record: TaskRecord = {
@@ -191,7 +191,7 @@ export async function writeSubmission(fs: Pick<TaskFs, "writeNewFile">, outputRo
     transparent_background: plan.transparentBackground,
     references,
   };
-  await fs.writeNewFile(taskPath(outputRoot, dir, TASK_RECORD_FILE), new TextEncoder().encode(`${JSON.stringify(record, null, 2)}\n`));
+  await fs.writeNewFile(taskPath(userRoot, dir, TASK_RECORD_FILE), new TextEncoder().encode(`${JSON.stringify(record, null, 2)}\n`));
   return { relDir: dir, references: plan.references.map((ref, i) => ({ mediaType: kinds[i].mediaType, bytes: ref.bytes })) };
 }
 
@@ -233,12 +233,12 @@ function parseTaskRecord(bytes: Uint8Array): TaskRecord {
  * 读回一次提交：任务记录与全部参考图快照（references 与 record.references 同序），与 writeSubmission 对称。
  * 只校验重新生成必需的字段；未知字段忽略，fitted / region 缺省即旧口径。
  */
-export async function readSubmission(fs: Pick<TaskFs, "readFile">, outputRoot: string, taskId: string): Promise<{ record: TaskRecord; references: Uint8Array[] }> {
+export async function readSubmission(fs: Pick<TaskFs, "readFile">, userRoot: string, taskId: string): Promise<{ record: TaskRecord; references: Uint8Array[] }> {
   const dir = taskDirOfTaskId(taskId);
   if (!dir) throw new LocalError(`上次任务的任务编号无效：${taskId}`);
   let bytes: Uint8Array;
   try {
-    bytes = await fs.readFile(taskPath(outputRoot, dir, TASK_RECORD_FILE));
+    bytes = await fs.readFile(taskPath(userRoot, dir, TASK_RECORD_FILE));
   } catch (e) {
     throw readError("上次任务的任务记录", e);
   }
@@ -246,7 +246,7 @@ export async function readSubmission(fs: Pick<TaskFs, "readFile">, outputRoot: s
   const references: Uint8Array[] = [];
   for (const [i, ref] of record.references.entries()) {
     try {
-      references.push(await fs.readFile(taskPath(outputRoot, dir, ref.file)));
+      references.push(await fs.readFile(taskPath(userRoot, dir, ref.file)));
     } catch (e) {
       throw readError(`上次任务的图${i + 1}`, e);
     }
@@ -254,12 +254,12 @@ export async function readSubmission(fs: Pick<TaskFs, "readFile">, outputRoot: s
   return { record, references };
 }
 
-/** 写结果图 result.<ext>；返回文件名与相对输出根目录的路径（画板结果节点的主引用）。 */
-export async function saveResult(fs: Pick<TaskFs, "writeNewFile">, outputRoot: string, relDir: string, bytes: Uint8Array): Promise<{ file: string; path: string }> {
+/** 写结果图 result.<ext>；返回文件名与相对用户数据根的路径（画板结果节点的主引用）。 */
+export async function saveResult(fs: Pick<TaskFs, "writeNewFile">, userRoot: string, relDir: string, bytes: Uint8Array): Promise<{ file: string; path: string }> {
   const kind = sniffImage(bytes);
   if (!kind) throw new Error("结果不是可识别的图片");
   const file = `result.${kind.ext}`;
-  await fs.writeNewFile(taskPath(outputRoot, relDir, file), bytes);
+  await fs.writeNewFile(taskPath(userRoot, relDir, file), bytes);
   return { file, path: `${relDir}/${file}` };
 }
 
@@ -277,17 +277,17 @@ export function layerFileName(index: number, ext = "png"): string {
 }
 
 /** 拆分图层落盘：按 z_index 升序写 layers/01.<ext>…；返回写盘后的图层记录。 */
-export async function saveLayers(fs: Pick<TaskFs, "writeNewFile">, outputRoot: string, relDir: string, layers: LayerImage[], metadata?: { base: { z_index: 0; name?: string; description?: string } }): Promise<LayerRecord[]> {
+export async function saveLayers(fs: Pick<TaskFs, "writeNewFile">, userRoot: string, relDir: string, layers: LayerImage[], metadata?: { base: { z_index: 0; name?: string; description?: string } }): Promise<LayerRecord[]> {
   const ordered = [...layers].sort((a, b) => a.zIndex - b.zIndex);
   const out: LayerRecord[] = [];
   for (const [i, layer] of ordered.entries()) {
     const kind = sniffImage(layer.bytes);
     if (!kind) throw new Error(`图层${i + 1} 不是可识别的图片`);
     const file = layerFileName(i + 1, kind.ext);
-    await fs.writeNewFile(taskPath(outputRoot, relDir, file), layer.bytes);
+    await fs.writeNewFile(taskPath(userRoot, relDir, file), layer.bytes);
     out.push({ file, z_index: layer.zIndex, bounding_box: layer.boundingBox, ...(layer.name !== undefined ? { name: layer.name } : {}), ...(layer.description !== undefined ? { description: layer.description } : {}) });
   }
-  await fs.writeNewFile(taskPath(outputRoot, relDir, "layers.json"), new TextEncoder().encode(layersExportJson(out, metadata?.base)));
+  await fs.writeNewFile(taskPath(userRoot, relDir, "layers.json"), new TextEncoder().encode(layersExportJson(out, metadata?.base)));
   return out;
 }
 
@@ -330,8 +330,8 @@ export function parseLayersFile(bytes: Uint8Array): { base?: LayersBase; layers:
 }
 
 /** 读任务目录真源的图层元数据；没有 layers.json（旧普通结果）为 null，损坏或关键身份 / 定位无效为明确失败。 */
-export async function readLayers(fs: Pick<TaskFs, "readFile">, outputRoot: string, taskId: string): Promise<LayerRecord[] | null> {
-  const path = taskFilePath(outputRoot, taskId, "layers.json");
+export async function readLayers(fs: Pick<TaskFs, "readFile">, userRoot: string, taskId: string): Promise<LayerRecord[] | null> {
+  const path = taskFilePath(userRoot, taskId, "layers.json");
   if (!path) return null;
   let bytes: Uint8Array;
   try {
@@ -343,11 +343,11 @@ export async function readLayers(fs: Pick<TaskFs, "readFile">, outputRoot: strin
 }
 
 /** 打开时按任务目录真源恢复 Flash 结果的图层（画板只冗余展示）；旧普通结果没有 layers.json，保持兼容。 */
-export async function restoreResultLayers(fs: Pick<TaskFs, "readFile">, outputRoot: string, board: Board): Promise<Board> {
+export async function restoreResultLayers(fs: Pick<TaskFs, "readFile">, userRoot: string, board: Board): Promise<Board> {
   const nodes = await Promise.all(
     board.nodes.map(async (node) => {
       if (node.type !== "result" || node.record.model !== "doubao-seedream-5-0-flash-260915") return node;
-      const layers = await readLayers(fs, outputRoot, node.task_id);
+      const layers = await readLayers(fs, userRoot, node.task_id);
       return layers === null ? node : { ...node, layer_count: layers.length, record: { ...node.record, layers } };
     }),
   );
@@ -362,15 +362,15 @@ export const TASK_RECORD_FILE = "task.json";
 export const OUTCOME_FILE = "outcome.json";
 
 /** 写结局记录 outcome.json：只含脱敏的错误类别，不含提示词、密钥与网关原文。 */
-export async function writeOutcome(fs: Pick<TaskFs, "writeNewFile">, outputRoot: string, relDir: string, outcome: TaskOutcome): Promise<void> {
+export async function writeOutcome(fs: Pick<TaskFs, "writeNewFile">, userRoot: string, relDir: string, outcome: TaskOutcome): Promise<void> {
   const record = outcome.kind === "failed" ? { outcome: "failed", label: outcome.label } : { outcome: "cancelled", gateway_may_continue: outcome.gatewayMayContinue };
-  await fs.writeNewFile(taskPath(outputRoot, relDir, OUTCOME_FILE), new TextEncoder().encode(`${JSON.stringify(record, null, 2)}\n`));
+  await fs.writeNewFile(taskPath(userRoot, relDir, OUTCOME_FILE), new TextEncoder().encode(`${JSON.stringify(record, null, 2)}\n`));
 }
 
 /** 按任务编号读结局记录；没有记录（本地读不到、HTTP 404）或读不懂为 null。
  *  HTTP 的其他失败（401、5xx、断网）必须抛出：它们不是「没有结局记录」，否则会把故障显示成已中断。 */
-export async function readOutcome(fs: Pick<TaskFs, "readFile">, outputRoot: string, taskId: string): Promise<TaskOutcome | null> {
-  const path = taskFilePath(outputRoot, taskId, OUTCOME_FILE);
+export async function readOutcome(fs: Pick<TaskFs, "readFile">, userRoot: string, taskId: string): Promise<TaskOutcome | null> {
+  const path = taskFilePath(userRoot, taskId, OUTCOME_FILE);
   if (!path) return null;
   return fs.readFile(path).then(parseOutcome, (e) => {
     const status = (e as { status?: unknown } | null)?.status;

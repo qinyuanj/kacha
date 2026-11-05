@@ -156,7 +156,7 @@ describe("画板文件读入", () => {
   });
 
   it("手写夹具画板含结果节点可读入", () => {
-    const text = readFileSync(new URL("../../fixtures/output-root/画板/结果节点夹具.ugcboard.json", import.meta.url), "utf8");
+    const text = readFileSync(new URL("../../fixtures/user-root/画板/结果节点夹具.ugcboard.json", import.meta.url), "utf8");
     const parsed = parseBoard(text);
     if (parsed.kind !== "ok") throw new Error(parsed.kind);
     const result = parsed.board.nodes.find((n) => n.type === "result");

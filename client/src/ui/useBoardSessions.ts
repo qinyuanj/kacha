@@ -40,7 +40,7 @@ const samePath = (a: string, b: string) => a.replace(/\\/g, "/").toLowerCase() =
 /** 编辑环境里随应用状态变化的部分：能力表、网关发现、该画板的锁定集（排队 / 执行 / 限流退避中的任务节点）。 */
 export type EnvSource = (key: string) => Pick<EditEnv, "table" | "discovery" | "locked">;
 
-export function useBoardSessions(outputRoot: string | null, envSource: EnvSource) {
+export function useBoardSessions(userRoot: string | null, envSource: EnvSource) {
   const [sessions, setSessionsState] = useState<Session[]>([]);
   const [activeKey, setActiveKeyState] = useState<string | null>(null);
   const activeKeyRef = useRef<string | null>(null);
@@ -114,14 +114,14 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
 
   const envSourceRef = useRef(envSource);
   envSourceRef.current = envSource;
-  const outputRootRef = useRef(outputRoot);
-  outputRootRef.current = outputRoot;
+  const userRootRef = useRef(userRoot);
+  userRootRef.current = userRoot;
   /** 按画板组装编辑环境：图片宽高只取已读到的；锁定集取该画板的（ADR 0015）。 */
   const envOf = useCallback(
     (key: string): EditEnv => ({
       ...envSourceRef.current(key),
       imageSize: (path) => {
-        const root = outputRootRef.current;
+        const root = userRootRef.current;
         const info = root ? knownImageInfo(resolveFromRoot(root, path)) : undefined;
         return info ? [info.width, info.height] : undefined;
       },
@@ -180,7 +180,7 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
     return s ? basename(s.path) : null;
   }, []);
 
-  /** 关闭全部标签页（切换输出根目录时用）；先落盘。 */
+  /** 关闭全部标签页（切换用户数据根时用）；先落盘。 */
   const closeAll = useCallback(async () => {
     for (const s of sessionsRef.current) await closeBoardRef.current(s.key);
   }, []);
@@ -204,9 +204,9 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
       if (texts.main === null && texts.bak === null) return false;
       const opened = openBoard(texts.main, texts.bak);
       // 任务目录是真源：Flash 结果的图层身份 / 定位按 layers.json 还原（画板只冗余展示）；画板包导入同走这里。
-      if (opened.kind === "ok" && outputRootRef.current) {
+      if (opened.kind === "ok" && userRootRef.current) {
         try {
-          opened.board = await restoreResultLayers({ readFile: ipc.readFileBytes }, outputRootRef.current, opened.board);
+          opened.board = await restoreResultLayers({ readFile: ipc.readFileBytes }, userRootRef.current, opened.board);
         } catch (e) {
           throw new Error(`打开画板失败：${errorText(e)}`);
         }
@@ -236,8 +236,8 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
   );
 
   const createBoard = useCallback(async () => {
-    if (!outputRoot) return;
-    const dir = boardsDir(outputRoot);
+    if (!userRoot) return;
+    const dir = boardsDir(userRoot);
     const onDisk = await ipc.listBoardNames(dir).catch(() => [] as string[]);
     const openHere = sessionsRef.current.filter((s) => samePath(dirname(s.path), dir)).map((s) => basename(s.path));
     const path = joinPath(dir, uniqueBoardFileName(DEFAULT_BOARD_TITLE, [...onDisk, ...openHere]));
@@ -246,13 +246,13 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
     setActiveKey(key);
     // 立即落盘占住文件名。
     await flush(key);
-  }, [outputRoot, flush, setSessions]);
+  }, [userRoot, flush, setSessions]);
 
-  /** 导入的画板写进输出根目录画板目录：同名沿用 (2) 自动改名、永不覆盖；写好后在新标签页打开。 */
+  /** 导入的画板写进用户数据根画板目录：同名沿用 (2) 自动改名、永不覆盖；写好后在新标签页打开。 */
   const addImportedBoard = useCallback(
     async (board: Board): Promise<string> => {
-      if (!outputRoot) throw new Error("输出根目录未就绪");
-      const dir = boardsDir(outputRoot);
+      if (!userRoot) throw new Error("用户数据根未就绪");
+      const dir = boardsDir(userRoot);
       const onDisk = await ipc.listBoardNames(dir);
       const openHere = sessionsRef.current.filter((s) => samePath(dirname(s.path), dir)).map((s) => basename(s.path));
       const path = joinPath(dir, uniqueBoardFileName(board.title, [...onDisk, ...openHere]));
@@ -260,7 +260,7 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
       await openPath(path, true);
       return path;
     },
-    [outputRoot, openPath],
+    [userRoot, openPath],
   );
 
   const closeBoard = useCallback(
@@ -328,7 +328,7 @@ export function useBoardSessions(outputRoot: string | null, envSource: EnvSource
         patch(key, (x) => ({ ...x, notice: `重新载入失败：${opened.kind === "newer" ? `画板格式版本 ${opened.version} 高于本应用` : opened.reason}` }));
         return;
       }
-      if (outputRootRef.current) opened.board = await restoreResultLayers({ readFile: ipc.readFileBytes }, outputRootRef.current, opened.board);
+      if (userRootRef.current) opened.board = await restoreResultLayers({ readFile: ipc.readFileBytes }, userRootRef.current, opened.board);
       patch(key, (x) => ({ ...x, board: opened.board, history: emptyHistory(), version: texts.version ?? null, saveError: null, conflicted: false, notice: null }));
     } catch (e) {
       patch(key, (x) => ({ ...x, notice: `重新载入失败：${errorText(e)}` }));
