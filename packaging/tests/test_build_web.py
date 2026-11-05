@@ -9,6 +9,7 @@ import unittest
 
 
 class BuildWebCliTest(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "npm/cargo 桩是 POSIX sh 脚本，Windows 上脚本会调用 npm.cmd 与 cargo.exe")
     def test_collects_server_and_relative_static_assets_without_toolchain_at_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

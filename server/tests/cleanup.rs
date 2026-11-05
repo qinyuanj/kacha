@@ -92,7 +92,20 @@ fn age(path: &Path, at: u64) {
             age(&e.unwrap().path(), at);
         }
     }
-    std::fs::File::open(path).unwrap().set_modified(t).unwrap();
+    open_for_set_times(path).set_modified(t).unwrap();
+}
+
+#[cfg(not(windows))]
+fn open_for_set_times(path: &Path) -> std::fs::File {
+    std::fs::File::open(path).unwrap()
+}
+
+/// Windows 改时间要写权限，打开目录还需 FILE_FLAG_BACKUP_SEMANTICS。
+#[cfg(windows)]
+fn open_for_set_times(path: &Path) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    std::fs::OpenOptions::new().write(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(path).unwrap()
 }
 
 fn board_with_result(task_dir: &str) -> String {
