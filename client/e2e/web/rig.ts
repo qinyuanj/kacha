@@ -27,6 +27,8 @@ export interface Stub {
   requests: { path: string; body: Record<string, unknown> }[];
   /** 对象存储内容（不带 CORS，只能由服务端中转）；默认 /objects/result.png 是真 PNG。 */
   objects: Map<string, Buffer>;
+  /** 对象存储对全部 /objects/* 返回的失败状态；null 时正常返回。 */
+  objectStatus: number | null;
   /** 自定义生成响应；返回 null 走默认：结果图指向本桩的对象存储（url 形式，走中转）。 */
   imageResponse: ((path: string, body: Record<string, unknown>) => { status?: number; json?: unknown } | null) | null;
   close(): Promise<void>;
@@ -36,7 +38,7 @@ export interface Stub {
 export async function startStub(): Promise<Stub> {
   const objects = new Map<string, Buffer>([["/objects/result.png", Buffer.from(png(64, 64), "base64")]]);
   const requests: { path: string; body: Record<string, unknown> }[] = [];
-  const stub: Stub = { url: "", requests, objects, imageResponse: null, close: async () => undefined };
+  const stub: Stub = { url: "", requests, objects, objectStatus: null, imageResponse: null, close: async () => undefined };
   const server = http.createServer((req, res) => {
     const url = req.url ?? "/";
     const isStore = url.startsWith("/objects/");
@@ -55,6 +57,7 @@ export async function startStub(): Promise<Stub> {
       return void res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ data: MODELS.map((id) => ({ id })) }));
     }
     if (isStore) {
+      if (stub.objectStatus !== null) return void res.writeHead(stub.objectStatus).end("denied");
       const bytes = objects.get(url);
       if (!bytes) return void res.writeHead(404).end("not found");
       return void res.writeHead(200, { "Content-Type": "image/png" }).end(bytes);

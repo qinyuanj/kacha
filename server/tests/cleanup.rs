@@ -242,3 +242,19 @@ fn now_accepts_utc_timestamp() {
     assert_eq!(out.status.code(), Some(0));
     assert!(String::from_utf8_lossy(&out.stdout).contains("闲置用户\tusers/idle\t"));
 }
+
+/// 画板写入接口不限制目录：画板文件不在 `画板/` 下也必须算引用，否则引用中的任务目录会被当成未引用清走。
+#[test]
+fn boards_outside_boards_dir_still_protect_their_task_dirs() {
+    let r = scenario();
+    let elsewhere = r.user("active").join("备份/旧");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::fs::write(elsewhere.join("另存.ugcboard.json"), board_with_result(OLD)).unwrap();
+    let (code, out, err) = r.run(&["--dry-run"], NOW);
+    assert_eq!(code, 0, "{err}");
+    assert!(!out.contains("未引用任务目录"), "画板/ 之外的画板仍引用 OLD：\n{out}");
+    // 画板/ 之外读不懂的画板同样阻止清理（保守）。
+    std::fs::write(elsewhere.join("另存.ugcboard.json"), "{ broken").unwrap();
+    let (_, out, _) = r.run(&["--dry-run"], NOW);
+    assert!(out.lines().any(|l| l.starts_with('#') && l.contains("备份/旧/另存.ugcboard.json")), "{out}");
+}

@@ -58,7 +58,6 @@ async fn main() {
             static_dir,
             result_hosts,
             min_free_bytes: min_free_gb.saturating_mul(1024 * 1024 * 1024),
-            free_space_override: None,
         },
         Arc::new(kacha_server::verify::HttpKeyVerifier::new(gateway_url.clone())),
         Arc::new(SystemTime::now),

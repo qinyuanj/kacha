@@ -2,7 +2,7 @@
 //!
 //! 候选只有两类：
 //! - 闲置用户：连续 60 天无访问的用户数据根（最后访问时间取 `.kacha/user.json`，缺失时取整棵树最新修改时间）；
-//! - 未引用任务目录：该用户所有画板（含 `.bak`）都不引用、且建立超过 30 天。建立时间取
+//! - 未引用任务目录：该用户所有画板（用户数据根内任意位置，含 `.bak`）都不引用、且建立超过 30 天。建立时间取
 //!   「task_id 时间戳」与「目录内最新修改时间」中较晚者（保守：导入或刚写入的不会被当成旧目录）。
 //!
 //! 任一画板读不懂（损坏 / 版本更高）时该用户本轮不清理任务目录。正式执行把候选移入
@@ -134,10 +134,13 @@ fn is_board_file(name: &str) -> bool {
     !name.starts_with('.') && (name.ends_with(BOARD_EXTENSION) || name.ends_with(&format!("{BOARD_EXTENSION}.bak")))
 }
 
-/// 该用户所有画板（含 `.bak`，递归 `画板/`）引用的任务目录；任一读不懂即报错。
+/// 该用户所有画板（含 `.bak`）引用的任务目录；任一读不懂即报错。
+///
+/// 递归整个用户数据根而不只是 `画板/`：画板写入 / 改名接口接受用户数据根内的任意路径，
+/// 只扫 `画板/` 会把别处画板引用的任务目录误判为未引用。不跟随符号链接。
 pub fn referenced_task_dirs(user_root: &Path) -> Result<BTreeSet<String>, UnreadableBoard> {
     let mut out = BTreeSet::new();
-    let mut stack = vec![user_root.join(BOARDS_DIR)];
+    let mut stack = vec![user_root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else { continue };
         for e in entries.flatten() {

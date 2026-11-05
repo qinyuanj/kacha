@@ -711,7 +711,7 @@ describe("结果中转", () => {
     base.d.relayResult = async ({ url, relDir, stem }) => {
       relays.push({ url, relDir, stem });
       const res = await base.d.fetch(url, { method: "GET", headers: {} });
-      if (res.status >= 400) throw Object.assign(new Error(`下载结果图失败：上游 HTTP ${res.status}`), { status: res.status, code: "download_failed" });
+      if (res.status >= 400) throw Object.assign(new Error(`下载结果图失败：上游 HTTP ${res.status}`), { status: 502, code: "download_failed", upstreamStatus: res.status });
       const bytes = new Uint8Array(await res.arrayBuffer());
       const kind = sniffImage(bytes);
       if (!kind) throw Object.assign(new Error("下载的内容不是可识别的图片"), { status: 422, code: "invalid_image" });
@@ -758,6 +758,20 @@ describe("结果中转", () => {
     expect(failureLabel(err)).toBe(ERROR_CATEGORY_LABELS.rejected);
     expect([...files.keys()].some((k) => k.includes("result."))).toBe(false);
     expect(discards).toEqual([job.relDir]);
+  });
+
+  it.each([
+    [401, "rejected"],
+    [429, "rate_limited"],
+    [503, "server"],
+  ] as const)("中转的上游 HTTP %i 归类为 %s：对象存储 401 不是密钥鉴权失败", async (status, category) => {
+    const { d } = withRelay((url) => (url.startsWith("https://oss") ? { status, body: "denied" } : byUrl(PNG_BINARY)(url)));
+    const job = await preparedJob(d);
+    const err = await executeJob(d, { job, outputRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
+    expect(err).toBeInstanceOf(GatewayError);
+    expect(err.category).toBe(category);
+    expect(err.status).toBe(status);
+    expect(err.message).toContain(`上游 HTTP ${status}`);
   });
 
   it("中转到的字节不是图片：invalid_response，不出现 result.*，暂存清理", async () => {

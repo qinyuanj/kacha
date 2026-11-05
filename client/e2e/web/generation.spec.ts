@@ -42,6 +42,19 @@ test("下载失败：任务按失败处理，不换模型不重发，不留成�
   expect(JSON.parse(readFileSync(path.join(dir, "outcome.json"), "utf8")).outcome).toBe("failed");
 });
 
+test("对象存储返回 401：任务失败并如实显示上游状态，不踢回粘贴密钥界面", async ({ page, rig }) => {
+  rig.stub.objectStatus = 401;
+  await openApp(page, rig, { title: "文生图", boardText: singleImage(), files });
+  await task(page, "t1").locator(".task-actions button.primary").click();
+  const failed = task(page, "t1").locator(".status-failed");
+  await expect(failed).toContainText("失败");
+  await expect(page.getByLabel("API 密钥", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "进入工作台" })).toHaveCount(0);
+  await expect(page.locator(".react-flow__node-result")).toHaveCount(0);
+  expect(JSON.parse(readFileSync(path.join(path.dirname(taskRecords(rig)[0].path), "outcome.json"), "utf8")).outcome).toBe("failed");
+  expect(await page.evaluate(() => fetch("/api/session").then((r) => r.status))).toBe(200);
+});
+
 test("结果地址不在允许列表：400 拒绝，任务失败且不写文件", async ({ page, rig }) => {
   rig.stub.imageResponse = (_path, body) =>
     String(body.model ?? "").startsWith("doubao")

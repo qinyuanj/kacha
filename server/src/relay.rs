@@ -2,7 +2,7 @@
 //! 流式写进任务目录的 `.staging/` 暂存区（只新建不覆盖）。浏览器读回校验后才提交为成品，
 //! 因此 `result.*` 永远只在全部校验通过后出现；取消 / 失败由 discard 清掉暂存区。
 //!
-//! 错误一律不回显原始地址（含临时签名），上游状态如实带回供前端按既有类别处理。
+//! 错误一律不回显原始地址（含临时签名）；上游失败统一 502，上游状态放在错误体的 upstream_status。
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -192,9 +192,13 @@ pub async fn relay(State(state): State<AppState>, user: User, body: Bytes) -> Re
         return error(StatusCode::BAD_REQUEST, "result_url_not_allowed", "结果地址重定向到了允许列表之外的主机");
     }
     if !response.status().is_success() {
+        // 上游失败一律 502：401 不能被前端当成会话失效，403 不能与路径越界混淆；上游状态放在错误体里。
         let status = response.status().as_u16();
-        let mapped = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY);
-        return error(mapped, "download_failed", &format!("下载结果图失败：上游 HTTP {status}"));
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "code": "download_failed", "message": format!("下载结果图失败：上游 HTTP {status}"), "upstream_status": status })),
+        )
+            .into_response();
     }
     if response.content_length().is_some_and(|len| len > MAX_RESULT_BYTES) {
         return error(StatusCode::PAYLOAD_TOO_LARGE, "download_failed", "结果图超过 64 MB 上限");

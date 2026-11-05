@@ -70,11 +70,13 @@ export function failureLabel(error: unknown): string {
   return "本地文件错误";
 }
 
-/** 中转接口的错误按上游状态归回既有网关类别：429 仍可退避重试，下载失败不换模型不重发。
+/** 中转接口的错误归回既有网关类别：429 仍可退避重试，下载失败不换模型不重发。
+ *  上游失败时服务端回 502 + upstreamStatus，按上游状态归类；但对象存储的 401 与用户密钥无关，不算鉴权失败。
  *  服务端不回显签名地址，这里也只用服务端文案。 */
 function relayError(e: unknown): Error {
-  const status = (e as { status?: unknown } | null)?.status;
+  const { status, upstreamStatus } = (e ?? {}) as { status?: unknown; upstreamStatus?: unknown };
   const message = e instanceof Error ? e.message : String(e);
+  if (typeof upstreamStatus === "number") return new GatewayError(upstreamStatus === 401 ? "rejected" : categoryForStatus(upstreamStatus), message, upstreamStatus);
   if (typeof status !== "number") return e instanceof Error ? e : new Error(message);
   if (status === 422) return new GatewayError("invalid_response", message, status);
   if (status === 0) return new GatewayError("network", "下载结果图失败：网络不可达");

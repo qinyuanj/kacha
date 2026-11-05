@@ -4,6 +4,8 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     message: string,
+    /** 服务端代为访问上游（对象存储）失败时的上游状态；与本接口自身的 status 不是一回事。 */
+    public upstreamStatus?: number,
   ) {
     super(message);
     this.name = "ApiError";

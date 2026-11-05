@@ -16,6 +16,9 @@ async fn object_store() -> String {
     let app = Router::new()
         .route("/objects/a.png", get(|| async { ([(axum::http::header::CONTENT_TYPE, "image/png")], PNG) }))
         .route("/objects/missing.png", get(|| async { (axum::http::StatusCode::NOT_FOUND, "gone") }))
+        .route("/objects/unauthorized.png", get(|| async { (axum::http::StatusCode::UNAUTHORIZED, "denied") }))
+        .route("/objects/forbidden.png", get(|| async { (axum::http::StatusCode::FORBIDDEN, "denied") }))
+        .route("/objects/throttled.png", get(|| async { (axum::http::StatusCode::TOO_MANY_REQUESTS, "slow down") }))
         .route("/objects/big.bin", get(|| async { "not an image" }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr: SocketAddr = listener.local_addr().unwrap();
@@ -92,7 +95,8 @@ async fn relay_upstream_failure_is_reported_and_leaves_no_product_file() {
     let cookie = h.session(GOOD_KEY).await;
     let dir = "2026-11-04/t2";
     let missing = relay(&h, &cookie, &format!("{store}/objects/missing.png"), dir, "0").await;
-    assert_eq!(missing.status, 404, "上游状态如实带回：{}", missing.text());
+    assert_eq!(missing.status, 502, "上游失败统一 502：{}", missing.text());
+    assert_eq!(missing.json()["upstream_status"], 404, "错误体保留上游状态");
     assert!(!missing.text().contains("missing.png"), "不回显签名地址");
     let not_image = relay(&h, &cookie, &format!("{store}/objects/big.bin"), dir, "1").await;
     assert_eq!(not_image.status, 422, "非图片字节：{}", not_image.text());
@@ -120,4 +124,24 @@ async fn relay_discard_clears_staging_and_rejects_escape() {
     let other = h.session(OTHER_KEY).await;
     assert_eq!(relay(&h, &other, &format!("{store}/objects/a.png"), dir, "9").await.status, 200);
     assert!(h.user_root(GOOD_KEY).join(dir).join(".staging").join("9.png").exists() == false, "按用户隔离");
+}
+
+#[tokio::test]
+async fn upstream_auth_failures_are_502_not_session_or_path_errors() {
+    let store = object_store().await;
+    let h = Harness::with_result_hosts(vec!["127.0.0.1".into()]);
+    let cookie = h.session(GOOD_KEY).await;
+    let dir = "2026-11-04/t4";
+    for (object, upstream) in [("unauthorized.png", 401), ("forbidden.png", 403), ("throttled.png", 429)] {
+        let res = relay(&h, &cookie, &format!("{store}/objects/{object}"), dir, "0").await;
+        assert_eq!(res.status, 502, "{object}：{}", res.text());
+        assert_eq!(res.json()["code"], "download_failed");
+        assert_eq!(res.json()["upstream_status"], upstream);
+        assert!(res.text().contains(&format!("HTTP {upstream}")), "文案如实显示上游状态：{}", res.text());
+    }
+    assert_eq!(h.get("/api/session", Some(&cookie)).await.status, 200, "上游 401 不影响会话");
+    // 路径越界仍是 403，与上游 403 可区分。
+    let escape = relay(&h, &cookie, &format!("{store}/objects/a.png"), "../x", "0").await;
+    assert_eq!(escape.status, 403);
+    assert_eq!(escape.json()["code"], "forbidden");
 }

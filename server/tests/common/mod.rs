@@ -36,6 +36,8 @@ pub struct Harness {
     pub dir: tempfile::TempDir,
     pub app: Router,
     now: Arc<Mutex<SystemTime>>,
+    result_hosts: Vec<String>,
+    free_space: Option<u64>,
 }
 
 pub struct Reply {
@@ -68,27 +70,37 @@ impl Harness {
     }
 
     /// 注入固定磁盘余量（None = 读真实文件系统）。
-    pub fn with_free_space(free_space_override: Option<u64>) -> Self {
-        Self::build(Vec::new(), free_space_override)
+    pub fn with_free_space(free_space: Option<u64>) -> Self {
+        Self::build(Vec::new(), free_space)
     }
 
-    fn build(result_hosts: Vec<String>, free_space_override: Option<u64>) -> Self {
+    fn build(result_hosts: Vec<String>, free_space: Option<u64>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let now = Arc::new(Mutex::new(UNIX_EPOCH + Duration::from_secs(1_800_000_000)));
+        let app = Self::app(dir.path(), &now, &result_hosts, free_space);
+        Harness { dir, app, now, result_hosts, free_space }
+    }
+
+    fn app(data_root: &Path, now: &Arc<Mutex<SystemTime>>, result_hosts: &[String], free_space: Option<u64>) -> Router {
         let clock_now = now.clone();
-        let state = AppState::new(
-            Config {
-                data_root: dir.path().to_path_buf(),
-                gateway_url: "http://gateway.test".into(),
-                static_dir: None,
-                result_hosts,
-                min_free_bytes: kacha_server::limits::DEFAULT_MIN_FREE_BYTES,
-                free_space_override,
-            },
-            Arc::new(FakeGateway),
-            Arc::new(move || *clock_now.lock().unwrap()),
-        );
-        Harness { dir, app: router(state), now }
+        let config = Config {
+            data_root: data_root.to_path_buf(),
+            gateway_url: "http://gateway.test".into(),
+            static_dir: None,
+            result_hosts: result_hosts.to_vec(),
+            min_free_bytes: kacha_server::limits::DEFAULT_MIN_FREE_BYTES,
+        };
+        let clock: kacha_server::Clock = Arc::new(move || *clock_now.lock().unwrap());
+        let state = match free_space {
+            Some(bytes) => AppState::with_free_space(config, Arc::new(FakeGateway), clock, Arc::new(move || Ok(bytes))),
+            None => AppState::new(config, Arc::new(FakeGateway), clock),
+        };
+        router(state)
+    }
+
+    /// 模拟服务端重启：丢弃全部进程内状态，只留下数据根。
+    pub fn restart(&mut self) {
+        self.app = Self::app(self.dir.path(), &self.now, &self.result_hosts, self.free_space);
     }
 
     pub fn data_root(&self) -> &Path {

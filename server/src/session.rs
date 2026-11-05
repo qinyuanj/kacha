@@ -1,6 +1,7 @@
 //! 以密钥指纹为身份的用户、用户数据根与会话（ADR 0018）。
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -16,45 +17,134 @@ pub const SESSION_COOKIE: &str = "kacha_session";
 pub const SESSION_TTL: Duration = Duration::from_secs(7 * 86400);
 pub const SESSION_TTL_SECS: u64 = 7 * 86400;
 
-/// 密钥指纹 = 密钥原文的 SHA-256 小写十六进制；服务端只存指纹。
-pub fn fingerprint(key: &str) -> String {
-    Sha256::digest(key.trim().as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+fn sha256_hex(text: &str) -> String {
+    Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-#[derive(Default)]
+/// 密钥指纹 = 密钥原文的 SHA-256 小写十六进制；服务端只存指纹。
+pub fn fingerprint(key: &str) -> String {
+    sha256_hex(key.trim())
+}
+
+/// 数据根下的会话文件：只含令牌哈希、指纹与过期时间。拿到它也换不出可用的 cookie，更没有密钥。
+const SESSIONS_FILE: &str = "sessions.json";
+const SESSIONS_FORMAT_VERSION: u32 = 1;
+
+/// 会话表：内存为工作副本，每次发放与作废都整表原子落盘，服务重启后会话仍有效。
+/// 表项以令牌哈希为键（令牌是 128 位随机数，不需要加盐）。
 pub struct Sessions {
+    file: PathBuf,
     map: Mutex<HashMap<String, Session>>,
     /// 每个会话上次落盘最后访问时间的时刻：读图等高频请求不必每次写盘。
     touched: Mutex<HashMap<String, SystemTime>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Session {
     fingerprint: String,
+    #[serde(with = "unix_secs")]
     expires_at: SystemTime,
 }
 
-impl Sessions {
-    fn issue(&self, fingerprint: String, now: SystemTime) -> String {
-        let token = random_token();
-        self.map.lock().unwrap().insert(token.clone(), Session { fingerprint, expires_at: now + SESSION_TTL });
-        token
+mod unix_secs {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(t: &SystemTime, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_u64(t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs())
     }
 
-    fn lookup(&self, token: &str, now: SystemTime) -> Option<String> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<SystemTime, D::Error> {
+        Ok(UNIX_EPOCH + Duration::from_secs(u64::deserialize(d)?))
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct SavedSession {
+    token_sha256: String,
+    #[serde(flatten)]
+    session: Session,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SavedSessions {
+    format_version: u32,
+    sessions: Vec<SavedSession>,
+}
+
+impl Sessions {
+    /// 读回未过期的会话。文件缺失是首次启动；损坏或版本更高时不阻止服务启动，
+    /// 代价只是用户重新粘贴一次密钥（密钥在浏览器里，不丢数据）。
+    pub fn load(data_root: &Path, now: SystemTime) -> Self {
+        let file = data_root.join(SESSIONS_FILE);
+        let map = match std::fs::read(&file) {
+            Ok(bytes) => match serde_json::from_slice::<SavedSessions>(&bytes) {
+                Ok(saved) if saved.format_version <= SESSIONS_FORMAT_VERSION => {
+                    saved.sessions.into_iter().filter(|s| s.session.expires_at > now).map(|s| (s.token_sha256, s.session)).collect()
+                }
+                Ok(saved) => {
+                    eprintln!("[kacha] {} 版本 {} 高于本程序，已有会话作废", file.display(), saved.format_version);
+                    HashMap::new()
+                }
+                Err(e) => {
+                    eprintln!("[kacha] {} 无法解析（{e}），已有会话作废", file.display());
+                    HashMap::new()
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+            Err(e) => {
+                eprintln!("[kacha] 读取 {} 失败（{e}），已有会话作废", file.display());
+                HashMap::new()
+            }
+        };
+        Sessions { file, map: Mutex::new(map), touched: Mutex::default() }
+    }
+
+    /// 调用方持有 map 的锁，落盘顺序因此与内存变更一致。
+    fn save(&self, map: &HashMap<String, Session>) -> std::io::Result<()> {
+        let sessions = map.iter().map(|(hash, s)| SavedSession { token_sha256: hash.clone(), session: s.clone() }).collect();
+        let text = serde_json::to_string_pretty(&SavedSessions { format_version: SESSIONS_FORMAT_VERSION, sessions }).map_err(std::io::Error::other)?;
+        crate::store::atomic_write(&self.file, text.as_bytes())
+    }
+
+    /// 落盘失败即发放失败：否则这个会话重启后会无声消失。
+    fn issue(&self, fingerprint: String, now: SystemTime) -> std::io::Result<String> {
+        let token = random_token();
+        let hash = sha256_hex(&token);
         let mut map = self.map.lock().unwrap();
-        match map.get(token) {
+        map.retain(|_, s| s.expires_at > now);
+        map.insert(hash.clone(), Session { fingerprint, expires_at: now + SESSION_TTL });
+        if let Err(e) = self.save(&map) {
+            map.remove(&hash);
+            return Err(e);
+        }
+        self.touched.lock().unwrap().retain(|k, _| map.contains_key(k));
+        Ok(token)
+    }
+
+    /// 过期表项只从内存摘掉：过期时间已在文件里，读回时同样失效，下次发放时一并清出文件。
+    fn lookup(&self, token: &str, now: SystemTime) -> Option<String> {
+        let hash = sha256_hex(token);
+        let mut map = self.map.lock().unwrap();
+        match map.get(&hash) {
             Some(s) if s.expires_at > now => Some(s.fingerprint.clone()),
             Some(_) => {
-                map.remove(token);
+                map.remove(&hash);
                 None
             }
             None => None,
         }
     }
 
-    fn revoke(&self, token: &str) {
-        self.map.lock().unwrap().remove(token);
+    /// 落盘失败时内存里已作废，但重启后会复活，必须告知调用方。
+    fn revoke(&self, token: &str) -> std::io::Result<()> {
+        let hash = sha256_hex(token);
+        let mut map = self.map.lock().unwrap();
+        self.touched.lock().unwrap().remove(&hash);
+        if map.remove(&hash).is_none() {
+            return Ok(());
+        }
+        self.save(&map)
     }
 }
 
@@ -105,7 +195,10 @@ pub async fn login(state: &AppState, body: &[u8]) -> Response {
     if let Err(e) = touch_access(&root, &fp, now) {
         return error(StatusCode::INTERNAL_SERVER_ERROR, "io", &format!("记录用户信息失败：{e}"));
     }
-    let token = state.sessions().issue(fp.clone(), now);
+    let token = match state.sessions().issue(fp.clone(), now) {
+        Ok(token) => token,
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "io", &format!("保存会话失败：{e}")),
+    };
     let cookie = format!(
         "{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SESSION_TTL_SECS}"
     );
@@ -117,14 +210,12 @@ pub async fn login(state: &AppState, body: &[u8]) -> Response {
 }
 
 pub fn logout(state: &AppState, headers: &HeaderMap) -> Response {
-    if let Some(token) = session_token(headers) {
-        state.sessions().revoke(&token);
+    let saved = session_token(headers).map_or(Ok(()), |token| state.sessions().revoke(&token));
+    let cookie = [(header::SET_COOKIE, format!("{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"))];
+    match saved {
+        Ok(()) => (cookie, StatusCode::NO_CONTENT).into_response(),
+        Err(e) => (cookie, error(StatusCode::INTERNAL_SERVER_ERROR, "io", &format!("保存会话失败：{e}"))).into_response(),
     }
-    (
-        [(header::SET_COOKIE, format!("{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"))],
-        StatusCode::NO_CONTENT,
-    )
-        .into_response()
 }
 
 /// 最后访问时间的落盘节流：5 分钟内的重复访问不重复写。
@@ -136,11 +227,12 @@ pub fn current_user(state: &AppState, headers: &HeaderMap) -> Option<String> {
     let now = state.now();
     let fp = state.sessions().lookup(&token, now)?;
     let due = {
+        let hash = sha256_hex(&token);
         let mut touched = state.sessions().touched.lock().unwrap();
-        match touched.get(&token) {
+        match touched.get(&hash) {
             Some(last) if now.duration_since(*last).unwrap_or_default() < ACCESS_TOUCH_INTERVAL => false,
             _ => {
-                touched.insert(token, now);
+                touched.insert(hash, now);
                 true
             }
         }

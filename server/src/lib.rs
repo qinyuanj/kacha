@@ -50,8 +50,6 @@ pub struct Config {
     pub result_hosts: Vec<String>,
     /// 剩余磁盘低于该值时写入类接口返回 507（默认 20 GB）。
     pub min_free_bytes: u64,
-    /// 注入固定的磁盘余量（测试用）；None 时读真实文件系统。
-    pub free_space_override: Option<u64>,
 }
 
 /// 网关对一把密钥的结论。Unavailable 是服务故障，不能当成密钥无效。
@@ -89,21 +87,22 @@ struct Inner {
 }
 
 impl AppState {
+    /// 生产装配：磁盘余量读数据根所在的文件系统。
     pub fn new(config: Config, verifier: Arc<dyn KeyVerifier>, clock: Clock) -> Self {
-        let free_space: limits::FreeSpace = match config.free_space_override {
-            Some(bytes) => Arc::new(move || Ok(bytes)),
-            None => {
-                let root = config.data_root.clone();
-                Arc::new(move || limits::filesystem_free_space(&root))
-            }
-        };
+        let root = config.data_root.clone();
+        Self::with_free_space(config, verifier, clock, Arc::new(move || limits::filesystem_free_space(&root)))
+    }
+
+    /// 磁盘余量探针可注入：测试不必真的填满磁盘。
+    pub fn with_free_space(config: Config, verifier: Arc<dyn KeyVerifier>, clock: Clock, free_space: limits::FreeSpace) -> Self {
+        let sessions = session::Sessions::load(&config.data_root, clock());
         AppState {
             inner: Arc::new(Inner {
                 disk: limits::DiskGuard::new(free_space, config.min_free_bytes),
                 config,
                 verifier,
                 clock,
-                sessions: session::Sessions::default(),
+                sessions,
                 board_lock: tokio::sync::Mutex::new(()),
                 heavy: limits::HeavyGate::default(),
                 pack_ops: Arc::new(packs::PackOps::default()),

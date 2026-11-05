@@ -36,14 +36,16 @@ async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     let code = "http_error";
     let message = `服务端返回 HTTP ${res.status}`;
+    let upstreamStatus: number | undefined;
     try {
       const body = await res.json();
       if (typeof body?.code === "string") code = body.code;
       if (typeof body?.message === "string") message = body.message;
+      if (typeof body?.upstream_status === "number") upstreamStatus = body.upstream_status;
     } catch {
       // 非 JSON 错误体（如网关代理的 HTML）保留状态码文案。
     }
-    throw new ApiError(res.status, code, message);
+    throw new ApiError(res.status, code, message, upstreamStatus);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
