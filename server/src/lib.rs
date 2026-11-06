@@ -24,6 +24,7 @@ pub mod references;
 pub mod relay;
 mod session;
 pub mod store;
+pub mod thumbs;
 pub mod transfer;
 pub mod usage;
 pub mod usage_log;
@@ -79,7 +80,7 @@ struct Inner {
     sessions: session::Sessions,
     /// 画板读-比较-写与改名的互斥：版本校验必须整体串行，否则两页同时写都通过。
     board_lock: tokio::sync::Mutex<()>,
-    /// 全局大请求并发上限（文件写入、结果图下载、SHA、图片解析、读画板包内容、画板包导入导出；画板包上传不占）。
+    /// 全局大请求并发上限（文件写入、结果图下载、SHA、图片解析、缩略图生成、读画板包内容、画板包导入导出；画板包上传不占）。
     heavy: limits::HeavyGate,
     /// 磁盘余量守卫：写入类接口余量不足返回 507。
     disk: limits::DiskGuard,
@@ -205,6 +206,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/boards/rename", axum::routing::post(fs::rename_board))
         .route("/api/boards/names", get(fs::list_board_names))
         .route("/api/fs/file", get(fs::read_file).put(fs::write_new_file))
+        .route("/api/fs/thumb", get(thumbs::read_thumb))
         .route("/api/fs/dir", get(fs::list_dir))
         .route("/api/fs/is-file", get(fs::is_file))
         .route("/api/fs/sha256", get(fs::file_sha256))

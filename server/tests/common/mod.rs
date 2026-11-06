@@ -35,6 +35,7 @@ impl KeyVerifier for FakeGateway {
 pub struct Harness {
     pub dir: tempfile::TempDir,
     pub app: Router,
+    pub state: AppState,
     now: Arc<Mutex<SystemTime>>,
     result_hosts: Vec<String>,
     free_space: Option<u64>,
@@ -77,11 +78,11 @@ impl Harness {
     fn build(result_hosts: Vec<String>, free_space: Option<u64>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let now = Arc::new(Mutex::new(UNIX_EPOCH + Duration::from_secs(1_800_000_000)));
-        let app = Self::app(dir.path(), &now, &result_hosts, free_space);
-        Harness { dir, app, now, result_hosts, free_space }
+        let state = Self::state(dir.path(), &now, &result_hosts, free_space);
+        Harness { dir, app: router(state.clone()), state, now, result_hosts, free_space }
     }
 
-    fn app(data_root: &Path, now: &Arc<Mutex<SystemTime>>, result_hosts: &[String], free_space: Option<u64>) -> Router {
+    fn state(data_root: &Path, now: &Arc<Mutex<SystemTime>>, result_hosts: &[String], free_space: Option<u64>) -> AppState {
         let clock_now = now.clone();
         let config = Config {
             data_root: data_root.to_path_buf(),
@@ -91,16 +92,16 @@ impl Harness {
             min_free_bytes: kacha_server::limits::DEFAULT_MIN_FREE_BYTES,
         };
         let clock: kacha_server::Clock = Arc::new(move || *clock_now.lock().unwrap());
-        let state = match free_space {
+        match free_space {
             Some(bytes) => AppState::with_free_space(config, Arc::new(FakeGateway), clock, Arc::new(move || Ok(bytes))),
             None => AppState::new(config, Arc::new(FakeGateway), clock),
-        };
-        router(state)
+        }
     }
 
     /// 模拟服务端重启：丢弃全部进程内状态，只留下数据根。
     pub fn restart(&mut self) {
-        self.app = Self::app(self.dir.path(), &self.now, &self.result_hosts, self.free_space);
+        self.state = Self::state(self.dir.path(), &self.now, &self.result_hosts, self.free_space);
+        self.app = router(self.state.clone());
     }
 
     pub fn data_root(&self) -> &Path {
