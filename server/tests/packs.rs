@@ -672,3 +672,64 @@ async fn upload_that_does_not_fit_above_the_free_space_threshold_returns_507_wit
     let res = tokio::time::timeout(std::time::Duration::from_secs(5), pending).await.unwrap().unwrap().unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 }
+
+// ---- 整包上传回退路径同样比对参考图快照（#51：服务端为信任边界读 task.json 的快照 hash）----
+
+fn sha_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+/// OTHER 的参考图快照与 TASK 的结果图内容相同（v2 省略、导入时还原）；OTHER 的 task.json 记下快照的 sha256。
+fn snapshot_pack(recorded_sha: &str) -> Vec<u8> {
+    use std::io::Write;
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let manifest = serde_json::json!({
+        "pack_format_version": 2, "app_version": "0.4.0", "boards": ["画板/a.ugcboard.json"],
+        "duplicates": { format!("{OTHER}/reference-1.png"): format!("{TASK}/result.png") }
+    });
+    let record = serde_json::json!({ "task_id": "b", "references": [{ "file": "reference-1.png", "sha256": recorded_sha }] });
+    let entries: Vec<(String, Vec<u8>)> = vec![
+        ("manifest.json".into(), manifest.to_string().into_bytes()),
+        ("画板/a.ugcboard.json".into(), b"{\"format_version\":1,\"title\":\"a\"}".to_vec()),
+        (format!("{TASK}/task.json"), b"{\"task_id\":\"a\"}".to_vec()),
+        (format!("{TASK}/result.png"), png()),
+        (format!("{OTHER}/task.json"), record.to_string().into_bytes()),
+    ];
+    for (name, bytes) in entries {
+        zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(&bytes).unwrap();
+    }
+    zip.finish().unwrap().into_inner()
+}
+
+async fn import_snapshot_pack(h: &Harness, cookie: &str, recorded_sha: &str) -> Reply {
+    let id = upload_pack(h, cookie, snapshot_pack(recorded_sha)).await;
+    let body = serde_json::json!({
+        "units": [{ "path": TASK, "identity": "task.json" }, { "path": OTHER, "identity": "task.json" }],
+        "duplicates": [{ "path": format!("{OTHER}/reference-1.png"), "source": format!("{TASK}/result.png") }]
+    });
+    h.send(Method::POST, &format!("/api/packs/uploads/{id}/import?op=snap"), Some(cookie), body.to_string()).await
+}
+
+#[tokio::test]
+async fn whole_pack_import_rejects_a_reference_snapshot_that_disagrees_with_task_json() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let reply = import_snapshot_pack(&h, &cookie, &sha_hex(b"not the snapshot")).await;
+    assert_eq!(reply.status, 422, "{}", reply.text());
+    assert_eq!(reply.json()["code"], "invalid_pack");
+    assert!(reply.json()["message"].as_str().unwrap().contains("reference-1.png"), "{}", reply.text());
+    let root = h.user_root(GOOD_KEY);
+    assert!(!root.join(TASK).exists() && !root.join(OTHER).exists(), "不合格时一个单元都不移入");
+    assert_eq!(upload_temps(&h, GOOD_KEY), 0, "失败也删除上传临时文件");
+}
+
+#[tokio::test]
+async fn whole_pack_import_accepts_a_reference_snapshot_matching_task_json() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let reply = import_snapshot_pack(&h, &cookie, &sha_hex(&png()).to_uppercase()).await;
+    assert_eq!(reply.status, 200, "{}", reply.text());
+    assert_eq!(std::fs::read(h.user_root(GOOD_KEY).join(OTHER).join("reference-1.png")).unwrap(), png());
+}

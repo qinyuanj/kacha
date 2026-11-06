@@ -475,6 +475,8 @@ pub fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[
         link_or_copy(link, &source, &dest)?;
     }
 
+    // 整包回退路径没有落盘清单：按解压（含还原）后的文件现算 sha256。
+    check_reference_snapshots(&temp.0, units, |path| safe_join(&temp.0, path).ok().filter(|p| p.is_file()).and_then(|p| sha256_file(&p).ok()))?;
     let outcomes = merge_units(&temp.0, root, units, cancel)?;
     Ok(ImportReport { outcomes, bytes: done })
 }
@@ -598,14 +600,16 @@ pub fn import_staged_with(staging: &Path, root: &Path, units: &[MergeUnit], file
         }
     }
 
-    check_reference_snapshots(&temp.0, units, &declared)?;
+    check_reference_snapshots(&temp.0, units, |path| declared.get(path).map(|sha| sha.to_string()))?;
     let outcomes = merge_units(&temp.0, root, units, cancel)?;
     Ok(ImportReport { outcomes, bytes: done })
 }
 
-/// task.json 的 references[] 里记了 sha256 的参考图快照，与落盘清单给它的内容比对；不一致按损坏拒绝。
+/// task.json 的 references[] 里记了 sha256 的参考图快照，与这次导入里它的实际内容（`actual` 按包内路径给 sha256）比对；
+/// 不一致按损坏拒绝。两条导入路径都比对：去重上传按落盘清单，整包回退按解压后的文件。
+/// 这是「格式规则在前端核心」（ADR 0013）的信任边界例外：服务端只读快照的 file 与 sha256，不解释其他字段。
 /// task.json 读不了或不是这个形状时不比对（旧包、非 Web 版的记录照常导入）。
-fn check_reference_snapshots(temp: &Path, units: &[MergeUnit], declared: &BTreeMap<&str, &str>) -> io::Result<()> {
+fn check_reference_snapshots(temp: &Path, units: &[MergeUnit], actual: impl Fn(&str) -> Option<String>) -> io::Result<()> {
     for unit in units {
         let Some(identity) = &unit.identity else { continue };
         let Ok(text) = fs::read(safe_join(&safe_join(temp, &unit.path)?, identity)?) else { continue };
@@ -613,7 +617,7 @@ fn check_reference_snapshots(temp: &Path, units: &[MergeUnit], declared: &BTreeM
         for reference in record.get("references").and_then(|r| r.as_array()).into_iter().flatten() {
             let (Some(file), Some(expected)) = (reference.get("file").and_then(|v| v.as_str()), reference.get("sha256").and_then(|v| v.as_str())) else { continue };
             let path = format!("{}/{file}", unit.path);
-            if let Some(actual) = declared.get(path.as_str()) {
+            if let Some(actual) = actual(&path) {
                 if !actual.eq_ignore_ascii_case(expected) {
                     return Err(invalid(format!("参考图快照 {path} 与 task.json 记录的 sha256 不一致，画板包已损坏")));
                 }
