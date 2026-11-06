@@ -5,6 +5,7 @@
 import { copyTaskIds, parseBoard, serializeBoard, type Board, type BoardNode } from "./board";
 import { BOARDS_DIR_NAME, basename, resolveFromRoot, toRootRelative } from "./paths";
 import { TASK_RECORD_FILE, taskDirOfRelPath, taskDirOfTaskId } from "./taskDir";
+import { blobSource, readEntryBytes, readZipIndex, type ZipSource } from "./zipIndex";
 
 /** 本机能导入的最高包格式版本。v2 = 导出时按内容去重，被省略的路径记在清单的 duplicates 里（ADR 0013 补记）。 */
 export const PACK_FORMAT_VERSION = 2;
@@ -235,6 +236,35 @@ export async function inspectPack(entries: string[], readTexts: (names: string[]
   return { kind: "ok", boards: versions.boards, units, duplicates };
 }
 
+const utf8 = new TextDecoder("utf-8", { fatal: true });
+
+/**
+ * 在浏览器本地检查包（#61）：读中央目录与清单、画板文本，交给 inspectPack 判版本与布局。
+ * 返回 null 表示 zip 读取器读不了（其他压缩方法、结构异常、条目数据读不出），调用方回退为整包上传、交服务端判定。
+ * 目录条目不计入布局，与服务端列条目一致。
+ */
+export async function inspectPackLocally(src: ZipSource): Promise<PackCheck | null> {
+  const index = await readZipIndex(src);
+  if (index.kind !== "ok") return null;
+  const files = index.entries.filter((e) => !e.name.endsWith("/"));
+  const byName = new Map(files.map((e) => [e.name, e]));
+  try {
+    return await inspectPack(
+      files.map((e) => e.name),
+      async (names) => {
+        const texts: Record<string, string> = {};
+        for (const name of names) {
+          const entry = byName.get(name);
+          if (entry) texts[name] = utf8.decode(await readEntryBytes(src, entry));
+        }
+        return texts;
+      },
+    );
+  } catch {
+    return null;
+  }
+}
+
 // ---- 导入结果 ----
 
 /** 壳对每个合并单元的处理：移入、本机已有且一致（跳过）、本机已有但不一致（冲突，不覆盖）。 */
@@ -324,8 +354,10 @@ export interface ImportOptions {
 type Merged = { check: Extract<PackCheck, { kind: "ok" }>; report: Awaited<ReturnType<PackIo["importUnits"]>> };
 
 /**
- * 导入画板包（#128）：在同一个可取消的进度阶段里依次上传（#59）→ 判版本与布局（不合格不合并）→ 解压合并任务目录，
- * 之后逐个写画板。从「已拿到用户选的包文件」开始；选包、进度、结果弹窗与文案都留在 ui（弹窗不是端口，见 #128），这里只返回结局。
+ * 导入画板包（#128）：在同一个可取消的进度阶段里依次本地检查（#61）→ 上传（#59）→ 解压合并任务目录，之后逐个写画板。
+ * 本地检查判为版本过新或损坏时直接返回，一个字节都不上传；检查通过就按本地判定合并，不再让服务端读条目。
+ * zip 读取器读不了的包跳过本地检查，整包上传后由服务端读条目与文本判定（不合格不合并）。
+ * 从「已拿到用户选的包文件」开始；选包、进度、结果弹窗与文案都留在 ui（弹窗不是端口，见 #128），这里只返回结局。
  * 上传被取消或失败时不再读包内容；上传之后的阶段不再合并时放弃上传。取消或失败时已移入的任务目录保留；写画板第一个失败即停，已写的保留。
  */
 export async function importPack(io: PackIo, opts: ImportOptions): Promise<ImportResult> {
@@ -333,15 +365,19 @@ export async function importPack(io: PackIo, opts: ImportOptions): Promise<Impor
   const fields = { action: "import", pack_file: file.name };
   let packBoards: string | undefined;
   const outcome = await runCancellable(io, opts.onStage, async (): Promise<Rejected | Merged> => {
+    const local = await inspectPackLocally(blobSource(file));
+    if (local && local.kind !== "ok") return local;
     const pack = await io.upload(file);
     try {
-      const check = await io
-        .entries(pack)
-        .then((entries) => inspectPack(entries, (names) => io.readTexts(pack, names)))
-        .catch((e): Rejected => {
-          if (errorText(e) === PACK_CANCELLED) throw e;
-          return { kind: "corrupt", reason: errorText(e) };
-        });
+      const check =
+        local ??
+        (await io
+          .entries(pack)
+          .then((entries) => inspectPack(entries, (names) => io.readTexts(pack, names)))
+          .catch((e): Rejected => {
+            if (errorText(e) === PACK_CANCELLED) throw e;
+            return { kind: "corrupt", reason: errorText(e) };
+          }));
       if (check.kind !== "ok") {
         await io.discard?.(pack).catch(() => undefined);
         return check;
