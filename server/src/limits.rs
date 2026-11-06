@@ -1,7 +1,8 @@
 //! 资源限制（ADR 0018 / #24）：全局大请求并发上限、写入前的磁盘余量检查、每日一次的用户数据根大小日志。
 //!
-//! 大请求（文件写入、结果图下载、SHA、图片解析、缩略图生成、画板包导入导出）都要先拿到 HeavyGate 的许可：
+//! 大请求（文件写入、结果图下载、SHA、图片解析、缩略图生成、读画板包内容、画板包导入导出）都要先拿到 HeavyGate 的许可：
 //! 全局最多 4 个并发，其余排队；阻塞的 zip / IO 在 spawn_blocking 里跑，不占异步线程。
+//! 画板包上传不拿许可（#60）：快慢取决于客户端网速，改由空闲超时与按 Content-Length 的余量预检兜住。
 //! 磁盘余量低于门槛时写入类接口返回 507；余量来源可注入（测试不必真的填满磁盘）。
 
 use std::io;
@@ -15,6 +16,8 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 pub const HEAVY_CONCURRENCY: usize = 4;
 /// 剩余磁盘低于该值时拒绝写入。
 pub const DEFAULT_MIN_FREE_BYTES: u64 = 20 * 1024 * 1024 * 1024;
+/// 上传请求体两块数据之间允许的最长空闲：超过即 408 并删掉临时文件（#60）。
+pub const UPLOAD_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// 磁盘余量来源：生产读文件系统，测试注入固定值。
 pub type FreeSpace = Arc<dyn Fn() -> io::Result<u64> + Send + Sync>;
@@ -90,8 +93,13 @@ impl DiskGuard {
     }
 
     pub fn enough(&self) -> bool {
+        self.fits(None)
+    }
+
+    /// 写入 `incoming` 字节后余量仍不低于门槛；长度未知（None）时按现有门槛判定。
+    pub fn fits(&self, incoming: Option<u64>) -> bool {
         match (self.free_space)() {
-            Ok(free) => free >= self.min_free_bytes,
+            Ok(free) => free >= self.min_free_bytes.saturating_add(incoming.unwrap_or(0)),
             Err(_) => {
                 // 读不到余量时不拒绝服务（避免把监控故障当成磁盘满），但每小时提醒一次。
                 let mut last = self.last_warn.lock().unwrap();
@@ -135,6 +143,10 @@ mod tests {
     fn disk_guard_rejects_below_threshold() {
         assert!(!DiskGuard::fixed(20 * 1024 * 1024 * 1024 - 1).enough());
         assert!(DiskGuard::fixed(20 * 1024 * 1024 * 1024).enough());
+        // 已知要写多少：写完后仍不低于门槛才放行。
+        assert!(DiskGuard::fixed(20 * 1024 * 1024 * 1024 + 10).fits(Some(10)));
+        assert!(!DiskGuard::fixed(20 * 1024 * 1024 * 1024 + 10).fits(Some(11)));
+        assert!(!DiskGuard::fixed(u64::MAX - 1).fits(Some(u64::MAX)), "长度相加不溢出");
         // 余量读不到不拒绝服务。
         assert!(DiskGuard::new(Arc::new(|| Err(io::Error::other("statvfs 失败"))), DEFAULT_MIN_FREE_BYTES).enough());
     }

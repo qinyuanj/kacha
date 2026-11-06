@@ -284,6 +284,22 @@ test("选中文件后窗口重新获得焦点、上传超过 1 秒：仍正常�
   expect(errors).toEqual([]);
 });
 
+for (const [status, reason] of [
+  [408, "上传中断：超过 60 秒没有收到数据，请检查网络后重试"],
+  [507, "服务器空间不足，请联系管理员"],
+] as const) {
+  test(`上传回 ${status}（反向代理给的非 JSON 响应体）：提示「${reason}」，不出现新画板（#60）`, async ({ page, rig }) => {
+    const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
+    await page.route("**/api/packs/uploads?*", (route) => route.fulfill({ status, contentType: "text/html", body: "<html>error</html>" }));
+    await importPack(page, V032);
+    await expect(toast(page)).toHaveText(`导入画板包失败：${reason}`);
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page.locator(".tab")).toHaveCount(1);
+    expect(existsSync(path.join(rig.userRoot(GOOD_KEY), DIR))).toBe(false);
+    expect(errors).toEqual([]);
+  });
+}
+
 test("上传延迟期间进度对话框可见；点「取消」后提示已取消，不出现新画板，不残留上传暂存（#59）", async ({ page, rig }) => {
   const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
   // 上传请求被拦住不放：模拟慢连接，进度对话框必须在上传期间就出现，且可取消。

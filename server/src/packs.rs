@@ -8,6 +8,8 @@
 //!   导入结束（成功 / 失败 / 取消）或上传中断都删除临时文件。
 //!   关页等留下的临时文件，在该用户下次上传开始时按修改时间回收（超过 1 小时）。
 //!   上传可带 `?op=<id>`（#59）：总量取 Content-Length，每写一块更新已完成字节数；被取消回 409 并删掉半成品。
+//!   上传不占大请求名额（#60）：两块之间空闲超过 60 秒回 408 并删掉半成品；Content-Length 加余量门槛
+//!   超过可用磁盘时，开始写入前就回 507。读条目 / 文本、合并、导出仍要拿名额。
 //! - 取消与进度按操作 id 隔离：POST /api/packs/ops/{op}/cancel 只影响该操作；GET 读进度，操作已结束或不存在时回 204。
 
 use std::collections::HashMap;
@@ -277,8 +279,54 @@ pub struct UploadQuery {
     op: Option<String>,
 }
 
+fn content_length(headers: &axum::http::HeaderMap) -> Option<u64> {
+    headers.get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok())
+}
+
+/// 把上传请求体逐块写进 `out`，返回写入的字节数。上传类接口共用（#60）：
+/// - 不拿大请求许可，快慢取决于客户端；两块之间空闲超过 UPLOAD_IDLE_TIMEOUT 回 408。
+/// - 带操作时每写一块更新已完成字节数；等下一块时也看取消，被取消回 409。
+///
+/// 出错时由调用方的守卫删掉写了一半的文件。
+async fn receive_body(body: Body, out: &mut tokio::fs::File, op: Option<&Op>) -> Result<u64, Response> {
+    let mut stream = body.into_data_stream();
+    let mut done = 0u64;
+    loop {
+        let next = tokio::time::timeout(crate::limits::UPLOAD_IDLE_TIMEOUT, async {
+            match op {
+                // 请求体停在半路（慢连接、卡住）时取消也要立刻生效。
+                Some(op) => tokio::select! {
+                    chunk = stream.next() => Ok(chunk),
+                    _ = op.wait_cancelled() => Err(()),
+                },
+                None => Ok(stream.next().await),
+            }
+        })
+        .await;
+        let next = match next {
+            Err(_) => return Err(error(StatusCode::REQUEST_TIMEOUT, "upload_timeout", UPLOAD_TIMEOUT_MESSAGE)),
+            Ok(Err(())) => return Err(error(StatusCode::CONFLICT, "cancelled", CANCELLED)),
+            Ok(Ok(next)) => next,
+        };
+        let Some(chunk) = next else { return Ok(done) };
+        let chunk = chunk.map_err(|_| error(StatusCode::BAD_REQUEST, "upload_failed", "上传中断"))?;
+        out.write_all(&chunk).await.map_err(crate::fs::io_error)?;
+        done += chunk.len() as u64;
+        if let Some(op) = op {
+            op.done.store(done, Ordering::Relaxed);
+            if op.cancel.load(Ordering::Relaxed) {
+                return Err(error(StatusCode::CONFLICT, "cancelled", CANCELLED));
+            }
+        }
+    }
+}
+
+const UPLOAD_TIMEOUT_MESSAGE: &str = "上传中断：超过 60 秒没有收到数据，请检查网络后重试";
+
 pub async fn upload(State(state): State<AppState>, user: User, Query(q): Query<UploadQuery>, headers: axum::http::HeaderMap, body: Body) -> Response {
-    if let Err(r) = crate::fs::ensure_space(&state) {
+    // 开始写入前预检：已知长度时要放得下这次上传，未知时按现有门槛。
+    let length = content_length(&headers);
+    if let Err(r) = crate::fs::ensure_space_for(&state, length) {
         return r;
     }
     // 带操作 id 时报进度、可取消；不带时照旧（进度与取消都没有）。
@@ -287,13 +335,11 @@ pub async fn upload(State(state): State<AppState>, user: User, Query(q): Query<U
         Err(r) => return r,
     };
     let op = tracked.as_ref().map(|(op, _)| op.clone());
-    let total = headers.get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
     if let Some(op) = &op {
-        op.total.store(total, Ordering::Relaxed);
+        op.total.store(length.unwrap_or(0), Ordering::Relaxed);
     }
     let root = state.user_root(&user.fingerprint);
     sweep_stale_uploads(&root, state.now());
-    let _permit = state.heavy().acquire().await;
     let id = format!("{:x}", rand_u64());
     let file = upload_path(&root, &id);
     if let Err(e) = std::fs::create_dir_all(file.parent().unwrap()) {
@@ -304,32 +350,8 @@ pub async fn upload(State(state): State<AppState>, user: User, Query(q): Query<U
         Ok(f) => f,
         Err(e) => return crate::fs::io_error(e),
     };
-    let mut stream = body.into_data_stream();
-    let mut done = 0u64;
-    loop {
-        // 等下一块时也看取消：请求体停在半路（慢连接、卡住）时取消要立刻生效；守卫删掉写了一半的文件。
-        let next = match &op {
-            Some(op) => tokio::select! {
-                chunk = stream.next() => chunk,
-                _ = op.wait_cancelled() => return error(StatusCode::CONFLICT, "cancelled", CANCELLED),
-            },
-            None => stream.next().await,
-        };
-        let Some(chunk) = next else { break };
-        let chunk = match chunk {
-            Ok(c) => c,
-            Err(_) => return error(StatusCode::BAD_REQUEST, "upload_failed", "上传中断"),
-        };
-        if let Err(e) = out.write_all(&chunk).await {
-            return crate::fs::io_error(e);
-        }
-        done += chunk.len() as u64;
-        if let Some(op) = &op {
-            op.done.store(done, Ordering::Relaxed);
-            if op.cancel.load(Ordering::Relaxed) {
-                return error(StatusCode::CONFLICT, "cancelled", CANCELLED);
-            }
-        }
+    if let Err(r) = receive_body(body, &mut out, op.as_deref()).await {
+        return r;
     }
     if let Err(e) = out.sync_all().await {
         return crate::fs::io_error(e);
@@ -361,6 +383,7 @@ pub async fn upload_entries(State(state): State<AppState>, user: User, AxPath(id
         Ok(f) => f,
         Err(r) => return r,
     };
+    let _permit = state.heavy().acquire().await;
     match tokio::task::spawn_blocking(move || board_pack::entries(&file)).await {
         Ok(Ok(names)) => Json(names).into_response(),
         Ok(Err(e)) => error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_pack", &format!("无法读取画板包：{e}")),
@@ -376,6 +399,7 @@ pub async fn upload_texts(State(state): State<AppState>, user: User, AxPath(id):
         Ok(f) => f,
         Err(r) => return r,
     };
+    let _permit = state.heavy().acquire().await;
     match tokio::task::spawn_blocking(move || board_pack::read_texts(&file, &names)).await {
         Ok(Ok(texts)) => Json(texts).into_response(),
         Ok(Err(e)) => error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_pack", &format!("无法读取画板包：{e}")),
