@@ -251,7 +251,7 @@ describe("单任务端到端", () => {
     expect(requests).toHaveLength(0);
 
     const result = await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "sk-test" });
-    expect(requests.map((r) => r.url)).toEqual(["http://gw/v1/images/edits"]);
+    expect(requests.map((r) => r.url)).toEqual(["http://gw/v1/images/generations"]);
     expect(files.get(`${dir}/result.png`)).toEqual(PNG);
     const b2 = addResultNode(b1, { ...result, id: "res" });
     expect(b2.nodes.find((n) => n.id === "res")).toMatchObject({ type: "result", task_id: job.taskId, path: `${job.relDir}/result.png` } satisfies Partial<ResultNode>);
@@ -270,7 +270,7 @@ describe("单任务端到端", () => {
     expect(taskJson.size.width % 16).toBe(0);
     expect(taskJson.size.height % 16).toBe(0);
     const result = await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "sk-test" });
-    expect(JSON.parse(String(requests[0].init?.body)).parameters.size).toBe(`${taskJson.size.width}*${taskJson.size.height}`);
+    expect(JSON.parse(String(requests[0].init?.body)).size).toBe(`${taskJson.size.width}x${taskJson.size.height}`);
     expect((addResultNode(b1, { ...result, id: "res" }).nodes.find((n) => n.id === "res") as ResultNode).record.size_spec).toEqual({ tier: "1K", ratio: "10:7", width: null, height: null });
   });
 
@@ -317,7 +317,7 @@ describe("单任务端到端", () => {
     expect(taskJson).toMatchObject({ prompt: "一只橘猫", send_text: "本次提供一张参考图，编号为图1。请依据图1的视觉内容执行下方用户指令；指令中省略编号的图片指代均指图1。\n\n用户指定参考用途时，按指定用途使用图1。用户要求修改图片时，以图1为编辑基础，保留与修改要求无关的内容。\n\n用户指令：\n一只橘猫", capability_table_sha256: "y" });
     expect(files.get(`/root/${job.relDir}/reference-1.png`)).toEqual(PNG);
     await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" });
-    expect(requests.map((r) => r.url)).toEqual(["http://gw/v1/images/edits"]);
+    expect(requests.map((r) => r.url)).toEqual(["http://gw/v1/images/generations"]);
   });
 
   it("重新生成：上次提交的任务编号不是本工具生成的，按没有可重新生成的提交报本地错误", async () => {
@@ -471,8 +471,8 @@ describe("区域指示：提交链路", () => {
 
     await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" });
     const body = JSON.parse(String(requests[0].init.body));
-    expect(body.input.messages[0].content).toHaveLength(3);
-    expect(body.input.messages[0].content[2].text).toContain("图2 是图1 的标注版");
+    expect(body.image).toHaveLength(2);
+    expect(body.prompt).toContain("图2 是图1 的标注版");
     void b1;
   });
 
@@ -511,7 +511,6 @@ describe("区域指示：提交链路", () => {
     await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" });
     // 提交路径：task.json 的 send_text 与请求体里的提示文本是同一字符串。
     const body = JSON.parse(String(requests[0].init.body));
-    expect(body.input.messages[0].content[3].text).toBe(taskJson.send_text);
     expect(body.prompt).toBe(taskJson.send_text);
   });
 
@@ -535,7 +534,6 @@ describe("区域指示：提交链路", () => {
     const regenerated = JSON.parse(new TextDecoder().decode(files.get(`/root/${job.relDir}/task.json`)));
     const body = JSON.parse(String(requests[0].init.body));
     expect(regenerated.send_text).toBe(expected);
-    expect(body.input.messages[0].content[3].text).toBe(regenerated.send_text);
     expect(body.prompt).toBe(regenerated.send_text);
   });
 
@@ -641,7 +639,7 @@ describe("参考图快照按模型规则缩放 / 转码（#116）", () => {
     expect(ref.source).toEqual({ kind: "reference", path: "refs/cat.png", sha256: "a".repeat(64) });
     expect(ref.fitted).toEqual({ from: { width: 4096, height: 4096, format: "png", bytes: PNG.length }, to: { width: 2048, height: 2048, format: "png", bytes: FITTED.length } });
     await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" });
-    expect(JSON.parse(String(requests[0].init.body)).input.messages[0].content[0].image).toContain(btoa(String.fromCharCode(...FITTED)));
+    expect(JSON.parse(String(requests[0].init.body)).image[0]).toContain(btoa(String.fromCharCode(...FITTED)));
   });
 
   it("同一张图接 seedream（36MP 上限）：不缩放、不重新编码，没有 fitted", async () => {
