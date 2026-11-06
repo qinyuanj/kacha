@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Board, BoardEdge, BoardNode, TaskNode } from "./board";
 import { BUILTIN_TABLE } from "./capabilities";
 import { imageSources } from "./graph";
-import { buildConfirmItems, collectRunFacts, createInterruptedLog, isDirty, isInterrupted, regenerateDispatch, runDispatch, runScope, snapshotOf, storedStatuses, withSubmitted, type ConfirmItem } from "./submission";
+import { buildConfirmItems, collectRunFacts, createInterruptedLog, interruptedCandidates, isDirty, regenerateDispatch, runDispatch, runScope, snapshotOf, storedStatuses, withSubmitted, type ConfirmItem } from "./submission";
 import { taskDirOfTaskId, writeOutcome } from "./taskDir";
 import { nodeStatus, nodeSummary } from "./runner";
 import type { UnrunnableReason } from "./taskView";
@@ -589,11 +589,11 @@ describe("运行前事实采集", () => {
 describe("已中断：重开时推导", () => {
   it("已提交、画板上没有结果、本次运行期间没经手过的任务", () => {
     const submitted = withSubmitted(board([prompt("p", "猫"), task("t")], [edge("p", "t", "positive")]), "t", "task-x");
-    expect(isInterrupted(submitted, "t", new Set())).toBe(true);
-    expect(isInterrupted(submitted, "t", new Set(["task-x"]))).toBe(false);
+    expect(interruptedCandidates(submitted, new Set())).toEqual([["t", "task-x"]]);
+    expect(interruptedCandidates(submitted, new Set(["task-x"]))).toEqual([]);
     const withResult = { ...submitted, nodes: [...submitted.nodes, result("x")] };
-    expect(isInterrupted(withResult, "t", new Set())).toBe(false);
-    expect(isInterrupted(board([task("t")], []), "t", new Set())).toBe(false);
+    expect(interruptedCandidates(withResult, new Set())).toEqual([]);
+    expect(interruptedCandidates(board([task("t")], []), new Set())).toEqual([]);
   });
 });
 

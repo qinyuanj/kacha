@@ -116,15 +116,9 @@ function candidateCopies(board: Board, task: TaskNode, handled: ReadonlySet<stri
 }
 
 /**
- * 候选的已中断：提交过、至少有一份在画板上没有结果，且本次程序运行期间队列没经手过这一份。
- * 界面再读任务目录的结局记录：有失败 / 取消记录的按记录显示，没有才是已中断。不持久化到画板。
+ * 画板上已中断的候选份：[任务节点 id, 该份的 task_id]。候选 = 提交过、该份在画板上没有结果，且本次程序运行期间
+ * 队列没经手过这一份；storedStatuses 再读任务目录的结局记录：有失败 / 取消记录的按记录，没有才是已中断。不持久化到画板。
  */
-export function isInterrupted(board: Board, taskId: string, handled: ReadonlySet<string>): boolean {
-  const task = findTask(board, taskId);
-  return !!task && candidateCopies(board, task, handled).length > 0;
-}
-
-/** 画板上已中断的候选份：[任务节点 id, 该份的 task_id]。 */
 export function interruptedCandidates(board: Board, handled: ReadonlySet<string>): [nodeId: string, taskId: string][] {
   return board.nodes.flatMap((n) => (n.type === "task" ? candidateCopies(board, n, handled).map((id) => [n.id, id] as [string, string]) : []));
 }
