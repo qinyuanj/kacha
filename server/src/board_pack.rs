@@ -85,7 +85,7 @@ pub struct PackDuplicate {
 }
 
 /// 还原被省略路径的方式：默认硬链接；测试注入失败以走复制回退。
-pub type Linker<'a> = dyn Fn(&Path, &Path) -> io::Result<()> + 'a;
+pub(crate) type Linker<'a> = dyn Fn(&Path, &Path) -> io::Result<()> + 'a;
 
 /// 硬链接到代表文件；链接失败（文件系统不支持、跨卷、链接数上限等）时复制。目标已存在时报错，不覆盖。
 fn link_or_copy(link: &Linker<'_>, source: &Path, dest: &Path) -> io::Result<()> {
@@ -412,12 +412,9 @@ fn belongs_to_unit(units: &[MergeUnit], name: &str) -> bool {
     units.iter().any(|u| name == u.path || name.strip_prefix(u.path.as_str()).is_some_and(|rest| rest.starts_with('/')))
 }
 
-pub fn import(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[PackDuplicate], progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
-    import_with(pack, root, units, duplicates, &|from, to| fs::hard_link(from, to), progress, cancel)
-}
-
-/// 同 import，可注入还原被省略路径时的链接方式。
-pub fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[PackDuplicate], link: &Linker<'_>, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
+/// 两条导入路径共用的入口：建好用户数据根（越界检查要解析它），再校验合并单元路径不越界、身份文件是合法的相对段。
+/// 在创建任何临时目录之前做，不合格时不写导入内容。
+fn prepare_root(root: &Path, units: &[MergeUnit]) -> io::Result<()> {
     fs::create_dir_all(root)?;
     for unit in units {
         resolve_in(root, &unit.path)?;
@@ -425,6 +422,16 @@ pub fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[
             safe_join(Path::new(""), identity)?;
         }
     }
+    Ok(())
+}
+
+pub fn import(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[PackDuplicate], progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
+    import_with(pack, root, units, duplicates, &|from, to| fs::hard_link(from, to), progress, cancel)
+}
+
+/// 同 import，可注入还原被省略路径时的链接方式。
+pub(crate) fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[PackDuplicate], link: &Linker<'_>, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
+    prepare_root(root, units)?;
     for d in duplicates {
         safe_join(Path::new(""), &d.path)?;
         safe_join(Path::new(""), &d.source)?;
@@ -446,7 +453,6 @@ pub fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[
         extract.push((i, name));
     }
 
-    fs::create_dir_all(root)?;
     sweep_stale_imports(root);
     let temp = TempDir(store::temp_path_for(&root.join(IMPORT_TEMP_STEM)));
     fs::create_dir(&temp.0)?;
@@ -547,14 +553,8 @@ pub fn import_staged(staging: &Path, root: &Path, units: &[MergeUnit], files: &[
 
 /// 按落盘清单把暂存的内容放进临时目录里的各单元：同一份内容第一份从暂存移过来，其余硬链接到它（失败回退为复制）；
 /// 再比对 task.json 里记了 sha256 的参考图快照（不一致按损坏拒绝），最后与整包导入同样校验、合并。可注入链接方式。
-pub fn import_staged_with(staging: &Path, root: &Path, units: &[MergeUnit], files: &[PlacedFile], link: &Linker<'_>, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
-    fs::create_dir_all(root)?;
-    for unit in units {
-        resolve_in(root, &unit.path)?;
-        if let Some(identity) = &unit.identity {
-            safe_join(Path::new(""), identity)?;
-        }
-    }
+pub(crate) fn import_staged_with(staging: &Path, root: &Path, units: &[MergeUnit], files: &[PlacedFile], link: &Linker<'_>, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
+    prepare_root(root, units)?;
     let mut declared = BTreeMap::new();
     for f in files {
         safe_join(Path::new(""), &f.path)?;
@@ -572,7 +572,6 @@ pub fn import_staged_with(staging: &Path, root: &Path, units: &[MergeUnit], file
         }
     }
 
-    fs::create_dir_all(root)?;
     sweep_stale_imports(root);
     let temp = TempDir(store::temp_path_for(&root.join(IMPORT_TEMP_STEM)));
     fs::create_dir(&temp.0)?;

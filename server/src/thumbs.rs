@@ -105,9 +105,15 @@ impl Job {
     }
 
     fn log_failure(&self, e: impl Display) {
-        let fields = serde_json::json!({ "path": self.rel, "error": e.to_string() });
-        let _ = logger::Logger::new(self.log_dir.clone(), crate::VERSION).log("thumb_failed", fields.as_object().unwrap());
+        log_failure(&self.log_dir, &self.rel, e);
     }
+}
+
+/// 缩略图相关失败（生成、写缓存、清理时删除）记一条 `thumb_failed`，写进该用户元数据目录 `meta` 的日志；
+/// `path` 是相对用户数据根的原图或任务目录路径。记不下就算了。
+pub fn log_failure(meta: &Path, path: &str, error: impl Display) {
+    let fields = serde_json::json!({ "path": path, "error": error.to_string() });
+    let _ = logger::Logger::new(meta.to_path_buf(), crate::VERSION).log("thumb_failed", fields.as_object().unwrap());
 }
 
 fn dimensions(src: &Path) -> ImageResult<(u32, u32)> {

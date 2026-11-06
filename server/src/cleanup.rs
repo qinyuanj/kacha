@@ -262,10 +262,7 @@ fn drop_thumbs(data_root: &Path, rel: &str) {
     match std::fs::remove_dir_all(&thumbs) {
         Ok(()) => remove_empty_parent(&thumbs),
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => {
-            let fields = serde_json::json!({ "path": dir, "error": format!("清理时删除缩略图失败：{e}") });
-            let _ = crate::logger::Logger::new(meta, crate::VERSION).log("thumb_failed", fields.as_object().unwrap());
-        }
+        Err(e) => crate::thumbs::log_failure(&meta, dir, format!("清理时删除缩略图失败：{e}")),
     }
 }
 

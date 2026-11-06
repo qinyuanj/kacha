@@ -132,6 +132,18 @@ pub async fn op_cancel(State(state): State<AppState>, user: User, AxPath(id): Ax
     }
 }
 
+/// 阻塞的画板包操作（字节事实、合并落盘）的结局到 HTTP 回复：被取消 409、包或规格不合格 422（`invalid_code`），
+/// 其余 io 错误按读写接口的映射（404 / 409 / 500）。
+fn pack_reply<T: serde::Serialize>(result: Result<std::io::Result<T>, tokio::task::JoinError>, invalid_code: &str) -> Response {
+    match result {
+        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::Interrupted => error(StatusCode::CONFLICT, "cancelled", CANCELLED),
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidData => error(StatusCode::UNPROCESSABLE_ENTITY, invalid_code, &e.to_string()),
+        Ok(Err(e)) => crate::fs::io_error(e),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
+    }
+}
+
 // ---- 导出：流式 zip 下载 ----
 
 #[derive(Deserialize)]
@@ -214,13 +226,7 @@ pub async fn export_facts(State(state): State<AppState>, user: User, Query(q): Q
     let _permit = state.heavy().acquire().await;
     let progress = progress_fn(&op);
     let cancel = op.clone();
-    match tokio::task::spawn_blocking(move || board_pack::entry_facts(&root, &spec, &progress, &cancel.cancel)).await {
-        Ok(Ok(facts)) => Json(facts).into_response(),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::Interrupted => error(StatusCode::CONFLICT, "cancelled", CANCELLED),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidData => error(StatusCode::UNPROCESSABLE_ENTITY, "export_failed", &e.to_string()),
-        Ok(Err(e)) => crate::fs::io_error(e),
-        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
-    }
+    pack_reply(tokio::task::spawn_blocking(move || board_pack::entry_facts(&root, &spec, &progress, &cancel.cancel)).await, "export_failed")
 }
 
 // ---- 导入：流式上传 → 判定 → 合并 ----
@@ -471,13 +477,7 @@ pub async fn import(State(state): State<AppState>, user: User, AxPath(id): AxPat
     let cancel = op.clone();
     let result = tokio::task::spawn_blocking(move || board_pack::import(&file, &root, &units, &duplicates, &progress, &cancel.cancel)).await;
     drop(cleanup);
-    match result {
-        Ok(Ok(report)) => Json(report).into_response(),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::Interrupted => error(StatusCode::CONFLICT, "cancelled", CANCELLED),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidData => error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_pack", &e.to_string()),
-        Ok(Err(e)) => crate::fs::io_error(e),
-        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
-    }
+    pack_reply(result, "invalid_pack")
 }
 
 /// 放弃上传（用户在判定后取消）：删除临时文件。
@@ -649,13 +649,7 @@ pub async fn import_staging(State(state): State<AppState>, user: User, AxPath(id
     let cancel = op.clone();
     let result = tokio::task::spawn_blocking(move || board_pack::import_staged(&dir, &root, &units, &files, &progress, &cancel.cancel)).await;
     drop(cleanup);
-    match result {
-        Ok(Ok(report)) => Json(report).into_response(),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::Interrupted => error(StatusCode::CONFLICT, "cancelled", CANCELLED),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidData => error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_pack", &e.to_string()),
-        Ok(Err(e)) => crate::fs::io_error(e),
-        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
-    }
+    pack_reply(result, "invalid_pack")
 }
 
 /// 写了一半的内容文件守卫：只删这个文件，不动暂存目录（同一暂存里还有别的内容）。
