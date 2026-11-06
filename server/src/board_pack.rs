@@ -5,6 +5,8 @@
 //! 导入：只解压属于给定合并单元的条目到输出根目录下的临时目录，校验后逐个单元原子 rename 移入；
 //! 目标已存在时按单元的身份文件（或整文件）比对，一致为跳过、不一致为冲突，均不覆盖。
 //! 失败 / 取消时清理临时目录，已移入的保留；进程被杀留下的临时目录在下次导入开始时清理。
+//! 包格式 v2 被省略的路径（前端核心已判过映射合法）在临时目录里还原：硬链接到代表文件，失败回退为复制，
+//! 之后与实存条目一样按合并单元比对、移入（ADR 0018 补记）。
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
@@ -57,6 +59,30 @@ pub struct ExportReport {
 pub struct MergeUnit {
     pub path: String,
     pub identity: Option<String>,
+}
+
+/// v2 包里被省略的路径与它的代表条目（都是包内路径）：导入时把 path 还原为与 source 内容相同的文件。
+#[derive(Debug, Deserialize, Clone)]
+pub struct PackDuplicate {
+    pub path: String,
+    pub source: String,
+}
+
+/// 还原被省略路径的方式：默认硬链接；测试注入失败以走复制回退。
+pub type Linker<'a> = dyn Fn(&Path, &Path) -> io::Result<()> + 'a;
+
+/// 硬链接到代表文件；链接失败（文件系统不支持、跨卷、链接数上限等）时复制。目标已存在时报错，不覆盖。
+fn link_or_copy(link: &Linker<'_>, source: &Path, dest: &Path) -> io::Result<()> {
+    if dest.symlink_metadata().is_ok() {
+        return Err(invalid(format!("还原目标已存在：{}", dest.display())));
+    }
+    if link(source, dest).is_ok() {
+        return Ok(());
+    }
+    let mut from = File::open(source)?;
+    let mut to = File::create_new(dest)?;
+    io::copy(&mut from, &mut to)?;
+    Ok(())
 }
 
 #[derive(Debug, Serialize, PartialEq, Clone, Copy)]
@@ -336,7 +362,12 @@ fn belongs_to_unit(units: &[MergeUnit], name: &str) -> bool {
     units.iter().any(|u| name == u.path || name.strip_prefix(u.path.as_str()).is_some_and(|rest| rest.starts_with('/')))
 }
 
-pub fn import(pack: &Path, root: &Path, units: &[MergeUnit], progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
+pub fn import(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[PackDuplicate], progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
+    import_with(pack, root, units, duplicates, &|from, to| fs::hard_link(from, to), progress, cancel)
+}
+
+/// 同 import，可注入还原被省略路径时的链接方式。
+pub fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[PackDuplicate], link: &Linker<'_>, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
     fs::create_dir_all(root)?;
     for unit in units {
         resolve_in(root, &unit.path)?;
@@ -344,13 +375,20 @@ pub fn import(pack: &Path, root: &Path, units: &[MergeUnit], progress: &dyn Fn(u
             safe_join(Path::new(""), identity)?;
         }
     }
+    for d in duplicates {
+        safe_join(Path::new(""), &d.path)?;
+        safe_join(Path::new(""), &d.source)?;
+    }
+    // 只还原落在合并单元里的省略路径；代表条目不在任何单元里时也要解压出来作为还原来源。
+    let restore: Vec<&PackDuplicate> = duplicates.iter().filter(|d| belongs_to_unit(units, &d.path)).collect();
+    let sources: BTreeSet<&str> = restore.iter().map(|d| d.source.as_str()).collect();
     let mut archive = open_archive(pack)?;
     let mut extract = Vec::new();
     let mut total = 0;
     for i in 0..archive.len() {
         let file = archive.by_index(i).map_err(zip_err)?;
         let name = file.name().to_string();
-        if file.is_dir() || !belongs_to_unit(units, &name) {
+        if file.is_dir() || !(belongs_to_unit(units, &name) || sources.contains(name.as_str())) {
             continue;
         }
         safe_join(root, &name)?;
@@ -371,6 +409,20 @@ pub fn import(pack: &Path, root: &Path, units: &[MergeUnit], progress: &dyn Fn(u
         }
         let mut out = File::create_new(&dest)?;
         copy_chunks(&mut file, &mut out, &mut done, total, progress, cancel)?;
+    }
+
+    // 还原被省略的路径（还在临时目录里，校验与比对看到的就是还原后的单元）。
+    for d in &restore {
+        check_cancel(cancel)?;
+        let source = safe_join(&temp.0, &d.source)?;
+        if !source.is_file() {
+            return Err(invalid(format!("包内缺少 {}（{} 的代表条目）", d.source, d.path)));
+        }
+        let dest = safe_join(&temp.0, &d.path)?;
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        link_or_copy(link, &source, &dest)?;
     }
 
     // 校验：每个单元都在包里（目录单元还要有身份文件）；不合格时一个都不移入。
@@ -576,14 +628,14 @@ mod tests {
         let f = fixture();
         let pack = exported(&f);
         let other = f.tmp.path().join("输出 B");
-        let report = import(&pack, &other, &units(), &no_progress, &AtomicBool::new(false)).unwrap();
+        let report = import(&pack, &other, &units(), &[], &no_progress, &AtomicBool::new(false)).unwrap();
         assert_eq!(outcomes(&report), vec![(TASK_A, MergeOutcome::Moved), (TASK_B, MergeOutcome::Moved), (REF, MergeOutcome::Moved)]);
         assert_eq!(fs::read(other.join(TASK_B).join("layers/01.png")).unwrap(), b"layer");
         assert_eq!(fs::read(other.join(REF)).unwrap(), b"cat");
         // 清单与画板不属于合并单元，不解压（画板由前端按改名规则写）；临时目录已清理。
         assert_eq!(names_in(&other), vec!["2026-09-16", "导入参考图"]);
 
-        let again = import(&pack, &other, &units(), &no_progress, &AtomicBool::new(false)).unwrap();
+        let again = import(&pack, &other, &units(), &[], &no_progress, &AtomicBool::new(false)).unwrap();
         assert_eq!(outcomes(&again), vec![(TASK_A, MergeOutcome::Identical), (TASK_B, MergeOutcome::Identical), (REF, MergeOutcome::Identical)]);
         assert_eq!(names_in(&other), vec!["2026-09-16", "导入参考图"]);
     }
@@ -595,7 +647,7 @@ mod tests {
         let other = f.tmp.path().join("输出 B");
         write(&other.join(TASK_A).join("task.json"), b"{\"local\":true}");
         write(&other.join(REF), b"dog");
-        let report = import(&pack, &other, &units(), &no_progress, &AtomicBool::new(false)).unwrap();
+        let report = import(&pack, &other, &units(), &[], &no_progress, &AtomicBool::new(false)).unwrap();
         assert_eq!(outcomes(&report), vec![(TASK_A, MergeOutcome::Conflict), (TASK_B, MergeOutcome::Moved), (REF, MergeOutcome::Conflict)]);
         assert_eq!(fs::read(other.join(TASK_A).join("task.json")).unwrap(), b"{\"local\":true}");
         assert!(!other.join(TASK_A).join("result.png").exists());
@@ -607,7 +659,7 @@ mod tests {
         let f = fixture();
         let pack = exported(&f);
         let other = f.tmp.path().join("输出 B");
-        let err = import(&pack, &other, &units(), &no_progress, &AtomicBool::new(true)).unwrap_err();
+        let err = import(&pack, &other, &units(), &[], &no_progress, &AtomicBool::new(true)).unwrap_err();
         assert_eq!(err.to_string(), CANCELLED);
         assert!(names_in(&other).is_empty(), "{:?}", names_in(&other));
     }
@@ -624,7 +676,7 @@ mod tests {
                 cancel.store(true, Ordering::Relaxed);
             }
         };
-        assert!(import(&pack, &other, &units(), &progress, &cancel).is_err());
+        assert!(import(&pack, &other, &units(), &[], &progress, &cancel).is_err());
         assert!(names_in(&other).is_empty(), "{:?}", names_in(&other));
     }
 
@@ -639,7 +691,7 @@ mod tests {
         let old = filetime::FileTime::from_system_time(std::time::SystemTime::now() - STALE_IMPORT_AGE * 2);
         filetime::set_file_times(&stale, old, old).unwrap();
         write(&other.join(".别的.tmp/x"), b"x");
-        import(&pack, &other, &units(), &no_progress, &AtomicBool::new(false)).unwrap();
+        import(&pack, &other, &units(), &[], &no_progress, &AtomicBool::new(false)).unwrap();
         assert_eq!(names_in(&other), vec![".别的.tmp", "2026-09-16", "导入参考图"]);
     }
 
@@ -651,7 +703,7 @@ mod tests {
         // 另一页面正在导入：临时目录是新鲜的，不能被这次导入清掉。
         let active = other.join(".ugcpack-import.999-111-0.tmp");
         write(&active.join("导入参考图/abc.png"), b"cat");
-        import(&pack, &other, &units(), &no_progress, &AtomicBool::new(false)).unwrap();
+        import(&pack, &other, &units(), &[], &no_progress, &AtomicBool::new(false)).unwrap();
         assert!(active.join("导入参考图/abc.png").is_file(), "并发导入的临时目录被误删");
     }
 
@@ -706,7 +758,7 @@ mod tests {
             MergeUnit { path: "2026-09-16/20260916T010000Z-0000000a".into(), identity: Some("task.json".into()) },
             MergeUnit { path: "导入参考图/5e4b079355f5f06363744c0778c5174040645713e06e6877eae22f573d46e6b0.png".into(), identity: None },
         ];
-        let report = import(&v032_pack(), &root, &units, &no_progress, &AtomicBool::new(false)).unwrap();
+        let report = import(&v032_pack(), &root, &units, &[], &no_progress, &AtomicBool::new(false)).unwrap();
         assert_eq!(outcomes(&report), vec![(units[0].path.as_str(), MergeOutcome::Moved), (units[1].path.as_str(), MergeOutcome::Moved)]);
         let dir = root.join("2026-09-16/20260916T010000Z-0000000a");
         // 图层文件与 layers.json 都在；导入后按任务目录真源继续迭代。
@@ -728,13 +780,76 @@ mod tests {
         let traversal = tmp.path().join("t.ugcpack");
         make_zip(&traversal, &["manifest.json", &format!("{TASK_A}/../../evil.png"), &format!("{TASK_A}/task.json")]);
         let task = || vec![MergeUnit { path: TASK_A.into(), identity: Some("task.json".into()) }];
-        assert!(import(&traversal, &root, &task(), &no_progress, &AtomicBool::new(false)).is_err());
+        assert!(import(&traversal, &root, &task(), &[], &no_progress, &AtomicBool::new(false)).is_err());
         let unsafe_unit = vec![MergeUnit { path: "../x".into(), identity: None }];
-        assert!(import(&traversal, &root, &unsafe_unit, &no_progress, &AtomicBool::new(false)).is_err());
+        assert!(import(&traversal, &root, &unsafe_unit, &[], &no_progress, &AtomicBool::new(false)).is_err());
         let no_record = tmp.path().join("n.ugcpack");
         make_zip(&no_record, &["manifest.json", &format!("{TASK_A}/result.png")]);
-        let err = import(&no_record, &root, &task(), &no_progress, &AtomicBool::new(false)).unwrap_err();
+        let err = import(&no_record, &root, &task(), &[], &no_progress, &AtomicBool::new(false)).unwrap_err();
         assert!(err.to_string().contains("缺少"), "{err}");
         assert!(names_in(&root).is_empty(), "{:?}", names_in(&root));
+    }
+
+    /// v2 包：TASK_B 的 task.json 与结果图、导入参考图 REF 都被省略，只存 TASK_A 里的代表条目。
+    fn v2_fixture() -> (tempfile::TempDir, PathBuf, Vec<MergeUnit>, Vec<PackDuplicate>) {
+        let tmp = tempfile::tempdir().unwrap();
+        let pack = tmp.path().join("v2.ugcpack");
+        let mut zip = zip::ZipWriter::new(File::create(&pack).unwrap());
+        for (name, bytes) in [("manifest.json".to_string(), &b"{}"[..]), (format!("{TASK_A}/task.json"), b"{\"same\":1}"), (format!("{TASK_A}/result.png"), b"png")] {
+            zip.start_file(name, SimpleFileOptions::default()).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+        let dup = |path: String, source: String| PackDuplicate { path, source };
+        let duplicates = vec![
+            dup(format!("{TASK_B}/task.json"), format!("{TASK_A}/task.json")),
+            dup(format!("{TASK_B}/result.png"), format!("{TASK_A}/result.png")),
+            dup(REF.into(), format!("{TASK_A}/result.png")),
+        ];
+        (tmp, pack, units(), duplicates)
+    }
+
+    #[cfg(unix)]
+    fn inode(path: &Path) -> (u64, u64) {
+        use std::os::unix::fs::MetadataExt;
+        let m = fs::metadata(path).unwrap();
+        (m.dev(), m.ino())
+    }
+
+    #[test]
+    fn v2_omitted_paths_are_hard_linked_and_count_toward_layout() {
+        let (tmp, pack, units, duplicates) = v2_fixture();
+        let root = tmp.path().join("输出");
+        let report = import(&pack, &root, &units, &duplicates, &no_progress, &AtomicBool::new(false)).unwrap();
+        // 被省略的 task.json 还原后，TASK_B 仍按身份文件比对、照常移入。
+        assert_eq!(outcomes(&report), vec![(TASK_A, MergeOutcome::Moved), (TASK_B, MergeOutcome::Moved), (REF, MergeOutcome::Moved)]);
+        assert_eq!(fs::read(root.join(TASK_B).join("task.json")).unwrap(), b"{\"same\":1}");
+        for omitted in [root.join(TASK_B).join("result.png"), root.join(REF)] {
+            assert_eq!(fs::read(&omitted).unwrap(), b"png");
+            #[cfg(unix)]
+            assert_eq!(inode(&omitted), inode(&root.join(TASK_A).join("result.png")), "应是硬链接：{}", omitted.display());
+        }
+        // 再导一次：还原后的单元与本机一致，全部跳过。
+        let again = import(&pack, &root, &units, &duplicates, &no_progress, &AtomicBool::new(false)).unwrap();
+        assert!(again.outcomes.iter().all(|o| o.outcome == MergeOutcome::Identical), "{:?}", again.outcomes);
+    }
+
+    #[test]
+    fn v2_link_failure_falls_back_to_copy() {
+        let (tmp, pack, units, duplicates) = v2_fixture();
+        let root = tmp.path().join("输出");
+        let links = std::cell::Cell::new(0);
+        let failing = |_: &Path, _: &Path| -> io::Result<()> {
+            links.set(links.get() + 1);
+            Err(io::Error::other("不支持硬链接"))
+        };
+        let report = import_with(&pack, &root, &units, &duplicates, &failing, &no_progress, &AtomicBool::new(false)).unwrap();
+        assert_eq!(links.get(), 3, "每个省略路径都先尝试链接");
+        assert!(report.outcomes.iter().all(|o| o.outcome == MergeOutcome::Moved));
+        for omitted in [root.join(TASK_B).join("result.png"), root.join(REF)] {
+            assert_eq!(fs::read(&omitted).unwrap(), b"png");
+            #[cfg(unix)]
+            assert_ne!(inode(&omitted), inode(&root.join(TASK_A).join("result.png")), "回退后应是独立副本");
+        }
     }
 }

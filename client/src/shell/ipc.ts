@@ -212,10 +212,10 @@ export const ipc: Ipc = {
   boardPackExport: async (target, spec) => boardPackExport({ ...spec, files: spec.files.map((f) => ({ ...f, source: stripRoot(f.source) })) }, target),
   boardPackEntries: (pack) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/entries`),
   boardPackReadTexts: (pack, names) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/texts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(names) }),
-  boardPackImport: async (pack, units) => {
+  boardPackImport: async (pack, units, duplicates) => {
     const op = requireOp();
     try {
-      return await api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(units) });
+      return await api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ units, duplicates }) });
     } catch (e) {
       // 服务端以 409 cancelled / 文案「已取消」回取消；保持与桌面的文案约定。
       if (cancelledOps.has(op) || (e instanceof ApiError && e.message === PACK_CANCELLED)) throw new Error(PACK_CANCELLED);

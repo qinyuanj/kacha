@@ -309,3 +309,98 @@ async fn fifth_concurrent_heavy_request_queues_until_a_slot_frees() {
         let _ = body.collect().await.unwrap();
     }
 }
+
+// ---- 包格式 v2：被省略的路径在服务端还原 ----
+
+const OTHER: &str = "2026-09-16/20260916T020000Z-0000000b";
+const REF_A: &str = "导入参考图/aa.png";
+const REF_B: &str = "导入参考图/bb.png";
+
+/// 手工构造的 v2 包：OTHER 的结果图、参考图快照与另一张导入参考图都被省略，只存代表条目。
+fn v2_pack() -> Vec<u8> {
+    use std::io::Write;
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let manifest = serde_json::json!({
+        "pack_format_version": 2, "app_version": "0.4.0", "boards": ["画板/a.ugcboard.json"],
+        "duplicates": { format!("{OTHER}/result.png"): format!("{TASK}/result.png"), format!("{OTHER}/references/01.png"): format!("{TASK}/result.png"), REF_B: REF_A }
+    });
+    let entries: Vec<(String, Vec<u8>)> = vec![
+        ("manifest.json".into(), manifest.to_string().into_bytes()),
+        ("画板/a.ugcboard.json".into(), b"{\"format_version\":1,\"title\":\"a\"}".to_vec()),
+        (format!("{TASK}/task.json"), b"{\"task_id\":\"a\"}".to_vec()),
+        (format!("{TASK}/result.png"), png()),
+        (format!("{OTHER}/task.json"), b"{\"task_id\":\"b\"}".to_vec()),
+        (REF_A.into(), b"ref".to_vec()),
+    ];
+    for (name, bytes) in entries {
+        zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(&bytes).unwrap();
+    }
+    zip.finish().unwrap().into_inner()
+}
+
+fn v2_import_body(duplicates: serde_json::Value) -> String {
+    serde_json::json!({
+        "units": [
+            { "path": TASK, "identity": "task.json" },
+            { "path": OTHER, "identity": "task.json" },
+            { "path": REF_A, "identity": null },
+            { "path": REF_B, "identity": null }
+        ],
+        "duplicates": duplicates
+    })
+    .to_string()
+}
+
+#[tokio::test]
+async fn importing_a_v2_pack_restores_omitted_paths_as_hard_links() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let id = upload_pack(&h, &cookie, v2_pack()).await;
+    let duplicates = serde_json::json!([
+        { "path": format!("{OTHER}/references/01.png"), "source": format!("{TASK}/result.png") },
+        { "path": format!("{OTHER}/result.png"), "source": format!("{TASK}/result.png") },
+        { "path": REF_B, "source": REF_A }
+    ]);
+    let reply = h.send(Method::POST, &format!("/api/packs/uploads/{id}/import?op=v2"), Some(&cookie), v2_import_body(duplicates)).await;
+    assert_eq!(reply.status, 200, "{}", reply.text());
+    let outcomes: Vec<String> = reply.json()["outcomes"].as_array().unwrap().iter().map(|o| o["outcome"].as_str().unwrap().to_string()).collect();
+    assert_eq!(outcomes, vec!["moved"; 4]);
+    let root = h.user_root(GOOD_KEY);
+    for (omitted, representative) in [
+        (format!("{OTHER}/result.png"), format!("{TASK}/result.png")),
+        (format!("{OTHER}/references/01.png"), format!("{TASK}/result.png")),
+        (REF_B.to_string(), REF_A.to_string()),
+    ] {
+        assert_eq!(std::fs::read(root.join(&omitted)).unwrap(), std::fs::read(root.join(&representative)).unwrap(), "{omitted}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let (a, b) = (std::fs::metadata(root.join(&omitted)).unwrap(), std::fs::metadata(root.join(&representative)).unwrap());
+            assert_eq!((a.dev(), a.ino()), (b.dev(), b.ino()), "能硬链接时 {omitted} 应是 {representative} 的硬链接");
+        }
+    }
+    assert!(!root.join(".kacha/packs").join(format!("{id}.ugcpack.tmp")).exists());
+}
+
+#[tokio::test]
+async fn v2_import_rejects_unsafe_or_dangling_duplicates_without_writing() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let root = h.user_root(GOOD_KEY);
+    for (i, duplicates) in [
+        serde_json::json!([{ "path": format!("{OTHER}/../../evil.png"), "source": format!("{TASK}/result.png") }]),
+        serde_json::json!([{ "path": format!("{OTHER}/result.png"), "source": "../outside.png" }]),
+        serde_json::json!([{ "path": format!("{OTHER}/result.png"), "source": format!("{TASK}/没有.png") }]),
+        serde_json::json!([{ "path": format!("{TASK}/result.png"), "source": REF_A }]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = upload_pack(&h, &cookie, v2_pack()).await;
+        let reply = h.send(Method::POST, &format!("/api/packs/uploads/{id}/import?op=bad{i}"), Some(&cookie), v2_import_body(duplicates.clone())).await;
+        assert_eq!(reply.status, 422, "{duplicates}: {}", reply.text());
+        assert!(!root.join("2026-09-16").exists() && !root.join("导入参考图").exists(), "{duplicates}: 不能移入任何单元");
+        assert!(!root.parent().unwrap().join("evil.png").exists());
+    }
+}
