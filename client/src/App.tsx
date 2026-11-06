@@ -205,6 +205,47 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
     [boards, runner],
   );
 
+  /** 从画板列表删除：本页开着的先保存再带版本删、成功后关标签页；没开的直接删（#68）。失败以错误抛回列表；
+   *  用户不肯停掉未完成的任务时什么都不做。 */
+  const deleteBoardAt = useCallback(
+    async (path: string) => {
+      const key = boards.keyOf(path);
+      if (!key) return ipc.deleteBoard(path);
+      const count = runner.getSnapshot().pending(key);
+      if (count > 0 && !(await confirmStopTasks(count))) return;
+      // 先停任务（与关闭标签页同序）再删，免得结果落进一块正在删除的画板；删除失败时停掉的任务不恢复。
+      runner.closeBoard(key);
+      await boards.deleteBoard(key);
+    },
+    [boards, runner],
+  );
+
+  /** 删除前导出画板包：没打开的先打开（导出流程以已打开的画板为准）。 */
+  const exportBoardAt = useCallback(
+    async (path: string) => {
+      if (!boards.keyOf(path) && !(await openPath(path, true))) return toast("画板不存在，可能已在别处改名或删除；请刷新列表");
+      const key = boards.keyOf(path);
+      if (key) await pack.prepareExport(key);
+    },
+    [boards, openPath, pack, toast],
+  );
+
+  /** 放弃一块服务端已不存在的画板：本页内容随之丢弃，先确认。 */
+  const discardMissing = useCallback(
+    async (key: string) => {
+      const ok = await browser.ask("服务端已没有这块画板，关闭后本页内容将丢失。需要保留的话请先导出画板包。", {
+        title: "关闭画板",
+        kind: "warning",
+        okLabel: "关闭",
+        cancelLabel: "返回",
+      });
+      if (!ok) return;
+      runner.closeBoard(key);
+      boards.dropSession(key);
+    },
+    [boards, runner],
+  );
+
   // 设置与界面状态就绪后恢复标签页；一个都没有就新建。
   useEffect(() => {
     if (!metadataReady || !settings.loaded || started.current) return;
@@ -279,6 +320,8 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               if (!opened) toast("画板不存在，可能已在别处改名；请刷新列表");
             }, (e) => toast(e instanceof Error ? e.message : String(e)));
           }}
+          onDelete={deleteBoardAt}
+          onExport={(path) => void exportBoardAt(path).catch((e) => toast(e instanceof Error ? e.message : String(e)))}
           onClose={() => setBoardListOpen(false)}
         />
       )}
@@ -350,10 +393,11 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
             <div key={s.key} className="bar bar-error">
               <span>
                 「{s.board.title}」{s.saveError}
-                {s.conflicted ? "（改动保留在本页，不会自动合并）" : "（之后每次修改都会重试）"}
+                {s.missing ? "" : s.conflicted ? "（改动保留在本页，不会自动合并）" : "（之后每次修改都会重试）"}
               </span>
-              {s.conflicted ? <button onClick={() => void boards.reload(s.key)}>重新载入</button> : <button onClick={() => void boards.retrySave(s.key)}>重试保存</button>}
+              {s.missing ? null : s.conflicted ? <button onClick={() => void boards.reload(s.key)}>重新载入</button> : <button onClick={() => void boards.retrySave(s.key)}>重试保存</button>}
               <button onClick={() => void pack.prepareExport(s.key)}>导出画板包</button>
+              {s.missing && <button onClick={() => void discardMissing(s.key)}>关闭</button>}
             </div>
           ),
       )}

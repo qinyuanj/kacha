@@ -12,7 +12,7 @@ use serde::Deserialize;
 use tokio_util::io::ReaderStream;
 
 use crate::session::error;
-use crate::{cache, paths, store, AppState, User, META_DIR};
+use crate::{cache, cleanup, paths, store, AppState, User, META_DIR};
 
 #[derive(Deserialize)]
 pub struct PathQuery {
@@ -168,7 +168,7 @@ pub async fn write_board(State(state): State<AppState>, user: User, Query(q): Qu
 fn board_save_error(e: store::BoardSaveError) -> Response {
     match e {
         store::BoardSaveError::Conflict => error(StatusCode::CONFLICT, "board_conflict", "画板已在别处修改，请重新载入"),
-        store::BoardSaveError::Missing => error(StatusCode::CONFLICT, "board_missing", "画板已在别处改名或删除，请重新载入；未保存的改动仍在本页，可先导出"),
+        store::BoardSaveError::Missing => error(StatusCode::CONFLICT, "board_missing", "画板已不存在，可能已在别处改名或删除；未保存的改动仍在本页，可先导出画板包"),
         store::BoardSaveError::AlreadyExists => error(StatusCode::CONFLICT, "already_exists", "同名画板已存在，请换一个名字"),
         store::BoardSaveError::Io(e) => io_error(e),
     }
@@ -183,13 +183,50 @@ pub async fn rename_board(State(state): State<AppState>, user: User, body: axum:
         (Err(r), _) | (_, Err(r)) => return r,
     };
     let _lock = state.board_lock().lock().await;
-    match off_thread(move || store::rename_board_guarded(&from, &to, req.version.as_deref())).await {
+    board_guarded_result(off_thread(move || store::rename_board_guarded(&from, &to, req.version.as_deref())).await)
+}
+
+/// 改名 / 删除的结果映射：主文件与 `.bak` 都不存在 404，版本已变 409 board_conflict。
+fn board_guarded_result(r: Result<std::io::Result<()>, Response>) -> Response {
+    match r {
         Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
         Ok(Err(e)) if e.kind() == ErrorKind::NotFound => error(StatusCode::NOT_FOUND, "not_found", "画板不存在，可能已在别处改名或删除；请重新载入画板列表"),
         Ok(Err(e)) if e.kind() == ErrorKind::InvalidInput => error(StatusCode::CONFLICT, "board_conflict", "画板已在别处修改，请重新载入"),
         Ok(Err(e)) => io_error(e),
         Err(r) => r,
     }
+}
+
+#[derive(Deserialize)]
+pub struct DeleteBoardQuery {
+    path: String,
+    /// 带版本删：主文件内容已变（或只剩 `.bak`）返回 409 board_conflict，与改名同语义。
+    version: Option<String>,
+}
+
+/// 删除画板（#68）：主文件与 `.bak` 一起移入回收区（与清理同布局，保留 14 天，只有管理员能恢复）；不动任何任务目录。
+pub async fn delete_board(State(state): State<AppState>, user: User, Query(q): Query<DeleteBoardQuery>) -> Response {
+    let path = match resolve(&state, &user, &q.path) {
+        Err(r) => return r,
+        Ok(p) => p,
+    };
+    // 只删画板文件：日期目录、`.kacha`、用户数据根本身等一律不经这里（删除画板不删任务目录，ADR 0010）。
+    if !q.path.ends_with(store::BOARD_EXTENSION) || path.is_dir() {
+        return error(StatusCode::BAD_REQUEST, "bad_request", "只能删除画板文件");
+    }
+    let data_root = state.data_root();
+    let Some(rel) = path.strip_prefix(&data_root).ok().map(|r| r.to_string_lossy().replace('\\', "/")) else {
+        return error(StatusCode::FORBIDDEN, "forbidden", "路径越界");
+    };
+    let now = state.now();
+    let _lock = state.board_lock().lock().await;
+    board_guarded_result(
+        off_thread(move || {
+            store::check_board_guard(&path, q.version.as_deref())?;
+            cleanup::recycle_board(&data_root, &rel, now)
+        })
+        .await,
+    )
 }
 
 pub async fn list_board_names(State(state): State<AppState>, user: User, Query(q): Query<DirQuery>) -> Response {

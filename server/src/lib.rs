@@ -202,7 +202,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/ui-state", get(fs::read_ui_state).put(fs::write_ui_state))
         .route("/api/models-cache", get(fs::read_models_cache).put(fs::write_models_cache))
         .route("/api/capability-override", get(fs::read_capability_override))
-        .route("/api/boards", get(fs::read_board).put(fs::write_board))
+        .route("/api/boards", get(fs::read_board).put(fs::write_board).delete(fs::delete_board))
         .route("/api/boards/rename", axum::routing::post(fs::rename_board))
         .route("/api/boards/names", get(fs::list_board_names))
         .route("/api/fs/file", get(fs::read_file).put(fs::write_new_file))
