@@ -118,6 +118,85 @@ async fn import_uploads_streams_merges_and_deletes_temp_file() {
     assert!(!root.join(".kacha/packs").join(format!("{id}.ugcpack.tmp")).exists(), "导入结束删除临时文件");
 }
 
+// ---- 过期上传暂存的回收（#56）----
+
+/// 预置一份上传暂存，修改时间设为 harness 时钟往前 `age`（harness 时钟与真实时间无关，必须显式设）。
+fn seed_upload_temp(h: &Harness, key: &str, name: &str, age: std::time::Duration) -> std::path::PathBuf {
+    let dir = h.user_root(key).join(".kacha/packs");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join(name);
+    std::fs::write(&file, b"half a pack").unwrap();
+    set_mtime(&file, h.now() - age);
+    file
+}
+
+fn set_mtime(path: &std::path::Path, at: std::time::SystemTime) {
+    std::fs::File::open(path).unwrap().set_modified(at).unwrap();
+}
+
+fn upload_temp(h: &Harness, key: &str, id: &str) -> std::path::PathBuf {
+    h.user_root(key).join(".kacha/packs").join(format!("{id}.ugcpack.tmp"))
+}
+
+const HOUR: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+#[tokio::test]
+async fn upload_sweeps_expired_upload_temp_files_and_keeps_the_new_one() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let old = seed_upload_temp(&h, GOOD_KEY, "0ld.ugcpack.tmp", std::time::Duration::ZERO);
+    h.advance(HOUR + std::time::Duration::from_secs(60));
+
+    let id = upload_pack(&h, &cookie, fixture_pack()).await;
+
+    assert!(!old.exists(), "超过 1 小时的上传临时文件在下次上传时被删");
+    assert!(upload_temp(&h, GOOD_KEY, &id).is_file(), "本次上传的文件保留");
+}
+
+#[tokio::test]
+async fn upload_keeps_unexpired_temp_files_and_other_users_files() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    // 另一个页面正在上传或等待导入：59 分钟前最后写入。
+    let busy = seed_upload_temp(&h, GOOD_KEY, "b05y.ugcpack.tmp", HOUR - std::time::Duration::from_secs(60));
+    // 不是上传暂存的文件、别的用户的过期暂存，都不归本次上传清理。
+    let unrelated = seed_upload_temp(&h, GOOD_KEY, "notes.txt", 2 * HOUR);
+    let others = seed_upload_temp(&h, OTHER_KEY, "07he7.ugcpack.tmp", 2 * HOUR);
+
+    let id = upload_pack(&h, &cookie, fixture_pack()).await;
+
+    assert!(busy.is_file(), "未过期的上传临时文件不被删");
+    assert!(unrelated.is_file() && others.is_file());
+    assert!(upload_temp(&h, GOOD_KEY, &id).is_file());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn upload_sweep_is_repeatable_and_survives_delete_failures() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let stale = seed_upload_temp(&h, GOOD_KEY, "57a1e.ugcpack.tmp", 2 * HOUR);
+    let fresh = seed_upload_temp(&h, GOOD_KEY, "f4e5h.ugcpack.tmp", std::time::Duration::ZERO);
+    // 删不掉的过期暂存：只读目录里的文件无法删除。
+    let stuck = h.user_root(GOOD_KEY).join(".kacha/packs/5tuck.ugcpack.tmp");
+    std::fs::create_dir_all(&stuck).unwrap();
+    std::fs::write(stuck.join("part"), b"x").unwrap();
+    std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o555)).unwrap();
+    set_mtime(&stuck, h.now() - 2 * HOUR);
+
+    let first = upload_pack(&h, &cookie, fixture_pack()).await;
+    // harness 时钟比真实时间超前，把刚上传的文件对齐到时钟，模拟它仍在等待导入。
+    set_mtime(&upload_temp(&h, GOOD_KEY, &first), h.now());
+    let second = upload_pack(&h, &cookie, fixture_pack()).await;
+
+    std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(!stale.exists(), "过期文件被删");
+    assert!(stuck.join("part").exists(), "删除失败不影响本次上传（两次上传都已成功返回）");
+    assert!(fresh.is_file(), "重复执行不误删未过期文件");
+    assert!(upload_temp(&h, GOOD_KEY, &first).is_file() && upload_temp(&h, GOOD_KEY, &second).is_file());
+}
+
 #[tokio::test]
 async fn cancel_only_affects_the_named_operation_and_cleans_temp() {
     let h = Harness::new();
