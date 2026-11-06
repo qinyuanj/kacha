@@ -1,12 +1,13 @@
 // 画板包（#24）新接缝：导出 = 浏览器下载流；导入 = 浏览器选文件流式上传 → 判定 → 合并 → 打开画板。
 // 旧假壳的 pack.spec.ts 不在这里复用：它注入的是虚拟条目与导出规格 JSON，不是真 zip。
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
-import { zipBytes, zipNames, zipText } from "../common/zip";
+import { unzip, zipBytes, zipNames, zipText } from "../common/zip";
 import { expect, GOOD_KEY, OTHER_KEY, test, type Rig } from "./rig";
 import { openApp, readJson, readText, taskRecords } from "./kit";
 
@@ -26,10 +27,14 @@ function packRequests(page: Page): string[] {
   const seen: string[] = [];
   page.on("request", (r) => {
     const url = new URL(r.url());
-    if (url.pathname.startsWith("/api/packs/uploads")) seen.push(`${r.method()} ${url.pathname}`);
+    if (/^\/api\/packs\/(uploads|staging|existing)/.test(url.pathname)) seen.push(`${r.method()} ${url.pathname}`);
   });
   return seen;
 }
+
+/** 去重上传里逐份上传内容的请求（#62）。 */
+const CONTENT_UPLOAD = "**/api/packs/staging/*/contents/*";
+const isContentUpload = (r: string) => /^PUT \/api\/packs\/staging\/[^/]+\/contents\//.test(r);
 
 async function exportPack(page: Page) {
   await page.getByRole("button", { name: "画板包 ▾" }).click();
@@ -261,7 +266,7 @@ test("导入桌面 v0.3.2 画板包：图层与 layers.json 落盘、画板打�
   expect(errors).toEqual([]);
 });
 
-test("导入桌面 0.2.0 画板包：本地检查通过，整包上传后直接合并（不再让服务端读条目），画板打开", async ({ page, rig }) => {
+test("导入桌面 0.2.0 画板包：本地检查通过，按内容去重上传后合并（不整包上传、不让服务端读条目），画板打开", async ({ page, rig }) => {
   const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
   const requests = packRequests(page);
   await importPack(page, V020);
@@ -269,8 +274,10 @@ test("导入桌面 0.2.0 画板包：本地检查通过，整包上传后直接�
   await expect(page.locator(".tab.tab-active .tab-title")).toHaveText("豆包测试");
   const root = rig.userRoot(GOOD_KEY);
   expect(existsSync(path.join(root, "2026-08-27/4effdba023ee4f52a3d51912fcee2e1b/reference-3.png"))).toBe(true);
-  expect(requests.filter((r) => r.startsWith("POST /api/packs/uploads") && !r.includes("/import"))).toHaveLength(1);
+  expect(requests.filter((r) => r.startsWith("POST /api/packs/uploads"))).toEqual([]);
+  expect(requests.filter(isContentUpload).length).toBeGreaterThan(0);
   expect(requests.filter((r) => /\/(entries|texts)$/.test(r))).toEqual([]);
+  expect(existsSync(path.join(root, ".kacha/pack-content")) ? readdirSync(path.join(root, ".kacha/pack-content")) : []).toEqual([]);
   expect(errors).toEqual([]);
 });
 
@@ -317,8 +324,13 @@ test("导入包格式 v2：被省略的参考图快照在服务端还原为硬�
 
 test("选中文件后窗口重新获得焦点、上传超过 1 秒：仍正常导入并打开，不残留上传临时文件（#55）", async ({ page, rig }) => {
   const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
-  await page.route("**/api/packs/uploads?*", async (route) => {
-    await new Promise((r) => setTimeout(r, 1000));
+  // 只拖住第一份内容：一份就超过 1 秒，其余照常（包里有好几份内容）。
+  let delayed = false;
+  await page.route(CONTENT_UPLOAD, async (route) => {
+    if (!delayed) {
+      delayed = true;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
     await route.continue();
   });
   await importPack(page, V032);
@@ -328,6 +340,7 @@ test("选中文件后窗口重新获得焦点、上传超过 1 秒：仍正常�
   await expect(page.locator(".tab.tab-active .tab-title")).toHaveText("旧版画板");
   expect(existsSync(path.join(rig.userRoot(GOOD_KEY), DIR, "task.json"))).toBe(true);
   expect(existsSync(path.join(rig.userRoot(GOOD_KEY), ".kacha/packs"))).toBe(false);
+  expect(readdirSync(path.join(rig.userRoot(GOOD_KEY), ".kacha/pack-content"))).toEqual([]);
   expect(errors).toEqual([]);
 });
 
@@ -337,7 +350,7 @@ for (const [status, reason] of [
 ] as const) {
   test(`上传回 ${status}（反向代理给的非 JSON 响应体）：提示「${reason}」，不出现新画板（#60）`, async ({ page, rig }) => {
     const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
-    await page.route("**/api/packs/uploads?*", (route) => route.fulfill({ status, contentType: "text/html", body: "<html>error</html>" }));
+    await page.route(CONTENT_UPLOAD, (route) => route.fulfill({ status, contentType: "text/html", body: "<html>error</html>" }));
     await importPack(page, V032);
     await expect(toast(page)).toHaveText(`导入画板包失败：${reason}`);
     await expect(dialog(page)).toHaveCount(0);
@@ -352,8 +365,8 @@ test("上传延迟期间进度对话框可见；点「取消」后提示已取�
   // 上传请求被拦住不放：模拟慢连接，进度对话框必须在上传期间就出现，且可取消。
   let release!: () => void;
   const held = new Promise<void>((r) => (release = r));
-  const aborted = new Promise<void>((resolve) => page.on("requestfailed", (r) => r.url().includes("/api/packs/uploads?") && resolve()));
-  await page.route("**/api/packs/uploads?*", async (route) => {
+  const aborted = new Promise<void>((resolve) => page.on("requestfailed", (r) => r.url().includes("/contents/") && resolve()));
+  await page.route(CONTENT_UPLOAD, async (route) => {
     await held;
     await route.continue().catch(() => undefined);
   });
@@ -370,12 +383,14 @@ test("上传延迟期间进度对话框可见；点「取消」后提示已取�
   const root = rig.userRoot(GOOD_KEY);
   expect(readdirSync(path.join(root, "画板"))).toEqual(["空.ugcboard.json"]);
   expect(existsSync(path.join(root, DIR))).toBe(false);
-  const packs = path.join(root, ".kacha/packs");
-  expect(existsSync(packs) ? readdirSync(packs) : []).toEqual([]);
+  for (const staging of [".kacha/packs", ".kacha/pack-content"]) {
+    const dir = path.join(root, staging);
+    await expect.poll(() => (existsSync(dir) ? readdirSync(dir) : []), { message: staging }).toEqual([]);
+  }
   expect(errors).toEqual([]);
 });
 
-test("正常导入大包：上传与合并阶段都有进度，结束后不再轮询进度、没有 404（#59）", async ({ page, rig }) => {
+test("正常导入大包（条目超过单份 64 MB，整包上传）：上传与合并阶段都有进度，结束后不再轮询进度、没有 404（#59）", async ({ page, rig }) => {
   const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
   const big = bigPack(rig);
   const size = statSync(big).size;
@@ -429,14 +444,14 @@ test("正常导入大包：上传与合并阶段都有进度，结束后不再�
   expect(errors).toEqual([]);
 });
 
-/** 在 v0.3.2 包的任务目录里加一个 48 MB 的随机文件：上传与合并都不是瞬间完成。 */
+/** 在 v0.3.2 包的任务目录里加一个 65 MB 的随机文件：超过单份内容上限，回退为整包上传；上传与合并都不是瞬间完成。 */
 function bigPack(rig: Rig): string {
   const file = path.join(rig.dataRoot, "big.ugcpack");
   execFileSync("python3", ["-I", "-c", [
     "import zipfile,sys,os",
     "src=zipfile.ZipFile(sys.argv[1]);z=zipfile.ZipFile(sys.argv[2],'w',zipfile.ZIP_DEFLATED)",
     "[z.writestr(i,src.read(i.filename)) for i in src.infolist()]",
-    `z.writestr(${JSON.stringify(`${DIR}/big.bin`)},os.urandom(48*1024*1024))`,
+    `z.writestr(${JSON.stringify(`${DIR}/big.bin`)},os.urandom(65*1024*1024))`,
     "z.close()",
   ].join(";"), V032, file]);
   return file;
@@ -472,6 +487,69 @@ test("重复导入同一包：任务目录跳过不覆盖，同名画板改名�
   expect(readText(record)).toBe(before);
   const boards = readdirSync(path.join(root, "画板")).filter((n) => n.endsWith(".ugcpack.json") || n.endsWith(".ugcboard.json"));
   expect(boards.length).toBeGreaterThanOrEqual(3); // 空 + 两份旧版画板（改名）
+});
+
+test("同一个包导入两次：第二次没有内容上传请求，结果为全部跳过（#62）", async ({ page, rig }) => {
+  const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
+  const requests = packRequests(page);
+  await importPack(page, V032);
+  await expect(toast(page)).toHaveText("导入 1 个任务，跳过 0 个");
+  expect(requests.filter(isContentUpload).length).toBeGreaterThan(0);
+  requests.length = 0;
+  await importPack(page, V032);
+  await expect(toast(page)).toHaveText("导入 0 个任务，跳过 1 个");
+  // 只问了一次服务端已有哪些：不开暂存、不上传、不合并，也不整包上传。
+  expect(requests).toEqual(["POST /api/packs/existing"]);
+  expect(errors).toEqual([]);
+});
+
+/** 用 v2 夹具还原出 v1 包：被省略的快照写回为实存条目，两个任务目录各带一份相同的 4 MB 随机文件。 */
+function duplicatedV1Pack(rig: Rig): string {
+  const file = path.join(rig.dataRoot, "dup-v1.ugcpack");
+  execFileSync("python3", ["-I", "-c", [
+    "import zipfile,sys,os,json",
+    "src=zipfile.ZipFile(sys.argv[1]);m=json.loads(src.read('manifest.json'));dup=m.pop('duplicates');m['pack_format_version']=1",
+    "z=zipfile.ZipFile(sys.argv[2],'w',zipfile.ZIP_STORED)",
+    "z.writestr('manifest.json',json.dumps(m))",
+    "[z.writestr(i.filename,src.read(i.filename)) for i in src.infolist() if i.filename!='manifest.json']",
+    "[z.writestr(k,src.read(v)) for k,v in dup.items()]",
+    "big=os.urandom(4*1024*1024)",
+    "[z.writestr(d+'/big.bin',big) for d in ('2026-09-16/20260916T010000Z-0000000a','2026-09-16/20260916T020000Z-0000000b')]",
+    "z.close()",
+  ].join(";"), V2, file]);
+  return file;
+}
+
+test("含重复内容的 v1 包：上传字节数等于去重后的大小，画板与图片完整（#62）", async ({ page, rig }) => {
+  const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
+  const pack = duplicatedV1Pack(rig);
+  const entries = unzip(readFileSync(pack)).filter((e) => e.name !== "manifest.json" && !e.name.startsWith("画板/"));
+  const all = entries.reduce((n, e) => n + e.bytes.length, 0);
+  const unique = new Map(entries.map((e) => [createHash("sha256").update(e.bytes).digest("hex"), e.bytes.length]));
+  const deduped = [...unique.values()].reduce((n, s) => n + s, 0);
+  // 浏览器不报 Blob 请求体的长度：按 URL 里的 sha256 认每份内容（服务端逐份核对 sha256），总量看 total 参数。
+  const uploads: URL[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "PUT" && r.url().includes("/contents/")) uploads.push(new URL(r.url()));
+  });
+  await importPack(page, pack);
+  await expect(toast(page)).toHaveText("导入 2 个任务，跳过 0 个");
+  await expect(page.locator(".tab.tab-active .tab-title")).toHaveText("去重画板");
+  expect(uploads.map((u) => u.pathname.split("/").pop()).sort()).toEqual([...unique.keys()].sort());
+  const sent = [...new Set(uploads.map((u) => u.pathname.split("/").pop()!))].reduce((n, sha) => n + unique.get(sha)!, 0);
+  expect(sent).toBe(deduped);
+  expect(uploads.every((u) => Number(u.searchParams.get("total")) === deduped)).toBe(true);
+  expect(all - deduped).toBeGreaterThan(4 * 1024 * 1024);
+  const root = rig.userRoot(GOOD_KEY);
+  for (const e of entries) expect(readFileSync(path.join(root, e.name)).equals(e.bytes), e.name).toBe(true);
+  const [a, b] = ["2026-09-16/20260916T010000Z-0000000a/big.bin", "2026-09-16/20260916T020000Z-0000000b/big.bin"].map((p) => path.join(root, p));
+  if (process.platform !== "win32") expect(statSync(a).ino).toBe(statSync(b).ino);
+  for (const id of ["ra", "rb", "snap"]) {
+    const img = page.locator(`.react-flow__node[data-id="${id}"] img.thumb`);
+    await expect(img, id).toBeVisible();
+    await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth), { message: id }).toBe(64);
+  }
+  expect(errors).toEqual([]);
 });
 
 test("包损坏：本地检查即拒绝，不发上传请求、不写任何文件", async ({ page, rig }) => {

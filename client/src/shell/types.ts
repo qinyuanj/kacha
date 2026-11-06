@@ -1,5 +1,5 @@
 // Web 壳层端口：UI 只认这些接口，同源 HTTP 与浏览器能力都在 ipc.ts 中实现。
-import type { MergeOutcome, MergeUnit, PackDuplicate, PackEntryFact, PackExportSpec } from "../core/boardPack";
+import type { MergeOutcome, MergeUnit, PackDuplicate, PackEntryFact, PackExportSpec, PackIo } from "../core/boardPack";
 import type { DirEntry } from "../core/relocate";
 
 export interface BoardTexts {
@@ -105,6 +105,9 @@ export interface PackUploadPort {
   upload(file: File): Promise<string>;
   discard(id: string): Promise<void>;
 }
+
+/** 去重上传（#62）：问已有、Worker 里 hash、开暂存、逐份上传、按落盘清单合并；语义见 core/boardPack 的 PackIo。 */
+export type PackContentPort = Required<Pick<PackIo, "existing" | "hash" | "stage" | "uploadContent" | "importContent" | "discardStaging">>;
 
 export interface SessionPort {
   login(key: string): Promise<{ fingerprint: string }>;
