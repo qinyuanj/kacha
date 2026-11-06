@@ -217,6 +217,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/log", axum::routing::post(fs::log_event))
         // 画板包：导出为下载流；导入先流式上传（不受单文件 64 MB 限制），再判定、合并。
         .route("/api/packs/export", axum::routing::post(packs::export))
+        .route("/api/packs/export/facts", axum::routing::post(packs::export_facts))
         .route("/api/packs/uploads", axum::routing::post(packs::upload).layer(axum::extract::DefaultBodyLimit::disable()))
         .route("/api/packs/uploads/{id}/entries", get(packs::upload_entries))
         .route("/api/packs/uploads/{id}/texts", axum::routing::post(packs::upload_texts))

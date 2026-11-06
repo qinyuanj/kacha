@@ -1,7 +1,7 @@
 // 画板包（#24）新接缝：导出 = 浏览器下载流；导入 = 浏览器选文件流式上传 → 判定 → 合并 → 打开画板。
 // 旧假壳的 pack.spec.ts 不在这里复用：它注入的是虚拟条目与导出规格 JSON，不是真 zip。
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
@@ -75,7 +75,8 @@ test("导出画板包是浏览器下载的真 zip：含画板、任务目录、�
   const names = zipNames(bytes);
   expect(names).toEqual(expect.arrayContaining(["manifest.json", "画板/本地.ugcboard.json", `${DIR}/task.json`, `${DIR}/layers.json`, `${DIR}/layers/01.png`, `${DIR}/layers/02.png`, `${DIR}/result.png`]));
   const manifest = JSON.parse(zipText(bytes, "manifest.json"));
-  expect(manifest.pack_format_version).toBe(1);
+  expect(manifest.pack_format_version).toBe(2);
+  expect(manifest.duplicates).toEqual({});
   expect(manifest.app_version).toMatch(/^\d+\.\d+\.\d+/);
   // 根内但不在任务目录的参考图按 sha256 改名打包，画板里的路径同步改写。
   const ref = names.find((n) => /^导入参考图\/[0-9a-f]{64}\.png$/.test(n));
@@ -88,6 +89,136 @@ test("导出画板包是浏览器下载的真 zip：含画板、任务目录、�
   expect(readdirSync(rig.userRoot(GOOD_KEY)).filter((n) => n.endsWith(".tmp"))).toEqual([]);
   expect(errors).toEqual([]);
 });
+
+// ---- 导出包格式 v2（#63）：按内容去重、预估大小与两阶段进度 ----
+
+const TASK_A = "20260916T010000Z-0000000a";
+const TASK_B = "20260916T020000Z-0000000b";
+const DIR_A = `2026-09-16/${TASK_A}`;
+const DIR_B = `2026-09-16/${TASK_B}`;
+const SNAPSHOT = `${DIR_B}/references/01.png`;
+
+/** 迭代画板：B 的参考图快照是 A 的结果（同一份字节），另有参考图节点直接引用这份快照。 */
+function iterationBoard(title: string) {
+  const resultA = png(256, 256, { rgb: [80, 120, 200] });
+  const resultNode = (id: string, taskId: string, dir: string, pos: [number, number]) => ({
+    id, type: "result", pos, size: [220, 280], task_id: taskId, file: "result.png", path: `${dir}/result.png`, layer_count: 0,
+    record: { model: "qwen-image-3.0-pro", prompt: "p", negative_prompt: "", size_spec: { tier: "1K", ratio: "1:1", width: null, height: null }, submitted_at: "2026-09-16T01:00:00.000Z" },
+  });
+  return {
+    title,
+    boardText: board(title, [resultNode("ra", TASK_A, DIR_A, [0, 0]), resultNode("rb", TASK_B, DIR_B, [300, 0]), referenceNode("snap", SNAPSHOT, [600, 0])], []),
+    files: {
+      [`${DIR_A}/task.json`]: { text: JSON.stringify({ task_id: TASK_A, model: "qwen-image-3.0-pro", prompt: "p" }) },
+      [`${DIR_A}/result.png`]: { b64: resultA },
+      [`${DIR_B}/task.json`]: { text: JSON.stringify({ task_id: TASK_B, model: "qwen-image-3.0-pro", prompt: "p", references: [{ file: "references/01.png", source: { kind: "result", path: `${DIR_A}/result.png` } }] }) },
+      [`${DIR_B}/result.png`]: { b64: png(256, 256, { rgb: [200, 80, 80] }) },
+      [SNAPSHOT]: { b64: resultA },
+    },
+  };
+}
+
+/** 让请求晚一点到服务端：好在对话框里看到该阶段的进度、在该阶段点取消。 */
+async function delay(page: Page, pattern: string, ms: number) {
+  await page.route(pattern, async (route) => {
+    await new Promise((r) => setTimeout(r, ms));
+    await route.continue();
+  });
+}
+
+const leftovers = (rig: Rig) => {
+  const root = rig.userRoot(GOOD_KEY);
+  return [...readdirSync(root).filter((n) => n.endsWith(".tmp")), ...(existsSync(path.join(root, ".kacha/packs")) ? [".kacha/packs"] : [])];
+};
+
+test("导出 v2：先显示预估大小再显示进度，重复的参考图快照只存一份，包比 v1 小，再导入后画板与图片完整", async ({ page, rig }) => {
+  const errors = await openApp(page, rig, iterationBoard("迭代"));
+  await delay(page, "**/api/packs/export/facts?*", 600);
+  await delay(page, "**/api/packs/export?*", 600);
+  let exportBody: string | null = null;
+  page.on("request", (r) => {
+    if (/\/api\/packs\/export\?/.test(r.url())) exportBody = r.postData();
+  });
+  await exportPack(page);
+  // hash 阶段的进度。
+  await expect(dialog(page)).toContainText("正在计算画板包大小：迭代");
+  // 预估大小 = 实存条目字节和（快照被省略）。
+  const root = rig.userRoot(GOOD_KEY);
+  const kept = [`${DIR_A}/task.json`, `${DIR_A}/result.png`, `${DIR_B}/task.json`, `${DIR_B}/result.png`].reduce((n, f) => n + statSync(path.join(root, f)).size, 0);
+  const saved = statSync(path.join(root, SNAPSHOT)).size;
+  await expect(dialog(page)).toContainText(`预估大小：${(kept / 1024).toFixed(1)} KB（重复内容只存一份，省去 ${(saved / 1024).toFixed(1)} KB）`);
+  const download = page.waitForEvent("download");
+  await dialog(page).getByRole("button", { name: "导出并下载…" }).click();
+  // 打包阶段的进度。
+  await expect(dialog(page)).toContainText("正在导出画板包：迭代");
+  const file = await download;
+  await expect(toast(page)).toHaveText("已导出画板包 迭代.ugcpack");
+  const bytes = readFileSync((await file.path())!);
+  const names = zipNames(bytes);
+  expect(names).not.toContain(SNAPSHOT);
+  expect(names).toEqual(expect.arrayContaining([`${DIR_A}/result.png`, `${DIR_B}/result.png`, `${DIR_B}/task.json`]));
+  const manifest = JSON.parse(zipText(bytes, "manifest.json"));
+  expect(manifest).toMatchObject({ pack_format_version: 2, duplicates: { [SNAPSHOT]: `${DIR_A}/result.png` } });
+
+  // 同一份规格不省略任何条目，即 v1 导出：v2 包更小。
+  expect(exportBody).not.toBeNull();
+  const v1Spec = { ...JSON.parse(exportBody!), omitted: [] };
+  const v1Base64 = await page.evaluate(async (spec) => {
+    const res = await fetch("/api/packs/export?op=v1-compare", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(spec) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = new Uint8Array(await res.arrayBuffer());
+    let bin = "";
+    for (const b of buf) bin += String.fromCharCode(b);
+    return btoa(bin);
+  }, v1Spec);
+  const v1Bytes = Buffer.from(v1Base64, "base64");
+  expect(zipNames(v1Bytes)).toContain(SNAPSHOT);
+  expect(bytes.length).toBeLessThan(v1Bytes.length);
+  expect(leftovers(rig)).toEqual([]);
+
+  // 删掉本机的任务目录，再导入刚导出的包：两个任务目录都回来，被省略的快照还原为同内容文件。
+  await page.unroute("**/api/packs/export/facts?*");
+  await page.unroute("**/api/packs/export?*");
+  rmSync(path.join(root, DIR_A), { recursive: true });
+  rmSync(path.join(root, DIR_B), { recursive: true });
+  await importPack(page, (await file.path())!);
+  await expect(toast(page)).toHaveText("导入 2 个任务，跳过 0 个");
+  // 导入的画板改名写入、作为新标签打开。
+  await expect(page.locator(".tab .tab-title")).toHaveText(["迭代", "迭代"]);
+  expect(readdirSync(path.join(root, "画板")).filter((n) => n.endsWith(".ugcboard.json"))).toHaveLength(2);
+  expect(readFileSync(path.join(root, SNAPSHOT)).equals(readFileSync(path.join(root, DIR_A, "result.png")))).toBe(true);
+  for (const id of ["ra", "rb", "snap"]) {
+    const img = page.locator(`.react-flow__node[data-id="${id}"] img.thumb`);
+    await expect(img, id).toBeVisible();
+    await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth), { message: id }).toBe(256);
+  }
+  expect(errors).toEqual([]);
+});
+
+for (const stage of [
+  { name: "hash 阶段", route: "**/api/packs/export/facts?*", title: "正在计算画板包大小：迭代", confirm: false },
+  { name: "打包阶段", route: "**/api/packs/export?*", title: "正在导出画板包：迭代", confirm: true },
+]) {
+  test(`导出 v2：${stage.name}取消提示已取消，不下载，也不留临时文件`, async ({ page, rig }) => {
+    const errors = await openApp(page, rig, iterationBoard("迭代"));
+    await delay(page, stage.route, 1500);
+    const downloads: string[] = [];
+    page.on("download", (d) => downloads.push(d.suggestedFilename()));
+    const settled = page.waitForResponse(stage.route.replace("**", rig.baseURL));
+    await exportPack(page);
+    if (stage.confirm) await dialog(page).getByRole("button", { name: "导出并下载…" }).click();
+    await expect(dialog(page)).toContainText(stage.title);
+    await dialog(page).getByRole("button", { name: "取消", exact: true }).click();
+    await expect(toast(page)).toHaveText("已取消导出画板包");
+    await expect(dialog(page)).toHaveCount(0);
+    // 晚到的请求在服务端照常结束后，仍不触发下载、不留临时文件。
+    await settled;
+    await page.waitForTimeout(300);
+    expect(downloads).toEqual([]);
+    expect(leftovers(rig)).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+}
 
 test("导入桌面 v0.3.2 画板包：图层与 layers.json 落盘、画板打开，导入后能继续迭代", async ({ page, rig }) => {
   const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });

@@ -404,3 +404,103 @@ async fn v2_import_rejects_unsafe_or_dangling_duplicates_without_writing() {
         assert!(!root.parent().unwrap().join("evil.png").exists());
     }
 }
+
+// ---- 导出包格式 v2：服务端给字节事实、只写实存条目（#63） ----
+
+fn seed_duplicate_reference(h: &Harness) {
+    seed_task(h, GOOD_KEY);
+    let root = h.user_root(GOOD_KEY);
+    std::fs::create_dir_all(root.join("别处")).unwrap();
+    // 与任务目录里的结果图内容相同：迭代时上一轮结果被当作参考图。
+    std::fs::write(root.join("别处/猫.png"), png()).unwrap();
+}
+
+#[tokio::test]
+async fn export_facts_report_size_and_sha256_of_every_file_the_export_would_write() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    seed_duplicate_reference(&h);
+    let body = serde_json::json!({ "task_dirs": [TASK, "2026-09-16/20260916T090000Z-000000ff"], "files": [{ "source": "别处/猫.png", "entry": "导入参考图/abc.png" }] });
+    let reply = h.send(Method::POST, "/api/packs/export/facts?op=f1", Some(&cookie), body.to_string()).await;
+    assert_eq!(reply.status, 200, "{}", reply.text());
+    let facts = reply.json();
+    let facts = facts.as_array().unwrap();
+    let entries: Vec<&str> = facts.iter().map(|f| f["entry"].as_str().unwrap()).collect();
+    // 本机不存在的任务目录跳过，与导出一致；文本条目不在其中。
+    assert_eq!(entries, vec![format!("{TASK}/result.png").as_str(), format!("{TASK}/task.json").as_str(), "导入参考图/abc.png"]);
+    let fact = |entry: &str| facts.iter().find(|f| f["entry"] == entry).unwrap().clone();
+    let result = fact(&format!("{TASK}/result.png"));
+    assert_eq!(result["size"], png().len() as u64);
+    assert_eq!(result["sha256"].as_str().unwrap().len(), 64);
+    assert_eq!(fact("导入参考图/abc.png")["sha256"], result["sha256"], "内容相同则 sha256 相同");
+    assert_ne!(fact(&format!("{TASK}/task.json"))["sha256"], result["sha256"]);
+    assert_eq!(h.get("/api/packs/ops/f1", Some(&cookie)).await.status, 404, "结束即注销操作");
+}
+
+#[tokio::test]
+async fn export_facts_reject_sources_outside_the_user_root() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let body = serde_json::json!({ "task_dirs": [], "files": [{ "source": "/etc/hostname", "entry": "导入参考图/x.png" }] });
+    let reply = h.send(Method::POST, "/api/packs/export/facts?op=f2", Some(&cookie), body.to_string()).await;
+    assert_eq!(reply.status, 422, "{}", reply.text());
+}
+
+#[tokio::test]
+async fn cancelling_export_facts_returns_409() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let dir = h.user_root(GOOD_KEY).join(TASK);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("task.json"), b"{}").unwrap();
+    std::fs::write(dir.join("result.bin"), vec![7u8; 96 * 1024 * 1024]).unwrap();
+    let body = serde_json::json!({ "task_dirs": [TASK], "files": [] }).to_string();
+    let req = Request::builder().method(Method::POST).uri("/api/packs/export/facts?op=f3").header(header::COOKIE, &cookie).body(Body::from(body)).unwrap();
+    let pending = tokio::spawn(h.app.clone().oneshot(req));
+    for _ in 0..400 {
+        let p = h.get("/api/packs/ops/f3", Some(&cookie)).await;
+        if p.status == 200 && p.json()["done"].as_u64().unwrap_or(0) > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert_eq!(h.send(Method::POST, "/api/packs/ops/f3/cancel", Some(&cookie), Body::empty()).await.status, 204);
+    let res = pending.await.unwrap().unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let text = String::from_utf8(res.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
+    assert!(text.contains("已取消"), "{text}");
+}
+
+#[tokio::test]
+async fn export_writes_only_present_entries_and_the_manifest_lists_duplicates() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    seed_duplicate_reference(&h);
+    let manifest = serde_json::json!({ "pack_format_version": 2, "app_version": "0.4.0", "boards": ["画板/a.ugcboard.json"], "duplicates": { "导入参考图/abc.png": format!("{TASK}/result.png") } });
+    let mut spec = export_spec();
+    spec["texts"][0]["text"] = manifest.to_string().into();
+    spec["omitted"] = serde_json::json!(["导入参考图/abc.png"]);
+    let reply = h.send(Method::POST, "/api/packs/export?op=v2e", Some(&cookie), spec.to_string()).await;
+    assert_eq!(reply.status, 200, "{}", reply.text());
+    let mut names = zip_entries(&reply.body);
+    names.sort();
+    assert_eq!(names, vec![format!("{TASK}/result.png"), format!("{TASK}/task.json"), "manifest.json".to_string(), "画板/a.ugcboard.json".to_string()]);
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(reply.body.to_vec())).unwrap();
+    let mut text = String::new();
+    archive.by_name("manifest.json").unwrap().read_to_string(&mut text).unwrap();
+    let written: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(written["duplicates"]["导入参考图/abc.png"], format!("{TASK}/result.png"));
+}
+
+#[tokio::test]
+async fn export_rejects_omitting_entries_that_are_not_files_of_the_spec() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    seed_duplicate_reference(&h);
+    for (i, omitted) in [serde_json::json!(["导入参考图/没有.png"]), serde_json::json!(["manifest.json"]), serde_json::json!(["画板/a.ugcboard.json"])].into_iter().enumerate() {
+        let mut spec = export_spec();
+        spec["omitted"] = omitted.clone();
+        let reply = h.send(Method::POST, &format!("/api/packs/export?op=om{i}"), Some(&cookie), spec.to_string()).await;
+        assert_eq!(reply.status, 422, "{omitted}: {}", reply.text());
+    }
+}
