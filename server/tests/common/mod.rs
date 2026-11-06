@@ -139,6 +139,16 @@ impl Harness {
         self.send(Method::PUT, uri, Some(cookie), body).await
     }
 
+    /// 带 Content-Length 的 POST（进程内 oneshot 不会自动补这个头）。
+    pub async fn post_with_length(&self, uri: &str, cookie: &str, body: Vec<u8>) -> Reply {
+        let req = Request::builder().method(Method::POST).uri(uri).header(header::COOKIE, cookie).header(header::CONTENT_LENGTH, body.len().to_string());
+        let res = self.app.clone().oneshot(req.body(Body::from(body)).unwrap()).await.unwrap();
+        let status = res.status();
+        let headers = res.headers().clone();
+        let body = res.into_body().collect().await.unwrap().to_bytes().to_vec();
+        Reply { status, headers, body }
+    }
+
     pub async fn login(&self, key: &str) -> Reply {
         self.send(Method::POST, "/api/session", None, serde_json::json!({ "key": key }).to_string()).await
     }

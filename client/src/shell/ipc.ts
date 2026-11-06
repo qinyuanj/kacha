@@ -119,6 +119,13 @@ async function tracked<T>(op: string, run: () => Promise<T>): Promise<T> {
   }
 }
 
+/** 上传类请求按状态码给可读的失败文案（#60）：反向代理回的非 JSON 错误体也能看懂。 */
+const UPLOAD_FAILURES: Record<number, string> = {
+  408: "上传中断：超过 60 秒没有收到数据，请检查网络后重试",
+  507: "服务器空间不足，请联系管理员",
+};
+const uploadFailure = (e: unknown) => (e instanceof ApiError && UPLOAD_FAILURES[e.status] ? new ApiError(e.status, e.code, UPLOAD_FAILURES[e.status]) : e);
+
 /** 本操作已被取消，或服务端以 409 cancelled / 文案「已取消」回取消：统一成与桌面一致的取消文案。 */
 const asCancelled = (op: string, e: unknown) => (cancelledOps.has(op) || (e instanceof ApiError && e.message === PACK_CANCELLED) ? new Error(PACK_CANCELLED) : e);
 
@@ -186,7 +193,7 @@ async function uploadPack(file: File): Promise<string> {
       return ((await res.json()) as { id: string }).id;
     });
   } catch (e) {
-    throw asCancelled(op, e);
+    throw uploadFailure(asCancelled(op, e));
   } finally {
     uploadAborts.delete(op);
   }
