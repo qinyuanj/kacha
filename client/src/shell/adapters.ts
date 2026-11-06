@@ -44,6 +44,7 @@ export const packFs: PackFs = {
 
 export const packIo: PackIo = {
   cancel: ipc.boardPackCancel,
+  upload: packUpload.upload,
   entries: ipc.boardPackEntries,
   readTexts: ipc.boardPackReadTexts,
   importUnits: ipc.boardPackImport,

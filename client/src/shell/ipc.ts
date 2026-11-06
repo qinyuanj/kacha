@@ -101,7 +101,26 @@ const newOpId = () => `op-${Date.now().toString(36)}-${Math.random().toString(36
 let currentOp: string | null = null;
 const cancelledOps = new Set<string>();
 
+/** 正在进行、带操作 id 的请求数：进度轮询只在有请求进行时才问服务端，操作结束后不再请求（#59）。 */
+const inFlight = new Map<string, number>();
+/** 可中止的上传请求：取消时中止，同时通知服务端。 */
+const uploadAborts = new Map<string, AbortController>();
+
 const requireOp = () => (currentOp ??= newOpId());
+
+async function tracked<T>(op: string, run: () => Promise<T>): Promise<T> {
+  inFlight.set(op, (inFlight.get(op) ?? 0) + 1);
+  try {
+    return await run();
+  } finally {
+    const left = (inFlight.get(op) ?? 1) - 1;
+    if (left > 0) inFlight.set(op, left);
+    else inFlight.delete(op);
+  }
+}
+
+/** 本操作已被取消，或服务端以 409 cancelled / 文案「已取消」回取消：统一成与桌面一致的取消文案。 */
+const asCancelled = (op: string, e: unknown) => (cancelledOps.has(op) || (e instanceof ApiError && e.message === PACK_CANCELLED) ? new Error(PACK_CANCELLED) : e);
 
 async function apiResponse(url: string, init: RequestInit): Promise<Response> {
   let res: Response;
@@ -143,20 +162,34 @@ function downloadBlob(blob: Blob, fileName: string) {
 async function boardPackExport(spec: unknown, target: string): Promise<{ task_dirs: number; bytes: number }> {
   const op = requireOp();
   try {
-    const res = await apiResponse(`/api/packs/export?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(spec) });
-    const blob = await res.blob();
-    downloadBlob(blob, target);
-    return { task_dirs: (spec as { task_dirs: string[] }).task_dirs.length, bytes: blob.size };
+    return await tracked(op, async () => {
+      const res = await apiResponse(`/api/packs/export?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(spec) });
+      const blob = await res.blob();
+      downloadBlob(blob, target);
+      return { task_dirs: (spec as { task_dirs: string[] }).task_dirs.length, bytes: blob.size };
+    });
   } catch (e) {
     if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
     throw e;
   }
 }
 
-/** 流式上传：请求体是 File 本身（浏览器按流发送），不读进内存。 */
+/** 流式上传：请求体是 File 本身（浏览器按流发送），不读进内存。带当前操作 id：服务端报进度、可取消（#59）。 */
 async function uploadPack(file: File): Promise<string> {
-  const res = await apiResponse("/api/packs/uploads", { method: "POST", headers: { "Content-Type": "application/zip" }, body: file });
-  return ((await res.json()) as { id: string }).id;
+  const op = requireOp();
+  if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
+  const abort = new AbortController();
+  uploadAborts.set(op, abort);
+  try {
+    return await tracked(op, async () => {
+      const res = await apiResponse(`/api/packs/uploads?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/zip" }, body: file, signal: abort.signal });
+      return ((await res.json()) as { id: string }).id;
+    });
+  } catch (e) {
+    throw asCancelled(op, e);
+  } finally {
+    uploadAborts.delete(op);
+  }
 }
 
 const discardUpload = async (id: string) => void (await api(`/api/packs/uploads/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true }));
@@ -165,7 +198,7 @@ const discardUpload = async (id: string) => void (await api(`/api/packs/uploads/
 function onPackProgress(handler: (progress: { done: number; total: number }) => void): () => void {
   let stopped = false;
   const tick = async () => {
-    if (stopped || !currentOp) return;
+    if (stopped || !currentOp || !inFlight.has(currentOp)) return;
     try {
       const res = await fetch(`/api/packs/ops/${encodeURIComponent(currentOp)}`, { credentials: "same-origin" });
       if (res.ok) handler((await res.json()) as { done: number; total: number });
@@ -214,12 +247,12 @@ export const ipc: Ipc = {
   boardPackReadTexts: (pack, names) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/texts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(names) }),
   boardPackImport: async (pack, units) => {
     const op = requireOp();
+    // 上传之后、合并之前被取消：服务端还没有这个操作，取消标记只在这里，不再发起合并。
+    if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
     try {
-      return await api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(units) });
+      return await tracked(op, () => api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(units) }));
     } catch (e) {
-      // 服务端以 409 cancelled / 文案「已取消」回取消；保持与桌面的文案约定。
-      if (cancelledOps.has(op) || (e instanceof ApiError && e.message === PACK_CANCELLED)) throw new Error(PACK_CANCELLED);
-      throw e;
+      throw asCancelled(op, e);
     }
   },
   boardPackCancel: async (cancelled) => {
@@ -227,6 +260,7 @@ export const ipc: Ipc = {
       const op = currentOp;
       if (!op) return;
       cancelledOps.add(op);
+      uploadAborts.get(op)?.abort();
       await api(`/api/packs/ops/${encodeURIComponent(op)}/cancel`, { method: "POST", keepalive: true });
     } else {
       currentOp = newOpId();

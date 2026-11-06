@@ -189,8 +189,8 @@ async fn cancelling_an_in_flight_export_aborts_its_stream_only() {
     assert_eq!(h.send(Method::POST, "/api/packs/ops/c1/cancel", Some(&cookie), Body::empty()).await.status, 204);
     let err = body.collect().await.unwrap_err();
     assert!(err.to_string().contains("已取消"), "取消应以错误中止流：{err}");
-    // 操作已注销；不留临时文件。
-    assert_eq!(h.get("/api/packs/ops/c1", Some(&cookie)).await.status, 404);
+    // 操作已注销（进度接口回 204，不当错误）；不留临时文件。
+    assert_eq!(h.get("/api/packs/ops/c1", Some(&cookie)).await.status, 204);
 }
 
 #[tokio::test]
@@ -229,4 +229,60 @@ async fn fifth_concurrent_heavy_request_queues_until_a_slot_frees() {
     for body in pending {
         let _ = body.collect().await.unwrap();
     }
+}
+
+/// 上传带操作 id（#59）：总量取 Content-Length，每写一块更新已完成字节数；请求体停在半路时取消，回 409 并删掉写了一半的文件。
+#[tokio::test]
+async fn cancelling_a_stalled_upload_returns_409_and_deletes_the_partial_file() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(1);
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/packs/uploads?op=u1")
+        .header(header::COOKIE, &cookie)
+        .header(header::CONTENT_LENGTH, "4096")
+        .body(Body::from_stream(stream))
+        .unwrap();
+    let pending = tokio::spawn(h.app.clone().oneshot(req));
+    tx.send(Ok(vec![7u8; 1024])).await.unwrap();
+    // 等第一块真的写下去，进度报出总量与已完成字节数。
+    let mut progress = serde_json::Value::Null;
+    for _ in 0..100 {
+        let p = h.get("/api/packs/ops/u1", Some(&cookie)).await;
+        if p.status == 200 && p.json()["done"].as_u64() == Some(1024) {
+            progress = p.json();
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(progress, serde_json::json!({ "done": 1024, "total": 4096 }), "上传进度应报出已写字节与 Content-Length");
+    let packs = h.user_root(GOOD_KEY).join(".kacha/packs");
+    assert_eq!(std::fs::read_dir(&packs).unwrap().count(), 1, "写了一半的临时文件在盘上");
+
+    // 请求体停住（发送端不关），这时取消。
+    assert_eq!(h.send(Method::POST, "/api/packs/ops/u1/cancel", Some(&cookie), Body::empty()).await.status, 204);
+    let res = tokio::time::timeout(std::time::Duration::from_secs(5), pending).await.expect("取消后上传应立即结束").unwrap().unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let body: serde_json::Value = serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["code"], "cancelled");
+    assert_eq!(body["message"], "已取消");
+    assert!(!packs.exists() || std::fs::read_dir(&packs).unwrap().count() == 0, "写了一半的临时文件要删掉");
+    assert_eq!(h.get("/api/packs/ops/u1", Some(&cookie)).await.status, 204, "上传结束即注销操作");
+    drop(tx);
+}
+
+#[tokio::test]
+async fn upload_with_op_reports_full_progress_and_unregisters_when_done() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let bytes = fixture_pack();
+    let reply = h.send(Method::POST, "/api/packs/uploads?op=u2", Some(&cookie), Body::from(bytes)).await;
+    assert_eq!(reply.status, 200, "{}", reply.text());
+    let id = reply.json()["id"].as_str().unwrap().to_string();
+    assert!(h.user_root(GOOD_KEY).join(".kacha/packs").join(format!("{id}.ugcpack.tmp")).is_file());
+    assert_eq!(h.get("/api/packs/ops/u2", Some(&cookie)).await.status, 204);
+    // 操作 id 照常校验。
+    assert_eq!(h.send(Method::POST, "/api/packs/uploads?op=bad%20id", Some(&cookie), Body::from(fixture_pack())).await.status, 400);
 }

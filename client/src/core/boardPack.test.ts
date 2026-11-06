@@ -329,7 +329,8 @@ describe("可取消的画板包命令", () => {
 });
 
 describe("导入画板包", () => {
-  const PACK = "D:\\下载\\千问测试.ugcpack";
+  const PACK = new File(["zip"], "千问测试.ugcpack");
+  const UPLOAD_ID = "up-1";
   const TASK = "2026-09-16/20260916T010000Z-0000000a";
   const SECRET = "机密提示词：橘猫";
   const boardA = "画板/甲.ugcboard.json";
@@ -346,16 +347,28 @@ describe("导入画板包", () => {
     [`${TASK}/result.png`]: "",
   };
 
-  /** 内存包命令：记录移入的合并单元；failAfterMove 让导入移完第一个单元后以该错误 reject。 */
-  function memoryPackIo(pack: Record<string, string>, opts: { failAfterMove?: unknown } = {}) {
+  /** 内存包命令：记录各步调用与移入的合并单元；failUpload 让上传以该错误 reject，failAfterMove 让导入移完第一个单元后以该错误 reject。 */
+  function memoryPackIo(pack: Record<string, string>, opts: { failAfterMove?: unknown; failUpload?: unknown } = {}) {
     const moved: string[] = [];
     const steps: string[] = [];
     const io: PackIo = {
       cancel: async (cancelled) => void steps.push(`cancel(${cancelled})`),
-      entries: async () => Object.keys(pack),
-      readTexts: async (_pack, names) => Object.fromEntries(names.filter((n) => n in pack).map((n) => [n, pack[n]])),
-      importUnits: async (_pack, units) => {
-        steps.push("import");
+      upload: async (file) => {
+        steps.push(`upload(${file.name})`);
+        if (opts.failUpload !== undefined) throw opts.failUpload;
+        return UPLOAD_ID;
+      },
+      entries: async (id) => {
+        steps.push(`entries(${id})`);
+        return Object.keys(pack);
+      },
+      readTexts: async (_pack, names) => {
+        steps.push("readTexts");
+        return Object.fromEntries(names.filter((n) => n in pack).map((n) => [n, pack[n]]));
+      },
+      discard: async (id) => void steps.push(`discard(${id})`),
+      importUnits: async (id, units) => {
+        steps.push(`import(${id})`);
         for (const unit of units) {
           moved.push(unit.path);
           if (opts.failAfterMove !== undefined) throw opts.failAfterMove;
@@ -371,7 +384,7 @@ describe("导入画板包", () => {
     const added: string[] = [];
     const stages: string[] = [];
     const outcome = importPack(io, {
-      packPath: PACK,
+      file: PACK,
       addBoard: async (board) => {
         added.push(board.title);
         return addBoard(board);
@@ -382,15 +395,14 @@ describe("导入画板包", () => {
     return { outcome, logs, added, stages };
   }
 
-  it("包版本更高：不写任何文件，不进入进度，日志记 newer", async () => {
+  it("包版本更高：上传后判定，不合并、不写画板，放弃上传，日志记 newer", async () => {
     const newer = { ...goodPack, [PACK_MANIFEST]: JSON.stringify({ pack_format_version: PACK_FORMAT_VERSION + 1, app_version: "9", boards: [] }) };
     const { io, moved, steps } = memoryPackIo(newer);
     const r = run(io);
     expect(await r.outcome).toMatchObject({ kind: "newer" });
     expect(moved).toEqual([]);
-    expect(steps).toEqual([]);
+    expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", `entries(${UPLOAD_ID})`, "readTexts", `discard(${UPLOAD_ID})`]);
     expect(r.added).toEqual([]);
-    expect(r.stages).toEqual([]);
     expect(r.logs).toEqual([{ kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", result: "newer" }]);
   });
 
@@ -410,6 +422,39 @@ describe("导入画板包", () => {
     expect(r2.logs).toEqual([{ kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", result: "corrupt" }]);
   });
 
+  it("上传被取消：返回 cancelled，不读条目、不读文本、不合并、不写画板", async () => {
+    const { io, moved, steps } = memoryPackIo(goodPack, { failUpload: PACK_CANCELLED });
+    const r = run(io);
+    expect(await r.outcome).toEqual({ kind: "cancelled" });
+    expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)"]);
+    expect(moved).toEqual([]);
+    expect(r.added).toEqual([]);
+    expect(r.stages).toEqual(["progress"]);
+    expect(r.logs).toEqual([{ kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", result: "cancelled" }]);
+  });
+
+  it("上传失败：返回 failed 与报错原文，不读条目、不读文本、不合并、不写画板", async () => {
+    const { io, moved, steps } = memoryPackIo(goodPack, { failUpload: new Error("服务器空间不足，请联系管理员") });
+    const r = run(io);
+    expect(await r.outcome).toEqual({ kind: "failed", error: "服务器空间不足，请联系管理员" });
+    expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)"]);
+    expect(moved).toEqual([]);
+    expect(r.added).toEqual([]);
+    expect(r.logs).toEqual([{ kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", result: "failed" }]);
+  });
+
+  it("上传后读条目时被取消：返回 cancelled，不合并，放弃上传", async () => {
+    const { io, moved, steps } = memoryPackIo(goodPack);
+    io.entries = async () => {
+      steps.push("entries");
+      throw new Error(PACK_CANCELLED);
+    };
+    const r = run(io);
+    expect(await r.outcome).toEqual({ kind: "cancelled" });
+    expect(moved).toEqual([]);
+    expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", "entries", `discard(${UPLOAD_ID})`]);
+  });
+
   it("导入中取消：返回 cancelled，已移入的任务目录保留，不写画板", async () => {
     const { io, moved } = memoryPackIo(goodPack, { failAfterMove: PACK_CANCELLED });
     const r = run(io);
@@ -426,11 +471,11 @@ describe("导入画板包", () => {
     expect(r.logs).toEqual([{ kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", board_file: "甲.ugcboard.json, 乙.ugcboard.json", result: "failed" }]);
   });
 
-  it("成功：先复位取消再进入进度再导入，逐个写画板，日志记计数与实际写入的文件名", async () => {
+  it("成功：先复位取消再进入进度，上传后按上传句柄判定与导入，逐个写画板，日志记计数与实际写入的文件名", async () => {
     const { io, steps } = memoryPackIo(goodPack);
     const r = run(io, async (b) => `${ROOT}\\画板\\${b.title} (2).ugcboard.json`);
     const outcome = await r.outcome;
-    expect(steps).toEqual(["cancel(false)", "import"]);
+    expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", `entries(${UPLOAD_ID})`, "readTexts", `import(${UPLOAD_ID})`]);
     expect(r.stages).toEqual(["progress"]);
     expect(r.added).toEqual(["甲", "乙"]);
     expect(outcome).toEqual({
