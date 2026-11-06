@@ -6,7 +6,9 @@
 import { copyTaskIds, parseBoard, serializeBoard, type Board, type BoardNode } from "./board";
 import { BOARDS_DIR_NAME, basename, resolveFromRoot, toRootRelative } from "./paths";
 import { TASK_RECORD_FILE, taskDirOfRelPath, taskDirOfTaskId } from "./taskDir";
-import { blobSource, readEntryBytes, readZipIndex, type ZipSource } from "./zipIndex";
+import { entryBody, type EntryHash } from "./packHash";
+import { sha256Hex } from "./sha256";
+import { blobSource, readEntryBytes, readZipIndex, type ZipEntry, type ZipSource } from "./zipIndex";
 
 /** 本机能导入、也是导出写的包格式版本。v2 = 导出时按内容去重，被省略的路径记在清单的 duplicates 里（ADR 0013 补记）。 */
 export const PACK_FORMAT_VERSION = 2;
@@ -291,18 +293,16 @@ export async function inspectPack(entries: string[], readTexts: (names: string[]
 
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
-/**
- * 在浏览器本地检查包（#61）：读中央目录与清单、画板文本，交给 inspectPack 判版本与布局。
- * 返回 null 表示 zip 读取器读不了（其他压缩方法、结构异常、条目数据读不出），调用方回退为整包上传、交服务端判定。
- * 目录条目不计入布局，与服务端列条目一致。
- */
-export async function inspectPackLocally(src: ZipSource): Promise<PackCheck | null> {
+/** 本地读出的包：判定结果与文件条目（不含目录条目）。 */
+type LocalPack = { check: PackCheck; entries: ZipEntry[] };
+
+async function readPackLocally(src: ZipSource): Promise<LocalPack | null> {
   const index = await readZipIndex(src);
   if (index.kind !== "ok") return null;
   const files = index.entries.filter((e) => !e.name.endsWith("/"));
   const byName = new Map(files.map((e) => [e.name, e]));
   try {
-    return await inspectPack(
+    const check = await inspectPack(
       files.map((e) => e.name),
       async (names) => {
         const texts: Record<string, string> = {};
@@ -313,9 +313,19 @@ export async function inspectPackLocally(src: ZipSource): Promise<PackCheck | nu
         return texts;
       },
     );
+    return { check, entries: files };
   } catch {
     return null;
   }
+}
+
+/**
+ * 在浏览器本地检查包（#61）：读中央目录与清单、画板文本，交给 inspectPack 判版本与布局。
+ * 返回 null 表示 zip 读取器读不了（其他压缩方法、结构异常、条目数据读不出），调用方回退为整包上传、交服务端判定。
+ * 目录条目不计入布局，与服务端列条目一致。
+ */
+export async function inspectPackLocally(src: ZipSource): Promise<PackCheck | null> {
+  return (await readPackLocally(src))?.check ?? null;
 }
 
 // ---- 导入结果 ----
@@ -348,10 +358,33 @@ export function importSummary(units: MergeUnit[], outcomes: { path: string; outc
 /** 与 server/src/board_pack.rs 的 CANCELLED 一致：取消时请求以此失败。 */
 export const PACK_CANCELLED = "已取消";
 
+/** 单份内容上传的上限，与服务端单文件请求体上限一致（ADR 0018）；包里有更大的条目时回退为整包上传。 */
+export const MAX_CONTENT_BYTES = 64 * 1024 * 1024;
+
+/** 去重上传落盘清单的一项：合并单元里的一个文件与它的内容 sha256（哪个路径对应哪份内容由浏览器给，服务端信任）。 */
+export interface PlacedFile {
+  path: string;
+  sha256: string;
+}
+
+type MergeReport = { outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number };
+
 /** 画板包命令的端口（壳层 ipc 实现，见 shell/adapters.ts）。 */
 export interface PackIo {
   /** 置取消标记；开始导出 / 导入前先以 false 复位。 */
   cancel(cancelled: boolean): Promise<void>;
+  /** 服务端已有的合并单元：任务目录给本机 task.json 的 sha256，参考图给整文件的 sha256；没有为 null。 */
+  existing(units: MergeUnit[]): Promise<{ path: string; sha256: string | null }[]>;
+  /** 按条目解压并算 sha256（浏览器里在 Web Worker 跑）；带进度，取消时以 PACK_CANCELLED reject。 */
+  hash(file: File, entries: ZipEntry[]): Promise<EntryHash[]>;
+  /** 开一份去重上传暂存，返回暂存 id。 */
+  stage(): Promise<string>;
+  /** 上传一份内容到暂存（服务端自算 sha256 核对）；progress 是本份之前已传的字节与全部要传的字节。取消时以 PACK_CANCELLED reject。 */
+  uploadContent(staging: string, sha256: string, body: Blob, progress: { done: number; total: number }): Promise<void>;
+  /** 按落盘清单把暂存的内容放进合并单元并合并（同一份内容第一份落盘、其余硬链接）；结束后服务端删暂存。 */
+  importContent(staging: string, units: MergeUnit[], files: PlacedFile[]): Promise<MergeReport>;
+  /** 不再合并就放弃暂存（幂等）。 */
+  discardStaging?(staging: string): Promise<void>;
   /** 把选中的包上传到服务端临时位置，返回上传句柄；带进度，取消时中止请求并以 PACK_CANCELLED reject。 */
   upload(file: File): Promise<string>;
   /** 包内条目名（正斜杠）。 */
@@ -362,7 +395,7 @@ export interface PackIo {
    * 按合并单元解压合并进用户数据根，先把 duplicates 里被省略的路径还原为与代表条目内容相同的文件（v1 包为空）；
    * 取消时以 PACK_CANCELLED reject，已移入的单元保留。
    */
-  importUnits(pack: string, units: MergeUnit[], duplicates: PackDuplicate[]): Promise<{ outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number }>;
+  importUnits(pack: string, units: MergeUnit[], duplicates: PackDuplicate[]): Promise<MergeReport>;
   /** 不再合并就放弃：删掉服务端的临时上传文件（幂等）。 */
   discard?(pack: string): Promise<void>;
 }
@@ -400,26 +433,104 @@ export interface ImportOptions {
   addBoard(board: Board): Promise<string>;
   /** 复位取消标记之后进入进度阶段。 */
   onStage(stage: "progress"): void;
+  /** 进度阶段内的各步（进度对话框据此显示正在做什么）；整包上传回退时 upload 即整包上传。 */
+  onPhase?(phase: ImportPhase): void;
   /** 脱敏日志：只记类别、文件名与计数，不记提示词与报错原文。 */
   log(kind: "board_pack", fields: Record<string, unknown>): void;
 }
 
-type Merged = { check: Extract<PackCheck, { kind: "ok" }>; report: Awaited<ReturnType<PackIo["importUnits"]>> };
+/** 进度阶段内的各步：本地检查 → 问服务端已有 → hash → 上传 → 服务端落盘合并。 */
+export type ImportPhase = "check" | "existing" | "hash" | "upload" | "merge";
+
+type OkCheck = Extract<PackCheck, { kind: "ok" }>;
+type Merged = { check: OkCheck; report: MergeReport };
+
+const isTextEntry = (name: string) => name === PACK_MANIFEST || name.startsWith(`${BOARDS_DIR_NAME}/`);
 
 /**
- * 导入画板包（#128）：在同一个可取消的进度阶段里依次本地检查（#61）→ 上传（#59）→ 解压合并任务目录，之后逐个写画板。
- * 本地检查判为版本过新或损坏时直接返回，一个字节都不上传；检查通过就按本地判定合并，不再让服务端读条目。
- * zip 读取器读不了的包跳过本地检查，整包上传后由服务端读条目与文本判定（不合格不合并）。
+ * 去重上传（#62，ADR 0018 补记）：先问服务端哪些合并单元已有——已有的任务目录按 ADR 0013 比 task.json 判跳过 / 冲突，
+ * 连 hash 都不算；剩下的条目算 sha256，相同内容只上传一份（v1 包在这里按 sha256 合并；v2 包被省略的路径直接用代表条目的内容，
+ * 只为代表条目算 hash），再按「路径 → sha256」的落盘清单让服务端落盘合并。导入参考图要整文件比对，已有的也要算 hash（只读本地）。
+ */
+async function importByContent(io: PackIo, file: File, check: OkCheck, entries: ZipEntry[], phase: (p: ImportPhase) => void): Promise<MergeReport> {
+  const src = blobSource(file);
+  const byName = new Map(entries.map((e) => [e.name, e]));
+  const omitted = new Map(check.duplicates.map((d) => [d.path, d.source]));
+  /** 某个路径的内容在包里由哪个条目承载（v2 被省略的路径指向代表条目）。 */
+  const contentOf = (path: string) => byName.get(omitted.get(path) ?? path)!;
+  const paths = [...byName.keys(), ...omitted.keys()].filter((name) => !isTextEntry(name)).sort(byPath);
+  const filesOf = (unit: MergeUnit) => (unit.identity === null ? [unit.path] : paths.filter((p) => p.startsWith(`${unit.path}/`)));
+
+  phase("existing");
+  const present = new Map((await io.existing(check.units)).map((p) => [p.path, p.sha256]));
+  const settled: MergeReport["outcomes"] = [];
+  const needed: MergeUnit[] = [];
+  const compareAfterHash: { path: string; sha256: string }[] = [];
+  for (const unit of check.units) {
+    const theirs = present.get(unit.path) ?? null;
+    if (theirs === null) needed.push(unit);
+    else if (unit.identity === null) compareAfterHash.push({ path: unit.path, sha256: theirs });
+    else {
+      const ours = await sha256Hex(await readEntryBytes(src, contentOf(`${unit.path}/${unit.identity}`)));
+      settled.push({ path: unit.path, outcome: ours === theirs ? "identical" : "conflict" });
+    }
+  }
+
+  const neededPaths = needed.flatMap(filesOf);
+  const toHash = [...new Map([...neededPaths, ...compareAfterHash.map((c) => c.path)].map((p) => [contentOf(p).name, contentOf(p)])).values()].sort((a, b) => byPath(a.name, b.name));
+  const shaOf = new Map<string, string>();
+  if (toHash.length > 0) {
+    phase("hash");
+    for (const fact of await io.hash(file, toHash)) shaOf.set(fact.name, fact.sha256);
+  }
+  for (const c of compareAfterHash) settled.push({ path: c.path, outcome: shaOf.get(contentOf(c.path).name) === c.sha256 ? "identical" : "conflict" });
+  if (needed.length === 0) return { outcomes: settled, bytes: 0 };
+
+  const files: PlacedFile[] = neededPaths.map((path) => ({ path, sha256: shaOf.get(contentOf(path).name)! }));
+  const contents = new Map<string, ZipEntry>();
+  for (const f of files) if (!contents.has(f.sha256)) contents.set(f.sha256, contentOf(f.path));
+  const total = [...contents.values()].reduce((n, e) => n + e.size, 0);
+
+  phase("upload");
+  const staging = await io.stage();
+  try {
+    let done = 0;
+    for (const [sha256, entry] of contents) {
+      await io.uploadContent(staging, sha256, await entryBody(file, entry), { done, total });
+      done += entry.size;
+    }
+    phase("merge");
+    const report = await io.importContent(staging, needed, files);
+    return { outcomes: [...settled, ...report.outcomes], bytes: report.bytes };
+  } catch (e) {
+    // 服务端在合并结束时自己删暂存；这里覆盖合并之前就被取消 / 失败的情况（幂等）。
+    await io.discardStaging?.(staging).catch(() => undefined);
+    throw e;
+  }
+}
+
+/**
+ * 导入画板包（#128）：在同一个可取消的进度阶段里依次本地检查（#61）→ 上传 → 合并任务目录，之后逐个写画板。
+ * 本地检查判为版本过新或损坏时直接返回，一个字节都不上传；检查通过就按内容去重上传（#62），只传服务端缺少的内容。
+ * zip 读取器读不了的包，或有条目超过单份上限的包，整包上传（#59）；读不了的由服务端读条目与文本判定（不合格不合并）。
  * 从「已拿到用户选的包文件」开始；选包、进度、结果弹窗与文案都留在 ui（弹窗不是端口，见 #128），这里只返回结局。
- * 上传被取消或失败时不再读包内容；上传之后的阶段不再合并时放弃上传。取消或失败时已移入的任务目录保留；写画板第一个失败即停，已写的保留。
+ * 任何一步被取消或失败都不进入后续各步，并放弃已上传的内容。取消或失败时已移入的任务目录保留；写画板第一个失败即停，已写的保留。
  */
 export async function importPack(io: PackIo, opts: ImportOptions): Promise<ImportResult> {
   const { file } = opts;
+  const phase = (p: ImportPhase) => opts.onPhase?.(p);
   const fields = { action: "import", pack_file: file.name };
   let packBoards: string | undefined;
   const outcome = await runCancellable(io, opts.onStage, async (): Promise<Rejected | Merged> => {
-    const local = await inspectPackLocally(blobSource(file));
+    phase("check");
+    const read = await readPackLocally(blobSource(file));
+    const local = read?.check ?? null;
     if (local && local.kind !== "ok") return local;
+    if (read && local && read.entries.every((e) => e.size <= MAX_CONTENT_BYTES)) {
+      packBoards = local.boards.map((b) => basename(b.entry)).join(", ");
+      return { check: local, report: await importByContent(io, file, local, read.entries, phase) };
+    }
+    phase("upload");
     const pack = await io.upload(file);
     try {
       const check =
@@ -436,6 +547,7 @@ export async function importPack(io: PackIo, opts: ImportOptions): Promise<Impor
         return check;
       }
       packBoards = check.boards.map((b) => basename(b.entry)).join(", ");
+      phase("merge");
       return { check, report: await io.importUnits(pack, check.units, check.duplicates) };
     } catch (e) {
       // 服务端在合并结束时自己删临时文件；这里的放弃覆盖合并之前就被取消 / 失败的情况（幂等）。

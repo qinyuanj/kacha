@@ -2,11 +2,14 @@
 // UI 与 core 不直接调业务 HTTP，都经这里的端口。
 import type { FetchLike } from "../core/gateway";
 import { PACK_CANCELLED, type PackEntryFact } from "../core/boardPack";
+import type { EntryHash } from "../core/packHash";
+import type { ZipEntry } from "../core/zipIndex";
+import type { HashMessage, HashRequest } from "./packHash.worker";
 import { ApiError } from "./apiError";
 import { DEFAULT_SETTINGS, serializeSettings } from "../core/settings";
-import type { BrowserPort, Ipc, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
+import type { BrowserPort, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
 
-export type { BoardTexts, BrowserPort, ImageInfo, Ipc, PackUploadPort, RelayPort, SessionPort, TransferPort, Usage, UsageCandidate, UsagePort } from "./types";
+export type { BoardTexts, BrowserPort, ImageInfo, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, Usage, UsageCandidate, UsagePort } from "./types";
 
 /** core/ 按「用户数据根 + 相对路径」拼路径；用户数据根在浏览器里是固定的虚拟根，壳层在边界剥掉，服务端只收相对路径。 */
 export const VIRTUAL_ROOT = "/~";
@@ -105,6 +108,10 @@ const cancelledOps = new Set<string>();
 const inFlight = new Map<string, number>();
 /** 可中止的上传请求：取消时中止，同时通知服务端。 */
 const uploadAborts = new Map<string, AbortController>();
+/** 每个操作一个中止信号（#62）：去重导入里问已有、hash、开暂存、逐份上传都挂在它上面，取消时一并中止。 */
+const opAborts = new Map<string, AbortController>();
+/** 浏览器本地阶段（Worker 里 hash）的进度：有值时进度轮询直接报它，不问服务端。 */
+const localProgress = new Map<string, { done: number; total: number }>();
 
 const requireOp = () => (currentOp ??= newOpId());
 
@@ -222,6 +229,8 @@ const discardUpload = async (id: string) => void (await api(`/api/packs/uploads/
 function onPackProgress(handler: (progress: { done: number; total: number }) => void): () => void {
   let stopped = false;
   const tick = async () => {
+    const local = currentOp ? localProgress.get(currentOp) : undefined;
+    if (!stopped && local) return handler(local);
     if (stopped || !currentOp || !inFlight.has(currentOp)) return;
     try {
       const res = await fetch(`/api/packs/ops/${encodeURIComponent(currentOp)}`, { credentials: "same-origin" });
@@ -286,9 +295,11 @@ export const ipc: Ipc = {
       if (!op) return;
       cancelledOps.add(op);
       uploadAborts.get(op)?.abort();
+      opAborts.get(op)?.abort(new Error(PACK_CANCELLED));
       await api(`/api/packs/ops/${encodeURIComponent(op)}/cancel`, { method: "POST", keepalive: true });
     } else {
       currentOp = newOpId();
+      opAborts.set(currentOp, new AbortController());
     }
   },
   listDir: (path) => api(`/api/fs/dir?${query(path)}`),
@@ -381,3 +392,57 @@ export const usage: UsagePort = {
 };
 
 export const packUpload: PackUploadPort = { upload: uploadPack, discard: discardUpload };
+
+// ---- 去重上传（#62）----
+
+const jsonPost = (body: unknown, signal?: AbortSignal): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), ...(signal ? { signal } : {}) });
+
+/** 在当前操作下跑一个可取消的请求：已取消就不发；被中止或服务端回取消都统一成取消文案，上传类状态码给可读文案。 */
+async function inOp<T>(run: (op: string, signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
+  const op = requireOp();
+  if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
+  try {
+    return await tracked(op, () => run(op, opAborts.get(op)?.signal));
+  } catch (e) {
+    throw uploadFailure(asCancelled(op, e));
+  }
+}
+
+/** hash 阶段：Worker 里按条目流式算 sha256，进度经 localProgress 报给进度轮询；取消即 terminate。 */
+function hashInWorker(file: File, entries: ZipEntry[]): Promise<EntryHash[]> {
+  const op = requireOp();
+  if (cancelledOps.has(op)) return Promise.reject(new Error(PACK_CANCELLED));
+  const signal = opAborts.get(op)?.signal;
+  const worker = new Worker(new URL("./packHash.worker.ts", import.meta.url), { type: "module" });
+  localProgress.set(op, { done: 0, total: entries.reduce((n, e) => n + e.size, 0) });
+  return new Promise<EntryHash[]>((resolve, reject) => {
+    const onAbort = () => reject(new Error(PACK_CANCELLED));
+    signal?.addEventListener("abort", onAbort, { once: true });
+    worker.onmessage = (e: MessageEvent<HashMessage>) => {
+      const m = e.data;
+      if (m.kind === "progress") localProgress.set(op, { done: m.done, total: m.total });
+      else if (m.kind === "done") resolve(m.facts);
+      else reject(new Error(`无法读取画板包：${m.message}`));
+    };
+    worker.onerror = (e) => reject(new Error(`无法读取画板包：${e.message}`));
+    worker.postMessage({ file, entries } satisfies HashRequest);
+  }).finally(() => {
+    worker.terminate();
+    localProgress.delete(op);
+  });
+}
+
+export const packContent: PackContentPort = {
+  existing: (units) => inOp((_op, signal) => api("/api/packs/existing", jsonPost(units, signal))),
+  hash: hashInWorker,
+  stage: () => inOp(async (_op, signal) => (await api<{ id: string }>("/api/packs/staging", { method: "POST", ...(signal ? { signal } : {}) })).id),
+  // 请求体是 Blob：stored 条目是包文件的切片，浏览器按流发送，不读进内存。
+  uploadContent: (staging, sha256, body, progress) =>
+    inOp(async (op, signal) => {
+      const params = new URLSearchParams({ op, done: String(progress.done), total: String(progress.total) });
+      await apiResponse(`/api/packs/staging/${encodeURIComponent(staging)}/contents/${sha256}?${params}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body, ...(signal ? { signal } : {}) });
+    }),
+  // 合并不中止请求：取消经服务端的取消标记生效（409），与整包导入一致。
+  importContent: (staging, units, files) => inOp((op) => api(`/api/packs/staging/${encodeURIComponent(staging)}/import?op=${encodeURIComponent(op)}`, jsonPost({ units, files }))),
+  discardStaging: async (staging) => void (await api(`/api/packs/staging/${encodeURIComponent(staging)}`, { method: "DELETE", keepalive: true })),
+};

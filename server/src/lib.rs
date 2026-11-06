@@ -225,6 +225,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/packs/uploads/{id}/texts", axum::routing::post(packs::upload_texts))
         .route("/api/packs/uploads/{id}/import", axum::routing::post(packs::import))
         .route("/api/packs/uploads/{id}", axum::routing::delete(packs::discard_upload))
+        // 去重上传（#62）：问已有 → 开暂存 → 逐份上传缺少的内容（流式，单份 64 MB 上限由接口自己守）→ 按落盘清单合并。
+        .route("/api/packs/existing", axum::routing::post(packs::existing))
+        .route("/api/packs/staging", axum::routing::post(packs::open_staging))
+        .route("/api/packs/staging/{id}", axum::routing::delete(packs::discard_staging))
+        .route("/api/packs/staging/{id}/contents/{sha256}", axum::routing::put(packs::put_content).layer(axum::extract::DefaultBodyLimit::disable()))
+        .route("/api/packs/staging/{id}/import", axum::routing::post(packs::import_staging))
         .route("/api/packs/ops/{op}", get(packs::op_progress))
         .route("/api/packs/ops/{op}/cancel", axum::routing::post(packs::op_cancel))
         .route("/api/{*rest}", axum::routing::any(api_fallback))

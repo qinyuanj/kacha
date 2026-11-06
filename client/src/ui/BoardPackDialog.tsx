@@ -5,7 +5,8 @@ import type { ExportPlan, PackContents } from "../core/boardPack";
 
 export type PackDialogState =
   | { stage: "confirmExport"; boardFile: string; plan: ExportPlan; contents: PackContents }
-  | { stage: "progress"; title: string }
+  /** detail：进度阶段内正在做的一步（导入时按 ImportPhase 换）。 */
+  | { stage: "progress"; title: string; detail?: string }
   /** 有冲突或写画板失败时才弹；任务目录的导入结果照常给出。 */
   | { stage: "importDone"; message: string; conflicts: string[]; error: string | null };
 
@@ -18,7 +19,7 @@ export interface BoardPackDialogProps {
 
 const formatSize = (bytes: number) => (bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
 
-function Progress({ title, onCancel }: { title: string; onCancel: () => void }) {
+function Progress({ title, detail, onCancel }: { title: string; detail?: string; onCancel: () => void }) {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [cancelling, setCancelling] = useState(false);
   useEffect(() => {
@@ -30,6 +31,7 @@ function Progress({ title, onCancel }: { title: string; onCancel: () => void }) 
       <div className="modal-head">
         <strong>{title}</strong>
       </div>
+      {detail && <div className="muted small pack-phase">{detail}</div>}
       <progress className="pack-progress" value={progress.done} max={progress.total || 1} />
       <div className="muted small">{progress.total ? `${formatSize(progress.done)} / ${formatSize(progress.total)}` : "准备中…"}</div>
       <div className="modal-foot">
@@ -53,7 +55,7 @@ export function BoardPackDialog({ state, onExport, onCancelProgress, onClose }: 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && dismiss?.()}>
       <div className="modal" role="dialog" aria-label="画板包">
-        {state.stage === "progress" && <Progress title={state.title} onCancel={onCancelProgress} />}
+        {state.stage === "progress" && <Progress title={state.title} detail={state.detail} onCancel={onCancelProgress} />}
         {state.stage === "confirmExport" && (
           <>
             <div className="modal-head">

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { newBoard, parseBoard, serializeBoard, taskCount, uniqueBoardFileName, type Board, type ReferenceNode, type ResultNode, type TaskNode } from "./board";
@@ -22,6 +23,7 @@ import {
 } from "./boardPack";
 import { resolveFromRoot } from "./paths";
 import { buildZip } from "./testing/zipFixture";
+import { hashEntries } from "./packHash";
 import { blobSource } from "./zipIndex";
 
 const ROOT = "C:\\Users\\Lzx_8\\Pictures\\UGC AI 生图工具";
@@ -491,6 +493,7 @@ describe("导入画板包", () => {
   const zipFile = (pack: Record<string, string>) =>
     new File([buildZip(Object.entries(pack).map(([name, data]) => ({ name, data, method: name.endsWith(".json") ? 8 : 0, descriptor: true })))], "千问测试.ugcpack");
   const UPLOAD_ID = "up-1";
+  const STAGING_ID = "st-1";
   const TASK = "2026-09-16/20260916T010000Z-0000000a";
   const SECRET = "机密提示词：橘猫";
   const boardA = "画板/甲.ugcboard.json";
@@ -507,12 +510,46 @@ describe("导入画板包", () => {
     [`${TASK}/result.png`]: "",
   };
 
-  /** 内存包命令：记录各步调用与移入的合并单元；failUpload 让上传以该错误 reject，failAfterMove 让导入移完第一个单元后以该错误 reject。 */
-  function memoryPackIo(pack: Record<string, string>, opts: { failAfterMove?: unknown; failUpload?: unknown } = {}) {
+  /**
+   * 内存包命令：记录各步调用与移入的合并单元；failUpload 让上传以该错误 reject，failAfterMove 让导入移完第一个单元后以该错误 reject。
+   * 去重路径：existing 是服务端已有单元的身份 sha256；hash 用真实的流式 hash 并记下算了哪些条目；上传的内容与落盘清单都记下。
+   */
+  function memoryPackIo(pack: Record<string, string>, opts: { failAfterMove?: unknown; failUpload?: unknown; existing?: Record<string, string> } = {}) {
     const moved: string[] = [];
     const steps: string[] = [];
     const restored: { path: string; source: string }[] = [];
+    const hashed: string[] = [];
+    const uploaded: { sha256: string; size: number; progress: { done: number; total: number } }[] = [];
+    const placed: { path: string; sha256: string }[] = [];
     const io: PackIo = {
+      existing: async (units) => {
+        steps.push("existing");
+        return units.map((u) => ({ path: u.path, sha256: opts.existing?.[u.path] ?? null }));
+      },
+      hash: async (file, entries) => {
+        steps.push("hash");
+        hashed.push(...entries.map((e) => e.name));
+        return hashEntries(blobSource(file), entries, () => undefined);
+      },
+      stage: async () => {
+        steps.push("stage");
+        return STAGING_ID;
+      },
+      uploadContent: async (_staging, sha256, body, progress) => {
+        steps.push("uploadContent");
+        if (opts.failUpload !== undefined) throw opts.failUpload;
+        uploaded.push({ sha256, size: body.size, progress });
+      },
+      importContent: async (staging, units, files) => {
+        steps.push(`importContent(${staging})`);
+        placed.push(...files);
+        for (const unit of units) {
+          moved.push(unit.path);
+          if (opts.failAfterMove !== undefined) throw opts.failAfterMove;
+        }
+        return { outcomes: units.map((u) => ({ path: u.path, outcome: "moved" as const })), bytes: uploaded.reduce((n, u) => n + u.size, 0) };
+      },
+      discardStaging: async (staging) => void steps.push(`discardStaging(${staging})`),
       cancel: async (cancelled) => void steps.push(`cancel(${cancelled})`),
       upload: async (file) => {
         steps.push(`upload(${file.name})`);
@@ -538,13 +575,14 @@ describe("导入画板包", () => {
         return { outcomes: units.map((u) => ({ path: u.path, outcome: "moved" as const })), bytes: 1234 };
       },
     };
-    return { io, moved, steps, restored };
+    return { io, moved, steps, restored, hashed, uploaded, placed };
   }
 
   function run(io: PackIo, addBoard: (board: Board) => Promise<string> = async (b) => `${ROOT}\\画板\\${b.title}.ugcboard.json`, file: File = PACK) {
     const logs: Record<string, unknown>[] = [];
     const added: string[] = [];
     const stages: string[] = [];
+    const phases: string[] = [];
     const outcome = importPack(io, {
       file,
       addBoard: async (board) => {
@@ -552,9 +590,10 @@ describe("导入画板包", () => {
         return addBoard(board);
       },
       onStage: (stage) => stages.push(stage),
+      onPhase: (phase) => phases.push(phase),
       log: (kind, fields) => void logs.push({ kind, ...fields }),
     });
-    return { outcome, logs, added, stages };
+    return { outcome, logs, added, stages, phases };
   }
 
   it("读取器认不了的包、版本更高：整包上传后由服务端条目判定，不合并、不写画板，放弃上传，日志记 newer", async () => {
@@ -709,27 +748,22 @@ describe("导入画板包", () => {
       expect(steps).toEqual(["cancel(false)"]);
     });
 
-    it("检查通过：整包上传后直接按本地判定合并，不再在服务端读条目与文本", async () => {
+    it("检查通过：按本地判定走去重上传（问已有 → hash → 上传缺少的内容 → 落盘合并），不整包上传、不让服务端读条目", async () => {
       const { io, steps, moved } = memoryPackIo(goodPack);
       const r = run(io, undefined, zipFile(goodPack));
       expect(await r.outcome).toMatchObject({ kind: "done", summary: { imported: 1 }, written: ["甲.ugcboard.json", "乙.ugcboard.json"] });
-      expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", `import(${UPLOAD_ID})`]);
+      expect(steps).toEqual(["cancel(false)", "existing", "hash", "stage", "uploadContent", "uploadContent", `importContent(${STAGING_ID})`]);
       expect(moved).toEqual([TASK]);
       expect(r.stages).toEqual(["progress"]);
-    });
-
-    it("检查通过的 v2 包：本地读出的还原清单交给壳", async () => {
-      const pack = { ...goodPack, [PACK_MANIFEST]: JSON.stringify({ pack_format_version: 2, app_version: "0.4.0", boards: [boardA, boardB], duplicates: { [`${TASK}/references/01.png`]: `${TASK}/result.png` } }) };
-      const v2 = memoryPackIo(pack);
-      expect(await run(v2.io, undefined, zipFile(pack)).outcome).toMatchObject({ kind: "done" });
-      expect(v2.restored).toEqual([{ path: `${TASK}/references/01.png`, source: `${TASK}/result.png` }]);
+      expect(r.phases).toEqual(["check", "existing", "hash", "upload", "merge"]);
     });
 
     it("目录条目不计入布局（与服务端列条目一致）", async () => {
       const { io, steps } = memoryPackIo(goodPack);
       const file = new File([buildZip([...Object.entries(goodPack).map(([name, data]) => ({ name, data })), { name: "2026-09-16/", data: "" }])], "千问测试.ugcpack");
       expect(await run(io, undefined, file).outcome).toMatchObject({ kind: "done" });
-      expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", `import(${UPLOAD_ID})`]);
+      expect(steps).not.toContain(`upload(千问测试.ugcpack)`);
+      expect(steps.at(-1)).toBe(`importContent(${STAGING_ID})`);
     });
 
     it("读取器不支持的压缩方法：跳过本地检查，整包上传，由服务端判定", async () => {
@@ -756,6 +790,147 @@ describe("导入画板包", () => {
       const { io, steps } = memoryPackIo(goodPack);
       expect(await run(io, undefined, new File([bytes], "千问测试.ugcpack")).outcome).toMatchObject({ kind: "done" });
       expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", `entries(${UPLOAD_ID})`, "readTexts", `import(${UPLOAD_ID})`]);
+    });
+  });
+
+  describe("按内容去重上传（#62）", () => {
+    const TASK_B = "2026-09-16/20260916T020000Z-0000000b";
+    const REF = "导入参考图/猫.png";
+    const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+    const RED = "红色的结果图";
+    const BLUE = "蓝色的结果图";
+    const RECORD_A = '{"task_id":"a"}';
+    const RECORD_B = '{"task_id":"b"}';
+    /** v1 包：任务 B 的参考图快照是任务 A 的结果图（迭代的典型重复），另有一张导入参考图。 */
+    const v1Pack: Record<string, string> = {
+      [PACK_MANIFEST]: JSON.stringify({ pack_format_version: 1, app_version: "0.3.2", boards: [boardA] }),
+      [boardA]: serializeBoard(withPrompt("甲")),
+      [`${TASK}/task.json`]: RECORD_A,
+      [`${TASK}/result.png`]: RED,
+      [`${TASK_B}/task.json`]: RECORD_B,
+      [`${TASK_B}/references/01.png`]: RED,
+      [`${TASK_B}/result.png`]: BLUE,
+      [REF]: "猫",
+    };
+    /** 同一份内容的 v2 包：快照被省略，记在 duplicates 里指向任务 A 的结果图。 */
+    const { [`${TASK_B}/references/01.png`]: _omitted, ...v2Rest } = v1Pack;
+    const v2Pack: Record<string, string> = {
+      ...v2Rest,
+      [PACK_MANIFEST]: JSON.stringify({ pack_format_version: 2, app_version: "0.4.0", boards: [boardA], duplicates: { [`${TASK_B}/references/01.png`]: `${TASK}/result.png` } }),
+    };
+    const contentFiles = Object.keys(v1Pack).filter((n) => n !== PACK_MANIFEST && n !== boardA);
+    const uploadedShas = (uploaded: { sha256: string }[]) => uploaded.map((u) => u.sha256).sort();
+
+    it("v1 包：相同内容在浏览器里按 sha256 合并，只上传一份；落盘清单里两条路径指向同一份内容", async () => {
+      const { io, hashed, uploaded, placed } = memoryPackIo(v1Pack);
+      const r = run(io, undefined, zipFile(v1Pack));
+      expect(await r.outcome).toMatchObject({ kind: "done", summary: { imported: 2, skipped: 0, conflicts: [] } });
+      expect([...hashed].sort()).toEqual([...contentFiles].sort());
+      expect(uploadedShas(uploaded)).toEqual([RECORD_A, RED, RECORD_B, BLUE, "猫"].map(sha).sort());
+      expect(placed).toEqual(expect.arrayContaining([
+        { path: `${TASK}/result.png`, sha256: sha(RED) },
+        { path: `${TASK_B}/references/01.png`, sha256: sha(RED) },
+        { path: REF, sha256: sha("猫") },
+      ]));
+      expect(placed).toHaveLength(contentFiles.length);
+      // 上传进度跨各份累计：总量 = 去重后的字节数。
+      const total = [RECORD_A, RED, RECORD_B, BLUE, "猫"].reduce((n, t) => n + new TextEncoder().encode(t).length, 0);
+      expect(uploaded.map((u) => u.progress.total)).toEqual(uploaded.map(() => total));
+      expect(uploaded[0].progress.done).toBe(0);
+      expect(uploaded.at(-1)!.progress.done).toBe(total - uploaded.at(-1)!.size);
+    });
+
+    it("v2 包：只为代表条目算 hash 并上传，被省略的路径在落盘清单里用代表条目的 sha256（与 v1 汇合到同一套落盘）", async () => {
+      const v2 = memoryPackIo(v2Pack);
+      expect(await run(v2.io, undefined, zipFile(v2Pack)).outcome).toMatchObject({ kind: "done", summary: { imported: 2 } });
+      expect(v2.hashed).not.toContain(`${TASK_B}/references/01.png`);
+      expect(uploadedShas(v2.uploaded)).toEqual([RECORD_A, RED, RECORD_B, BLUE, "猫"].map(sha).sort());
+      const v1 = memoryPackIo(v1Pack);
+      await run(v1.io, undefined, zipFile(v1Pack)).outcome;
+      const byPath = (a: { path: string }, b: { path: string }) => a.path.localeCompare(b.path);
+      expect([...v2.placed].sort(byPath)).toEqual([...v1.placed].sort(byPath));
+    });
+
+    it("服务端已有的任务目录（task.json 一致）：不进入 hash 与上传，计为跳过；只合并缺少的", async () => {
+      const { io, hashed, uploaded, placed, moved } = memoryPackIo(v1Pack, { existing: { [TASK]: sha(RECORD_A) } });
+      const r = run(io, undefined, zipFile(v1Pack));
+      expect(await r.outcome).toMatchObject({ kind: "done", summary: { imported: 1, skipped: 1, conflicts: [] } });
+      expect(hashed.filter((n) => n.startsWith(`${TASK}/`))).toEqual([]);
+      expect(placed.filter((f) => f.path.startsWith(`${TASK}/`))).toEqual([]);
+      expect(uploadedShas(uploaded)).not.toContain(sha(RECORD_A));
+      expect(moved).toEqual([TASK_B, REF]);
+    });
+
+    it("服务端已有但 task.json 不一致：照 ADR 0013 报冲突、不覆盖，也不 hash、不上传", async () => {
+      const { io, hashed, moved } = memoryPackIo(v1Pack, { existing: { [TASK]: sha("本机的另一份记录") } });
+      expect(await run(io, undefined, zipFile(v1Pack)).outcome).toMatchObject({ kind: "done", summary: { imported: 1, skipped: 0, conflicts: [TASK] } });
+      expect(hashed.filter((n) => n.startsWith(`${TASK}/`))).toEqual([]);
+      expect(moved).not.toContain(TASK);
+    });
+
+    it("v2 包的代表条目在已有的任务目录里：仍为还原被省略的路径算 hash 并上传那份内容", async () => {
+      const { io, hashed, uploaded, placed } = memoryPackIo(v2Pack, { existing: { [TASK]: sha(RECORD_A) } });
+      expect(await run(io, undefined, zipFile(v2Pack)).outcome).toMatchObject({ kind: "done", summary: { imported: 1, skipped: 1 } });
+      expect(hashed).toContain(`${TASK}/result.png`);
+      expect(hashed).not.toContain(`${TASK}/task.json`);
+      expect(uploadedShas(uploaded)).toContain(sha(RED));
+      expect(placed).toContainEqual({ path: `${TASK_B}/references/01.png`, sha256: sha(RED) });
+      expect(placed.filter((f) => f.path.startsWith(`${TASK}/`))).toEqual([]);
+    });
+
+    it("服务端已有的导入参考图：内容一致为跳过、不一致为冲突，都不上传", async () => {
+      const same = memoryPackIo(v1Pack, { existing: { [REF]: sha("猫") } });
+      expect(await run(same.io, undefined, zipFile(v1Pack)).outcome).toMatchObject({ kind: "done", summary: { conflicts: [] } });
+      expect(same.placed.map((f) => f.path)).not.toContain(REF);
+      expect(uploadedShas(same.uploaded)).not.toContain(sha("猫"));
+      const differ = memoryPackIo(v1Pack, { existing: { [REF]: sha("狗") } });
+      expect(await run(differ.io, undefined, zipFile(v1Pack)).outcome).toMatchObject({ kind: "done", summary: { conflicts: [REF] } });
+      expect(differ.placed.map((f) => f.path)).not.toContain(REF);
+    });
+
+    it("全部已存在：只问一次服务端，不 hash、不开暂存、不上传、不合并，结果为全部跳过", async () => {
+      const { io, steps } = memoryPackIo(v1Pack, { existing: { [TASK]: sha(RECORD_A), [TASK_B]: sha(RECORD_B), [REF]: sha("猫") } });
+      const r = run(io, undefined, zipFile(v1Pack));
+      expect(await r.outcome).toMatchObject({ kind: "done", summary: { imported: 0, skipped: 2, conflicts: [], message: "导入 0 个任务，跳过 2 个" }, written: ["甲.ugcboard.json"] });
+      // 参考图要比对整文件，仍要算它的 hash（只读本地，不上传）。
+      expect(steps).toEqual(["cancel(false)", "existing", "hash"]);
+      expect(r.logs).toEqual([expect.objectContaining({ result: "ok", task_dirs: 0, skipped: 2, bytes: 0 })]);
+    });
+
+    const failing = (error: unknown) => async () => {
+      throw error;
+    };
+    for (const phase of ["existing", "hash", "stage", "uploadContent", "importContent"] as const) {
+      for (const [result, error] of [["cancelled", new Error(PACK_CANCELLED)], ["failed", new Error("服务端返回 HTTP 500")]] as const) {
+        it(`${phase} 阶段${result === "cancelled" ? "被取消" : "失败"}：返回 ${result}，不进入后续阶段，不写画板`, async () => {
+          const m = memoryPackIo(v1Pack);
+          const original = m.io[phase] as (...args: never[]) => Promise<unknown>;
+          m.io[phase] = (async (...args: never[]) => {
+            await original(...args);
+            return failing(error)();
+          }) as never;
+          const r = run(m.io, undefined, zipFile(v1Pack));
+          expect(await r.outcome).toEqual(result === "cancelled" ? { kind: "cancelled" } : { kind: "failed", error: "服务端返回 HTTP 500" });
+          const order = ["existing", "hash", "stage", "uploadContent", `importContent(${STAGING_ID})`];
+          const at = m.steps.findIndex((s) => s === phase || s.startsWith(`${phase}(`));
+          const later = order.slice(order.findIndex((s) => s === phase || s.startsWith(`${phase}(`)) + 1);
+          expect(m.steps.slice(at + 1).filter((s) => later.includes(s))).toEqual([]);
+          expect(r.added).toEqual([]);
+          // 开了暂存之后的失败都放弃暂存（幂等）；之前的没有暂存可放弃。
+          const staged = ["uploadContent", "importContent"].includes(phase);
+          expect(m.steps.includes(`discardStaging(${STAGING_ID})`)).toBe(staged);
+          expect(m.steps).not.toContain("upload(千问测试.ugcpack)");
+        });
+      }
+    }
+
+    it("有条目超过单份 64 MB 上限：回退为整包上传", async () => {
+      const huge = new Uint8Array(64 * 1024 * 1024 + 1);
+      const entries = Object.entries(goodPack).map(([name, data]) => ({ name, data, method: name.endsWith(".json") ? 8 : 0 }));
+      const file = new File([buildZip([...entries, { name: `${TASK}/big.bin`, data: huge }])], "千问测试.ugcpack");
+      const { io, steps } = memoryPackIo(goodPack);
+      expect(await run(io, undefined, file).outcome).toMatchObject({ kind: "done" });
+      expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", `import(${UPLOAD_ID})`]);
     });
   });
 

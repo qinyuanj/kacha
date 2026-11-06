@@ -165,7 +165,7 @@ async function centralEntries(src: ZipSource): Promise<ZipEntry[]> {
 }
 
 /** 条目数据在文件里的起点：本地头的文件名与 extra 长度可能与中央目录不同，必须按本地头算。 */
-async function dataStart(src: ZipSource, entry: ZipEntry): Promise<number> {
+export async function dataStart(src: ZipSource, entry: ZipEntry): Promise<number> {
   const header = view(await read(src, entry.localHeaderOffset, LOCAL_HEADER_SIZE));
   if (header.getUint32(0, true) !== SIG_LOCAL) unsupported(`本地头损坏：${entry.name}`);
   const start = entry.localHeaderOffset + LOCAL_HEADER_SIZE + header.getUint16(26, true) + header.getUint16(28, true);

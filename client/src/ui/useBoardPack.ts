@@ -3,7 +3,7 @@ import { browser, ipc } from "../shell/ipc";
 import { pickPackFile } from "../shell/packFile";
 import { useCallback, useState } from "react";
 import { BOARD_EXTENSION, type Board } from "../core/board";
-import { buildExportSpec, exportSources, importPack as importPackIn, PACK_EXTENSION, planExport, planPackContents, runCancellable } from "../core/boardPack";
+import { buildExportSpec, exportSources, importPack as importPackIn, PACK_EXTENSION, planExport, planPackContents, runCancellable, type ImportPhase } from "../core/boardPack";
 import { packFs, packIo } from "../shell/adapters";
 import { logEvent } from "../shell/log";
 import type { PackDialogState } from "./BoardPackDialog";
@@ -14,6 +14,15 @@ interface PackBoards {
   boardFileName: (key: string) => string | null;
   addImportedBoard: (board: Board) => Promise<string>;
 }
+
+/** 导入进度对话框里各步的说明（#62）。 */
+const IMPORT_PHASES: Record<ImportPhase, string> = {
+  check: "正在检查画板包…",
+  existing: "正在比对服务端已有的任务目录…",
+  hash: "正在计算内容校验值…",
+  upload: "正在上传缺少的内容…",
+  merge: "正在合并任务目录…",
+};
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -76,6 +85,7 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
         file,
         addBoard: (board) => boards.addImportedBoard(board),
         onStage: progress(`正在导入画板包：${file.name}`),
+        onPhase: (phase) => setDialog((d) => (d?.stage === "progress" ? { ...d, detail: IMPORT_PHASES[phase] } : d)),
         log: logEvent,
       });
       switch (result.kind) {
