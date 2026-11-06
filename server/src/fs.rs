@@ -53,7 +53,12 @@ pub(crate) fn resolve(state: &AppState, user: &User, rel: &str) -> Result<PathBu
 
 /// 写入类接口的磁盘余量检查：不足 507。
 pub(crate) fn ensure_space(state: &AppState) -> Result<(), Response> {
-    if state.disk_guard().enough() {
+    ensure_space_for(state, None)
+}
+
+/// 要写入 `incoming` 字节（如上传的 Content-Length）时的余量预检：写完会低于门槛即 507；长度未知按 ensure_space。
+pub(crate) fn ensure_space_for(state: &AppState, incoming: Option<u64>) -> Result<(), Response> {
+    if state.disk_guard().fits(incoming) {
         Ok(())
     } else {
         Err(error(StatusCode::INSUFFICIENT_STORAGE, "insufficient_storage", "服务器空间不足，请联系管理员"))

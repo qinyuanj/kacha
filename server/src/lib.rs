@@ -80,7 +80,7 @@ struct Inner {
     sessions: session::Sessions,
     /// 画板读-比较-写与改名的互斥：版本校验必须整体串行，否则两页同时写都通过。
     board_lock: tokio::sync::Mutex<()>,
-    /// 全局大请求并发上限（文件写入、结果图下载、SHA、图片解析、画板包导入导出）。
+    /// 全局大请求并发上限（文件写入、结果图下载、SHA、图片解析、缩略图生成、读画板包内容、画板包导入导出；画板包上传不占）。
     heavy: limits::HeavyGate,
     /// 磁盘余量守卫：写入类接口余量不足返回 507。
     disk: limits::DiskGuard,
@@ -219,6 +219,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/log", axum::routing::post(fs::log_event))
         // 画板包：导出为下载流；导入先流式上传（不受单文件 64 MB 限制），再判定、合并。
         .route("/api/packs/export", axum::routing::post(packs::export))
+        .route("/api/packs/export/facts", axum::routing::post(packs::export_facts))
         .route("/api/packs/uploads", axum::routing::post(packs::upload).layer(axum::extract::DefaultBodyLimit::disable()))
         .route("/api/packs/uploads/{id}/entries", get(packs::upload_entries))
         .route("/api/packs/uploads/{id}/texts", axum::routing::post(packs::upload_texts))

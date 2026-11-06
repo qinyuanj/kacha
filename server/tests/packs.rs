@@ -460,3 +460,215 @@ async fn v2_import_rejects_unsafe_or_dangling_duplicates_without_writing() {
         assert!(!root.parent().unwrap().join("evil.png").exists());
     }
 }
+
+// ---- 导出包格式 v2：服务端给字节事实、只写实存条目（#63） ----
+
+fn seed_duplicate_reference(h: &Harness) {
+    seed_task(h, GOOD_KEY);
+    let root = h.user_root(GOOD_KEY);
+    std::fs::create_dir_all(root.join("别处")).unwrap();
+    // 与任务目录里的结果图内容相同：迭代时上一轮结果被当作参考图。
+    std::fs::write(root.join("别处/猫.png"), png()).unwrap();
+}
+
+#[tokio::test]
+async fn export_facts_report_size_and_sha256_of_every_file_the_export_would_write() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    seed_duplicate_reference(&h);
+    let body = serde_json::json!({ "task_dirs": [TASK, "2026-09-16/20260916T090000Z-000000ff"], "files": [{ "source": "别处/猫.png", "entry": "导入参考图/abc.png" }] });
+    let reply = h.send(Method::POST, "/api/packs/export/facts?op=f1", Some(&cookie), body.to_string()).await;
+    assert_eq!(reply.status, 200, "{}", reply.text());
+    let facts = reply.json();
+    let facts = facts.as_array().unwrap();
+    let entries: Vec<&str> = facts.iter().map(|f| f["entry"].as_str().unwrap()).collect();
+    // 本机不存在的任务目录跳过，与导出一致；文本条目不在其中。
+    assert_eq!(entries, vec![format!("{TASK}/result.png").as_str(), format!("{TASK}/task.json").as_str(), "导入参考图/abc.png"]);
+    let fact = |entry: &str| facts.iter().find(|f| f["entry"] == entry).unwrap().clone();
+    let result = fact(&format!("{TASK}/result.png"));
+    assert_eq!(result["size"], png().len() as u64);
+    assert_eq!(result["sha256"].as_str().unwrap().len(), 64);
+    assert_eq!(fact("导入参考图/abc.png")["sha256"], result["sha256"], "内容相同则 sha256 相同");
+    assert_ne!(fact(&format!("{TASK}/task.json"))["sha256"], result["sha256"]);
+    // 结束即注销操作：之后的进度查询按「已结束」回 204（#59）。
+    assert_eq!(h.get("/api/packs/ops/f1", Some(&cookie)).await.status, 204, "结束即注销操作");
+}
+
+#[tokio::test]
+async fn export_facts_reject_sources_outside_the_user_root() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let body = serde_json::json!({ "task_dirs": [], "files": [{ "source": "/etc/hostname", "entry": "导入参考图/x.png" }] });
+    let reply = h.send(Method::POST, "/api/packs/export/facts?op=f2", Some(&cookie), body.to_string()).await;
+    assert_eq!(reply.status, 422, "{}", reply.text());
+}
+
+#[tokio::test]
+async fn cancelling_export_facts_returns_409() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let dir = h.user_root(GOOD_KEY).join(TASK);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("task.json"), b"{}").unwrap();
+    std::fs::write(dir.join("result.bin"), vec![7u8; 96 * 1024 * 1024]).unwrap();
+    let body = serde_json::json!({ "task_dirs": [TASK], "files": [] }).to_string();
+    let req = Request::builder().method(Method::POST).uri("/api/packs/export/facts?op=f3").header(header::COOKIE, &cookie).body(Body::from(body)).unwrap();
+    let pending = tokio::spawn(h.app.clone().oneshot(req));
+    for _ in 0..400 {
+        let p = h.get("/api/packs/ops/f3", Some(&cookie)).await;
+        if p.status == 200 && p.json()["done"].as_u64().unwrap_or(0) > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert_eq!(h.send(Method::POST, "/api/packs/ops/f3/cancel", Some(&cookie), Body::empty()).await.status, 204);
+    let res = pending.await.unwrap().unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let text = String::from_utf8(res.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
+    assert!(text.contains("已取消"), "{text}");
+}
+
+#[tokio::test]
+async fn export_writes_only_present_entries_and_the_manifest_lists_duplicates() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    seed_duplicate_reference(&h);
+    let manifest = serde_json::json!({ "pack_format_version": 2, "app_version": "0.4.0", "boards": ["画板/a.ugcboard.json"], "duplicates": { "导入参考图/abc.png": format!("{TASK}/result.png") } });
+    let mut spec = export_spec();
+    spec["texts"][0]["text"] = manifest.to_string().into();
+    spec["omitted"] = serde_json::json!(["导入参考图/abc.png"]);
+    let reply = h.send(Method::POST, "/api/packs/export?op=v2e", Some(&cookie), spec.to_string()).await;
+    assert_eq!(reply.status, 200, "{}", reply.text());
+    let mut names = zip_entries(&reply.body);
+    names.sort();
+    assert_eq!(names, vec![format!("{TASK}/result.png"), format!("{TASK}/task.json"), "manifest.json".to_string(), "画板/a.ugcboard.json".to_string()]);
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(reply.body.to_vec())).unwrap();
+    let mut text = String::new();
+    archive.by_name("manifest.json").unwrap().read_to_string(&mut text).unwrap();
+    let written: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(written["duplicates"]["导入参考图/abc.png"], format!("{TASK}/result.png"));
+}
+
+#[tokio::test]
+async fn export_rejects_omitting_entries_that_are_not_files_of_the_spec() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    seed_duplicate_reference(&h);
+    for (i, omitted) in [serde_json::json!(["导入参考图/没有.png"]), serde_json::json!(["manifest.json"]), serde_json::json!(["画板/a.ugcboard.json"])].into_iter().enumerate() {
+        let mut spec = export_spec();
+        spec["omitted"] = omitted.clone();
+        let reply = h.send(Method::POST, &format!("/api/packs/export?op=om{i}"), Some(&cookie), spec.to_string()).await;
+        assert_eq!(reply.status, 422, "{omitted}: {}", reply.text());
+    }
+}
+
+// ---- 上传不占大请求名额、空闲超时、余量预检（#60）----
+
+type BodySender = tokio::sync::mpsc::Sender<Result<Vec<u8>, std::io::Error>>;
+
+/// 请求体由测试一块一块喂、可以停住不发的上传请求。
+fn stalled_upload(cookie: &str, op: &str, content_length: Option<u64>) -> (BodySender, Request<Body>) {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(1);
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) });
+    let mut req = Request::builder().method(Method::POST).uri(format!("/api/packs/uploads?op={op}")).header(header::COOKIE, cookie);
+    if let Some(len) = content_length {
+        req = req.header(header::CONTENT_LENGTH, len.to_string());
+    }
+    (tx, req.body(Body::from_stream(stream)).unwrap())
+}
+
+fn upload_temps(h: &Harness, key: &str) -> usize {
+    let packs = h.user_root(key).join(".kacha/packs");
+    if packs.exists() { std::fs::read_dir(packs).unwrap().count() } else { 0 }
+}
+
+/// 等到 `count` 个上传临时文件都写到 `len` 字节，并把它们的修改时间对齐到 harness 时钟。
+async fn wait_for_partial_uploads(h: &Harness, count: usize, len: u64) {
+    let packs = h.user_root(GOOD_KEY).join(".kacha/packs");
+    for _ in 0..500 {
+        let files: Vec<_> = std::fs::read_dir(&packs).into_iter().flatten().flatten().collect();
+        if files.len() == count && files.iter().all(|f| f.metadata().is_ok_and(|m| m.len() == len)) {
+            files.iter().for_each(|f| set_mtime(&f.path(), h.now()));
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("没等到 {count} 个写了 {len} 字节的上传临时文件");
+}
+
+#[tokio::test]
+async fn four_stalled_uploads_do_not_block_an_export() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    seed_task(&h, GOOD_KEY);
+    let mut senders = Vec::new();
+    let mut pending = Vec::new();
+    for i in 0..kacha_server::limits::HEAVY_CONCURRENCY {
+        let (tx, req) = stalled_upload(&cookie, &format!("s{i}"), Some(4096));
+        pending.push(tokio::spawn(h.app.clone().oneshot(req)));
+        tx.send(Ok(vec![7u8; 1024])).await.unwrap();
+        senders.push(tx);
+        // 等这一块写下去，再把修改时间对齐到 harness 时钟：否则下一个上传开始时会把它当过期暂存回收。
+        wait_for_partial_uploads(&h, i + 1, 1024).await;
+    }
+    assert_eq!(upload_temps(&h, GOOD_KEY), 4, "4 个上传都已开始写临时文件，然后停住不发");
+
+    let spec = serde_json::json!({ "texts": [], "task_dirs": [TASK], "files": [] }).to_string();
+    let export = tokio::time::timeout(std::time::Duration::from_secs(10), h.send(Method::POST, "/api/packs/export?op=x1", Some(&cookie), spec))
+        .await
+        .expect("挂起的上传不能占住大请求名额，导出必须能完成");
+    assert_eq!(export.status, 200, "{}", export.text());
+    assert!(zip_entries(&export.body).contains(&format!("{TASK}/result.png")));
+    assert!(pending.iter().all(|p| !p.is_finished()), "上传仍在等请求体");
+    drop(senders);
+}
+
+#[tokio::test(start_paused = true)]
+async fn upload_idle_for_over_60_seconds_returns_408_and_deletes_the_temp_file() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let (tx, req) = stalled_upload(&cookie, "idle", Some(4096));
+    let pending = tokio::spawn(h.app.clone().oneshot(req));
+    tx.send(Ok(vec![7u8; 1024])).await.unwrap();
+    // 计的是块与块之间的空闲：59 秒后再来一块，计时重新开始。
+    tokio::time::sleep(std::time::Duration::from_secs(59)).await;
+    tx.send(Ok(vec![7u8; 1024])).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_secs(59)).await;
+    assert!(!pending.is_finished(), "块与块之间没超过 60 秒，上传继续");
+    assert_eq!(upload_temps(&h, GOOD_KEY), 1, "写了一半的临时文件在盘上");
+
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    let res = tokio::time::timeout(std::time::Duration::from_secs(5), pending).await.expect("空闲超过 60 秒应结束上传").unwrap().unwrap();
+    assert_eq!(res.status(), StatusCode::REQUEST_TIMEOUT);
+    let body: serde_json::Value = serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["code"], "upload_timeout");
+    assert_eq!(upload_temps(&h, GOOD_KEY), 0, "超时删除临时文件");
+    assert_eq!(h.get("/api/packs/ops/idle", Some(&cookie)).await.status, 204, "超时即注销操作");
+    drop(tx);
+}
+
+#[tokio::test]
+async fn upload_that_does_not_fit_above_the_free_space_threshold_returns_507_without_a_temp_file() {
+    let min_free = kacha_server::limits::DEFAULT_MIN_FREE_BYTES;
+    // 余量刚过门槛：现有判定放行，但放不下 4096 字节的包。
+    let h = Harness::with_free_space(Some(min_free + 4095));
+    let cookie = h.session(GOOD_KEY).await;
+    let (tx, req) = stalled_upload(&cookie, "big", Some(4096));
+    let res = tokio::time::timeout(std::time::Duration::from_secs(5), h.app.clone().oneshot(req)).await.expect("开始写入前就应拒绝，不等请求体").unwrap();
+    assert_eq!(res.status(), StatusCode::INSUFFICIENT_STORAGE);
+    let body: serde_json::Value = serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["code"], "insufficient_storage");
+    assert!(!h.user_root(GOOD_KEY).join(".kacha/packs").exists(), "不创建临时文件");
+    drop(tx);
+
+    // 放得下（长度 + 门槛不超过余量）照常上传。
+    let fits = h.post_with_length("/api/packs/uploads", &cookie, vec![7u8; 4095]).await;
+    assert_eq!(fits.status, 200, "{}", fits.text());
+    // 没有 Content-Length：按现有的余量门槛判定，余量够门槛即放行。
+    let (tx, req) = stalled_upload(&cookie, "nolen", None);
+    let pending = tokio::spawn(h.app.clone().oneshot(req));
+    tx.send(Ok(vec![7u8; 8192])).await.unwrap();
+    drop(tx);
+    let res = tokio::time::timeout(std::time::Duration::from_secs(5), pending).await.unwrap().unwrap().unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}

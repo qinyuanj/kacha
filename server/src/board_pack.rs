@@ -2,6 +2,7 @@
 //! 结果怎么计数）全部在前端 core/boardPack.ts；这里只按给定条目与合并单元搬字节，并守住路径安全。
 //!
 //! 导出：流式写同目录临时文件，JSON deflate、其余 store，完成后 rename 覆盖目标。
+//! 包格式 v2：导出前按规格给出逐文件长度与 sha256（entry_facts），导出时不写规格里 omitted 的条目。
 //! 导入：只解压属于给定合并单元的条目到输出根目录下的临时目录，校验后逐个单元原子 rename 移入；
 //! 目标已存在时按单元的身份文件（或整文件）比对，一致为跳过、不一致为冲突，均不覆盖。
 //! 失败 / 取消时清理临时目录，已移入的保留；进程被杀留下的临时目录在下次导入开始时清理。
@@ -41,11 +42,24 @@ pub struct PackFile {
 
 #[derive(Debug, Deserialize)]
 pub struct ExportSpec {
-    /// 直接写入的文本条目（清单、画板）。
+    /// 直接写入的文本条目（清单、画板）；算字节事实时不需要。
+    #[serde(default)]
     pub texts: Vec<PackText>,
     /// 相对输出根目录的目录，整目录写入；本机不存在的跳过。
     pub task_dirs: Vec<String>,
     pub files: Vec<PackFile>,
+    /// 包格式 v2 里不写的条目（前端核心按内容去重选出的被省略路径，已记进清单的 duplicates）。
+    /// 必须是本规格要写的文件，不能是文本条目。
+    #[serde(default)]
+    pub omitted: Vec<String>,
+}
+
+/// 导出要写的一个文件的字节事实：包内路径、长度与 sha256（前端核心据此去重）。
+#[derive(Debug, Serialize, PartialEq)]
+pub struct EntryFact {
+    pub entry: String,
+    pub size: u64,
+    pub sha256: String,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -194,7 +208,41 @@ fn export_sources(root: &Path, spec: &ExportSpec) -> io::Result<(Vec<(String, Pa
         let path = resolve_in(root, &f.source)?;
         sources.push((f.entry.clone(), path));
     }
+    let omitted: BTreeSet<&str> = spec.omitted.iter().map(String::as_str).collect();
+    if let Some(name) = omitted.iter().find(|name| !sources.iter().any(|(n, _)| n == *name)) {
+        return Err(invalid(format!("被省略的条目不是导出的文件：{name}")));
+    }
+    sources.retain(|(name, _)| !omitted.contains(name.as_str()));
     Ok((sources, task_dirs))
+}
+
+/// 导出要写的全部文件（不含 omitted 与文本条目）的长度与 sha256，按包内路径排序。progress 按已读字节报告，可取消。
+pub fn entry_facts(root: &Path, spec: &ExportSpec, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<Vec<EntryFact>> {
+    let (mut sources, _) = export_sources(root, spec)?;
+    check_entry_names(&[], &sources)?;
+    sources.sort();
+    let total = sources.iter().map(|(_, p)| fs::metadata(p).map(|m| m.len()).unwrap_or(0)).sum::<u64>();
+    let mut done = 0;
+    let mut facts = Vec::with_capacity(sources.len());
+    let mut buf = vec![0u8; CHUNK];
+    for (entry, path) in sources {
+        let mut file = File::open(&path)?;
+        let mut hasher = Sha256::new();
+        let mut size = 0u64;
+        loop {
+            check_cancel(cancel)?;
+            let n = file.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+            size += n as u64;
+            done += n as u64;
+            progress(done, total);
+        }
+        facts.push(EntryFact { entry, size, sha256: format!("{:x}", hasher.finalize()) });
+    }
+    Ok(facts)
 }
 
 /// 相对用户数据根解析：拒绝绝对路径、`..` 与符号链接越界（board_pack 不再接受浏览器传来的本机绝对路径）。
@@ -510,6 +558,7 @@ mod tests {
             texts: vec![text("manifest.json", "{\"pack_format_version\":1}"), text("画板/千问测试.ugcboard.json", "{\"title\":\"千问测试\"}")],
             task_dirs: vec![TASK_A.into(), TASK_B.into(), "2026-09-17/20260917T000000Z-missing".into()],
             files: vec![PackFile { source: REF_SOURCE.into(), entry: REF.into() }],
+            omitted: vec![],
         }
     }
 

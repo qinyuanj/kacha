@@ -1,5 +1,5 @@
 // Web 壳层端口：UI 只认这些接口，同源 HTTP 与浏览器能力都在 ipc.ts 中实现。
-import type { MergeOutcome, MergeUnit, PackDuplicate, PackExportSpec } from "../core/boardPack";
+import type { MergeOutcome, MergeUnit, PackDuplicate, PackEntryFact, PackExportSpec } from "../core/boardPack";
 import type { DirEntry } from "../core/relocate";
 
 export interface BoardTexts {
@@ -37,6 +37,8 @@ export interface Ipc {
   readModelsCache(): Promise<string | null>;
   writeModelsCache(text: string): Promise<void>;
   logEvent(kind: string, fields: Record<string, unknown>): Promise<void>;
+  /** 导出前的 hash 阶段：每个要写的文件的长度与 sha256；取消时以 PACK_CANCELLED reject。 */
+  boardPackFacts(spec: Pick<PackExportSpec, "task_dirs" | "files">): Promise<PackEntryFact[]>;
   boardPackExport(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number }>;
   boardPackEntries(pack: string): Promise<string[]>;
   boardPackReadTexts(pack: string, names: string[]): Promise<Record<string, string>>;

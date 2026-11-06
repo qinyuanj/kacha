@@ -1,7 +1,7 @@
 // 壳层（唯一实现）：业务调用走同源 HTTP，密钥存 localStorage，网关由浏览器直连（ADR 0018）。
 // UI 与 core 不直接调业务 HTTP，都经这里的端口。
 import type { FetchLike } from "../core/gateway";
-import { PACK_CANCELLED } from "../core/boardPack";
+import { PACK_CANCELLED, type PackEntryFact } from "../core/boardPack";
 import { ApiError } from "./apiError";
 import { DEFAULT_SETTINGS, serializeSettings } from "../core/settings";
 import type { BrowserPort, Ipc, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
@@ -119,6 +119,13 @@ async function tracked<T>(op: string, run: () => Promise<T>): Promise<T> {
   }
 }
 
+/** 上传类请求按状态码给可读的失败文案（#60）：反向代理回的非 JSON 错误体也能看懂。 */
+const UPLOAD_FAILURES: Record<number, string> = {
+  408: "上传中断：超过 60 秒没有收到数据，请检查网络后重试",
+  507: "服务器空间不足，请联系管理员",
+};
+const uploadFailure = (e: unknown) => (e instanceof ApiError && UPLOAD_FAILURES[e.status] ? new ApiError(e.status, e.code, UPLOAD_FAILURES[e.status]) : e);
+
 /** 本操作已被取消，或服务端以 409 cancelled / 文案「已取消」回取消：统一成与桌面一致的取消文案。 */
 const asCancelled = (op: string, e: unknown) => (cancelledOps.has(op) || (e instanceof ApiError && e.message === PACK_CANCELLED) ? new Error(PACK_CANCELLED) : e);
 
@@ -165,12 +172,29 @@ async function boardPackExport(spec: unknown, target: string): Promise<{ task_di
     return await tracked(op, async () => {
       const res = await apiResponse(`/api/packs/export?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(spec) });
       const blob = await res.blob();
+      // 取消请求晚于打包完成到达时，服务端照常发完；以前端的取消为准，不再触发下载。
+      if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
       downloadBlob(blob, target);
       return { task_dirs: (spec as { task_dirs: string[] }).task_dirs.length, bytes: blob.size };
     });
   } catch (e) {
     if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
     throw e;
+  }
+}
+
+/** 导出的 hash 阶段：服务端按操作 id 报进度、可取消（409 已取消）。 */
+async function boardPackFacts(spec: unknown): Promise<PackEntryFact[]> {
+  const op = requireOp();
+  try {
+    return await tracked(op, async () => {
+      const facts = await api<PackEntryFact[]>(`/api/packs/export/facts?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(spec) });
+      // 取消请求晚于服务端算完到达：以前端的取消为准。
+      if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
+      return facts;
+    });
+  } catch (e) {
+    throw asCancelled(op, e);
   }
 }
 
@@ -186,7 +210,7 @@ async function uploadPack(file: File): Promise<string> {
       return ((await res.json()) as { id: string }).id;
     });
   } catch (e) {
-    throw asCancelled(op, e);
+    throw uploadFailure(asCancelled(op, e));
   } finally {
     uploadAborts.delete(op);
   }
@@ -242,6 +266,7 @@ export const ipc: Ipc = {
   logEvent: async (kind, fields) =>
     void (await api("/api/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, fields }) })),
   // spec.files[].source 是 core 拼出的虚拟根绝对路径：在边界剥成相对用户数据根，服务端只收相对路径。
+  boardPackFacts: async (spec) => boardPackFacts({ ...spec, files: spec.files.map((f) => ({ ...f, source: stripRoot(f.source) })) }),
   boardPackExport: async (target, spec) => boardPackExport({ ...spec, files: spec.files.map((f) => ({ ...f, source: stripRoot(f.source) })) }, target),
   boardPackEntries: (pack) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/entries`),
   boardPackReadTexts: (pack, names) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/texts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(names) }),
