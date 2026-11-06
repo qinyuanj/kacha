@@ -476,6 +476,225 @@ describe("任务运行器：按份数展开", () => {
   });
 });
 
+describe("任务运行器：取消各份", () => {
+  const nodeOf = (h: ReturnType<typeof harness>, id: string) => h.runner.getSnapshot().board("A").nodes.get(id);
+  const resultCount = (h: ReturnType<typeof harness>) => h.changes.filter((c) => c.change.kind === "runResult").length;
+  const activeIds = (h: ReturnType<typeof harness>) => h.runner.getSnapshot().active.map((a) => a.taskId);
+  const catReads = (h: ReturnType<typeof harness>) => h.reads.filter((path) => path.endsWith("cat.png"));
+
+  it("节点取消：一次取消执行中与排队的全部份，并解除锁定", async () => {
+    const h = harness({ concurrency: 2 });
+    h.gateway.closed = true;
+    await h.runner.submit(h.target(), board(), ["t1"], { t1: 3 });
+    await settle();
+    expect(nodeOf(h, "t1")?.counts).toEqual({ running: 2, queued: 1 });
+    h.runner.cancel({ kind: "task", boardKey: "A", taskNodeId: "t1" });
+    expect(nodeOf(h, "t1")?.counts).toEqual({ cancelled: 2 });
+    expect(h.locked()).toEqual([]);
+    expect(h.runner.getSnapshot().pending()).toBe(0);
+    h.gateway.open();
+    await settle();
+    expect(resultCount(h)).toBe(0);
+    expect(h.requests).toHaveLength(2);
+    expect(outcomes(h)).toEqual([
+      { kind: "cancelled", gatewayMayContinue: true },
+      { kind: "cancelled", gatewayMayContinue: true },
+    ]);
+  });
+
+  it("节点取消只影响该节点：其他节点的份继续", async () => {
+    const h = harness({ concurrency: 4 });
+    h.gateway.closed = true;
+    await h.runner.submit(h.target(), board(["t1", "t2"]), ["t1", "t2"], { t1: 2, t2: 2 });
+    await settle();
+    h.runner.cancel({ kind: "task", boardKey: "A", taskNodeId: "t1" });
+    expect(h.locked()).toEqual(["t2"]);
+    h.gateway.open();
+    await settle();
+    expect(h.changes.filter((c) => c.change.kind === "runResult")).toHaveLength(2);
+  });
+
+  it("展开中途节点取消：还没读图的份不再读图、不入队，同一次提交的其他节点照常", async () => {
+    const h = harness();
+    h.read.closed = true;
+    const submitting = h.runner.submit(h.target(), board(["t1", "t2"], true), ["t1", "t2"], { t1: 3 });
+    await settle();
+    expect(h.read.held).toBe(1);
+    expect(nodeOf(h, "t1")?.counts).toEqual({ queued: 3 });
+    h.runner.cancel({ kind: "task", boardKey: "A", taskNodeId: "t1" });
+    expect(nodeOf(h, "t1")).toBeUndefined();
+    expect(h.locked()).toEqual([]);
+    h.read.open();
+    expect(await submitting).toEqual([]);
+    await settle();
+    expect(h.logs.filter((l) => l.fields.task_node_id === "t1")).toEqual([]);
+    expect(catReads(h)).toHaveLength(1);
+    expect([...h.taskDirs()]).toHaveLength(1);
+    expect(h.changes.filter((c) => c.change.kind === "runResult")).toHaveLength(1);
+  });
+
+  it("展开中途节点取消：已入队的份一并取消，后续的份不再入队", async () => {
+    const h = harness({ concurrency: 1 });
+    h.gateway.closed = true;
+    h.read.closeAfter(1);
+    const submitting = h.runner.submit(h.target(), board(["t1"], true), ["t1"], { t1: 3 });
+    await settle();
+    expect(h.read.held).toBe(1);
+    expect(nodeOf(h, "t1")?.counts).toEqual({ running: 1, queued: 2 });
+    h.runner.cancel({ kind: "task", boardKey: "A", taskNodeId: "t1" });
+    h.read.open();
+    h.gateway.open();
+    expect(await submitting).toEqual([]);
+    await settle();
+    expect(h.runner.getSnapshot().pending()).toBe(0);
+    expect(h.requests.length).toBeLessThanOrEqual(1);
+    expect(h.logs.filter((l) => l.kind === "queue_dispatch")).toHaveLength(1);
+    expect(h.logs.filter((l) => l.kind === "task" && l.fields.from_status === null)).toHaveLength(1);
+    expect(catReads(h)).toHaveLength(2);
+    expect(resultCount(h)).toBe(0);
+  });
+
+  it("单份取消执行中的一份：只取消该份，排队的份补上派发，其余份产出结果", async () => {
+    const h = harness({ concurrency: 2 });
+    h.gateway.closed = true;
+    await h.runner.submit(h.target(), board(), ["t1"], { t1: 3 });
+    await settle();
+    const [first, second, third] = activeIds(h);
+    h.runner.cancel({ kind: "copy", taskId: first });
+    await settle();
+    expect(nodeOf(h, "t1")?.counts).toEqual({ cancelled: 1, running: 2 });
+    expect(nodeOf(h, "t1")?.copies[0]).toEqual({ taskId: first, status: { kind: "cancelled", gatewayMayContinue: true } });
+    expect(activeIds(h)).toEqual([second, third]);
+    expect(h.locked()).toEqual(["t1"]);
+    h.gateway.open();
+    await settle();
+    expect(resultCount(h)).toBe(2);
+    expect(h.locked()).toEqual([]);
+    expect(outcomes(h)).toEqual([{ kind: "cancelled", gatewayMayContinue: true }]);
+  });
+
+  it("单份取消排队的一份：从未派发，不写任务目录、不留痕迹，其余份继续", async () => {
+    const h = harness({ concurrency: 1 });
+    h.gateway.closed = true;
+    await h.runner.submit(h.target(), board(), ["t1"], { t1: 3 });
+    await settle();
+    const [first, second, third] = activeIds(h);
+    h.runner.cancel({ kind: "copy", taskId: second });
+    expect(activeIds(h)).toEqual([first, third]);
+    expect(nodeOf(h, "t1")?.counts).toEqual({ running: 1, queued: 1 });
+    expect(h.logs.filter((l) => l.fields.to_status === "cancelled").map((l) => l.fields.task_id)).toEqual([second]);
+    h.gateway.open();
+    await settle();
+    expect(resultCount(h)).toBe(2);
+    expect(h.taskDirs().size).toBe(2);
+    expect([...h.files.keys()].some((k) => k.includes(second))).toBe(false);
+  });
+
+  it("单份取消退避中的一份：已取消、网关没在算，其余份继续", async () => {
+    const h = harness({ concurrency: 2 });
+    h.replies.push({ status: 429, body: "{}" });
+    await h.runner.submit(h.target(), board(), ["t1"], { t1: 2 });
+    await settle();
+    expect(nodeOf(h, "t1")?.counts).toEqual({ backoff: 1 });
+    const [backoff] = activeIds(h);
+    h.runner.cancel({ kind: "copy", taskId: backoff });
+    await settle();
+    expect(nodeOf(h, "t1")?.copies).toEqual([{ taskId: backoff, status: { kind: "cancelled", gatewayMayContinue: false } }]);
+    expect(resultCount(h)).toBe(1);
+    expect(h.locked()).toEqual([]);
+  });
+
+  it("展开中途单份取消：不影响同一次提交里还没读图的份和后面的节点", async () => {
+    const h = harness({ concurrency: 1 });
+    h.gateway.closed = true;
+    h.read.closeAfter(1);
+    const submitting = h.runner.submit(h.target(), board(["t1", "t2"], true), ["t1", "t2"], { t1: 3 });
+    await settle();
+    expect(h.read.held).toBe(1);
+    const [first] = activeIds(h);
+    h.runner.cancel({ kind: "copy", taskId: first });
+    h.read.open();
+    h.gateway.open();
+    expect(await submitting).toEqual([]);
+    await settle();
+    expect(h.changes.filter((c) => c.change.kind === "runResult")).toHaveLength(3);
+    expect(h.locked()).toEqual([]);
+  });
+
+  it("单份取消不存在或已结束的任务编号：无事发生", async () => {
+    const h = harness();
+    await h.runner.submit(h.target(), board(), ["t1"], { t1: 2 });
+    await settle();
+    const taskId = h.logs.find((l) => l.kind === "queue_dispatch")?.fields.task_id as string;
+    for (const id of [taskId, "zzz"]) h.runner.cancel({ kind: "copy", taskId: id });
+    await settle();
+    expect(resultCount(h)).toBe(2);
+    expect(h.logs.filter((l) => l.fields.to_status === "cancelled")).toEqual([]);
+  });
+
+  it("取消全部排队：覆盖各份里排队的，执行中的份不受影响", async () => {
+    const h = harness({ concurrency: 1 });
+    h.gateway.closed = true;
+    await h.runner.submit(h.target(), board(["t1", "t2"]), ["t1", "t2"], { t1: 2, t2: 2 });
+    await settle();
+    h.runner.cancel({ kind: "waiting" });
+    expect(nodeOf(h, "t1")?.counts).toEqual({ running: 1 });
+    expect(nodeOf(h, "t2")).toBeUndefined();
+    h.gateway.open();
+    await settle();
+    expect(resultCount(h)).toBe(1);
+  });
+
+  it("展开中途取消全部排队：还没读图的份和后面的节点不再提交", async () => {
+    const h = harness({ concurrency: 1 });
+    h.gateway.closed = true;
+    h.read.closeAfter(1);
+    const submitting = h.runner.submit(h.target(), board(["t1", "t2"], true), ["t1", "t2"], { t1: 3 });
+    await settle();
+    expect(h.read.held).toBe(1);
+    h.runner.cancel({ kind: "waiting" });
+    expect(nodeOf(h, "t1")?.counts).toEqual({ running: 1 });
+    h.read.open();
+    h.gateway.open();
+    await submitting;
+    await settle();
+    expect(resultCount(h)).toBe(1);
+    expect(nodeOf(h, "t2")).toBeUndefined();
+  });
+
+  it("按画板取消：覆盖该画板全部份，其他画板不受影响", async () => {
+    const h = harness({ concurrency: 2 });
+    h.gateway.closed = true;
+    await h.runner.submit(h.target("A"), board(), ["t1"], { t1: 3 });
+    await h.runner.submit(h.target("B"), board(), ["t1"], { t1: 2 });
+    await settle();
+    h.runner.cancel({ kind: "board", boardKey: "A" });
+    expect(h.runner.getSnapshot().pending("A")).toBe(0);
+    expect(h.runner.getSnapshot().pending("B")).toBe(2);
+    h.gateway.open();
+    await settle();
+    expect(h.changes.filter((c) => c.change.kind === "runResult").map((c) => c.boardKey)).toEqual(["B", "B"]);
+  });
+
+  it("关闭画板：取消全部份并遗忘各份终态，展开中途的份不再入队", async () => {
+    const h = harness({ concurrency: 1 });
+    h.gateway.closed = true;
+    h.read.closeAfter(1);
+    const submitting = h.runner.submit(h.target(), board(["t1"], true), ["t1"], { t1: 3 });
+    await settle();
+    expect(h.read.held).toBe(1);
+    h.runner.closeBoard("A");
+    h.read.open();
+    h.gateway.open();
+    await submitting;
+    await settle();
+    expect(h.runner.getSnapshot().pending()).toBe(0);
+    expect(h.runner.getSnapshot().board("A").nodes.size).toBe(0);
+    expect(h.runner.getSnapshot().board("A").locked.size).toBe(0);
+    expect(resultCount(h)).toBe(0);
+  });
+});
+
 describe("任务节点状态显示", () => {
   const copy = (kind: "running" | "queued" | "failed" | "cancelled" | "backoff") =>
     ({ taskId: null, status: kind === "running" ? { kind, startedAt: 0 } : kind === "failed" ? { kind, label: "x" } : kind === "cancelled" ? { kind, gatewayMayContinue: false } : kind === "backoff" ? { kind, retryAt: 0 } : { kind } }) as const;

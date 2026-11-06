@@ -79,6 +79,24 @@ test("Issue #34 运行按份数展开：每份一次 n: 1 请求、一个任务�
   expect(errors).toEqual([]);
 });
 
+test("Issue #37 运行指示单行取消：只取消那一份，其余份继续并产出结果", async ({ page, rig }) => {
+  const text = board("单份取消", [promptNode("p1", "一只猫"), taskNode("t1", { count: 2 })], [edge("p1", "t1", "positive")]);
+  const errors = await openApp(page, rig, { title: "单份取消", boardText: text });
+  let release = () => {};
+  rig.stub.holdImages = new Promise((resolve) => (release = resolve));
+  await task(page, "t1").locator(".task-actions button.primary").click();
+  await page.locator(".run-indicator > button").filter({ hasText: "执行 2 · 排队 0" }).click();
+  const rows = page.locator(".run-list li");
+  await expect(rows).toHaveCount(2);
+  await rows.first().getByRole("button", { name: /^取消任务 / }).click();
+  await expect(rows).toHaveCount(1);
+  await expect(page.locator(".run-indicator > button")).toHaveText("执行 1 · 排队 0");
+  release();
+  await expect(page.locator(".react-flow__node-result")).toHaveCount(1);
+  await expect(page.locator(".run-indicator")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test.describe("Issue #1 单图默认引用与多图点击插入引导", () => {
   const openSingleImage = async (page: Page, rig: Rig, prompt: string, files: Record<string, { b64: string }> = { [REF]: { b64: png(1024, 1024) } }, edges: unknown[] = [edge("p1", "t1", "positive"), edge("r1", "t1", "image:0")]) => {
     const text = board("单图", [promptNode("p1", prompt), referenceNode("r1", REF), taskNode("t1", { image_ports: 1 })], edges);

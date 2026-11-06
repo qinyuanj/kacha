@@ -101,7 +101,10 @@ export interface RunnerSnapshot {
 }
 
 export type CancelFilter =
+  /** 节点上的取消：该节点全部未结束的份，含展开中还没读图的。 */
   | { kind: "task"; boardKey: string; taskNodeId: string }
+  /** 运行指示的单行：只取消这一份（按任务编号），其余份与同一次提交的展开继续。 */
+  | { kind: "copy"; taskId: string }
   | { kind: "board"; boardKey: string }
   /** 运行指示「取消全部排队」：读图中、排队、退避的；执行中的不受影响。 */
   | { kind: "waiting" }
@@ -440,6 +443,8 @@ export function createRunner(ports: RunnerPorts): Runner {
       switch (filter.kind) {
         case "task":
           return job.target.boardKey === filter.boardKey && job.taskNodeId === filter.taskNodeId;
+        case "copy":
+          return job.prepared?.taskId === filter.taskId;
         case "board":
           return job.target.boardKey === filter.boardKey;
         case "waiting":
@@ -450,8 +455,8 @@ export function createRunner(ports: RunnerPorts): Runner {
     };
     for (const job of [...jobs]) {
       if (!match(job)) continue;
-      // 按画板 / 全部取消时，同一次提交里还没读图的任务也不再提交。
-      if (filter.kind !== "task") job.submission.cancelled = true;
+      // 按画板 / 排队 / 全部取消时，同一次提交里还没读图的任务也不再提交；节点取消与单份取消不波及其他节点。
+      if (filter.kind !== "task" && filter.kind !== "copy") job.submission.cancelled = true;
       cancelJob(job);
     }
     pump();

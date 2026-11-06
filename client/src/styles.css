@@ -888,13 +888,24 @@ button.primary[aria-disabled="true"] {
   overflow: auto;
   list-style: none;
 }
+.run-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .run-list li button {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
   padding: 3px 0;
   text-align: left;
+}
+.run-list li button:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.run-list li button:last-child {
+  flex: none;
 }
 .run-list .status {
   margin-left: 0;

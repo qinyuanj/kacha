@@ -289,6 +289,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               boards.setActiveKey(t.boardKey);
               setFocus((f) => ({ boardKey: t.boardKey, nodeId: t.taskNodeId, nonce: (f?.nonce ?? 0) + 1 }));
             }}
+            onCancelCopy={(taskId) => runner.cancel({ kind: "copy", taskId })}
             onCancelWaiting={() => runner.cancel({ kind: "waiting" })}
           />
           <button

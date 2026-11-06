@@ -1,4 +1,4 @@
-// 顶栏运行指示「执行 n · 排队 m」：点开小列表，可跳到对应画板与节点，或取消全部排队。不是任务中心。
+// 顶栏运行指示「执行 n · 排队 m」：点开小列表，可跳到对应画板与节点、取消其中一份，或取消全部排队。不是任务中心。
 import { useState } from "react";
 import type { ActiveTask } from "../core/runner";
 
@@ -6,10 +6,11 @@ interface Props {
   active: readonly ActiveTask[];
   titleOf: (boardKey: string) => string;
   onJump: (task: ActiveTask) => void;
+  onCancelCopy: (taskId: string) => void;
   onCancelWaiting: () => void;
 }
 
-export function RunIndicator({ active, titleOf, onJump, onCancelWaiting }: Props) {
+export function RunIndicator({ active, titleOf, onJump, onCancelCopy, onCancelWaiting }: Props) {
   const [open, setOpen] = useState(false);
   if (active.length === 0) return null;
   const running = active.filter((t) => t.state === "running").length;
@@ -34,6 +35,9 @@ export function RunIndicator({ active, titleOf, onJump, onCancelWaiting }: Props
                   <span className={t.state === "running" ? "status status-running" : "status status-queued"}>{t.state === "running" ? "执行中" : "排队中"}</span>
                   {titleOf(t.boardKey)}
                   <span className="mono muted"> {t.taskId}</span>
+                </button>
+                <button className="link small" aria-label={`取消任务 ${t.taskId}`} onClick={() => onCancelCopy(t.taskId)}>
+                  取消
                 </button>
               </li>
             ))}

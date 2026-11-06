@@ -31,6 +31,8 @@ export interface Stub {
   objectStatus: number | null;
   /** 自定义生成响应；返回 null 走默认：结果图指向本桩的对象存储（url 形式，走中转）。 */
   imageResponse: ((path: string, body: Record<string, unknown>) => { status?: number; json?: unknown } | null) | null;
+  /** 非 null 时生成请求挂到它兑现后才应答，用来让任务停在执行中。 */
+  holdImages: Promise<void> | null;
   close(): Promise<void>;
 }
 
@@ -38,7 +40,7 @@ export interface Stub {
 export async function startStub(): Promise<Stub> {
   const objects = new Map<string, Buffer>([["/objects/result.png", Buffer.from(png(64, 64), "base64")]]);
   const requests: { path: string; body: Record<string, unknown> }[] = [];
-  const stub: Stub = { url: "", requests, objects, objectStatus: null, imageResponse: null, close: async () => undefined };
+  const stub: Stub = { url: "", requests, objects, objectStatus: null, imageResponse: null, holdImages: null, close: async () => undefined };
   const server = http.createServer((req, res) => {
     const url = req.url ?? "/";
     const isStore = url.startsWith("/objects/");
@@ -65,9 +67,10 @@ export async function startStub(): Promise<Stub> {
     if (url.startsWith("/v1/images/")) {
       let raw = "";
       req.on("data", (d) => (raw += String(d)));
-      req.on("end", () => {
+      req.on("end", async () => {
         const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
         requests.push({ path: url, body });
+        await stub.holdImages;
         const custom = stub.imageResponse?.(url, body);
         if (custom) return void res.writeHead(custom.status ?? 200, { "Content-Type": "application/json" }).end(JSON.stringify(custom.json ?? {}));
         const image = `${stub.url}/objects/result.png`;

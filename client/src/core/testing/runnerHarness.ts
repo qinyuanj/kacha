@@ -29,8 +29,17 @@ function gate() {
   const waiting: (() => void)[] = [];
   return {
     closed: false,
+    /** 还放行几次后自动关闸；null = 不自动关。 */
+    remaining: null as number | null,
     pass(): Promise<void> {
+      if (this.remaining !== null && this.remaining-- <= 0) {
+        this.remaining = null;
+        this.closed = true;
+      }
       return this.closed ? new Promise((resolve) => waiting.push(resolve)) : Promise.resolve();
+    },
+    closeAfter(passes: number) {
+      this.remaining = passes;
     },
     get held() {
       return waiting.length;
@@ -52,6 +61,8 @@ export function harness(opts: { concurrency?: number; imageCodec?: RunDeps["imag
   /** 每次请求的 JSON 请求体（GET 等无请求体的为 null）。 */
   const bodies: unknown[] = [];
   const replies: Reply[] = [];
+  /** 每次读文件的路径（含挂在读图闸上的）。 */
+  const reads: string[] = [];
   const read = gate();
   const write = gate();
   const gateway = gate();
@@ -60,6 +71,7 @@ export function harness(opts: { concurrency?: number; imageCodec?: RunDeps["imag
   const deps: RunDeps = {
     imageCodec: opts.imageCodec,
     readFile: async (path) => {
+      reads.push(path);
       await read.pass();
       return path === "/root/refs/cat.png" ? PNG : fs.readFile(path);
     },
@@ -93,6 +105,7 @@ export function harness(opts: { concurrency?: number; imageCodec?: RunDeps["imag
     requests,
     bodies,
     replies,
+    reads,
     read,
     write,
     gateway,
