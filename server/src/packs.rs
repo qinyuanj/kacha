@@ -132,6 +132,18 @@ pub async fn op_cancel(State(state): State<AppState>, user: User, AxPath(id): Ax
     }
 }
 
+/// 阻塞的画板包操作（字节事实、合并落盘）的结局到 HTTP 回复：被取消 409、包或规格不合格 422（`invalid_code`），
+/// 其余 io 错误按读写接口的映射（404 / 409 / 500）。
+fn pack_reply<T: serde::Serialize>(result: Result<std::io::Result<T>, tokio::task::JoinError>, invalid_code: &str) -> Response {
+    match result {
+        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::Interrupted => error(StatusCode::CONFLICT, "cancelled", CANCELLED),
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidData => error(StatusCode::UNPROCESSABLE_ENTITY, invalid_code, &e.to_string()),
+        Ok(Err(e)) => crate::fs::io_error(e),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
+    }
+}
+
 // ---- 导出：流式 zip 下载 ----
 
 #[derive(Deserialize)]
@@ -214,13 +226,7 @@ pub async fn export_facts(State(state): State<AppState>, user: User, Query(q): Q
     let _permit = state.heavy().acquire().await;
     let progress = progress_fn(&op);
     let cancel = op.clone();
-    match tokio::task::spawn_blocking(move || board_pack::entry_facts(&root, &spec, &progress, &cancel.cancel)).await {
-        Ok(Ok(facts)) => Json(facts).into_response(),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::Interrupted => error(StatusCode::CONFLICT, "cancelled", CANCELLED),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidData => error(StatusCode::UNPROCESSABLE_ENTITY, "export_failed", &e.to_string()),
-        Ok(Err(e)) => crate::fs::io_error(e),
-        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
-    }
+    pack_reply(tokio::task::spawn_blocking(move || board_pack::entry_facts(&root, &spec, &progress, &cancel.cancel)).await, "export_failed")
 }
 
 // ---- 导入：流式上传 → 判定 → 合并 ----
@@ -471,13 +477,7 @@ pub async fn import(State(state): State<AppState>, user: User, AxPath(id): AxPat
     let cancel = op.clone();
     let result = tokio::task::spawn_blocking(move || board_pack::import(&file, &root, &units, &duplicates, &progress, &cancel.cancel)).await;
     drop(cleanup);
-    match result {
-        Ok(Ok(report)) => Json(report).into_response(),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::Interrupted => error(StatusCode::CONFLICT, "cancelled", CANCELLED),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidData => error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_pack", &e.to_string()),
-        Ok(Err(e)) => crate::fs::io_error(e),
-        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
-    }
+    pack_reply(result, "invalid_pack")
 }
 
 /// 放弃上传（用户在判定后取消）：删除临时文件。
@@ -496,8 +496,10 @@ pub async fn discard_upload(State(state): State<AppState>, user: User, AxPath(id
 // 另外每份内容遵守单文件 64 MB 上限（413），并边写边算 sha256 与声明核对（不一致按损坏 422）。
 // 问已有（要读身份文件算 sha256）与合并落盘仍拿大请求名额。
 
-/// 服务端已有的合并单元：任务目录给身份文件（task.json）的 sha256，参考图给整文件的 sha256；没有为 null。
-/// 目录在但身份文件读不到时给空串（与任何 sha256 都不等，前端据此判冲突，与合并时的比对一致）。
+/// 用户数据根里已有的合并单元，每个单元一种状态：
+/// - `absent`：没有；
+/// - `present`：有，带 sha256（任务目录给身份文件 task.json 的，参考图给整文件的）；
+/// - `unreadable`：在但身份文件（或参考图本身）读不出——前端按冲突处理，与合并时「读不了视为不同」的比对一致。
 pub async fn existing(State(state): State<AppState>, user: User, body: axum::body::Bytes) -> Response {
     let Ok(units) = serde_json::from_slice::<Vec<MergeUnit>>(&body) else {
         return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表");
@@ -513,8 +515,15 @@ pub async fn existing(State(state): State<AppState>, user: User, body: axum::bod
                 Some(identity) => resolve(&format!("{}/{identity}", unit.path))?,
                 None => path.clone(),
             };
-            let sha256 = if path.exists() { Some(board_pack::sha256_file(&identity).unwrap_or_default()) } else { None };
-            out.push(serde_json::json!({ "path": unit.path, "sha256": sha256 }));
+            let state = if !path.exists() {
+                serde_json::json!({ "path": unit.path, "state": "absent" })
+            } else {
+                match board_pack::sha256_file(&identity) {
+                    Ok(sha256) => serde_json::json!({ "path": unit.path, "state": "present", "sha256": sha256 }),
+                    Err(_) => serde_json::json!({ "path": unit.path, "state": "unreadable" }),
+                }
+            };
+            out.push(state);
         }
         Ok(out)
     })
@@ -649,13 +658,7 @@ pub async fn import_staging(State(state): State<AppState>, user: User, AxPath(id
     let cancel = op.clone();
     let result = tokio::task::spawn_blocking(move || board_pack::import_staged(&dir, &root, &units, &files, &progress, &cancel.cancel)).await;
     drop(cleanup);
-    match result {
-        Ok(Ok(report)) => Json(report).into_response(),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::Interrupted => error(StatusCode::CONFLICT, "cancelled", CANCELLED),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidData => error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_pack", &e.to_string()),
-        Ok(Err(e)) => crate::fs::io_error(e),
-        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
-    }
+    pack_reply(result, "invalid_pack")
 }
 
 /// 写了一半的内容文件守卫：只删这个文件，不动暂存目录（同一暂存里还有别的内容）。

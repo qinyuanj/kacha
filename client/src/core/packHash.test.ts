@@ -28,9 +28,9 @@ describe("按条目流式 hash（#62）", () => {
     const progress: [number, number][] = [];
     const facts = await hashEntries(blobSource(file), entries, (done, total) => progress.push([done, total]));
     expect(facts).toEqual([
-      { name: "a/task.json", sha256: sha('{"x":1}'), size: 7 },
-      { name: "a/result.png", sha256: sha(big), size: big.length },
-      { name: "b/大图.png", sha256: sha(big), size: big.length },
+      { entry: "a/task.json", sha256: sha('{"x":1}'), size: 7 },
+      { entry: "a/result.png", sha256: sha(big), size: big.length },
+      { entry: "b/大图.png", sha256: sha(big), size: big.length },
     ]);
     const total = 7 + 2 * big.length;
     expect(progress.at(-1)).toEqual([total, total]);

@@ -217,16 +217,16 @@ function ImageNode({
   );
 }
 
-export const PromptNodeView = memo(function PromptNodeView({ data }: NodeProps<PromptFlowNode>) {
-  const { apply, setPromptDraft, promptFocused } = useBoardActions();
+export const PromptNodeView = memo(function PromptNodeView({ data, width, height }: NodeProps<PromptFlowNode>) {
+  const { apply, setPromptDraft, takePromptFocus } = useBoardActions();
   const { node, recorded, autoFocus, draft: pending, portKind, guides } = data;
   const textarea = useRef<HTMLTextAreaElement>(null);
-  // 只聚焦一次：新建时可能落在视口外，日后进入视口重新挂载时不能再抢焦点。
+  // xyflow 在节点测量完之前以 visibility: hidden 渲染它，此时 focus() 不生效；有了尺寸才可见、才聚焦。
+  const shown = !!width && !!height;
+  // 只聚焦一次：显示出来时向画布取走请求；视口外新建、一直没显示的由画布在视口开始移动时清除（见 BoardCanvas 的 focusPrompt）。
   useEffect(() => {
-    if (!autoFocus) return;
-    textarea.current?.focus({ preventScroll: true });
-    promptFocused(node.id);
-  }, [autoFocus, node.id, promptFocused]);
+    if (autoFocus && shown && takePromptFocus(node.id)) textarea.current?.focus({ preventScroll: true });
+  }, [autoFocus, shown, node.id, takePromptFocus]);
   // 下游有执行记录时，本次聚焦内第一次改动先三选；选「不断开」后到失焦前不再问。
   // 未提交文本由画布保管：节点离开视口卸载再挂载时仍在。
   const setPending = (text: string | null) => setPromptDraft(node.id, text);

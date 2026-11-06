@@ -6,7 +6,6 @@
 import { copyTaskIds, parseBoard, serializeBoard, type Board, type BoardNode } from "./board";
 import { BOARDS_DIR_NAME, basename, resolveFromRoot, toRootRelative } from "./paths";
 import { TASK_RECORD_FILE, taskDirOfRelPath, taskDirOfTaskId } from "./taskDir";
-import { entryBody, type EntryHash } from "./packHash";
 import { sha256Hex } from "./sha256";
 import { blobSource, readEntryBytes, readZipIndex, type ZipEntry, type ZipSource } from "./zipIndex";
 
@@ -98,7 +97,8 @@ export async function planExport(board: Board, userRoot: string, fs: PackFs): Pr
 
 // ---- 按内容去重（包格式 v2） ----
 
-/** 服务端给出的字节事实：导出计划里每个要写的文件（任务目录展开后）的包内路径、长度与 sha256。 */
+/** 一个包内文件的字节事实：包内路径、（解压后的）长度与 sha256。导出时由服务端按导出计划给出（任务目录展开后），
+ *  导入时由浏览器按条目算出（packHash）。 */
 export interface PackEntryFact {
   entry: string;
   size: number;
@@ -107,7 +107,7 @@ export interface PackEntryFact {
 
 /** 去重后的包内容：省略路径 → 包内实存路径；bytes = 实存条目字节和（预估大小），totalBytes = 不去重时的字节和。 */
 export interface PackContents {
-  duplicates: Record<string, string>;
+  duplicates: PackDuplicates;
   bytes: number;
   totalBytes: number;
 }
@@ -127,7 +127,7 @@ const omittable = (entry: string) => {
 export function planPackContents(facts: PackEntryFact[]): PackContents {
   const sorted = [...facts].sort((a, b) => byPath(a.entry, b.entry));
   const kept = new Map<string, string>();
-  const duplicates: Record<string, string> = {};
+  const duplicates: PackDuplicates = {};
   let bytes = 0;
   let totalBytes = 0;
   for (const fact of sorted) {
@@ -148,7 +148,7 @@ export function planPackContents(facts: PackEntryFact[]): PackContents {
 
 const packBoardEntry = (boardFileName: string) => `${BOARDS_DIR_NAME}/${boardFileName}`;
 
-export function buildManifest(appVersion: string, boards: string[], duplicates: Record<string, string> = {}): string {
+export function buildManifest(appVersion: string, boards: string[], duplicates: PackDuplicates = {}): string {
   return `${JSON.stringify({ pack_format_version: PACK_FORMAT_VERSION, app_version: appVersion, boards, duplicates }, null, 2)}\n`;
 }
 
@@ -185,15 +185,15 @@ export interface MergeUnit {
   identity: string | null;
 }
 
-/** v2 包里被省略的路径（path）与包内实存的代表条目（source）：导入时还原为内容相同的文件。 */
-export interface PackDuplicate {
-  path: string;
-  source: string;
-}
+/**
+ * v2 包的重复路径：被省略的路径 → 包内实存的代表条目。清单、导出规划与导入检查都用这一种形状（导入时把省略路径
+ * 还原为与代表条目内容相同的文件）；按键天然不会有同一省略路径的两条映射。
+ */
+export type PackDuplicates = Record<string, string>;
 
 type PackBoard = { entry: string; board: Board };
 type Rejected = { kind: "newer"; message: string } | { kind: "corrupt"; reason: string };
-export type PackCheck = { kind: "ok"; boards: PackBoard[]; units: MergeUnit[]; duplicates: PackDuplicate[] } | Rejected;
+export type PackCheck = { kind: "ok"; boards: PackBoard[]; units: MergeUnit[]; duplicates: PackDuplicates } | Rejected;
 
 const UPGRADE = "请升级本工具后再导入";
 
@@ -204,7 +204,7 @@ const UPGRADE = "请升级本工具后再导入";
 export function checkPack(
   manifestText: string | null,
   boardTexts: Record<string, string>,
-): { kind: "ok"; boards: PackBoard[]; duplicates: Record<string, string> } | Rejected {
+): { kind: "ok"; boards: PackBoard[]; duplicates: PackDuplicates } | Rejected {
   if (manifestText === null) return { kind: "corrupt", reason: `缺少 ${PACK_MANIFEST}` };
   let manifest: { pack_format_version?: unknown; app_version?: unknown; boards?: unknown; duplicates?: unknown };
   try {
@@ -221,13 +221,13 @@ export function checkPack(
   if (typeof manifest.app_version !== "string" || !Array.isArray(manifest.boards) || !manifest.boards.every((b) => typeof b === "string")) {
     return { kind: "corrupt", reason: `${PACK_MANIFEST} 格式无效` };
   }
-  let duplicates: Record<string, string> = {};
+  let duplicates: PackDuplicates = {};
   if (version === 2 && manifest.duplicates !== undefined) {
     const d = manifest.duplicates;
     if (d === null || typeof d !== "object" || Array.isArray(d) || !Object.values(d).every((v) => typeof v === "string")) {
       return { kind: "corrupt", reason: `${PACK_MANIFEST} 的 duplicates 格式无效` };
     }
-    duplicates = d as Record<string, string>;
+    duplicates = d as PackDuplicates;
   }
   const boards: PackBoard[] = [];
   for (const entry of manifest.boards as string[]) {
@@ -259,19 +259,19 @@ export async function inspectPack(entries: string[], readTexts: (names: string[]
   if (versions.kind !== "ok") return versions;
 
   const names = new Set(entries);
-  const duplicates: PackDuplicate[] = [];
+  const duplicates: PackDuplicates = {};
   for (const [path, source] of Object.entries(versions.duplicates).sort(([a], [b]) => byPath(a, b))) {
     if (!path.split("/").every(isSafeSegment)) return { kind: "corrupt", reason: `duplicates 含无效路径：${path}` };
     if (path === PACK_MANIFEST || isBoardEntry(path)) return { kind: "corrupt", reason: `duplicates 不能省略 ${path}` };
     if (names.has(path)) return { kind: "corrupt", reason: `duplicates 的省略路径 ${path} 同时是包内条目` };
     if (source in versions.duplicates) return { kind: "corrupt", reason: `duplicates 不允许链式映射：${path} → ${source}` };
     if (!names.has(source)) return { kind: "corrupt", reason: `duplicates 指向包内不存在的条目：${path} → ${source}` };
-    duplicates.push({ path, source });
+    duplicates[path] = source;
   }
 
   const taskDirs = new Set<string>();
   const references: string[] = [];
-  for (const path of duplicates.map((d) => d.path)) names.add(path);
+  for (const path of Object.keys(duplicates)) names.add(path);
   for (const name of names) {
     const parts = name.split("/");
     if (!parts.every(isSafeSegment)) return { kind: "corrupt", reason: `包内路径无效：${name}` };
@@ -361,26 +361,39 @@ export const PACK_CANCELLED = "已取消";
 /** 单份内容上传的上限，与服务端单文件请求体上限一致（ADR 0018）；包里有更大的条目时回退为整包上传。 */
 export const MAX_CONTENT_BYTES = 64 * 1024 * 1024;
 
+/** 用户数据根里某个合并单元的现状（去重上传前问服务端）。读不出的按冲突处理，与合并时「读不了视为不同」一致。 */
+export type ExistingUnit = { path: string } & ({ state: "absent" } | { state: "present"; sha256: string } | { state: "unreadable" });
+
+/** 去重上传的一份内容：包文件里承载它的条目。 */
+export interface PackContent {
+  file: File;
+  entry: ZipEntry;
+}
+
 /** 去重上传落盘清单的一项：合并单元里的一个文件与它的内容 sha256（哪个路径对应哪份内容由浏览器给，服务端信任）。 */
 export interface PlacedFile {
   path: string;
   sha256: string;
 }
 
-type MergeReport = { outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number };
+/** 服务端合并落盘的报告：每个合并单元的结局与实际写入的字节数。 */
+export type MergeReport = { outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number };
 
 /** 画板包命令的端口（壳层 ipc 实现，见 shell/adapters.ts）。 */
 export interface PackIo {
   /** 置取消标记；开始导出 / 导入前先以 false 复位。 */
   cancel(cancelled: boolean): Promise<void>;
-  /** 服务端已有的合并单元：任务目录给本机 task.json 的 sha256，参考图给整文件的 sha256；没有为 null。 */
-  existing(units: MergeUnit[]): Promise<{ path: string; sha256: string | null }[]>;
+  /** 用户数据根里已有的合并单元：任务目录给 task.json 的 sha256，参考图给整文件的 sha256；没有、或在但读不出各是一种状态。 */
+  existing(units: MergeUnit[]): Promise<ExistingUnit[]>;
   /** 按条目解压并算 sha256（浏览器里在 Web Worker 跑）；带进度，取消时以 PACK_CANCELLED reject。 */
-  hash(file: File, entries: ZipEntry[]): Promise<EntryHash[]>;
+  hash(file: File, entries: ZipEntry[]): Promise<PackEntryFact[]>;
   /** 开一份去重上传暂存，返回暂存 id。 */
   stage(): Promise<string>;
-  /** 上传一份内容到暂存（服务端自算 sha256 核对）；progress 是本份之前已传的字节与全部要传的字节。取消时以 PACK_CANCELLED reject。 */
-  uploadContent(staging: string, sha256: string, body: Blob, progress: { done: number; total: number }): Promise<void>;
+  /**
+   * 上传一份内容到暂存（服务端自算 sha256 核对）：内容是包里的一个条目，上传体由端口取出（浏览器里 stored 条目直接切片，
+   * deflate 条目在 Web Worker 解压，不进主线程内存）。progress 是本份之前已传的字节与全部要传的字节。取消时以 PACK_CANCELLED reject。
+   */
+  uploadContent(staging: string, sha256: string, content: PackContent, progress: { done: number; total: number }): Promise<void>;
   /** 按落盘清单把暂存的内容放进合并单元并合并（同一份内容第一份落盘、其余硬链接）；结束后服务端删暂存。 */
   importContent(staging: string, units: MergeUnit[], files: PlacedFile[]): Promise<MergeReport>;
   /** 不再合并就放弃暂存（幂等）。 */
@@ -395,7 +408,7 @@ export interface PackIo {
    * 按合并单元解压合并进用户数据根，先把 duplicates 里被省略的路径还原为与代表条目内容相同的文件（v1 包为空）；
    * 取消时以 PACK_CANCELLED reject，已移入的单元保留。
    */
-  importUnits(pack: string, units: MergeUnit[], duplicates: PackDuplicate[]): Promise<MergeReport>;
+  importUnits(pack: string, units: MergeUnit[], duplicates: PackDuplicates): Promise<MergeReport>;
   /** 不再合并就放弃：删掉服务端的临时上传文件（幂等）。 */
   discard?(pack: string): Promise<void>;
 }
@@ -455,24 +468,25 @@ const isTextEntry = (name: string) => name === PACK_MANIFEST || name.startsWith(
 async function importByContent(io: PackIo, file: File, check: OkCheck, entries: ZipEntry[], phase: (p: ImportPhase) => void): Promise<MergeReport> {
   const src = blobSource(file);
   const byName = new Map(entries.map((e) => [e.name, e]));
-  const omitted = new Map(check.duplicates.map((d) => [d.path, d.source]));
+  const omitted = new Map(Object.entries(check.duplicates));
   /** 某个路径的内容在包里由哪个条目承载（v2 被省略的路径指向代表条目）。 */
   const contentOf = (path: string) => byName.get(omitted.get(path) ?? path)!;
   const paths = [...byName.keys(), ...omitted.keys()].filter((name) => !isTextEntry(name)).sort(byPath);
   const filesOf = (unit: MergeUnit) => (unit.identity === null ? [unit.path] : paths.filter((p) => p.startsWith(`${unit.path}/`)));
 
   phase("existing");
-  const present = new Map((await io.existing(check.units)).map((p) => [p.path, p.sha256]));
+  const present = new Map((await io.existing(check.units)).map((p) => [p.path, p]));
   const settled: MergeReport["outcomes"] = [];
   const needed: MergeUnit[] = [];
   const compareAfterHash: { path: string; sha256: string }[] = [];
   for (const unit of check.units) {
-    const theirs = present.get(unit.path) ?? null;
-    if (theirs === null) needed.push(unit);
-    else if (unit.identity === null) compareAfterHash.push({ path: unit.path, sha256: theirs });
+    const theirs = present.get(unit.path) ?? { state: "absent" };
+    if (theirs.state === "absent") needed.push(unit);
+    else if (theirs.state === "unreadable") settled.push({ path: unit.path, outcome: "conflict" });
+    else if (unit.identity === null) compareAfterHash.push({ path: unit.path, sha256: theirs.sha256 });
     else {
       const ours = await sha256Hex(await readEntryBytes(src, contentOf(`${unit.path}/${unit.identity}`)));
-      settled.push({ path: unit.path, outcome: ours === theirs ? "identical" : "conflict" });
+      settled.push({ path: unit.path, outcome: ours === theirs.sha256 ? "identical" : "conflict" });
     }
   }
 
@@ -481,7 +495,7 @@ async function importByContent(io: PackIo, file: File, check: OkCheck, entries: 
   const shaOf = new Map<string, string>();
   if (toHash.length > 0) {
     phase("hash");
-    for (const fact of await io.hash(file, toHash)) shaOf.set(fact.name, fact.sha256);
+    for (const fact of await io.hash(file, toHash)) shaOf.set(fact.entry, fact.sha256);
   }
   for (const c of compareAfterHash) settled.push({ path: c.path, outcome: shaOf.get(contentOf(c.path).name) === c.sha256 ? "identical" : "conflict" });
   if (needed.length === 0) return { outcomes: settled, bytes: 0 };
@@ -493,18 +507,29 @@ async function importByContent(io: PackIo, file: File, check: OkCheck, entries: 
 
   phase("upload");
   const staging = await io.stage();
+  return discardOnError(
+    async () => {
+      let done = 0;
+      for (const [sha256, entry] of contents) {
+        await io.uploadContent(staging, sha256, { file, entry }, { done, total });
+        done += entry.size;
+      }
+      phase("merge");
+      const report = await io.importContent(staging, needed, files);
+      return { outcomes: [...settled, ...report.outcomes], bytes: report.bytes };
+    },
+    () => io.discardStaging?.(staging),
+  );
+}
+
+/**
+ * 服务端在合并结束时自己删上传的包 / 暂存；合并之前就被取消或失败时由这里放弃（幂等，放弃失败不掩盖原错误），再原样抛出。
+ */
+async function discardOnError<T>(run: () => Promise<T>, discard: () => Promise<void> | undefined): Promise<T> {
   try {
-    let done = 0;
-    for (const [sha256, entry] of contents) {
-      await io.uploadContent(staging, sha256, await entryBody(file, entry), { done, total });
-      done += entry.size;
-    }
-    phase("merge");
-    const report = await io.importContent(staging, needed, files);
-    return { outcomes: [...settled, ...report.outcomes], bytes: report.bytes };
+    return await run();
   } catch (e) {
-    // 服务端在合并结束时自己删暂存；这里覆盖合并之前就被取消 / 失败的情况（幂等）。
-    await io.discardStaging?.(staging).catch(() => undefined);
+    await discard()?.catch(() => undefined);
     throw e;
   }
 }
@@ -520,19 +545,21 @@ export async function importPack(io: PackIo, opts: ImportOptions): Promise<Impor
   const { file } = opts;
   const phase = (p: ImportPhase) => opts.onPhase?.(p);
   const fields = { action: "import", pack_file: file.name };
-  let packBoards: string | undefined;
+  /** 通过检查的包（日志里的画板文件名由它给出）。 */
+  let checked: OkCheck | undefined;
   const outcome = await runCancellable(io, opts.onStage, async (): Promise<Rejected | Merged> => {
     phase("check");
     const read = await readPackLocally(blobSource(file));
     const local = read?.check ?? null;
     if (local && local.kind !== "ok") return local;
     if (read && local && read.entries.every((e) => e.size <= MAX_CONTENT_BYTES)) {
-      packBoards = local.boards.map((b) => basename(b.entry)).join(", ");
+      checked = local;
       return { check: local, report: await importByContent(io, file, local, read.entries, phase) };
     }
     phase("upload");
     const pack = await io.upload(file);
-    try {
+    const discard = () => io.discard?.(pack);
+    return discardOnError(async (): Promise<Rejected | Merged> => {
       const check =
         local ??
         (await io
@@ -543,18 +570,15 @@ export async function importPack(io: PackIo, opts: ImportOptions): Promise<Impor
             return { kind: "corrupt", reason: errorText(e) };
           }));
       if (check.kind !== "ok") {
-        await io.discard?.(pack).catch(() => undefined);
+        await discard()?.catch(() => undefined);
         return check;
       }
-      packBoards = check.boards.map((b) => basename(b.entry)).join(", ");
+      checked = check;
       phase("merge");
       return { check, report: await io.importUnits(pack, check.units, check.duplicates) };
-    } catch (e) {
-      // 服务端在合并结束时自己删临时文件；这里的放弃覆盖合并之前就被取消 / 失败的情况（幂等）。
-      await io.discard?.(pack).catch(() => undefined);
-      throw e;
-    }
+    }, discard);
   });
+  const packBoards = checked?.boards.map((b) => basename(b.entry)).join(", ");
   const boardField = packBoards === undefined ? {} : { board_file: packBoards };
   if (!outcome.ok) {
     opts.log("board_pack", { ...fields, ...boardField, result: outcome.result });

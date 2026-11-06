@@ -85,7 +85,7 @@ pub struct PackDuplicate {
 }
 
 /// 还原被省略路径的方式：默认硬链接；测试注入失败以走复制回退。
-pub type Linker<'a> = dyn Fn(&Path, &Path) -> io::Result<()> + 'a;
+pub(crate) type Linker<'a> = dyn Fn(&Path, &Path) -> io::Result<()> + 'a;
 
 /// 硬链接到代表文件；链接失败（文件系统不支持、跨卷、链接数上限等）时复制。目标已存在时报错，不覆盖。
 fn link_or_copy(link: &Linker<'_>, source: &Path, dest: &Path) -> io::Result<()> {
@@ -412,12 +412,9 @@ fn belongs_to_unit(units: &[MergeUnit], name: &str) -> bool {
     units.iter().any(|u| name == u.path || name.strip_prefix(u.path.as_str()).is_some_and(|rest| rest.starts_with('/')))
 }
 
-pub fn import(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[PackDuplicate], progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
-    import_with(pack, root, units, duplicates, &|from, to| fs::hard_link(from, to), progress, cancel)
-}
-
-/// 同 import，可注入还原被省略路径时的链接方式。
-pub fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[PackDuplicate], link: &Linker<'_>, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
+/// 两条导入路径共用的入口：建好用户数据根（越界检查要解析它），再校验合并单元路径不越界、身份文件是合法的相对段。
+/// 在创建任何临时目录之前做，不合格时不写导入内容。
+fn prepare_root(root: &Path, units: &[MergeUnit]) -> io::Result<()> {
     fs::create_dir_all(root)?;
     for unit in units {
         resolve_in(root, &unit.path)?;
@@ -425,6 +422,16 @@ pub fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[
             safe_join(Path::new(""), identity)?;
         }
     }
+    Ok(())
+}
+
+pub fn import(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[PackDuplicate], progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
+    import_with(pack, root, units, duplicates, &|from, to| fs::hard_link(from, to), progress, cancel)
+}
+
+/// 同 import，可注入还原被省略路径时的链接方式。
+pub(crate) fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[PackDuplicate], link: &Linker<'_>, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
+    prepare_root(root, units)?;
     for d in duplicates {
         safe_join(Path::new(""), &d.path)?;
         safe_join(Path::new(""), &d.source)?;
@@ -446,7 +453,6 @@ pub fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[
         extract.push((i, name));
     }
 
-    fs::create_dir_all(root)?;
     sweep_stale_imports(root);
     let temp = TempDir(store::temp_path_for(&root.join(IMPORT_TEMP_STEM)));
     fs::create_dir(&temp.0)?;
@@ -475,6 +481,8 @@ pub fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[
         link_or_copy(link, &source, &dest)?;
     }
 
+    // 整包回退路径没有落盘清单：按解压（含还原）后的文件现算 sha256。
+    check_reference_snapshots(&temp.0, units, |path| safe_join(&temp.0, path).ok().filter(|p| p.is_file()).and_then(|p| sha256_file(&p).ok()))?;
     let outcomes = merge_units(&temp.0, root, units, cancel)?;
     Ok(ImportReport { outcomes, bytes: done })
 }
@@ -545,14 +553,8 @@ pub fn import_staged(staging: &Path, root: &Path, units: &[MergeUnit], files: &[
 
 /// 按落盘清单把暂存的内容放进临时目录里的各单元：同一份内容第一份从暂存移过来，其余硬链接到它（失败回退为复制）；
 /// 再比对 task.json 里记了 sha256 的参考图快照（不一致按损坏拒绝），最后与整包导入同样校验、合并。可注入链接方式。
-pub fn import_staged_with(staging: &Path, root: &Path, units: &[MergeUnit], files: &[PlacedFile], link: &Linker<'_>, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
-    fs::create_dir_all(root)?;
-    for unit in units {
-        resolve_in(root, &unit.path)?;
-        if let Some(identity) = &unit.identity {
-            safe_join(Path::new(""), identity)?;
-        }
-    }
+pub(crate) fn import_staged_with(staging: &Path, root: &Path, units: &[MergeUnit], files: &[PlacedFile], link: &Linker<'_>, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
+    prepare_root(root, units)?;
     let mut declared = BTreeMap::new();
     for f in files {
         safe_join(Path::new(""), &f.path)?;
@@ -570,7 +572,6 @@ pub fn import_staged_with(staging: &Path, root: &Path, units: &[MergeUnit], file
         }
     }
 
-    fs::create_dir_all(root)?;
     sweep_stale_imports(root);
     let temp = TempDir(store::temp_path_for(&root.join(IMPORT_TEMP_STEM)));
     fs::create_dir(&temp.0)?;
@@ -598,14 +599,16 @@ pub fn import_staged_with(staging: &Path, root: &Path, units: &[MergeUnit], file
         }
     }
 
-    check_reference_snapshots(&temp.0, units, &declared)?;
+    check_reference_snapshots(&temp.0, units, |path| declared.get(path).map(|sha| sha.to_string()))?;
     let outcomes = merge_units(&temp.0, root, units, cancel)?;
     Ok(ImportReport { outcomes, bytes: done })
 }
 
-/// task.json 的 references[] 里记了 sha256 的参考图快照，与落盘清单给它的内容比对；不一致按损坏拒绝。
+/// task.json 的 references[] 里记了 sha256 的参考图快照，与这次导入里它的实际内容（`actual` 按包内路径给 sha256）比对；
+/// 不一致按损坏拒绝。两条导入路径都比对：去重上传按落盘清单，整包回退按解压后的文件。
+/// 这是「格式规则在前端核心」（ADR 0013）的信任边界例外：服务端只读快照的 file 与 sha256，不解释其他字段。
 /// task.json 读不了或不是这个形状时不比对（旧包、非 Web 版的记录照常导入）。
-fn check_reference_snapshots(temp: &Path, units: &[MergeUnit], declared: &BTreeMap<&str, &str>) -> io::Result<()> {
+fn check_reference_snapshots(temp: &Path, units: &[MergeUnit], actual: impl Fn(&str) -> Option<String>) -> io::Result<()> {
     for unit in units {
         let Some(identity) = &unit.identity else { continue };
         let Ok(text) = fs::read(safe_join(&safe_join(temp, &unit.path)?, identity)?) else { continue };
@@ -613,7 +616,7 @@ fn check_reference_snapshots(temp: &Path, units: &[MergeUnit], declared: &BTreeM
         for reference in record.get("references").and_then(|r| r.as_array()).into_iter().flatten() {
             let (Some(file), Some(expected)) = (reference.get("file").and_then(|v| v.as_str()), reference.get("sha256").and_then(|v| v.as_str())) else { continue };
             let path = format!("{}/{file}", unit.path);
-            if let Some(actual) = declared.get(path.as_str()) {
+            if let Some(actual) = actual(&path) {
                 if !actual.eq_ignore_ascii_case(expected) {
                     return Err(invalid(format!("参考图快照 {path} 与 task.json 记录的 sha256 不一致，画板包已损坏")));
                 }
@@ -989,7 +992,7 @@ mod tests {
             #[cfg(unix)]
             assert_eq!(inode(&omitted), inode(&root.join(TASK_A).join("result.png")), "应是硬链接：{}", omitted.display());
         }
-        // 再导一次：还原后的单元与本机一致，全部跳过。
+        // 再导一次：还原后的单元与用户数据根里的一致，全部跳过。
         let again = import(&pack, &root, &units, &duplicates, &no_progress, &AtomicBool::new(false)).unwrap();
         assert!(again.outcomes.iter().all(|o| o.outcome == MergeOutcome::Identical), "{:?}", again.outcomes);
     }

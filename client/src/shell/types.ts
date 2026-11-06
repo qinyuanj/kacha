@@ -1,5 +1,5 @@
 // Web 壳层端口：UI 只认这些接口，同源 HTTP 与浏览器能力都在 ipc.ts 中实现。
-import type { MergeOutcome, MergeUnit, PackDuplicate, PackEntryFact, PackExportSpec, PackIo } from "../core/boardPack";
+import type { MergeReport, MergeUnit, PackDuplicates, PackEntryFact, PackExportSpec, PackIo } from "../core/boardPack";
 import type { DirEntry } from "../core/relocate";
 
 export interface BoardTexts {
@@ -42,7 +42,7 @@ export interface Ipc {
   boardPackExport(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number }>;
   boardPackEntries(pack: string): Promise<string[]>;
   boardPackReadTexts(pack: string, names: string[]): Promise<Record<string, string>>;
-  boardPackImport(pack: string, units: MergeUnit[], duplicates: PackDuplicate[]): Promise<{ outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number }>;
+  boardPackImport(pack: string, units: MergeUnit[], duplicates: PackDuplicates): Promise<MergeReport>;
   boardPackCancel(cancelled: boolean): Promise<void>;
   listDir(path: string): Promise<DirEntry[]>;
   fileSha256(path: string): Promise<string>;

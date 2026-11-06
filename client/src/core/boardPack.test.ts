@@ -16,6 +16,7 @@ import {
   planExport,
   planPackContents,
   runCancellable,
+  type ExistingUnit,
   type PackEntryFact,
   type MergeUnit,
   type PackFs,
@@ -23,7 +24,7 @@ import {
 } from "./boardPack";
 import { resolveFromRoot } from "./paths";
 import { buildZip } from "./testing/zipFixture";
-import { hashEntries } from "./packHash";
+import { entryBody, hashEntries } from "./packHash";
 import { blobSource } from "./zipIndex";
 
 const ROOT = "C:\\Users\\Lzx_8\\Pictures\\UGC AI 生图工具";
@@ -247,7 +248,7 @@ describe("导出 v2：按内容去重", () => {
     expect(check.kind).toBe("ok");
     if (check.kind !== "ok") return;
     expect(check.units.map((u) => u.path)).toEqual([A, B, C, "导入参考图/s3.png"]);
-    expect(Object.fromEntries(check.duplicates.map((d) => [d.path, d.source]))).toEqual(contents.duplicates);
+    expect(check.duplicates).toEqual(contents.duplicates);
   });
 });
 
@@ -392,11 +393,11 @@ describe("导入前检查包内容", () => {
         { path: "导入参考图/aa.png", identity: null },
         { path: "导入参考图/bb.png", identity: null },
       ]);
-      expect(check.duplicates).toEqual([
-        { path: `${OTHER}/references/01.png`, source: `${TASK}/result.png` },
-        { path: `${OTHER}/result.png`, source: `${TASK}/result.png` },
-        { path: "导入参考图/bb.png", source: "导入参考图/aa.png" },
-      ]);
+      expect(check.duplicates).toEqual({
+        [`${OTHER}/references/01.png`]: `${TASK}/result.png`,
+        [`${OTHER}/result.png`]: `${TASK}/result.png`,
+        "导入参考图/bb.png": "导入参考图/aa.png",
+      });
     });
 
     it("被省略的 task.json 仍算任务目录含 task.json", async () => {
@@ -408,9 +409,9 @@ describe("导入前检查包内容", () => {
 
     it("没有 duplicates 的 v2 包与 v1 一样；v1 包的还原清单为空", async () => {
       const v2Check = await inspectPack(present, reader(v2(undefined)).readTexts);
-      expect(v2Check).toMatchObject({ kind: "ok", duplicates: [] });
+      expect(v2Check.kind === "ok" && v2Check.duplicates).toEqual({});
       const v1Check = await inspectPack(present, reader(texts).readTexts);
-      expect(v1Check).toMatchObject({ kind: "ok", duplicates: [] });
+      expect(v1Check.kind === "ok" && v1Check.duplicates).toEqual({});
     });
 
     const violations: [string, unknown][] = [
@@ -514,17 +515,21 @@ describe("导入画板包", () => {
    * 内存包命令：记录各步调用与移入的合并单元；failUpload 让上传以该错误 reject，failAfterMove 让导入移完第一个单元后以该错误 reject。
    * 去重路径：existing 是服务端已有单元的身份 sha256；hash 用真实的流式 hash 并记下算了哪些条目；上传的内容与落盘清单都记下。
    */
-  function memoryPackIo(pack: Record<string, string>, opts: { failAfterMove?: unknown; failUpload?: unknown; existing?: Record<string, string> } = {}) {
+  function memoryPackIo(pack: Record<string, string>, opts: { failAfterMove?: unknown; failUpload?: unknown; existing?: Record<string, string>; unreadable?: string[] } = {}) {
     const moved: string[] = [];
     const steps: string[] = [];
-    const restored: { path: string; source: string }[] = [];
+    const restored: Record<string, string>[] = [];
     const hashed: string[] = [];
     const uploaded: { sha256: string; size: number; progress: { done: number; total: number } }[] = [];
     const placed: { path: string; sha256: string }[] = [];
     const io: PackIo = {
       existing: async (units) => {
         steps.push("existing");
-        return units.map((u) => ({ path: u.path, sha256: opts.existing?.[u.path] ?? null }));
+        return units.map((u): ExistingUnit => {
+          if (opts.unreadable?.includes(u.path)) return { path: u.path, state: "unreadable" };
+          const sha256 = opts.existing?.[u.path];
+          return sha256 === undefined ? { path: u.path, state: "absent" } : { path: u.path, state: "present", sha256 };
+        });
       },
       hash: async (file, entries) => {
         steps.push("hash");
@@ -535,9 +540,10 @@ describe("导入画板包", () => {
         steps.push("stage");
         return STAGING_ID;
       },
-      uploadContent: async (_staging, sha256, body, progress) => {
+      uploadContent: async (_staging, sha256, content, progress) => {
         steps.push("uploadContent");
         if (opts.failUpload !== undefined) throw opts.failUpload;
+        const body = await entryBody(content.file, content.entry);
         uploaded.push({ sha256, size: body.size, progress });
       },
       importContent: async (staging, units, files) => {
@@ -567,7 +573,7 @@ describe("导入画板包", () => {
       discard: async (id) => void steps.push(`discard(${id})`),
       importUnits: async (id, units, duplicates) => {
         steps.push(`import(${id})`);
-        restored.push(...duplicates);
+        if (Object.keys(duplicates).length > 0) restored.push(duplicates);
         for (const unit of units) {
           moved.push(unit.path);
           if (opts.failAfterMove !== undefined) throw opts.failAfterMove;
@@ -695,7 +701,7 @@ describe("导入画板包", () => {
     const v2 = memoryPackIo(v2Pack);
     expect(await run(v2.io).outcome).toMatchObject({ kind: "done" });
     expect(v2.moved).toEqual([TASK]);
-    expect(v2.restored).toEqual([{ path: `${TASK}/references/01.png`, source: `${TASK}/result.png` }]);
+    expect(v2.restored).toEqual([{ [`${TASK}/references/01.png`]: `${TASK}/result.png` }]);
     const v1 = memoryPackIo(goodPack);
     await run(v1.io).outcome;
     expect(v1.restored).toEqual([]);
@@ -779,7 +785,7 @@ describe("导入画板包", () => {
       expect(await local("fixtures/packs/v0.3.2-flash-layers.ugcpack")).toMatchObject({ kind: "ok", units: expect.arrayContaining([{ path: TASK, identity: "task.json" }]) });
       expect(await local("fixtures/packs/v2-duplicates.ugcpack")).toMatchObject({
         kind: "ok",
-        duplicates: [{ path: "2026-09-16/20260916T020000Z-0000000b/references/01.png", source: `${TASK}/result.png` }],
+        duplicates: { "2026-09-16/20260916T020000Z-0000000b/references/01.png": `${TASK}/result.png` },
       });
     });
 
@@ -862,10 +868,18 @@ describe("导入画板包", () => {
     });
 
     it("服务端已有但 task.json 不一致：照 ADR 0013 报冲突、不覆盖，也不 hash、不上传", async () => {
-      const { io, hashed, moved } = memoryPackIo(v1Pack, { existing: { [TASK]: sha("本机的另一份记录") } });
+      const { io, hashed, moved } = memoryPackIo(v1Pack, { existing: { [TASK]: sha("用户数据根里的另一份记录") } });
       expect(await run(io, undefined, zipFile(v1Pack)).outcome).toMatchObject({ kind: "done", summary: { imported: 1, skipped: 0, conflicts: [TASK] } });
       expect(hashed.filter((n) => n.startsWith(`${TASK}/`))).toEqual([]);
       expect(moved).not.toContain(TASK);
+    });
+
+    it("服务端已有但读不出（任务目录或导入参考图）：按冲突处理、不覆盖，也不上传", async () => {
+      const { io, hashed, moved, placed } = memoryPackIo(v1Pack, { unreadable: [TASK, REF] });
+      expect(await run(io, undefined, zipFile(v1Pack)).outcome).toMatchObject({ kind: "done", summary: { imported: 1, conflicts: [TASK, REF] } });
+      expect(hashed.filter((n) => n.startsWith(`${TASK}/`))).toEqual([]);
+      expect(moved).toEqual([TASK_B]);
+      expect(placed.map((f) => f.path).filter((p) => p === REF || p.startsWith(`${TASK}/`))).toEqual([]);
     });
 
     it("v2 包的代表条目在已有的任务目录里：仍为还原被省略的路径算 hash 并上传那份内容", async () => {

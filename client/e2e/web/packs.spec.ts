@@ -193,7 +193,7 @@ test("导出 v2：先显示预估大小再显示进度，重复的参考图快�
   expect(bytes.length).toBeLessThan(v1Bytes.length);
   expect(leftovers(rig)).toEqual([]);
 
-  // 删掉本机的任务目录，再导入刚导出的包：两个任务目录都回来，被省略的快照还原为同内容文件。
+  // 删掉用户数据根里的任务目录，再导入刚导出的包：两个任务目录都回来，被省略的快照还原为同内容文件。
   await page.unroute("**/api/packs/export/facts?*");
   await page.unroute("**/api/packs/export?*");
   rmSync(path.join(root, DIR_A), { recursive: true });
@@ -366,12 +366,17 @@ test("上传延迟期间进度对话框可见；点「取消」后提示已取�
   let release!: () => void;
   const held = new Promise<void>((r) => (release = r));
   const aborted = new Promise<void>((resolve) => page.on("requestfailed", (r) => r.url().includes("/contents/") && resolve()));
+  // 进度对话框从本地检查就已出现：要等内容上传真的发出（被拦住）再取消，否则取消落在检查 / hash 阶段，上传根本不发。
+  let uploading!: () => void;
+  const started = new Promise<void>((r) => (uploading = r));
   await page.route(CONTENT_UPLOAD, async (route) => {
+    uploading();
     await held;
     await route.continue().catch(() => undefined);
   });
   await importPack(page, V032);
   await expect(dialog(page)).toContainText("正在导入画板包：v0.3.2-flash-layers.ugcpack");
+  await started;
   await dialog(page).getByRole("button", { name: "取消" }).click();
   await expect(toast(page)).toHaveText("已取消导入；已移入的任务目录保留");
   await expect(dialog(page)).toHaveCount(0);
@@ -405,7 +410,7 @@ test("正常导入大包（条目超过单份 64 MB，整包上传）：上传�
   });
   const consoleErrors: string[] = [];
   page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
-  // 合并在本机很快，页面每 200ms 的轮询未必赶上：合并请求进行期间由测试按 10ms 直接查同一个进度接口。
+  // 服务端合并很快，页面每 200ms 的轮询未必赶上：合并请求进行期间由测试按 10ms 直接查同一个进度接口。
   const merge: { done: number; total: number }[] = [];
   let merging: Promise<void> | null = null;
   page.on("request", (req) => {

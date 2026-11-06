@@ -194,6 +194,17 @@ test("新建落在视口外的提示词，之后平移使其进入视口，焦�
   expect(errors).toEqual([]);
 });
 
+test("新建落在视口内的提示词照常获得焦点", async ({ page, rig }) => {
+  const text = boardAt("聚焦内", [referenceNode("r1", REF, [400, 0])], [], { x: 0, y: 500, zoom: 1 });
+  const errors = await openApp(page, rig, { title: "聚焦内", boardText: text, files: { [REF]: { b64: png(64, 64) } } });
+  await task(page, "r1").locator("img.thumb").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "以此继续编辑" }).click();
+  await expect.poll(() => savedNodes(rig, "聚焦内").filter((n) => n.type === "prompt").length).toBe(1);
+  const created = savedNodes(rig, "聚焦内").find((n) => n.type === "prompt")!.id;
+  await expect(task(page, created).locator("textarea")).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
 test("把节点拖出画布区域时 onNodeDragStop 仍然触发（Alt + 拖复制在松手时对调）", async ({ page, rig }) => {
   const text = boardAt("拖出", [referenceNode("r1", REF, [300, 20])], [], { x: 0, y: 0, zoom: 1 });
   const errors = await openApp(page, rig, { title: "拖出", boardText: text, files: { [REF]: { b64: png(64, 64) } } });

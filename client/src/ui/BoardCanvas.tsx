@@ -171,7 +171,17 @@ export function BoardCanvas({
   }, [board.nodes]);
   const selectedEdgesRef = useRef(selectedEdges);
   selectedEdgesRef.current = selectedEdges;
+  /**
+   * 「以此继续编辑」新建提示词的一次性聚焦请求。两处显式清除，不依赖 xyflow 是否把还没测量的视口外节点强制渲染一次：
+   * 节点显示出来并取走请求时（takePromptFocus）；视口开始移动时（onMoveStart）——视口外的节点要等视口移动才会挂载，
+   * 请求活不到那时，日后进入视口不会抢焦点。ref 是权威值（同步清除）；state 只用来把 autoFocus 传给节点触发重渲染。
+   */
   const [focusPrompt, setFocusPrompt] = useState<string | null>(null);
+  const focusPromptRef = useRef<string | null>(null);
+  const requestPromptFocus = useCallback((promptId: string | null) => {
+    focusPromptRef.current = promptId;
+    setFocusPrompt(promptId);
+  }, []);
   /** 提示词等待三选一的未提交文本：存在画布而不是节点里，节点离开视口卸载再挂载时仍在。 */
   const [promptDrafts, setPromptDrafts] = useState<ReadonlyMap<string, string>>(new Map());
   // 撤销 / 删除后不在画板上的提示词不留未提交文本。
@@ -198,6 +208,10 @@ export function BoardCanvas({
     setMenu(null);
     setDragMenu(null);
   }, []);
+  const onMoveStart = useCallback(() => {
+    closeMenu();
+    requestPromptFocus(null);
+  }, [closeMenu, requestPromptFocus]);
   /** 拖线建节点多候选时弹的菜单（目前三种起点均为单候选，此路径预留）。 */
   const [dragMenu, setDragMenu] = useState<{ from: DragFrom; items: MenuItem[]; client: { x: number; y: number }; at: { x: number; y: number } } | null>(null);
   // 预览弹窗、上下文菜单开着时快捷键不作用于背后的画板（菜单自己处理 Esc）。
@@ -307,7 +321,7 @@ export function BoardCanvas({
         // 选中的是新提示词；新建的任务节点（新提示词接的那个）也默认展开。
         const taskId = r.board.edges.find((e) => e.from[0] === promptId && e.to[1] === "positive")?.to[0];
         if (taskId) setExpandOverrides((o) => new Map([...o, [taskId, true]]));
-        setFocusPrompt(promptId);
+        requestPromptFocus(promptId);
       },
       setPromptDraft: (promptId, text) =>
         setPromptDrafts((d) => {
@@ -317,7 +331,11 @@ export function BoardCanvas({
           else next.set(promptId, text);
           return next;
         }),
-      promptFocused: (promptId) => setFocusPrompt((f) => (f === promptId ? null : f)),
+      takePromptFocus: (promptId) => {
+        if (focusPromptRef.current !== promptId) return false;
+        requestPromptFocus(null);
+        return true;
+      },
       nodeUnmounted: (nodeId) => unhoverNode(nodeId),
       addAsReference: (resultId, sourceLayer = null) => void apply({ kind: "addAsReference", resultId, selected: [...selectedRef.current], sourceLayer }),
       previewNode: openNodePreview,
@@ -926,7 +944,7 @@ export function BoardCanvas({
           onConnectEnd={onConnectEnd}
           onBeforeDelete={onBeforeDelete}
           onDelete={onDelete}
-          onMoveStart={closeMenu}
+          onMoveStart={onMoveStart}
           onMoveEnd={onMoveEnd}
           onPaneContextMenu={(e) => openMenu(e, { kind: "pane" })}
           onNodeContextMenu={(e, n) => !isTyping(e.target) && openMenu(e, { kind: "node", nodeId: n.id })}
