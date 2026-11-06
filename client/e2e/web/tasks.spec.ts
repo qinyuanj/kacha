@@ -288,6 +288,19 @@ test("#5 英文提示词 + 参考图 + 英文序号未验证：黄色提示，�
   await expect(confirm.getByRole("button", { name: "运行 1 个任务" })).toBeEnabled();
 });
 
+test("#36 份数超过并发上限：节点与确认窗同一条黄色提示，不标红，仍可运行", async ({ page, rig }) => {
+  const text = board("份数", [promptNode("p1", "一只猫"), taskNode("t1", { count: 6 })], [edge("p1", "t1", "positive")]);
+  await openApp(page, rig, { title: "份数", boardText: text });
+  await expand(page, "t1");
+  const node = task(page, "t1");
+  await expect(node.locator("ul.warn-list")).toContainText("份数 6，本次按 4");
+  await expect(node.locator(".node-task")).not.toHaveClass(/node-error/);
+  await node.locator(".task-actions button.primary").click();
+  const confirm = page.getByRole("dialog", { name: "确认运行" });
+  await expect(confirm.locator("ul.warn-list")).toContainText("份数 6，本次按 4");
+  await expect(confirm.getByRole("button", { name: "运行 1 个任务" })).toBeEnabled();
+});
+
 test.describe("#6 透明背景开关", () => {
   const SEEDREAM = "doubao-seedream-5-0-pro-260628";
   const OPAQUE = "导入参考图/opaque.png";

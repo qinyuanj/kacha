@@ -1,7 +1,7 @@
 // 生成任务视图：一个生成任务按当前画板、能力表与界面采集的事实，能不能运行、为什么、节点上显示什么。
 // 生成任务节点与二次确认（buildConfirmItems）消费同一份，「节点标红 ≡ 运行被拦」由构造保证。
 // 换模型绝不自动删线或改设置，只报告原因。
-import type { Board, TaskNode } from "./board";
+import { taskCount, type Board, type TaskNode } from "./board";
 import { findModel, isRetiredModel, isSupported, LITE_RETIRED_HINT, type CapabilityTable, type ModelCapability } from "./capabilities";
 import { isRequestShapeImplemented } from "./gateway";
 import { imageEdges, imagePortSlots, imageSources, promptText, workflowOf } from "./graph";
@@ -52,6 +52,8 @@ export interface TaskFacts {
   /** 节点 id → 是否带透明通道；不在 Map 里 = 未知。 */
   alphaByNode: ReadonlyMap<string, boolean>;
   discovery: Discovery;
+  /** 页面当前的并发上限：实际份数不超过它。 */
+  concurrency: number;
 }
 
 /** 任务开关能不能打开；hint 为不能打开的简短说明，能打开时为空串。已打开的开关不受它约束（条件变坏保留 + 标红，绝不自动关）。 */
@@ -115,9 +117,10 @@ export function taskView(board: Board, table: CapabilityTable, taskId: string, f
   const rule = model?.workflows[workflowOf(board, taskId)].size_rule;
   const size = !flashLayers && rule ? resolveSize(rule, task.size_spec) : null;
   const { tier, ratio } = task.size_spec;
+  const count = taskCount(task);
   return {
     reasons: dedupe(reasons),
-    warnings: [...refs.warnings, ...(englishUnverified ? ["该模型英文序号未验证"] : [])],
+    warnings: [...refs.warnings, ...(englishUnverified ? ["该模型英文序号未验证"] : []), ...(count > facts.concurrency ? [`份数 ${count}，本次按 ${facts.concurrency}`] : [])],
     unreferenced: refs.unreferenced,
     model: modelLabel(table, facts.discovery, task.model),
     size,

@@ -116,8 +116,8 @@ it("来源图层探测所选文件并与底图 alpha 事实分开", async () => 
   const facts = await collectRunFacts({ inspectImage: async path => { paths.push(path); return { has_alpha: true }; } }, b, ["t1"], "/root");
   expect(paths).toEqual(["/root/2026-10-10/id/layers/01.png"]);
   expect(facts.alphaByNode.get("r:layer:1")).toBe(true);
-  expect(taskView(b, BUILTIN_TABLE, "t1", { ...facts, discovery: { source: "none" } })!.reasons).toEqual([]);
-  expect(taskView(b, BUILTIN_TABLE, "t1", { ...facts, alphaByNode: new Map([["r", true]]), discovery: { source: "none" } })!.reasons.map(r => r.kind)).toContain("transparentNoAlpha");
+  expect(taskView(b, BUILTIN_TABLE, "t1", { ...facts, discovery: { source: "none" }, concurrency: 4 })!.reasons).toEqual([]);
+  expect(taskView(b, BUILTIN_TABLE, "t1", { ...facts, alphaByNode: new Map([["r", true]]), discovery: { source: "none" }, concurrency: 4 })!.reasons.map(r => r.kind)).toContain("transparentNoAlpha");
 });
 
 it("Flash 透明与图层路径共同开放：能力表标记 supported，视图中无阻止原因", () => {
@@ -144,7 +144,7 @@ describe("透明背景控件和运行规则一致", () => {
     const b = board(["t1"], true);
     const t = b.nodes.find(n => n.type === "task") as TaskNode;
     t.model = model.model_id;
-    const facts = { discovery: { source: "none" as const }, missingNodes: new Set<string>(), alphaByNode: new Map([["r", true]]) };
+    const facts = { discovery: { source: "none" as const }, missingNodes: new Set<string>(), alphaByNode: new Map([["r", true]]), concurrency: 4 };
     expect(taskView(b, BUILTIN_TABLE, "t1", facts)!.toggles.transparentBackground.canEnable).toBe(true);
     expect(taskView(b, BUILTIN_TABLE, "t1", { ...facts, alphaByNode: new Map() })!.toggles.transparentBackground.canEnable).toBe(false);
     t.output_options = { output_format: "jpeg", response_format: "url", watermark: false };

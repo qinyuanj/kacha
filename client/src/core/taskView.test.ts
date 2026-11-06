@@ -41,7 +41,7 @@ function board(nodes: BoardNode[], edges: BoardEdge[] = []): Board {
 }
 
 /** 事实全未知：没读到缺图、没读到透明通道、没发现模型列表。 */
-const UNKNOWN: TaskFacts = { missingNodes: new Set(), alphaByNode: new Map(), discovery: { source: "none" } };
+const UNKNOWN: TaskFacts = { missingNodes: new Set(), alphaByNode: new Map(), discovery: { source: "none" }, concurrency: 4 };
 
 const view = (b: Board, table: CapabilityTable = BUILTIN_TABLE, facts: TaskFacts = UNKNOWN) => taskView(b, table, "t", facts)!;
 const kinds = (b: Board, table?: CapabilityTable, facts?: TaskFacts) => view(b, table, facts).reasons.map((r) => [r.kind, r.category]);
