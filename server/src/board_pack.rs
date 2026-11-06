@@ -8,6 +8,8 @@
 //! 失败 / 取消时清理临时目录，已移入的保留；进程被杀留下的临时目录在下次导入开始时清理。
 //! 包格式 v2 被省略的路径（前端核心已判过映射合法）在临时目录里还原：硬链接到代表文件，失败回退为复制，
 //! 之后与实存条目一样按合并单元比对、移入（ADR 0018 补记）。
+//! 去重上传（#62）：浏览器只上传缺少的内容（每份按 sha256 存在暂存里），再给「路径 → sha256」的落盘清单；
+//! 同一份内容第一份落盘、其余硬链接（失败回退为复制），之后与整包导入走同一段校验与合并。
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
@@ -473,9 +475,15 @@ pub fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[
         link_or_copy(link, &source, &dest)?;
     }
 
-    // 校验：每个单元都在包里（目录单元还要有身份文件）；不合格时一个都不移入。
+    let outcomes = merge_units(&temp.0, root, units, cancel)?;
+    Ok(ImportReport { outcomes, bytes: done })
+}
+
+/// 两条导入路径共用的收尾：临时目录里已备好各单元（含还原的省略路径），先校验每个单元都在（目录单元还要有身份文件），
+/// 不合格时一个都不移入；再逐个单元移入——目标已存在时按身份文件（或整文件）比对，一致为跳过、不一致为冲突，均不覆盖。
+fn merge_units(temp: &Path, root: &Path, units: &[MergeUnit], cancel: &AtomicBool) -> io::Result<Vec<UnitOutcome>> {
     for unit in units {
-        let from = safe_join(&temp.0, &unit.path)?;
+        let from = safe_join(temp, &unit.path)?;
         let present = match &unit.identity {
             Some(identity) => safe_join(&from, identity)?.is_file(),
             None => from.is_file(),
@@ -488,7 +496,7 @@ pub fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[
     let mut outcomes = Vec::new();
     for unit in units {
         check_cancel(cancel)?;
-        let from = safe_join(&temp.0, &unit.path)?;
+        let from = safe_join(temp, &unit.path)?;
         let to = resolve_in(root, &unit.path)?;
         let outcome = if to.exists() {
             let same = match &unit.identity {
@@ -509,7 +517,110 @@ pub fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplicates: &[
         };
         outcomes.push(UnitOutcome { path: unit.path.clone(), outcome });
     }
+    Ok(outcomes)
+}
+
+// ---- 去重上传的落盘（#62） ----
+
+/// 去重上传落盘清单的一项：合并单元里的一个文件与它的内容 sha256。「哪个路径对应哪份内容」由浏览器给、这里信任；
+/// 内容本身在上传时已按 sha256 核对过。
+#[derive(Debug, Deserialize, Clone)]
+pub struct PlacedFile {
+    pub path: String,
+    pub sha256: String,
+}
+
+pub fn valid_sha256(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// 暂存里一份内容的文件名（即它的 sha256）。
+pub fn staged_content(staging: &Path, sha256: &str) -> PathBuf {
+    staging.join(sha256)
+}
+
+pub fn import_staged(staging: &Path, root: &Path, units: &[MergeUnit], files: &[PlacedFile], progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
+    import_staged_with(staging, root, units, files, &|from, to| fs::hard_link(from, to), progress, cancel)
+}
+
+/// 按落盘清单把暂存的内容放进临时目录里的各单元：同一份内容第一份从暂存移过来，其余硬链接到它（失败回退为复制）；
+/// 再比对 task.json 里记了 sha256 的参考图快照（不一致按损坏拒绝），最后与整包导入同样校验、合并。可注入链接方式。
+pub fn import_staged_with(staging: &Path, root: &Path, units: &[MergeUnit], files: &[PlacedFile], link: &Linker<'_>, progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
+    fs::create_dir_all(root)?;
+    for unit in units {
+        resolve_in(root, &unit.path)?;
+        if let Some(identity) = &unit.identity {
+            safe_join(Path::new(""), identity)?;
+        }
+    }
+    let mut declared = BTreeMap::new();
+    for f in files {
+        safe_join(Path::new(""), &f.path)?;
+        if !belongs_to_unit(units, &f.path) {
+            return Err(invalid(format!("落盘清单里的 {} 不属于任何合并单元", f.path)));
+        }
+        if !valid_sha256(&f.sha256) {
+            return Err(invalid(format!("{} 的 sha256 无效", f.path)));
+        }
+        if declared.insert(f.path.as_str(), f.sha256.as_str()).is_some() {
+            return Err(invalid(format!("落盘清单里的路径重复：{}", f.path)));
+        }
+        if !staged_content(staging, &f.sha256).is_file() {
+            return Err(invalid(format!("缺少 {} 的内容（没有上传）", f.path)));
+        }
+    }
+
+    fs::create_dir_all(root)?;
+    sweep_stale_imports(root);
+    let temp = TempDir(store::temp_path_for(&root.join(IMPORT_TEMP_STEM)));
+    fs::create_dir(&temp.0)?;
+    let mut placed: BTreeMap<&str, PathBuf> = BTreeMap::new();
+    let total: u64 = declared.values().collect::<BTreeSet<_>>().iter().map(|sha| fs::metadata(staged_content(staging, sha)).map(|m| m.len()).unwrap_or(0)).sum();
+    let mut done = 0;
+    for (path, sha256) in &declared {
+        check_cancel(cancel)?;
+        let dest = safe_join(&temp.0, path)?;
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        match placed.get(sha256) {
+            Some(first) => link_or_copy(link, first, &dest)?,
+            None => {
+                // 第一份落盘：暂存与用户数据根在同一文件系统，直接移过来；移不了就复制。
+                let blob = staged_content(staging, sha256);
+                done += fs::metadata(&blob)?.len();
+                if fs::rename(&blob, &dest).is_err() {
+                    fs::copy(&blob, &dest)?;
+                }
+                placed.insert(sha256, dest);
+                progress(done, total);
+            }
+        }
+    }
+
+    check_reference_snapshots(&temp.0, units, &declared)?;
+    let outcomes = merge_units(&temp.0, root, units, cancel)?;
     Ok(ImportReport { outcomes, bytes: done })
+}
+
+/// task.json 的 references[] 里记了 sha256 的参考图快照，与落盘清单给它的内容比对；不一致按损坏拒绝。
+/// task.json 读不了或不是这个形状时不比对（旧包、非 Web 版的记录照常导入）。
+fn check_reference_snapshots(temp: &Path, units: &[MergeUnit], declared: &BTreeMap<&str, &str>) -> io::Result<()> {
+    for unit in units {
+        let Some(identity) = &unit.identity else { continue };
+        let Ok(text) = fs::read(safe_join(&safe_join(temp, &unit.path)?, identity)?) else { continue };
+        let Ok(record) = serde_json::from_slice::<serde_json::Value>(&text) else { continue };
+        for reference in record.get("references").and_then(|r| r.as_array()).into_iter().flatten() {
+            let (Some(file), Some(expected)) = (reference.get("file").and_then(|v| v.as_str()), reference.get("sha256").and_then(|v| v.as_str())) else { continue };
+            let path = format!("{}/{file}", unit.path);
+            if let Some(actual) = declared.get(path.as_str()) {
+                if !actual.eq_ignore_ascii_case(expected) {
+                    return Err(invalid(format!("参考图快照 {path} 与 task.json 记录的 sha256 不一致，画板包已损坏")));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -881,6 +992,52 @@ mod tests {
         // 再导一次：还原后的单元与本机一致，全部跳过。
         let again = import(&pack, &root, &units, &duplicates, &no_progress, &AtomicBool::new(false)).unwrap();
         assert!(again.outcomes.iter().all(|o| o.outcome == MergeOutcome::Identical), "{:?}", again.outcomes);
+    }
+
+    /// 去重上传的暂存：两个任务目录的 task.json 与结果图内容各相同，暂存里每份内容只有一个文件。
+    fn staged_fixture() -> (tempfile::TempDir, PathBuf, Vec<MergeUnit>, Vec<PlacedFile>) {
+        let tmp = tempfile::tempdir().unwrap();
+        let staging = tmp.path().join("staging");
+        let sha = |b: &[u8]| format!("{:x}", Sha256::digest(b));
+        for bytes in [&b"png"[..], b"{\"same\":1}"] {
+            write(&staged_content(&staging, &sha(bytes)), bytes);
+        }
+        let placed = |path: String, bytes: &[u8]| PlacedFile { path, sha256: sha(bytes) };
+        let files = vec![
+            placed(format!("{TASK_A}/task.json"), b"{\"same\":1}"),
+            placed(format!("{TASK_A}/result.png"), b"png"),
+            placed(format!("{TASK_B}/task.json"), b"{\"same\":1}"),
+            placed(format!("{TASK_B}/result.png"), b"png"),
+        ];
+        let dir = |p: &str| MergeUnit { path: p.into(), identity: Some("task.json".into()) };
+        (tmp, staging, vec![dir(TASK_A), dir(TASK_B)], files)
+    }
+
+    #[test]
+    fn staged_same_content_is_hard_linked_or_copied_when_linking_fails() {
+        let (tmp, staging, units, files) = staged_fixture();
+        let root = tmp.path().join("输出");
+        let report = import_staged(&staging, &root, &units, &files, &no_progress, &AtomicBool::new(false)).unwrap();
+        assert!(report.outcomes.iter().all(|o| o.outcome == MergeOutcome::Moved));
+        assert_eq!(report.bytes, 3 + 10, "每份内容只计一次");
+        #[cfg(unix)]
+        assert_eq!(inode(&root.join(TASK_A).join("result.png")), inode(&root.join(TASK_B).join("result.png")));
+
+        let (tmp, staging, units, files) = staged_fixture();
+        let root = tmp.path().join("输出");
+        let links = std::cell::Cell::new(0);
+        let failing = |_: &Path, _: &Path| -> io::Result<()> {
+            links.set(links.get() + 1);
+            Err(io::Error::other("不支持硬链接"))
+        };
+        let report = import_staged_with(&staging, &root, &units, &files, &failing, &no_progress, &AtomicBool::new(false)).unwrap();
+        assert_eq!(links.get(), 2, "每份内容的第二份先尝试链接");
+        assert!(report.outcomes.iter().all(|o| o.outcome == MergeOutcome::Moved));
+        for file in ["task.json", "result.png"] {
+            assert_eq!(fs::read(root.join(TASK_B).join(file)).unwrap(), fs::read(root.join(TASK_A).join(file)).unwrap());
+            #[cfg(unix)]
+            assert_ne!(inode(&root.join(TASK_A).join(file)), inode(&root.join(TASK_B).join(file)), "回退后应是独立副本");
+        }
     }
 
     #[test]

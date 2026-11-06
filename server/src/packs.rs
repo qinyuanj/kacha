@@ -25,6 +25,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures_util::StreamExt;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
 use crate::board_pack::{self, ExportSpec, MergeUnit, PackDuplicate, CANCELLED};
@@ -250,9 +251,13 @@ fn upload_path(root: &Path, id: &str) -> PathBuf {
     root.join(META_DIR).join(UPLOAD_DIR).join(format!("{id}{UPLOAD_SUFFIX}"))
 }
 
+/// 去重上传（#62）的暂存：每次导入一个目录 `<id>.staging.tmp/`，里面每份内容一个文件，以 sha256 命名。
+const CONTENT_DIR: &str = "pack-content";
+const CONTENT_SUFFIX: &str = ".staging.tmp";
+
 /// 该用户的上传暂存：(元数据目录下的子目录, 暂存条目名后缀)。新的上传暂存位置加在这里，
 /// 每次上传开始时一并回收。
-const UPLOAD_STAGING: &[(&str, &str)] = &[(UPLOAD_DIR, UPLOAD_SUFFIX)];
+const UPLOAD_STAGING: &[(&str, &str)] = &[(UPLOAD_DIR, UPLOAD_SUFFIX), (CONTENT_DIR, CONTENT_SUFFIX)];
 
 /// 上传暂存最后一次写入超过这个时间才回收：并发进行中的上传在持续写入，等待导入的不会等这么久。
 const STALE_UPLOAD_AGE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
@@ -283,12 +288,23 @@ fn content_length(headers: &axum::http::HeaderMap) -> Option<u64> {
     headers.get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok())
 }
 
+/// 写请求体时的附加规则：已完成字节从 `base` 起算（去重上传跨多份内容累计进度）；写过 `max` 字节回 413；
+/// `hasher` 边写边算 sha256。
+#[derive(Default)]
+struct Receive<'a> {
+    op: Option<&'a Op>,
+    base: u64,
+    max: Option<u64>,
+    hasher: Option<&'a mut Sha256>,
+}
+
 /// 把上传请求体逐块写进 `out`，返回写入的字节数。上传类接口共用（#60）：
 /// - 不拿大请求许可，快慢取决于客户端；两块之间空闲超过 UPLOAD_IDLE_TIMEOUT 回 408。
 /// - 带操作时每写一块更新已完成字节数；等下一块时也看取消，被取消回 409。
 ///
 /// 出错时由调用方的守卫删掉写了一半的文件。
-async fn receive_body(body: Body, out: &mut tokio::fs::File, op: Option<&Op>) -> Result<u64, Response> {
+async fn receive_body(body: Body, out: &mut tokio::fs::File, rules: Receive<'_>) -> Result<u64, Response> {
+    let Receive { op, base, max, mut hasher } = rules;
     let mut stream = body.into_data_stream();
     let mut done = 0u64;
     loop {
@@ -310,10 +326,16 @@ async fn receive_body(body: Body, out: &mut tokio::fs::File, op: Option<&Op>) ->
         };
         let Some(chunk) = next else { return Ok(done) };
         let chunk = chunk.map_err(|_| error(StatusCode::BAD_REQUEST, "upload_failed", "上传中断"))?;
-        out.write_all(&chunk).await.map_err(crate::fs::io_error)?;
         done += chunk.len() as u64;
+        if max.is_some_and(|max| done > max) {
+            return Err(too_large());
+        }
+        out.write_all(&chunk).await.map_err(crate::fs::io_error)?;
+        if let Some(h) = hasher.as_deref_mut() {
+            h.update(&chunk);
+        }
         if let Some(op) = op {
-            op.done.store(done, Ordering::Relaxed);
+            op.done.store(base + done, Ordering::Relaxed);
             if op.cancel.load(Ordering::Relaxed) {
                 return Err(error(StatusCode::CONFLICT, "cancelled", CANCELLED));
             }
@@ -322,6 +344,10 @@ async fn receive_body(body: Body, out: &mut tokio::fs::File, op: Option<&Op>) ->
 }
 
 const UPLOAD_TIMEOUT_MESSAGE: &str = "上传中断：超过 60 秒没有收到数据，请检查网络后重试";
+
+fn too_large() -> Response {
+    error(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large", "单份内容超过 64 MB 上限")
+}
 
 pub async fn upload(State(state): State<AppState>, user: User, Query(q): Query<UploadQuery>, headers: axum::http::HeaderMap, body: Body) -> Response {
     // 开始写入前预检：已知长度时要放得下这次上传，未知时按现有门槛。
@@ -350,7 +376,7 @@ pub async fn upload(State(state): State<AppState>, user: User, Query(q): Query<U
         Ok(f) => f,
         Err(e) => return crate::fs::io_error(e),
     };
-    if let Err(r) = receive_body(body, &mut out, op.as_deref()).await {
+    if let Err(r) = receive_body(body, &mut out, Receive { op: op.as_deref(), ..Default::default() }).await {
         return r;
     }
     if let Err(e) = out.sync_all().await {
@@ -462,5 +488,204 @@ pub async fn discard_upload(State(state): State<AppState>, user: User, AxPath(id
     }
     let _ = std::fs::remove_file(&file);
     let _ = std::fs::remove_dir(file.parent().unwrap());
+    StatusCode::NO_CONTENT.into_response()
+}
+
+// ---- 去重上传（#62）：问已有 → 开暂存 → 逐份上传缺少的内容 → 按落盘清单合并 ----
+// 上传沿用整包上传的规则（#60）：不拿大请求名额、空闲超时 408、按 Content-Length 的余量预检 507、按操作 id 取消 409；
+// 另外每份内容遵守单文件 64 MB 上限（413），并边写边算 sha256 与声明核对（不一致按损坏 422）。
+// 问已有（要读身份文件算 sha256）与合并落盘仍拿大请求名额。
+
+/// 服务端已有的合并单元：任务目录给身份文件（task.json）的 sha256，参考图给整文件的 sha256；没有为 null。
+/// 目录在但身份文件读不到时给空串（与任何 sha256 都不等，前端据此判冲突，与合并时的比对一致）。
+pub async fn existing(State(state): State<AppState>, user: User, body: axum::body::Bytes) -> Response {
+    let Ok(units) = serde_json::from_slice::<Vec<MergeUnit>>(&body) else {
+        return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表");
+    };
+    let root = state.user_root(&user.fingerprint);
+    let _permit = state.heavy().acquire().await;
+    let result = tokio::task::spawn_blocking(move || -> Result<Vec<serde_json::Value>, String> {
+        let resolve = |rel: &str| crate::paths::resolve(&root, rel).map_err(|e| e.message().to_string());
+        let mut out = Vec::with_capacity(units.len());
+        for unit in &units {
+            let path = resolve(&unit.path)?;
+            let identity = match &unit.identity {
+                Some(identity) => resolve(&format!("{}/{identity}", unit.path))?,
+                None => path.clone(),
+            };
+            let sha256 = if path.exists() { Some(board_pack::sha256_file(&identity).unwrap_or_default()) } else { None };
+            out.push(serde_json::json!({ "path": unit.path, "sha256": sha256 }));
+        }
+        Ok(out)
+    })
+    .await;
+    match result {
+        Ok(Ok(out)) => Json(out).into_response(),
+        Ok(Err(message)) => error(StatusCode::FORBIDDEN, "forbidden", &message),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
+    }
+}
+
+fn staging_path(root: &Path, id: &str) -> PathBuf {
+    root.join(META_DIR).join(CONTENT_DIR).join(format!("{id}{CONTENT_SUFFIX}"))
+}
+
+fn resolve_staging(state: &AppState, user: &User, id: &str) -> Result<PathBuf, Response> {
+    if !valid_op_id(id) {
+        return Err(error(StatusCode::BAD_REQUEST, "bad_request", "暂存 id 无效"));
+    }
+    let dir = staging_path(&state.user_root(&user.fingerprint), id);
+    if !dir.is_dir() {
+        return Err(error(StatusCode::NOT_FOUND, "not_found", "上传暂存不存在或已被清理"));
+    }
+    Ok(dir)
+}
+
+/// 开一份去重上传暂存。这是一次去重上传的开始：照整包上传的做法先回收该用户过期的上传暂存。
+pub async fn open_staging(State(state): State<AppState>, user: User) -> Response {
+    let root = state.user_root(&user.fingerprint);
+    sweep_stale_uploads(&root, state.now());
+    let id = format!("{:x}", rand_u64());
+    match std::fs::create_dir_all(staging_path(&root, &id)) {
+        Ok(()) => Json(Uploaded { id }).into_response(),
+        Err(e) => crate::fs::io_error(e),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ContentQuery {
+    op: Option<String>,
+    /// 本份之前已传的字节与全部要传的字节：进度跨各份累计。
+    done: Option<u64>,
+    total: Option<u64>,
+}
+
+/// 上传一份内容到暂存：先写临时的 `.part`，边写边算 sha256，与路径里声明的一致才改名为 `<sha256>`。
+pub async fn put_content(
+    State(state): State<AppState>,
+    user: User,
+    AxPath((id, sha256)): AxPath<(String, String)>,
+    Query(q): Query<ContentQuery>,
+    headers: axum::http::HeaderMap,
+    body: Body,
+) -> Response {
+    if !board_pack::valid_sha256(&sha256) {
+        return error(StatusCode::BAD_REQUEST, "bad_request", "sha256 应为 64 位小写十六进制");
+    }
+    let dir = match resolve_staging(&state, &user, &id) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let length = content_length(&headers);
+    if length.is_some_and(|n| n > crate::MAX_BODY_BYTES as u64) {
+        return too_large();
+    }
+    if let Err(r) = crate::fs::ensure_space_for(&state, length) {
+        return r;
+    }
+    let tracked = match q.op.as_deref().map(|op| begin_op(&state, &user, op)).transpose() {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let op = tracked.as_ref().map(|(op, _)| op.clone());
+    let base = q.done.unwrap_or(0);
+    if let Some(op) = &op {
+        op.total.store(q.total.unwrap_or(base + length.unwrap_or(0)), Ordering::Relaxed);
+        op.done.store(base, Ordering::Relaxed);
+    }
+    let target = board_pack::staged_content(&dir, &sha256);
+    let part = dir.join(format!("{sha256}.{:x}.part", rand_u64()));
+    let mut guard = PartGuard { file: part.clone(), keep: false };
+    let mut out = match tokio::fs::OpenOptions::new().write(true).create_new(true).open(&part).await {
+        Ok(f) => f,
+        Err(e) => return crate::fs::io_error(e),
+    };
+    let mut hasher = Sha256::new();
+    let rules = Receive { op: op.as_deref(), base, max: Some(crate::MAX_BODY_BYTES as u64), hasher: Some(&mut hasher) };
+    if let Err(r) = receive_body(body, &mut out, rules).await {
+        return r;
+    }
+    if format!("{:x}", hasher.finalize()) != sha256 {
+        return error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_pack", "上传的内容与声明的 sha256 不一致，画板包已损坏");
+    }
+    if let Err(e) = out.sync_all().await {
+        return crate::fs::io_error(e);
+    }
+    drop(out);
+    // 同一份内容重复上传（重试）时覆盖为同样的字节，结果不变。
+    if let Err(e) = std::fs::rename(&part, &target) {
+        return crate::fs::io_error(e);
+    }
+    guard.keep = true;
+    StatusCode::NO_CONTENT.into_response()
+}
+
+#[derive(Deserialize)]
+struct StagedImport {
+    units: Vec<MergeUnit>,
+    files: Vec<board_pack::PlacedFile>,
+}
+
+/// 按落盘清单合并：结束后无论结局都删除暂存（已移入的单元保留）。
+pub async fn import_staging(State(state): State<AppState>, user: User, AxPath(id): AxPath<String>, Query(q): Query<OpQuery>, body: axum::body::Bytes) -> Response {
+    if let Err(r) = crate::fs::ensure_space(&state) {
+        return r;
+    }
+    let Ok(StagedImport { units, files }) = serde_json::from_slice::<StagedImport>(&body) else {
+        return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元与落盘清单");
+    };
+    let dir = match resolve_staging(&state, &user, &id) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let cleanup = StagingGuard(dir.clone());
+    let (op, _guard) = match begin_op(&state, &user, &q.op) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let root = state.user_root(&user.fingerprint);
+    let _permit = state.heavy().acquire().await;
+    let progress = progress_fn(&op);
+    let cancel = op.clone();
+    let result = tokio::task::spawn_blocking(move || board_pack::import_staged(&dir, &root, &units, &files, &progress, &cancel.cancel)).await;
+    drop(cleanup);
+    match result {
+        Ok(Ok(report)) => Json(report).into_response(),
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::Interrupted => error(StatusCode::CONFLICT, "cancelled", CANCELLED),
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidData => error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_pack", &e.to_string()),
+        Ok(Err(e)) => crate::fs::io_error(e),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
+    }
+}
+
+/// 写了一半的内容文件守卫：只删这个文件，不动暂存目录（同一暂存里还有别的内容）。
+struct PartGuard {
+    file: PathBuf,
+    keep: bool,
+}
+
+impl Drop for PartGuard {
+    fn drop(&mut self) {
+        if !self.keep {
+            let _ = std::fs::remove_file(&self.file);
+        }
+    }
+}
+
+/// 暂存目录守卫：离开作用域时整目录删除。
+struct StagingGuard(PathBuf);
+
+impl Drop for StagingGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// 放弃暂存（导入在合并之前被取消 / 失败）：删除整个暂存目录，幂等。
+pub async fn discard_staging(State(state): State<AppState>, user: User, AxPath(id): AxPath<String>) -> Response {
+    if !valid_op_id(&id) {
+        return error(StatusCode::BAD_REQUEST, "bad_request", "暂存 id 无效");
+    }
+    let _ = std::fs::remove_dir_all(staging_path(&state.user_root(&user.fingerprint), &id));
     StatusCode::NO_CONTENT.into_response()
 }
