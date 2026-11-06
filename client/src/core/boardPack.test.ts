@@ -248,7 +248,7 @@ describe("导出 v2：按内容去重", () => {
     expect(check.kind).toBe("ok");
     if (check.kind !== "ok") return;
     expect(check.units.map((u) => u.path)).toEqual([A, B, C, "导入参考图/s3.png"]);
-    expect(Object.fromEntries(check.duplicates.map((d) => [d.path, d.source]))).toEqual(contents.duplicates);
+    expect(check.duplicates).toEqual(contents.duplicates);
   });
 });
 
@@ -393,11 +393,11 @@ describe("导入前检查包内容", () => {
         { path: "导入参考图/aa.png", identity: null },
         { path: "导入参考图/bb.png", identity: null },
       ]);
-      expect(check.duplicates).toEqual([
-        { path: `${OTHER}/references/01.png`, source: `${TASK}/result.png` },
-        { path: `${OTHER}/result.png`, source: `${TASK}/result.png` },
-        { path: "导入参考图/bb.png", source: "导入参考图/aa.png" },
-      ]);
+      expect(check.duplicates).toEqual({
+        [`${OTHER}/references/01.png`]: `${TASK}/result.png`,
+        [`${OTHER}/result.png`]: `${TASK}/result.png`,
+        "导入参考图/bb.png": "导入参考图/aa.png",
+      });
     });
 
     it("被省略的 task.json 仍算任务目录含 task.json", async () => {
@@ -409,9 +409,9 @@ describe("导入前检查包内容", () => {
 
     it("没有 duplicates 的 v2 包与 v1 一样；v1 包的还原清单为空", async () => {
       const v2Check = await inspectPack(present, reader(v2(undefined)).readTexts);
-      expect(v2Check).toMatchObject({ kind: "ok", duplicates: [] });
+      expect(v2Check.kind === "ok" && v2Check.duplicates).toEqual({});
       const v1Check = await inspectPack(present, reader(texts).readTexts);
-      expect(v1Check).toMatchObject({ kind: "ok", duplicates: [] });
+      expect(v1Check.kind === "ok" && v1Check.duplicates).toEqual({});
     });
 
     const violations: [string, unknown][] = [
@@ -518,7 +518,7 @@ describe("导入画板包", () => {
   function memoryPackIo(pack: Record<string, string>, opts: { failAfterMove?: unknown; failUpload?: unknown; existing?: Record<string, string>; unreadable?: string[] } = {}) {
     const moved: string[] = [];
     const steps: string[] = [];
-    const restored: { path: string; source: string }[] = [];
+    const restored: Record<string, string>[] = [];
     const hashed: string[] = [];
     const uploaded: { sha256: string; size: number; progress: { done: number; total: number } }[] = [];
     const placed: { path: string; sha256: string }[] = [];
@@ -573,7 +573,7 @@ describe("导入画板包", () => {
       discard: async (id) => void steps.push(`discard(${id})`),
       importUnits: async (id, units, duplicates) => {
         steps.push(`import(${id})`);
-        restored.push(...duplicates);
+        if (Object.keys(duplicates).length > 0) restored.push(duplicates);
         for (const unit of units) {
           moved.push(unit.path);
           if (opts.failAfterMove !== undefined) throw opts.failAfterMove;
@@ -701,7 +701,7 @@ describe("导入画板包", () => {
     const v2 = memoryPackIo(v2Pack);
     expect(await run(v2.io).outcome).toMatchObject({ kind: "done" });
     expect(v2.moved).toEqual([TASK]);
-    expect(v2.restored).toEqual([{ path: `${TASK}/references/01.png`, source: `${TASK}/result.png` }]);
+    expect(v2.restored).toEqual([{ [`${TASK}/references/01.png`]: `${TASK}/result.png` }]);
     const v1 = memoryPackIo(goodPack);
     await run(v1.io).outcome;
     expect(v1.restored).toEqual([]);
@@ -785,7 +785,7 @@ describe("导入画板包", () => {
       expect(await local("fixtures/packs/v0.3.2-flash-layers.ugcpack")).toMatchObject({ kind: "ok", units: expect.arrayContaining([{ path: TASK, identity: "task.json" }]) });
       expect(await local("fixtures/packs/v2-duplicates.ugcpack")).toMatchObject({
         kind: "ok",
-        duplicates: [{ path: "2026-09-16/20260916T020000Z-0000000b/references/01.png", source: `${TASK}/result.png` }],
+        duplicates: { "2026-09-16/20260916T020000Z-0000000b/references/01.png": `${TASK}/result.png` },
       });
     });
 

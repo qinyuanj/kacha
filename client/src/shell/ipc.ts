@@ -2,7 +2,6 @@
 // UI 与 core 不直接调业务 HTTP，都经这里的端口。
 import type { FetchLike } from "../core/gateway";
 import { PACK_CANCELLED, type PackContent, type PackEntryFact } from "../core/boardPack";
-import type { EntryHash } from "../core/packHash";
 import type { ZipEntry } from "../core/zipIndex";
 import { entryBody } from "../core/packHash";
 import type { WorkerMessage, WorkerRequest } from "./packHash.worker";
@@ -285,7 +284,7 @@ export const ipc: Ipc = {
     // 上传之后、合并之前被取消：服务端还没有这个操作，取消标记只在这里，不再发起合并。
     if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
     try {
-      return await tracked(op, () => api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ units, duplicates }) }));
+      return await tracked(op, () => api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ units, duplicates: Object.entries(duplicates).map(([path, source]) => ({ path, source })) }) }));
     } catch (e) {
       throw asCancelled(op, e);
     }
@@ -432,7 +431,7 @@ function inWorker<T>(request: WorkerRequest, settle: (m: Exclude<WorkerMessage, 
 }
 
 /** hash 阶段：Worker 里按条目流式算 sha256，进度经 localProgress 报给进度轮询；取消即 terminate。 */
-function hashInWorker(file: File, entries: ZipEntry[]): Promise<EntryHash[]> {
+function hashInWorker(file: File, entries: ZipEntry[]): Promise<PackEntryFact[]> {
   const op = requireOp();
   localProgress.set(op, { done: 0, total: entries.reduce((n, e) => n + e.size, 0) });
   return inWorker(

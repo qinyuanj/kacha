@@ -1,14 +1,15 @@
 // 画板包导入里要整条读字节的活跑在这个 Web Worker 里（#62）：File 经 postMessage 传进来（不复制内容）。
-// - hash：按条目流式解压并算 sha256，回传进度与每个条目的 { name, sha256, size }。
+// - hash：按条目流式解压并算 sha256，回传进度与每个条目的字节事实（PackEntryFact）。
 // - body：去重上传时 deflate 条目的上传体，在这里解压成 Blob 再传回（Blob 按引用传递），解压后的字节不进主线程内存。
 // 取消由主线程 terminate()。
-import { entryBody, hashEntries, type EntryHash } from "../core/packHash";
+import type { PackEntryFact } from "../core/boardPack";
+import { entryBody, hashEntries } from "../core/packHash";
 import { blobSource, type ZipEntry } from "../core/zipIndex";
 
 export type WorkerRequest = { kind: "hash"; file: File; entries: ZipEntry[] } | { kind: "body"; file: File; entry: ZipEntry };
 export type WorkerMessage =
   | { kind: "progress"; done: number; total: number }
-  | { kind: "hashed"; facts: EntryHash[] }
+  | { kind: "hashed"; facts: PackEntryFact[] }
   | { kind: "body"; body: Blob }
   | { kind: "error"; message: string };
 
