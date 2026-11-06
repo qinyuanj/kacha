@@ -192,6 +192,16 @@ describe("份数随画板包导出与导入", () => {
     expect(tasks.map((t) => taskCount(t))).toEqual([3, 50, 1]);
     expect(tasks[2]).not.toHaveProperty("count");
   });
+
+  it("同一次提交各份的任务目录随包导出（失败 / 已中断的份没有结果节点）；只有 task_id 的旧画板行为不变", async () => {
+    const copies = ["20261106T080000Z-0000000a", "20261106T080000Z-0000000b"];
+    const multi: TaskNode = { ...task("t", 2), last_submitted: { task_id: copies[1], copy_task_ids: copies, images: [] } };
+    const old: TaskNode = { ...task("old"), last_submitted: { task_id: "20260916T010000Z-0000000f", images: [] } };
+    const plan = await planExport(boardWith(multi, old, result("r", copies[0], "2026-11-06")), ROOT, memoryFs({ [abs(`2026-11-06/${copies[0]}/result.png`)]: "" }));
+    expect(plan.taskDirs).toEqual(copies.map((id) => `2026-11-06/${id}`));
+    expect(plan.missing).toEqual([]);
+    expect(plan.board.nodes[0]).toEqual(multi);
+  });
 });
 
 describe("包清单与版本判定", () => {

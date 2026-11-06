@@ -162,6 +162,23 @@ test.describe("#19 / #20 重开画板后的已存状态", () => {
     expect(interrupted).toEqual([{ task_id: ids.interrupted, board_file: expect.any(String), task_node_id: "ti", from_status: "running", to_status: "interrupted" }]);
   });
 
+  test("#38 多份：按各份任务目录推导并聚合为计数摘要，悬停显示每份的失败原因", async ({ page, rig }) => {
+    const copies = { failed: "20260915T020101Z-bbbb0001", timeout: "20260915T020102Z-bbbb0002", interrupted: "20260915T020103Z-bbbb0003" };
+    const multi = board(
+      "多份已存状态",
+      [taskNode("tm", { count: 3, last_submitted: { task_id: copies.interrupted, copy_task_ids: Object.values(copies) } })],
+      [],
+    );
+    await openApp(page, rig, {
+      title: "多份已存状态",
+      boardText: multi,
+      files: { ...outcome(copies.failed, { outcome: "failed", label: "鉴权失败" }), ...outcome(copies.timeout, { outcome: "failed", label: "网关超时" }) },
+    });
+    const badge = task(page, "tm").locator(".status-failed");
+    await expect(badge).toHaveText("失败 2 · 已中断 1");
+    await expect(badge).toHaveAttribute("title", "第 1 份：失败 · 鉴权失败\n第 2 份：失败 · 网关超时\n第 3 份：已中断");
+  });
+
   test("结局记录读失败（5xx）不显示已中断，恢复后能读到真实状态", async ({ page, rig }) => {
     await page.route("**/api/fs/file?*", (route) => (decodeURIComponent(route.request().url()).includes("outcome.json") ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ code: "io", message: "磁盘错误（模拟）" }) }) : route.continue()));
     await openApp(page, rig, scenario);
