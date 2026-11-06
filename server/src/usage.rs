@@ -87,7 +87,7 @@ pub async fn cleanup_unreferenced(State(state): State<AppState>, user: User, bod
         let mut skipped = Vec::new();
         for want in req.dirs {
             match dirs.iter().find(|d| d.dir == want) {
-                Some(d) => match cleanup::move_to_recycle(&data_root, &format!("{rel_prefix}/{}", d.dir), now) {
+                Some(d) => match cleanup::recycle_task_dir(&data_root, &format!("{rel_prefix}/{}", d.dir), now) {
                     Ok(()) => moved.push(candidate_json(d)),
                     Err(e) => return Err(error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string())),
                 },

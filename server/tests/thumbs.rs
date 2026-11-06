@@ -276,3 +276,132 @@ async fn thumbnails_follow_session_and_path_rules() {
     assert_eq!(get_thumb(&h, &alice, "../outside.png").await.status, 403);
     assert_eq!(get_thumb(&h, &alice, "2026-11-04/../../outside.png").await.status, 403);
 }
+
+// ---- 清理任务目录时删除缩略图（#65） ----
+
+const DAY: u64 = 86400;
+
+/// 一个建立超过 30 天、无画板引用的任务目录，原图够大、缩略图已生成。
+async fn seed_unreferenced_with_thumb(h: &Harness, cookie: &str) -> PathBuf {
+    let root = h.user_root(GOOD_KEY);
+    seed(&root, TASK_FILE, &encode(opaque(1000, 600), ImageFormat::Png));
+    let task_dir = root.join(TASK_FILE).parent().unwrap().to_path_buf();
+    age(&task_dir, h.now_secs() - 100 * DAY);
+    assert_eq!(get_thumb(h, cookie, TASK_FILE).await.status, 200);
+    assert!(cached(&root, TASK_FILE).exists());
+    task_dir
+}
+
+fn age(path: &Path, at: u64) {
+    let t = std::time::UNIX_EPOCH + Duration::from_secs(at);
+    if path.is_dir() {
+        for e in std::fs::read_dir(path).unwrap() {
+            age(&e.unwrap().path(), at);
+        }
+    }
+    open_for_set_times(path).set_modified(t).unwrap();
+}
+
+#[cfg(not(windows))]
+fn open_for_set_times(path: &Path) -> std::fs::File {
+    std::fs::File::open(path).unwrap()
+}
+
+/// Windows 改时间要写权限，打开目录还需 FILE_FLAG_BACKUP_SEMANTICS。
+#[cfg(windows)]
+fn open_for_set_times(path: &Path) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    std::fs::OpenOptions::new().write(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(path).unwrap()
+}
+
+fn cleanup_cli(h: &Harness, args: &[&str]) {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_kacha-server"))
+        .arg("cleanup")
+        .args(args)
+        .args(["--data-root", h.data_root().to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+}
+
+/// 回收区里所有文件（相对回收区，正斜杠）。
+fn recycled_files(h: &Harness) -> Vec<String> {
+    fn walk(base: &Path, dir: &Path, out: &mut Vec<String>) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let path = e.unwrap().path();
+            if path.is_dir() {
+                walk(base, &path, out);
+            } else {
+                out.push(path.strip_prefix(base).unwrap().to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    let base = h.data_root().join("recycle");
+    let mut out = Vec::new();
+    walk(&base, &base, &mut out);
+    out
+}
+
+#[tokio::test]
+async fn admin_cleanup_deletes_the_thumbnail_instead_of_recycling_it() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let task_dir = seed_unreferenced_with_thumb(&h, &cookie).await;
+
+    cleanup_cli(&h, &["--now", &h.now_secs().to_string()]);
+
+    assert!(!task_dir.exists(), "任务目录已移入回收区");
+    assert!(!cached(&h.user_root(GOOD_KEY), TASK_FILE).exists(), "缩略图随之删除");
+    let recycled = recycled_files(&h);
+    assert!(recycled.iter().any(|f| f.ends_with(TASK_FILE)), "{recycled:?}");
+    assert!(recycled.iter().all(|f| !f.contains(".kacha")), "回收区里没有缩略图：{recycled:?}");
+}
+
+#[tokio::test]
+async fn admin_purge_also_deletes_the_thumbnail() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    seed_unreferenced_with_thumb(&h, &cookie).await;
+
+    cleanup_cli(&h, &["--purge", "--now", &h.now_secs().to_string()]);
+
+    assert!(!cached(&h.user_root(GOOD_KEY), TASK_FILE).exists());
+}
+
+#[tokio::test]
+async fn thumbnail_regenerates_after_cleanup_restore() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let task_dir = seed_unreferenced_with_thumb(&h, &cookie).await;
+    cleanup_cli(&h, &["--now", &h.now_secs().to_string()]);
+
+    // Harness 时钟 2027-01-15T08:00:00Z 即回收批次名；restore 只搬回任务目录。
+    let dir = TASK_FILE.rsplit_once('/').unwrap().0;
+    cleanup_cli(&h, &["restore", &format!("20270115T080000Z/users/{}/{dir}", fingerprint(GOOD_KEY))]);
+    assert!(task_dir.join("result.png").exists());
+    assert!(!cached(&h.user_root(GOOD_KEY), TASK_FILE).exists(), "restore 不带回缩略图");
+
+    let reply = get_thumb(&h, &cookie, TASK_FILE).await;
+    assert_eq!(reply.status, 200, "{}", reply.text());
+    assert_eq!(decoded(&reply, ImageFormat::Jpeg).dimensions(), (512, 307));
+    assert_eq!(std::fs::read(cached(&h.user_root(GOOD_KEY), TASK_FILE)).unwrap(), reply.body, "重新生成并写回缓存");
+}
+
+#[tokio::test]
+async fn self_service_cleanup_deletes_the_thumbnail_too() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let task_dir = seed_unreferenced_with_thumb(&h, &cookie).await;
+    let dir = TASK_FILE.rsplit_once('/').unwrap().0;
+
+    let body = serde_json::json!({ "dirs": [dir] }).to_string();
+    let reply = h.send(axum::http::Method::POST, "/api/cleanup/unreferenced", Some(&cookie), body).await;
+    assert_eq!(reply.status, 200, "{}", reply.text());
+    assert_eq!(reply.json()["moved"][0]["dir"], dir);
+
+    assert!(!task_dir.exists());
+    assert!(!cached(&h.user_root(GOOD_KEY), TASK_FILE).exists(), "缩略图随之删除");
+    let recycled = recycled_files(&h);
+    assert!(recycled.iter().all(|f| !f.contains(".kacha")), "回收区里没有缩略图：{recycled:?}");
+}
