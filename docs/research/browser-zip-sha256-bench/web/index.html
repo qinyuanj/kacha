@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8" />
+<input type="file" id="f" />
+<script type="module">
+  import { runManual, setDigest, makeHasher } from "./bench-core.js";
+  import * as zip from "/nm/@zip.js/zip.js/index.js";
+
+  let peakHeap = 0;
+  const sampleHeap = () => (peakHeap = Math.max(peakHeap, performance.memory?.usedJSHeapSize ?? 0));
+  const MiB = (b) => +(b / 1048576).toFixed(1);
+
+  // 主线程卡顿：每 16ms 的定时器，记录最大间隔
+  function jank() {
+    let last = performance.now(), worst = 0, id;
+    const tick = () => { const now = performance.now(); worst = Math.max(worst, now - last); last = now; id = setTimeout(tick, 16); };
+    id = setTimeout(tick, 16);
+    return () => { clearTimeout(id); return Math.round(worst); };
+  }
+
+  window.env = () => ({ isSecureContext, subtle: typeof crypto.subtle, getRandomValues: typeof crypto.getRandomValues, ds: typeof DecompressionStream, ua: navigator.userAgent });
+
+  window.bench = async (mode) => {
+    const file = document.getElementById("f").files[0];
+    peakHeap = 0;
+    const heapTimer = setInterval(sampleHeap, 20);
+    const stopJank = jank();
+    let out;
+    if (mode === "main-wasm" || mode === "main-noble") {
+      const r = await runManual(file, mode === "main-noble" ? "noble" : "wasm", sampleHeap);
+      out = { secs: r.secs, bytes: r.bytes, avgChunk: r.avgChunk, maxChunk: r.maxChunk, set: await setDigest(r.results), n: Object.keys(r.results).length };
+    } else if (mode === "worker-wasm" || mode === "worker-noble") {
+      const w = new Worker("./worker.js", { type: "module" });
+      out = await new Promise((res) => { w.onmessage = (e) => res(e.data); w.postMessage({ file, kind: mode.endsWith("noble") ? "noble" : "wasm" }); });
+      w.terminate();
+      if (!out.ok) throw new Error(out.error);
+    } else if (mode === "main-zipjs") {
+      zip.configure({ useWebWorkers: false });
+      const newHash = await makeHasher("wasm");
+      const results = {};
+      let bytes = 0;
+      const t0 = performance.now();
+      const reader = new zip.ZipReader(new zip.BlobReader(file));
+      for (const e of await reader.getEntries()) {
+        if (e.directory) continue;
+        const h = newHash();
+        await e.getData(new WritableStream({ write(c) { h.update(c); bytes += c.byteLength; sampleHeap(); } }));
+        results[e.filename] = h.hex();
+      }
+      await reader.close();
+      out = { secs: (performance.now() - t0) / 1000, bytes, set: await setDigest(results), n: Object.keys(results).length };
+    }
+    clearInterval(heapTimer);
+    return { mode, n: out.n, MiB: MiB(out.bytes), secs: +out.secs.toFixed(2), MiBps: Math.round(out.bytes / 1048576 / out.secs), avgChunkKiB: out.avgChunk ? Math.round(out.avgChunk / 1024) : undefined, maxChunkKiB: out.maxChunk ? Math.round(out.maxChunk / 1024) : undefined, mainPeakJsHeapMiB: MiB(peakHeap), mainWorstTimerGapMs: stopJank(), set: out.set };
+  };
+</script>
