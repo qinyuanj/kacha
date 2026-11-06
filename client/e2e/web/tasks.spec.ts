@@ -6,7 +6,7 @@ import { board, edge, png, promptNode, referenceNode, taskNode } from "../common
 import { test, type Rig } from "./rig";
 import path from "node:path";
 import { GOOD_KEY } from "./rig";
-import { boardRelPath, openApp, readJson, task, taskRecords } from "./kit";
+import { boardRelPath, openApp, readJson, savedNodes, task, taskRecords } from "./kit";
 
 const builtin = JSON.parse(readFileSync(new URL("../../src/core/capabilities.builtin.json", import.meta.url), "utf8"));
 const fixture = (name: string) => readFileSync(new URL(`../../src/core/__fixtures__/${name}`, import.meta.url), "utf8");
@@ -113,12 +113,14 @@ test("Issue #35 重新生成按份数展开并二次确认；生成变体只生�
   expect(asked[0]).toContain("将生成 2 份，模型 qwen-image-3.0-pro");
   expect(bodies(rig)).toHaveLength(2);
   accept = true;
+  // 结果列变长后新结果可能落在视口外、不在 DOM 中（只渲染可见节点）：按画板文件计数。
+  const results = () => savedNodes(rig, "份数重新生成").filter((n) => n.type === "result").length;
   await openMenu(page, "t1", "重新生成");
-  await expect(page.locator(".react-flow__node-result")).toHaveCount(4);
+  await expect.poll(results).toBe(4);
   expect(bodies(rig)).toHaveLength(4);
   await page.locator(".react-flow__node-result").first().click({ button: "right" });
   await page.getByRole("menuitem", { name: "生成变体", exact: true }).click();
-  await expect(page.locator(".react-flow__node-result")).toHaveCount(5);
+  await expect.poll(results).toBe(5);
   expect(bodies(rig)).toHaveLength(5);
   expect(asked).toHaveLength(2);
   expect(errors).toEqual([]);
