@@ -354,7 +354,7 @@ export function BoardCanvas({
           }
         })(),
     }),
-    [table, boardFile, userRoot, discovery, apply, onRegenerate, toast, openNodePreview, regionTargetsOf],
+    [table, boardFile, userRoot, discovery, concurrency, apply, onRegenerate, toast, openNodePreview, regionTargetsOf],
   );
 
   // 选中任一节点即高亮其谱系。
