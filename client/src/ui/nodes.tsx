@@ -231,6 +231,8 @@ export const PromptNodeView = memo(function PromptNodeView({ data, width, height
   // 未提交文本由画布保管：节点离开视口卸载再挂载时仍在。
   const setPending = (text: string | null) => setPromptDraft(node.id, text);
   const [keep, setKeep] = useState(false);
+  // 输入法组字期间文本只留在节点内：受控值必须同步跟上 DOM，否则组字被打断（拼音清空或重复）；组字结束再提交一次。
+  const [composing, setComposing] = useState<string | null>(null);
   const fork = () => {
     if (pending !== null) apply({ kind: "forkPrompt", promptId: node.id, text: pending });
     setPending(null);
@@ -252,6 +254,10 @@ export const PromptNodeView = memo(function PromptNodeView({ data, width, height
       }
     });
   };
+  // 部分浏览器在 compositionend 后还会补发一次同文本的 input；文本没变不算改动，免得误触发三选。
+  const typed = (text: string) => {
+    if (text !== (pending ?? node.text)) change(text);
+  };
   const insertReference = (port: number) => {
     const el = textarea.current;
     const current = pending ?? node.text;
@@ -265,19 +271,24 @@ export const PromptNodeView = memo(function PromptNodeView({ data, width, height
       <textarea
         ref={textarea}
         className="nodrag nowheel prompt-text"
-        value={pending ?? node.text}
+        value={composing ?? pending ?? node.text}
         placeholder="输入提示词…"
         onBlur={() => setKeep(false)}
+        onCompositionStart={(e) => setComposing(e.currentTarget.value)}
+        onCompositionEnd={(e) => {
+          setComposing(null);
+          typed(e.currentTarget.value);
+        }}
         onKeyDown={(e) => {
-          if (pending === null) return;
+          if (pending === null || composing !== null) return;
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             fork();
           } else if (e.key === "Escape") setPending(null);
         }}
         onChange={(e) => {
-          if (e.nativeEvent instanceof InputEvent && e.nativeEvent.isComposing) return;
-          change(e.target.value);
+          if (composing !== null) setComposing(e.target.value);
+          else typed(e.target.value);
         }}
       />
       {guides.length > 0 && (

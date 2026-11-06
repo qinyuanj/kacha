@@ -65,3 +65,16 @@ test("中文输入法提交单个标点不重复", async ({ page, rig }) => {
   await cdp.send("Input.insertText", { text: "。" });
   await expect(field).toHaveValue("。");
 });
+
+test("中文输入法组字过程中保留拼音并提交汉字", async ({ page, rig }) => {
+  await openApp(page, rig, { title: "输入法", boardText: board("输入法", [promptNode("p1", "")], []) });
+  const field = task(page, "p1").locator("textarea");
+  await field.focus();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.imeSetComposition", { text: "n", selectionStart: 1, selectionEnd: 1 });
+  await cdp.send("Input.imeSetComposition", { text: "ni", selectionStart: 2, selectionEnd: 2 });
+  await cdp.send("Input.imeSetComposition", { text: "ni h", selectionStart: 4, selectionEnd: 4 });
+  await expect(field).toHaveValue("ni h");
+  await cdp.send("Input.insertText", { text: "你好" });
+  await expect(field).toHaveValue("你好");
+});
