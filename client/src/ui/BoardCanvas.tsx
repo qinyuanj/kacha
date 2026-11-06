@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import { type Board, type BoardEdge } from "../core/board";
 import { findModel, modelsByTier, type CapabilityTable, type InputImageRule } from "../core/capabilities";
 import type { TaskStatus } from "../core/run";
+import { nodeStatus, type NodeRunState } from "../core/runner";
 import { availableModels, defaultTaskModel, type Discovery } from "../core/settings";
 import {
   canConnect,
@@ -84,7 +85,8 @@ interface Props {
   redoLabel: string | null;
   toast: (message: string) => void;
   discovery: Discovery;
-  statuses: ReadonlyMap<string, TaskStatus>;
+  /** 运行器快照里本画板各任务节点的各份。 */
+  runNodes: ReadonlyMap<string, NodeRunState>;
   /** 本次程序运行期间队列经手过的提交；其余无结果的提交按任务目录推导失败 / 已取消 / 已中断。 */
   handled: ReadonlySet<string>;
   /** 点「运行」：传当前选中的节点 id。 */
@@ -121,7 +123,7 @@ export function BoardCanvas({
   redoLabel,
   toast,
   discovery,
-  statuses,
+  runNodes,
   handled,
   onRun,
   onCancelTask,
@@ -261,7 +263,7 @@ export function BoardCanvas({
   );
 
   const stored = useStoredStatuses(board, boardFile, userRoot, handled);
-  const statusOf = useCallback((taskId: string): TaskStatus | null => statuses.get(taskId) ?? stored.get(taskId) ?? null, [statuses, stored]);
+  const statusOf = useCallback((taskId: string): TaskStatus | null => nodeStatus(runNodes.get(taskId)) ?? stored.get(taskId) ?? null, [runNodes, stored]);
 
   // perform 依赖每次渲染重建的新建类函数，经 ref 取最新一版，actions 保持稳定。
   const performRef = useRef<BoardActions["perform"]>(() => {});
