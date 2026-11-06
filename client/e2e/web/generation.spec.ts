@@ -22,7 +22,7 @@ test("url 结果由服务端中转写入任务目录，刷新后结果节点仍�
   expect(existsSync(path.join(dir, ".staging"))).toBe(false, "提交后不留暂存区");
   // 浏览器没有直接跨域取对象存储：桩的 /objects/* 响应不带 CORS，结果图由 <img> 靠 cookie 从服务端加载。
   const src = await page.locator(".react-flow__node-result img").first().getAttribute("src");
-  expect(src).toContain("/api/fs/file?path=");
+  expect(src).toContain("/api/fs/thumb?path=");
   await page.reload();
   await expect(page.locator(".react-flow__node-result")).toHaveCount(1);
   await expect(task(page, "t1").locator(".status")).toHaveCount(0);

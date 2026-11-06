@@ -279,6 +279,9 @@ export const httpFetch: FetchLike = (url, init) => fetch(url, init);
 /** 图片地址走同源读文件接口，靠会话 cookie 认人。 */
 export const fileUrl = (path: string) => `/api/fs/file?${query(path)}`;
 
+/** 节点上显示用的缩略图地址；放大预览、图层查看、下载与上传参考图仍用 `fileUrl` / 原图字节。 */
+export const thumbUrl = (path: string) => `/api/fs/thumb?${query(path)}`;
+
 export const browser: BrowserPort = {
   ask: async (text, options) => window.confirm(options?.title ? `${options.title}\n\n${text}` : text),
   message: async (text, options) => void window.alert(options?.title ? `${options.title}\n\n${text}` : text),
