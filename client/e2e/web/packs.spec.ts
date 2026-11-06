@@ -1,7 +1,7 @@
 // 画板包（#24）新接缝：导出 = 浏览器下载流；导入 = 浏览器选文件流式上传 → 判定 → 合并 → 打开画板。
 // 旧假壳的 pack.spec.ts 不在这里复用：它注入的是虚拟条目与导出规格 JSON，不是真 zip。
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
@@ -13,6 +13,7 @@ import { openApp, readJson, readText, taskRecords } from "./kit";
 const TASK_ID = "20260916T010000Z-0000000a";
 const DIR = `2026-09-16/${TASK_ID}`;
 const V032 = fileURLToPath(new URL("../../fixtures/packs/v0.3.2-flash-layers.ugcpack", import.meta.url));
+const V2 = fileURLToPath(new URL("../../fixtures/packs/v2-duplicates.ugcpack", import.meta.url));
 const REF_ENTRY = "导入参考图/5e4b079355f5f06363744c0778c5174040645713e06e6877eae22f573d46e6b0.png";
 
 const dialog = (page: Page) => page.getByRole("dialog", { name: "画板包" });
@@ -117,6 +118,25 @@ test("导入桌面 v0.3.2 画板包：图层与 layers.json 落盘、画板打�
   expect(errors).toEqual([]);
 });
 
+test("导入包格式 v2：被省略的参考图快照在服务端还原为硬链接，画板打开、所有图片可显示", async ({ page, rig }) => {
+  const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
+  await importPack(page, V2);
+  await expect(toast(page)).toHaveText("导入 2 个任务，跳过 0 个");
+  await expect(page.locator(".tab.tab-active .tab-title")).toHaveText("去重画板");
+  const root = rig.userRoot(GOOD_KEY);
+  const representative = path.join(root, "2026-09-16/20260916T010000Z-0000000a/result.png");
+  const omitted = path.join(root, "2026-09-16/20260916T020000Z-0000000b/references/01.png");
+  expect(readFileSync(omitted).equals(readFileSync(representative))).toBe(true);
+  if (process.platform !== "win32") expect(statSync(omitted).ino).toBe(statSync(representative).ino);
+  for (const id of ["ra", "rb", "snap"]) {
+    const img = page.locator(`.react-flow__node[data-id="${id}"] img.thumb`);
+    await expect(img, id).toBeVisible();
+    await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth), { message: id }).toBe(64);
+  }
+  expect(existsSync(path.join(root, ".kacha/packs"))).toBe(false);
+  expect(errors).toEqual([]);
+});
+
 test("重复导入同一包：任务目录跳过不覆盖，同名画板改名写入", async ({ page, rig }) => {
   await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
   await importPack(page, V032);
@@ -178,7 +198,7 @@ function makeZip(rig: Rig, file: string, lines: string[]): string {
 
 test("包格式版本较新：弹「无法导入画板包」，不进进度、不写文件", async ({ page, rig }) => {
   await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
-  const newer = makePack(rig, "newer.ugcpack", {}, { pack_format_version: 2 });
+  const newer = makePack(rig, "newer.ugcpack", {}, { pack_format_version: 3 });
   const alerts: string[] = [];
   page.on("dialog", async (d) => {
     alerts.push(d.message());
@@ -186,7 +206,7 @@ test("包格式版本较新：弹「无法导入画板包」，不进进度、�
   });
   await importPack(page, newer);
   await expect.poll(() => alerts.length).toBe(1);
-  expect(alerts[0]).toContain("格式版本 2 高于本机支持的 1（由 9.9.9 导出）");
+  expect(alerts[0]).toContain("格式版本 3 高于本机支持的 2（由 9.9.9 导出）");
   expect(existsSync(path.join(rig.userRoot(GOOD_KEY), DIR))).toBe(false);
   await expect(dialog(page)).toHaveCount(0);
   expect(existsSync(path.join(rig.userRoot(GOOD_KEY), ".kacha/packs"))).toBe(false);
