@@ -8,6 +8,7 @@ import {
   openBoard,
   parseBoard,
   serializeBoard,
+  copyTaskIds,
   runCopies,
   taskCount,
   uniqueBoardFileName,
@@ -181,6 +182,13 @@ describe("画板文件读入", () => {
     expect(runCopies(task, 3)).toEqual({ set: 1, actual: 1 });
     expect(runCopies({ ...task, count: 5 }, 3)).toEqual({ set: 5, actual: 3 });
     expect(runCopies({ ...task, count: 2 }, 3)).toEqual({ set: 2, actual: 2 });
+  });
+
+  it("copy_task_ids 读取：缺失或不是数组为空，非字符串项丢弃", () => {
+    expect(copyTaskIds(null)).toEqual([]);
+    expect(copyTaskIds({ task_id: "a" })).toEqual([]);
+    expect(copyTaskIds({ copy_task_ids: "a" })).toEqual([]);
+    expect(copyTaskIds({ copy_task_ids: ["a", 1, null, "b"] })).toEqual(["a", "b"]);
   });
 
   it("份数不是正整数视为损坏，按字段名给原因", () => {

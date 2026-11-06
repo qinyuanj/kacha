@@ -126,6 +126,16 @@ export function taskCount(task: TaskNode): number {
 }
 
 /**
+ * last_submitted.copy_task_ids 的读取：同一次提交按份数展开时已派发的各份任务编号（份数 > 1 时才有，不参与脏判据）。
+ * 字段缺失或不是数组时为空；其中不是字符串的项丢弃。客户端各处只经这里读这个字段。
+ */
+export function copyTaskIds(last: unknown): string[] {
+  if (typeof last !== "object" || last === null) return [];
+  const ids = (last as Json).copy_task_ids;
+  return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+}
+
+/**
  * 一次运行（或重新生成）的份数：set = 节点设定的份数，actual = 实际展开的 min(set, 页面当前并发上限)（至少 1）；
  * actual < set 即本次被截断。截断规则只在这里，调用方在提交时算出并随任务固化。生成变体总是一份，不经过这里。
  */

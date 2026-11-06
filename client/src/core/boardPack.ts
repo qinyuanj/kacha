@@ -2,7 +2,7 @@
 // 包格式的全部规则在这里：导出计划（带哪些任务目录 / 参考图、画板路径改写）、清单、导入前的版本与布局判定、
 // 合并单元（任务目录按 task.json 比对，参考图按整文件比对）与结果文案。
 // server/src/board_pack.rs 只按给定条目与合并单元搬字节。文件系统由调用方注入。
-import { parseBoard, serializeBoard, type Board, type BoardNode } from "./board";
+import { copyTaskIds, parseBoard, serializeBoard, type Board, type BoardNode } from "./board";
 import { BOARDS_DIR_NAME, basename, resolveFromRoot, toRootRelative } from "./paths";
 import { TASK_RECORD_FILE, taskDirOfRelPath, taskDirOfTaskId } from "./taskDir";
 
@@ -47,10 +47,10 @@ export async function planExport(board: Board, userRoot: string, fs: PackFs): Pr
   for (const node of board.nodes) {
     if (node.type !== "result" && node.type !== "reference") {
       // 份数展开的同一次提交：各份的任务目录都带上（失败 / 已取消 / 已中断的份没有结果节点）；本机已不在的由壳跳过。
-      const copies = node.type === "task" ? node.last_submitted?.copy_task_ids : undefined;
-      if (Array.isArray(copies))
-        for (const id of copies) {
-          const dir = typeof id === "string" ? taskDirOfTaskId(id) : null;
+      // 只有 task_id 的一份提交照旧不带（没有结果节点就不导出它的任务目录）。
+      if (node.type === "task")
+        for (const id of copyTaskIds(node.last_submitted)) {
+          const dir = taskDirOfTaskId(id);
           if (dir) taskDirs.add(dir);
         }
       nodes.push(node);

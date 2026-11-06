@@ -1,7 +1,7 @@
 // 画板文件引用了哪些任务目录：清理未引用任务目录的依据（ADR 0018）。
 // 规则定义在画板文件格式（JSON 原文）上，与服务端 server/src/references.rs 逐条对应，
 // 两侧共用 contracts/fixtures/board-references/ 夹具。改这里必须同步改服务端。
-import { BOARD_FORMAT_VERSION } from "./board";
+import { BOARD_FORMAT_VERSION, copyTaskIds } from "./board";
 import { taskDirOfRelPath, taskDirOfTaskId } from "./taskDir";
 
 /** readable=false：画板读不懂（损坏 / 版本更高），不能当成没有引用。 */
@@ -46,7 +46,7 @@ function addNode(out: Set<string>, node: unknown) {
       if (!isObject(last)) return;
       addTaskId(out, last.task_id);
       // 同一次提交按份数展开的各份（失败 / 已取消 / 已中断的份没有结果节点，只靠这里引用）。
-      if (Array.isArray(last.copy_task_ids)) last.copy_task_ids.forEach((id) => addTaskId(out, id));
+      copyTaskIds(last).forEach((id) => addTaskId(out, id));
       if (Array.isArray(last.images))
         for (const image of last.images) {
           if (!isObject(image)) continue;

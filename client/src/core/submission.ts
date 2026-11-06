@@ -1,7 +1,7 @@
 // 提交前的纯函数：脏判据快照、运行范围、二次确认清单。
 import type { OutputOptions } from "./gateway";
 import { outputOptions } from "./gateway";
-import { runCopies, type Board, type Region, type TaskNode } from "./board";
+import { copyTaskIds, runCopies, type Board, type Region, type TaskNode } from "./board";
 import { findModel, type CapabilityTable } from "./capabilities";
 import { imageEdges, imageSources, promptText } from "./graph";
 import type { SendPlan } from "./sendPlan";
@@ -99,8 +99,7 @@ export function withSubmitted(board: Board, taskId: string, submittedTaskId: str
  */
 export function submittedTaskIds(last: TaskNode["last_submitted"]): string[] {
   if (!last) return [];
-  const copies = Array.isArray(last.copy_task_ids) ? last.copy_task_ids : [];
-  return [...new Set([...copies, last.task_id].filter((id): id is string => typeof id === "string"))];
+  return [...new Set([...copyTaskIds(last), last.task_id].filter((id): id is string => typeof id === "string"))];
 }
 
 const hasResult = (board: Board, taskId: string) => board.nodes.some((n) => n.type === "result" && n.task_id === taskId);
