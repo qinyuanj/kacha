@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BoardNode } from "./board";
 import { parseOutcome } from "./taskDir";
 import { board, harness, settle } from "./testing/runnerHarness";
-import { createRunner, nodeStatus } from "./runner";
+import { createRunner, nodeStatus, nodeSummary } from "./runner";
 import { BUILTIN_TABLE } from "./capabilities";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
 import { sendPlanOf } from "./taskView";
@@ -335,6 +335,161 @@ describe("任务运行器：取消", () => {
     h.gateway.open();
     await settle();
     expect(h.changes.map((c) => c.change.kind)).toEqual(["submitted", "runResult"]);
+  });
+});
+
+describe("任务运行器：按份数展开", () => {
+  const node = (h: ReturnType<typeof harness>, id: string) => h.runner.getSnapshot().board("A").nodes.get(id);
+  const results = (h: ReturnType<typeof harness>) => h.changes.filter((c) => c.change.kind === "runResult");
+  const submittedIds = (h: ReturnType<typeof harness>) => h.changes.flatMap((c) => (c.change.kind === "submitted" ? [c.change.lastSubmitted?.task_id] : []));
+  /** 各任务目录 task.json 去掉任务编号后的内容。 */
+  const records = (h: ReturnType<typeof harness>) =>
+    [...h.files].filter(([k]) => k.endsWith("/task.json")).map(([, v]) => {
+      const { task_id, ...rest } = JSON.parse(new TextDecoder().decode(v));
+      return { task_id, rest };
+    });
+
+  it("份数 N 展开为 N 个生成任务、N 个任务目录、N 条运行结果；任务记录除任务编号外相同", async () => {
+    const h = harness({ concurrency: 3 });
+    h.read.closed = true;
+    const submitting = h.runner.submit(h.target(), board(["t1"], true), ["t1"], { t1: 3 });
+    await settle();
+    // 各份读参考图期间时钟走动，任务记录仍相同。
+    h.advance(1500);
+    h.read.open();
+    expect(await submitting).toEqual([]);
+    await settle();
+    expect(results(h)).toHaveLength(3);
+    expect(h.taskDirs().size).toBe(3);
+    const recs = records(h);
+    expect(new Set(recs.map((r) => r.task_id)).size).toBe(3);
+    expect(recs[1].rest).toEqual(recs[0].rest);
+    expect(recs[2].rest).toEqual(recs[0].rest);
+    const resultTaskIds = results(h).map((c) => c.change.kind === "runResult" && c.change.result.submittedTaskId);
+    expect(new Set(resultTaskIds)).toEqual(new Set(recs.map((r) => r.task_id)));
+    expect(h.runner.getSnapshot().pending()).toBe(0);
+    expect(h.locked()).toEqual([]);
+  });
+
+  it("不传份数时为一份；每份各发一次 n: 1 请求", async () => {
+    const h = harness();
+    await h.runner.submit(h.target(), board(["t1", "t2"]), ["t1", "t2"], { t1: 2 });
+    await settle();
+    expect(results(h)).toHaveLength(3);
+    expect(h.bodies).toHaveLength(3);
+    for (const body of h.bodies) expect(body).toMatchObject({ n: 1 });
+  });
+
+  it("各份写入 last_submitted，最后派发的一份成为节点最近一次提交", async () => {
+    const h = harness({ concurrency: 1 });
+    await h.runner.submit(h.target(), board(), ["t1"], { t1: 2 });
+    await settle();
+    const dispatched = h.logs.filter((l) => l.kind === "queue_dispatch").map((l) => l.fields.task_id);
+    expect(dispatched).toHaveLength(2);
+    expect(submittedIds(h)).toEqual(dispatched);
+  });
+
+  it("提交后调低并发上限，不影响已排队任务的数量", async () => {
+    const h = harness({ concurrency: 3 });
+    h.gateway.closed = true;
+    await h.runner.submit(h.target(), board(), ["t1"], { t1: 3 });
+    await settle();
+    h.runner.setConcurrency(1);
+    h.gateway.open();
+    await settle();
+    expect(results(h)).toHaveLength(3);
+  });
+
+  it("运行全部：各节点各自展开，不限总数，超出并发的排队；运行指示每份一行", async () => {
+    const h = harness({ concurrency: 2 });
+    h.gateway.closed = true;
+    await h.runner.submit(h.target(), board(["t1", "t2"]), ["t1", "t2"], { t1: 2, t2: 2 });
+    await settle();
+    const active = h.runner.getSnapshot().active;
+    expect(active.map((a) => [a.taskNodeId, a.state])).toEqual([["t1", "running"], ["t1", "running"], ["t2", "waiting"], ["t2", "waiting"]]);
+    expect(new Set(active.map((a) => a.taskId)).size).toBe(4);
+    expect(node(h, "t1")?.counts).toEqual({ running: 2 });
+    expect(node(h, "t2")?.counts).toEqual({ queued: 2 });
+    h.gateway.open();
+    await settle();
+    expect(results(h)).toHaveLength(4);
+  });
+
+  it("节点锁定到最后一份结束；期间再次运行被跳过；每份成功后立即产出结果", async () => {
+    const h = harness({ concurrency: 1 });
+    h.gateway.closed = true;
+    await h.runner.submit(h.target(), board(), ["t1"], { t1: 2 });
+    await settle();
+    // 放行第一份，第二份派发后挂在网关。
+    h.gateway.open();
+    h.gateway.closed = true;
+    await settle();
+    expect(results(h)).toHaveLength(1);
+    expect(h.locked()).toEqual(["t1"]);
+    expect(node(h, "t1")?.counts).toEqual({ running: 1 });
+    expect(await h.runner.submit(h.target(), board(), ["t1"], { t1: 2 })).toEqual([]);
+    expect(await h.runner.regenerate(h.target(), board(), "t1")).toBeNull();
+    await settle();
+    expect(h.runner.getSnapshot().pending()).toBe(1);
+    h.gateway.open();
+    await settle();
+    expect(results(h)).toHaveLength(2);
+    expect(h.locked()).toEqual([]);
+    expect(h.requests).toHaveLength(2);
+  });
+
+  it("部分失败：成功的产出结果，失败的计入摘要，不自动补跑", async () => {
+    const h = harness({ concurrency: 1 });
+    h.replies.push({ status: 500, body: "{}" });
+    await h.runner.submit(h.target(), board(), ["t1"], { t1: 3 });
+    await settle();
+    expect(results(h)).toHaveLength(2);
+    expect(h.requests).toHaveLength(3);
+    const failedTaskId = h.logs.find((l) => l.kind === "task" && l.fields.to_status === "failed")?.fields.task_id;
+    expect(node(h, "t1")).toEqual({ copies: [{ taskId: failedTaskId, status: { kind: "failed", label: expect.any(String) } }], counts: { failed: 1 } });
+  });
+
+  it("重新运行前只清除该节点上次的终态一次，展开中的后续份不再清除", async () => {
+    const h = harness();
+    h.replies.push({ status: 500, body: "{}" });
+    await h.runner.submit(h.target(), board(), ["t1"]);
+    await settle();
+    expect(node(h, "t1")?.counts).toEqual({ failed: 1 });
+    // 参考图缺失：两份都在读图时失败。
+    const b = board(["t1"], true);
+    const gone = { ...b, nodes: b.nodes.map((n) => (n.id === "r" ? { ...n, path: "refs/gone.png" } : n)) as BoardNode[] };
+    const problems = await h.runner.submit(h.target(), gone, ["t1"], { t1: 2 });
+    expect(problems).toHaveLength(2);
+    expect(node(h, "t1")?.counts).toEqual({ failed: 2 });
+  });
+
+  it("任务迁移与 queue_dispatch 按每份任务各自记录", async () => {
+    const h = harness({ concurrency: 2 });
+    await h.runner.submit(h.target(), board(), ["t1"], { t1: 2 });
+    await settle();
+    const dispatched = h.logs.filter((l) => l.kind === "queue_dispatch").map((l) => l.fields.task_id);
+    expect(new Set(dispatched).size).toBe(2);
+    for (const id of dispatched) {
+      const steps = h.logs.filter((l) => l.kind === "task" && l.fields.task_id === id).map((l) => `${l.fields.from_status}→${l.fields.to_status}`);
+      expect(steps).toEqual(["null→queued", "queued→running", "running→succeeded"]);
+    }
+  });
+});
+
+describe("任务节点状态显示", () => {
+  const copy = (kind: "running" | "queued" | "failed" | "cancelled" | "backoff") =>
+    ({ taskId: null, status: kind === "running" ? { kind, startedAt: 0 } : kind === "failed" ? { kind, label: "x" } : kind === "cancelled" ? { kind, gatewayMayContinue: false } : kind === "backoff" ? { kind, retryAt: 0 } : { kind } }) as const;
+
+  it("只有一份时没有计数摘要，状态即该份", () => {
+    const n = { copies: [copy("running")], counts: { running: 1 } };
+    expect(nodeSummary(n)).toBeNull();
+    expect(nodeStatus(n)).toEqual({ kind: "running", startedAt: 0 });
+    expect(nodeSummary(undefined)).toBeNull();
+  });
+
+  it("多份时给出计数摘要，执行中、排队（含限流退避）、失败、已取消依次排列", () => {
+    expect(nodeSummary({ copies: [copy("failed"), copy("running"), copy("running"), copy("queued")], counts: { failed: 1, running: 2, queued: 1 } })).toBe("执行中 2 · 排队 1 · 失败 1");
+    expect(nodeSummary({ copies: [copy("cancelled"), copy("backoff"), copy("queued")], counts: { cancelled: 1, backoff: 1, queued: 1 } })).toBe("排队 2 · 已取消 1");
   });
 });
 

@@ -67,6 +67,18 @@ test("Issue #32 份数控件：可选 1 到并发上限，随画板保存；超�
   expect(errors).toEqual([]);
 });
 
+test("Issue #34 运行按份数展开：每份一次 n: 1 请求、一个任务目录、一个结果节点", async ({ page, rig }) => {
+  const text = board("份数运行", [promptNode("p1", "一只猫"), taskNode("t1", { count: 2 })], [edge("p1", "t1", "positive")]);
+  const errors = await openApp(page, rig, { title: "份数运行", boardText: text });
+  await task(page, "t1").locator(".task-actions button.primary").click();
+  await expect(page.getByRole("dialog", { name: "确认运行" })).toHaveCount(0);
+  await expect(page.locator(".react-flow__node-result")).toHaveCount(2);
+  expect(bodies(rig)).toHaveLength(2);
+  for (const body of bodies(rig)) expect(body).toMatchObject({ n: 1 });
+  expect(new Set(taskRecords(rig).map((r) => r.json.task_id)).size).toBe(2);
+  expect(errors).toEqual([]);
+});
+
 test.describe("Issue #1 单图默认引用与多图点击插入引导", () => {
   const openSingleImage = async (page: Page, rig: Rig, prompt: string, files: Record<string, { b64: string }> = { [REF]: { b64: png(1024, 1024) } }, edges: unknown[] = [edge("p1", "t1", "positive"), edge("r1", "t1", "image:0")]) => {
     const text = board("单图", [promptNode("p1", prompt), referenceNode("r1", REF), taskNode("t1", { image_ports: 1 })], edges);

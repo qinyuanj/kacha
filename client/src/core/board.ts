@@ -125,6 +125,11 @@ export function taskCount(task: TaskNode): number {
   return task.count ?? 1;
 }
 
+/** 一次运行实际展开的份数：min(份数, 页面当前并发上限)，由调用方在提交时算出并随任务固化。 */
+export function actualCount(task: TaskNode, concurrency: number): number {
+  return Math.max(1, Math.min(taskCount(task), concurrency));
+}
+
 export type ParsedBoard =
   | { kind: "ok"; board: Board }
   | { kind: "newer"; version: number }

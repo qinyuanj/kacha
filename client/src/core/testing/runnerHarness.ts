@@ -49,6 +49,8 @@ export function harness(opts: { concurrency?: number; imageCodec?: RunDeps["imag
   const fs = memoryTaskFs();
   const files = fs.files;
   const requests: string[] = [];
+  /** 每次请求的 JSON 请求体（GET 等无请求体的为 null）。 */
+  const bodies: unknown[] = [];
   const replies: Reply[] = [];
   const read = gate();
   const write = gate();
@@ -65,8 +67,9 @@ export function harness(opts: { concurrency?: number; imageCodec?: RunDeps["imag
       await write.pass();
       return fs.writeNewFile(path, bytes);
     },
-    fetch: async (url) => {
+    fetch: async (url, init) => {
       requests.push(url);
+      bodies.push(typeof init?.body === "string" ? JSON.parse(init.body) : null);
       await gateway.pass();
       const r = replies.shift() ?? { status: 200, body: OK_BODY };
       return { status: r.status, headers: { get: () => null }, text: async () => r.body, arrayBuffer: async () => (r.bytes ?? new TextEncoder().encode(r.body)).slice().buffer as ArrayBuffer };
@@ -88,6 +91,7 @@ export function harness(opts: { concurrency?: number; imageCodec?: RunDeps["imag
     runner,
     files,
     requests,
+    bodies,
     replies,
     read,
     write,

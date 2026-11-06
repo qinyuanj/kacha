@@ -142,7 +142,7 @@ export interface Prepared {
  */
 export async function prepareJob(
   deps: RunDeps,
-  args: { board: Board; table: CapabilityTable; tableSha256: string; userRoot: string; taskNodeId: string },
+  args: { board: Board; table: CapabilityTable; tableSha256: string; userRoot: string; taskNodeId: string; submittedAt?: Date },
 ): Promise<Prepared> {
   const { board, table, userRoot, taskNodeId } = args;
   const task = board.nodes.find((n) => n.id === taskNodeId);
@@ -197,7 +197,8 @@ export async function prepareJob(
       references.push({ ...overlay, source: { kind: "overlay", of: sourcePort }, region: { rects: region.rects, render: "highlight_overlay", source_port: sourcePort } });
     }
   }
-  const submittedAt = deps.now();
+  // 同一次提交按份数展开的各份共用提交时刻，任务记录除任务编号外相同。
+  const submittedAt = args.submittedAt ?? deps.now();
   const taskId = newTaskId(submittedAt);
   const plan: SubmissionPlan = {
     taskId,
@@ -257,7 +258,7 @@ function jobOf(taskNodeId: string, plan: SubmissionPlan, model: ModelCapability)
  */
 export async function prepareRegenerate(
   deps: RunDeps,
-  args: { board: Board; table: CapabilityTable; tableSha256: string; userRoot: string; taskNodeId: string; fromTaskId?: string },
+  args: { board: Board; table: CapabilityTable; tableSha256: string; userRoot: string; taskNodeId: string; fromTaskId?: string; submittedAt?: Date },
 ): Promise<Prepared> {
   const { board, userRoot, taskNodeId } = args;
   const task = board.nodes.find((n) => n.id === taskNodeId);
@@ -292,7 +293,7 @@ export async function prepareRegenerate(
       ? { sizeSpec: { tier: current.tier, ratio: current.ratio, width: current.width, height: current.height }, size: currentSize }
       : { sizeSpec: previous.size_spec, size: previous.size };
 
-  const submittedAt = deps.now();
+  const submittedAt = args.submittedAt ?? deps.now();
   const taskId = newTaskId(submittedAt);
   const plan: SubmissionPlan = {
     taskId,

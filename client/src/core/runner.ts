@@ -60,9 +60,27 @@ export interface NodeRunState {
   counts: StatusCounts;
 }
 
-/** 只有一份时即该份的状态（显示与以前一致）；多份时暂取最后一份，摘要显示由份数票处理。 */
+/** 只有一份时即该份的状态（显示与以前一致）；多份时取最后一份，节点上显示的是 nodeSummary。 */
 export function nodeStatus(node: NodeRunState | undefined): TaskStatus | null {
   return node?.copies.at(-1)?.status ?? null;
+}
+
+/** 摘要的排列顺序与名称；限流退避计入排队。 */
+const SUMMARY_PARTS: [string, TaskStatus["kind"][]][] = [
+  ["执行中", ["running"]],
+  ["排队", ["queued", "backoff"]],
+  ["失败", ["failed"]],
+  ["已取消", ["cancelled"]],
+  ["已中断", ["interrupted"]],
+];
+
+/** 多份时的计数摘要，如「执行中 2 · 排队 1 · 失败 1」；只有一份（或没有）时为 null，按单份状态显示。 */
+export function nodeSummary(node: NodeRunState | undefined): string | null {
+  if (!node || node.copies.length < 2) return null;
+  return SUMMARY_PARTS.flatMap(([label, kinds]) => {
+    const n = kinds.reduce((sum, k) => sum + (node.counts[k] ?? 0), 0);
+    return n ? [`${label} ${n}`] : [];
+  }).join(" · ");
 }
 
 export interface BoardRunState {
@@ -89,9 +107,13 @@ export type CancelFilter =
   | { kind: "waiting" }
   | { kind: "all" };
 
+/** 任务节点 id → 本次实际份数（调用方按 min(份数, 并发上限) 算出，提交时固化）；缺省为 1。 */
+export type CopiesByNode = Readonly<Record<string, number>>;
+
 export interface Runner {
-  /** 按顺序读参考图并入队；board 是二次确认时的画板。返回本地提交失败的说明（不含密钥与提示词）。 */
-  submit(target: RunTarget, board: Board, taskNodeIds: string[]): Promise<string[]>;
+  /** 按顺序读参考图并入队，每个节点按 copies 展开为输入相同的若干个生成任务；board 是二次确认时的画板。
+   *  返回本地提交失败的说明（不含密钥与提示词）。 */
+  submit(target: RunTarget, board: Board, taskNodeIds: string[], copies?: CopiesByNode): Promise<string[]>;
   /** 重新生成 / 生成变体（fromTaskId = 该结果的任务编号）；board 是当前画板。返回本地失败说明。 */
   regenerate(target: RunTarget, board: Board, taskNodeId: string, fromTaskId?: string): Promise<string | null>;
   cancel(filter: CancelFilter): void;
@@ -217,7 +239,7 @@ export function createRunner(ports: RunnerPorts): Runner {
     list.push({ taskNodeId: job.taskNodeId, taskId: job.prepared?.taskId ?? null, status });
   }
 
-  /** 重新运行前清掉该节点上次的终态。 */
+  /** 重新运行前清掉该节点上次的终态（每次提交每个节点一次，见 expand）。 */
   function clearFinished(boardKey: string, taskNodeId: string) {
     const list = finished.get(boardKey);
     if (list) finished.set(boardKey, list.filter((f) => f.taskNodeId !== taskNodeId));
@@ -330,19 +352,50 @@ export function createRunner(ports: RunnerPorts): Runner {
   /** 该节点有任一份未结束。 */
   const occupied = (boardKey: string, taskNodeId: string) => [...jobs].some((j) => j.target.boardKey === boardKey && j.taskNodeId === taskNodeId);
 
-  /** 读参考图并入队；读的期间被取消则不入队。返回本地失败说明。 */
-  async function enqueue(target: RunTarget, taskNodeId: string, submission: Job["submission"], prepare: () => Promise<Prepared>): Promise<string | null> {
-    if (closed.has(target.boardKey)) return null;
+  /**
+   * 把一个任务节点展开为 copies 份：各份一开始就以读图中的任务记下（节点从此锁定，摘要计入排队），
+   * 上次的终态只在这里清一次；随后逐份读参考图并入队。某份在读图前已被取消（中止）就不再读图、不入队。
+   * stopped() 为真（更新准备守护挂上）时余下的份撤掉、不留痕迹。
+   * prepare 收到首份的提交时刻，各份共用，任务记录除任务编号外相同。返回各份的本地失败说明。
+   */
+  async function expand(
+    target: RunTarget,
+    taskNodeId: string,
+    submission: Job["submission"],
+    copies: number,
+    stopped: () => boolean,
+    prepare: (submittedAt: Date | undefined) => Promise<Prepared>,
+  ): Promise<string[]> {
+    if (closed.has(target.boardKey)) return [];
     // 守护在算能力表摘要期间挂上的情况由 submit / regenerate 在 await 之后拦截，这里不用查。
     const guardedAtEntry = submissionGuard;
     if (guardedAtEntry) {
       guardedAtEntry();
-      return null;
+      return [];
     }
-    const job: Job = { target, taskNodeId, phase: "reading", submission, retries: 0, startedAt: 0, controller: new AbortController() };
-    jobs.add(job);
+    const batch = Array.from({ length: Math.max(1, Math.floor(copies)) }, (): Job => ({ target, taskNodeId, phase: "reading", submission, retries: 0, startedAt: 0, controller: new AbortController() }));
+    batch.forEach((job) => jobs.add(job));
     clearFinished(target.boardKey, taskNodeId);
     publish();
+    const problems: string[] = [];
+    let submittedAt: Date | undefined;
+    for (const job of batch) {
+      if (job.controller.signal.aborted) continue;
+      if (stopped()) {
+        remove(job);
+        publish();
+        continue;
+      }
+      const problem = await enqueue(job, () => prepare(submittedAt));
+      submittedAt ??= job.prepared?.plan.submittedAt;
+      if (problem) problems.push(problem);
+    }
+    return problems;
+  }
+
+  /** 读参考图并入队；读的期间被取消则不入队。返回本地失败说明。 */
+  async function enqueue(job: Job, prepare: () => Promise<Prepared>): Promise<string | null> {
+    const { target } = job;
     try {
       const prepared = await prepare();
       if (job.controller.signal.aborted) return null;
@@ -404,21 +457,21 @@ export function createRunner(ports: RunnerPorts): Runner {
     pump();
   }
 
-  async function submit(target: RunTarget, board: Board, taskNodeIds: string[]): Promise<string[]> {
+  async function submit(target: RunTarget, board: Board, taskNodeIds: string[], copies: CopiesByNode = {}): Promise<string[]> {
     const problems: string[] = [];
     if (submissionGuard) {
       submissionGuard();
       return problems;
     }
     const generation = submissionGeneration;
+    const stopped = () => generation !== submissionGeneration;
     const submission = { cancelled: false };
     const tableSha256 = await tableDigest(target.table);
     if (generation !== submissionGeneration) return problems;
     for (const taskNodeId of taskNodeIds) {
       if (submission.cancelled || closed.has(target.boardKey) || generation !== submissionGeneration) break;
       if (occupied(target.boardKey, taskNodeId)) continue;
-      const problem = await enqueue(target, taskNodeId, submission, () => prepareJob(deps, { board, table: target.table, tableSha256, userRoot: target.userRoot, taskNodeId }));
-      if (problem) problems.push(problem);
+      problems.push(...(await expand(target, taskNodeId, submission, copies[taskNodeId] ?? 1, stopped, (submittedAt) => prepareJob(deps, { board, table: target.table, tableSha256, userRoot: target.userRoot, taskNodeId, submittedAt }))));
     }
     return problems;
   }
@@ -433,9 +486,10 @@ export function createRunner(ports: RunnerPorts): Runner {
     const tableSha256 = await tableDigest(target.table);
     if (generation !== submissionGeneration) return null;
     if (occupied(target.boardKey, taskNodeId)) return null;
-    return enqueue(target, taskNodeId, { cancelled: false }, () =>
-      prepareRegenerate(deps, { board, table: target.table, tableSha256, userRoot: target.userRoot, taskNodeId, fromTaskId }),
+    const [problem] = await expand(target, taskNodeId, { cancelled: false }, 1, () => generation !== submissionGeneration, (submittedAt) =>
+      prepareRegenerate(deps, { board, table: target.table, tableSha256, userRoot: target.userRoot, taskNodeId, fromTaskId, submittedAt }),
     );
+    return problem ?? null;
   }
 
   return {

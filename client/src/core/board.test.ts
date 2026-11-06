@@ -8,6 +8,7 @@ import {
   openBoard,
   parseBoard,
   serializeBoard,
+  actualCount,
   taskCount,
   uniqueBoardFileName,
   type Board,
@@ -172,6 +173,14 @@ describe("画板文件读入", () => {
     expect(task.type === "task" && taskCount(task)).toBe(25);
     expect(task.type === "task" && task.extra).toEqual({});
     expect(JSON.parse(serializeBoard(parsed.board)).nodes[2].count).toBe(25);
+  });
+
+  it("实际份数为 min(份数, 并发上限)，不改写画板上的份数", () => {
+    const task = sample().nodes[2];
+    if (task.type !== "task") throw new Error("应为任务节点");
+    expect(actualCount(task, 3)).toBe(1);
+    expect(actualCount({ ...task, count: 5 }, 3)).toBe(3);
+    expect(actualCount({ ...task, count: 2 }, 3)).toBe(2);
   });
 
   it("份数不是正整数视为损坏，按字段名给原因", () => {

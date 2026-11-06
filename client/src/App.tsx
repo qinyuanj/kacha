@@ -1,6 +1,6 @@
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type Board } from "./core/board";
+import { actualCount, type Board } from "./core/board";
 import { BUILTIN_TABLE, effectiveTable, type CapabilityTable } from "./core/capabilities";
 import type { BoardChange } from "./core/edit";
 import { redoLabel, undoLabel } from "./core/history";
@@ -109,10 +109,12 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       setConfirm(null);
       if (!userRoot) return;
       const target: RunTarget = { boardKey, boardFile: boards.boardFileName(boardKey), table, userRoot, baseUrl: settings.settings.base_url, apiKey: settings.apiKey };
-      const problems = await runner.submit(target, board, taskIds);
+      // 实际份数按此刻的并发上限算出并随任务固化；之后改并发上限不影响已排队的任务数。
+      const copies = Object.fromEntries(board.nodes.flatMap((n) => (n.type === "task" && taskIds.includes(n.id) ? [[n.id, actualCount(n, settings.settings.concurrency)]] : [])));
+      const problems = await runner.submit(target, board, taskIds, copies);
       if (problems.length) toast(`${problems.length} 个任务提交失败：${problems[0]}`);
     },
-    [userRoot, runner, boards, table, settings.settings.base_url, settings.apiKey, toast],
+    [userRoot, runner, boards, table, settings.settings.base_url, settings.settings.concurrency, settings.apiKey, toast],
   );
 
   // 单个干净任务直接提交，单个标红 / 没有任务只提示；其余弹二次确认（分派规则见 runDispatch）。

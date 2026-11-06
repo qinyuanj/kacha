@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import { type Board, type BoardEdge } from "../core/board";
 import { findModel, modelsByTier, type CapabilityTable, type InputImageRule } from "../core/capabilities";
 import type { TaskStatus } from "../core/run";
-import { nodeStatus, type NodeRunState } from "../core/runner";
+import { nodeStatus, nodeSummary, type NodeRunState } from "../core/runner";
 import { availableModels, defaultTaskModel, type Discovery } from "../core/settings";
 import {
   canConnect,
@@ -473,6 +473,7 @@ export function BoardCanvas({
                 regionRender: render,
                 hasPositive: board.edges.some((e) => e.to[0] === n.id && e.to[1] === "positive"),
                 status: statusOf(n.id),
+                summary: nodeSummary(runNodes.get(n.id)),
                 expanded: expanded.has(n.id),
                 run: menuItems({ kind: "node", nodeId: n.id }, menuFacts(new Set([n.id]))).find((i) => i.action === "run")!,
               },
@@ -481,7 +482,7 @@ export function BoardCanvas({
         }
       }
     });
-  }, [board, table, userRoot, selectedNodes, measured, statusOf, locked, discovery, highlighted, missing, focusPrompt, alphaByNode, imageInfos, expanded, menuFacts, drag]);
+  }, [board, table, userRoot, selectedNodes, measured, statusOf, runNodes, locked, discovery, highlighted, missing, focusPrompt, alphaByNode, imageInfos, expanded, menuFacts, drag]);
 
   const dragging = drag !== null;
   const edges = useMemo<Edge[]>(
