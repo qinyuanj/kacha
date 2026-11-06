@@ -131,7 +131,8 @@ fn seed_upload_temp(h: &Harness, key: &str, name: &str, age: std::time::Duration
 }
 
 fn set_mtime(path: &std::path::Path, at: std::time::SystemTime) {
-    std::fs::File::open(path).unwrap().set_modified(at).unwrap();
+    // Windows 改修改时间要写权限，只读打开会被拒绝。
+    std::fs::OpenOptions::new().write(true).open(path).unwrap().set_modified(at).unwrap();
 }
 
 fn upload_temp(h: &Harness, key: &str, id: &str) -> std::path::PathBuf {
@@ -587,7 +588,8 @@ async fn wait_for_partial_uploads(h: &Harness, count: usize, len: u64) {
     let packs = h.user_root(GOOD_KEY).join(".kacha/packs");
     for _ in 0..500 {
         let files: Vec<_> = std::fs::read_dir(&packs).into_iter().flatten().flatten().collect();
-        if files.len() == count && files.iter().all(|f| f.metadata().is_ok_and(|m| m.len() == len)) {
+        // 按路径取元数据：Windows 上目录项缓存的大小在文件写入期间不会更新。
+        if files.len() == count && files.iter().all(|f| std::fs::metadata(f.path()).is_ok_and(|m| m.len() == len)) {
             files.iter().for_each(|f| set_mtime(&f.path(), h.now()));
             return;
         }
