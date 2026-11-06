@@ -11,6 +11,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 
 pub mod board_pack;
+pub mod cache;
 pub mod cleanup;
 pub mod fs;
 pub mod image_info;

@@ -245,12 +245,12 @@ export const ipc: Ipc = {
   boardPackExport: async (target, spec) => boardPackExport({ ...spec, files: spec.files.map((f) => ({ ...f, source: stripRoot(f.source) })) }, target),
   boardPackEntries: (pack) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/entries`),
   boardPackReadTexts: (pack, names) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/texts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(names) }),
-  boardPackImport: async (pack, units) => {
+  boardPackImport: async (pack, units, duplicates) => {
     const op = requireOp();
     // 上传之后、合并之前被取消：服务端还没有这个操作，取消标记只在这里，不再发起合并。
     if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
     try {
-      return await tracked(op, () => api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(units) }));
+      return await tracked(op, () => api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ units, duplicates }) }));
     } catch (e) {
       throw asCancelled(op, e);
     }

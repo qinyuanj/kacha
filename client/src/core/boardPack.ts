@@ -6,7 +6,10 @@ import { copyTaskIds, parseBoard, serializeBoard, type Board, type BoardNode } f
 import { BOARDS_DIR_NAME, basename, resolveFromRoot, toRootRelative } from "./paths";
 import { TASK_RECORD_FILE, taskDirOfRelPath, taskDirOfTaskId } from "./taskDir";
 
-export const PACK_FORMAT_VERSION = 1;
+/** 本机能导入的最高包格式版本。v2 = 导出时按内容去重，被省略的路径记在清单的 duplicates 里（ADR 0013 补记）。 */
+export const PACK_FORMAT_VERSION = 2;
+/** 导出写的包格式版本：导出 v2 落地前仍写 v1，保证导出的包总能被导回来。 */
+const EXPORT_PACK_FORMAT_VERSION = 1;
 export const PACK_EXTENSION = ".ugcpack";
 /** 系统对话框的扩展名过滤器。 */
 export const PACK_FILE_FILTER = { name: "画板包", extensions: [PACK_EXTENSION.slice(1)] };
@@ -96,7 +99,7 @@ export async function planExport(board: Board, userRoot: string, fs: PackFs): Pr
 const packBoardEntry = (boardFileName: string) => `${BOARDS_DIR_NAME}/${boardFileName}`;
 
 export function buildManifest(appVersion: string, boards: string[]): string {
-  return `${JSON.stringify({ pack_format_version: PACK_FORMAT_VERSION, app_version: appVersion, boards }, null, 2)}\n`;
+  return `${JSON.stringify({ pack_format_version: EXPORT_PACK_FORMAT_VERSION, app_version: appVersion, boards }, null, 2)}\n`;
 }
 
 /** 交给壳的导出规格：文本条目直接写入，任务目录整目录、参考图逐个流式写入。 */
@@ -126,16 +129,28 @@ export interface MergeUnit {
   identity: string | null;
 }
 
+/** v2 包里被省略的路径（path）与包内实存的代表条目（source）：导入时还原为内容相同的文件。 */
+export interface PackDuplicate {
+  path: string;
+  source: string;
+}
+
 type PackBoard = { entry: string; board: Board };
 type Rejected = { kind: "newer"; message: string } | { kind: "corrupt"; reason: string };
-export type PackCheck = { kind: "ok"; boards: PackBoard[]; units: MergeUnit[] } | Rejected;
+export type PackCheck = { kind: "ok"; boards: PackBoard[]; units: MergeUnit[]; duplicates: PackDuplicate[] } | Rejected;
 
 const UPGRADE = "请升级本工具后再导入";
 
-/** 版本判定：包格式版本或包内画板版本高于本机时拒绝（此时还没写任何文件）。 */
-export function checkPack(manifestText: string | null, boardTexts: Record<string, string>): { kind: "ok"; boards: PackBoard[] } | Rejected {
+/**
+ * 版本判定：包格式版本或包内画板版本高于本机时拒绝（此时还没写任何文件）。
+ * v2 包另读清单的 `duplicates`（省略路径 → 实存路径），这里只判类型；映射是否合法由 inspectPack 对照条目判。
+ */
+export function checkPack(
+  manifestText: string | null,
+  boardTexts: Record<string, string>,
+): { kind: "ok"; boards: PackBoard[]; duplicates: Record<string, string> } | Rejected {
   if (manifestText === null) return { kind: "corrupt", reason: `缺少 ${PACK_MANIFEST}` };
-  let manifest: { pack_format_version?: unknown; app_version?: unknown; boards?: unknown };
+  let manifest: { pack_format_version?: unknown; app_version?: unknown; boards?: unknown; duplicates?: unknown };
   try {
     manifest = JSON.parse(manifestText);
   } catch {
@@ -150,6 +165,14 @@ export function checkPack(manifestText: string | null, boardTexts: Record<string
   if (typeof manifest.app_version !== "string" || !Array.isArray(manifest.boards) || !manifest.boards.every((b) => typeof b === "string")) {
     return { kind: "corrupt", reason: `${PACK_MANIFEST} 格式无效` };
   }
+  let duplicates: Record<string, string> = {};
+  if (version === 2 && manifest.duplicates !== undefined) {
+    const d = manifest.duplicates;
+    if (d === null || typeof d !== "object" || Array.isArray(d) || !Object.values(d).every((v) => typeof v === "string")) {
+      return { kind: "corrupt", reason: `${PACK_MANIFEST} 的 duplicates 格式无效` };
+    }
+    duplicates = d as Record<string, string>;
+  }
   const boards: PackBoard[] = [];
   for (const entry of manifest.boards as string[]) {
     const text = boardTexts[entry];
@@ -159,7 +182,7 @@ export function checkPack(manifestText: string | null, boardTexts: Record<string
     if (parsed.kind === "corrupt") return { kind: "corrupt", reason: `包内画板 ${basename(entry)} 已损坏：${parsed.reason}` };
     boards.push({ entry, board: parsed.board });
   }
-  return { kind: "ok", boards };
+  return { kind: "ok", boards, duplicates };
 }
 
 const isSafeSegment = (s: string) => s !== "" && s !== "." && s !== ".." && !/[\\:\p{Cc}]/u.test(s);
@@ -167,6 +190,8 @@ const isSafeSegment = (s: string) => s !== "" && s !== "." && s !== ".." && !/[\
 /**
  * 导入前检查：只读清单与画板文本判版本，再按条目名判布局。包内只允许清单、`画板/<文件>`、
  * `<日期>/<task_id>/…`（须含 task.json）与 `导入参考图/<文件>`；其他一律判为损坏，不解压任何内容。
+ * v2 包的 duplicates：键须是任务目录或导入参考图下的合法路径且不是实存条目，值须是实存条目（于是不会再作为键，
+ * 不允许链式映射）；被省略的路径与实存条目一起计入布局。
  */
 export async function inspectPack(entries: string[], readTexts: (names: string[]) => Promise<Record<string, string>>): Promise<PackCheck> {
   const isBoardEntry = (name: string) => {
@@ -177,10 +202,21 @@ export async function inspectPack(entries: string[], readTexts: (names: string[]
   const versions = checkPack(texts[PACK_MANIFEST] ?? null, texts);
   if (versions.kind !== "ok") return versions;
 
+  const names = new Set(entries);
+  const duplicates: PackDuplicate[] = [];
+  for (const [path, source] of Object.entries(versions.duplicates).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    if (!path.split("/").every(isSafeSegment)) return { kind: "corrupt", reason: `duplicates 含无效路径：${path}` };
+    if (path === PACK_MANIFEST || isBoardEntry(path)) return { kind: "corrupt", reason: `duplicates 不能省略 ${path}` };
+    if (names.has(path)) return { kind: "corrupt", reason: `duplicates 的省略路径 ${path} 同时是包内条目` };
+    if (source in versions.duplicates) return { kind: "corrupt", reason: `duplicates 不允许链式映射：${path} → ${source}` };
+    if (!names.has(source)) return { kind: "corrupt", reason: `duplicates 指向包内不存在的条目：${path} → ${source}` };
+    duplicates.push({ path, source });
+  }
+
   const taskDirs = new Set<string>();
   const references: string[] = [];
-  const names = new Set(entries);
-  for (const name of entries) {
+  for (const path of duplicates.map((d) => d.path)) names.add(path);
+  for (const name of names) {
     const parts = name.split("/");
     if (!parts.every(isSafeSegment)) return { kind: "corrupt", reason: `包内路径无效：${name}` };
     if (name === PACK_MANIFEST || isBoardEntry(name)) continue;
@@ -196,7 +232,7 @@ export async function inspectPack(entries: string[], readTexts: (names: string[]
     ...[...taskDirs].sort().map((path) => ({ path, identity: TASK_RECORD_FILE })),
     ...references.sort().map((path) => ({ path, identity: null })),
   ];
-  return { kind: "ok", boards: versions.boards, units };
+  return { kind: "ok", boards: versions.boards, units, duplicates };
 }
 
 // ---- 导入结果 ----
@@ -239,8 +275,11 @@ export interface PackIo {
   entries(pack: string): Promise<string[]>;
   /** 读指定条目的文本；不存在的条目不出现在结果里。 */
   readTexts(pack: string, names: string[]): Promise<Record<string, string>>;
-  /** 按合并单元解压合并进用户数据根；取消时以 PACK_CANCELLED reject，已移入的单元保留。 */
-  importUnits(pack: string, units: MergeUnit[]): Promise<{ outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number }>;
+  /**
+   * 按合并单元解压合并进用户数据根，先把 duplicates 里被省略的路径还原为与代表条目内容相同的文件（v1 包为空）；
+   * 取消时以 PACK_CANCELLED reject，已移入的单元保留。
+   */
+  importUnits(pack: string, units: MergeUnit[], duplicates: PackDuplicate[]): Promise<{ outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number }>;
   /** 不再合并就放弃：删掉服务端的临时上传文件（幂等）。 */
   discard?(pack: string): Promise<void>;
 }
@@ -308,7 +347,7 @@ export async function importPack(io: PackIo, opts: ImportOptions): Promise<Impor
         return check;
       }
       packBoards = check.boards.map((b) => basename(b.entry)).join(", ");
-      return { check, report: await io.importUnits(pack, check.units) };
+      return { check, report: await io.importUnits(pack, check.units, check.duplicates) };
     } catch (e) {
       // 服务端在合并结束时自己删临时文件；这里的放弃覆盖合并之前就被取消 / 失败的情况（幂等）。
       await io.discard?.(pack).catch(() => undefined);

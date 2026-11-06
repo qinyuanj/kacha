@@ -119,7 +119,7 @@ describe("导出计划", () => {
     const plan = await planExport(boardWith(reference("a", "D:\\猫.png")), ROOT, memoryFs({ "D:\\猫.png": "aa" }));
     const spec = buildExportSpec("0.2.0", "千问测试.ugcboard.json", plan);
     expect(spec.texts.map((t) => t.entry)).toEqual([PACK_MANIFEST, "画板/千问测试.ugcboard.json"]);
-    expect(JSON.parse(spec.texts[0].text)).toEqual({ pack_format_version: PACK_FORMAT_VERSION, app_version: "0.2.0", boards: ["画板/千问测试.ugcboard.json"] });
+    expect(JSON.parse(spec.texts[0].text)).toEqual({ pack_format_version: 1, app_version: "0.2.0", boards: ["画板/千问测试.ugcboard.json"] });
     expect(spec.texts[1].text).toBe(serializeBoard(plan.board));
     expect(spec.task_dirs).toEqual([]);
     expect(spec.files).toEqual(plan.files);
@@ -226,6 +226,13 @@ describe("包清单与版本判定", () => {
     expect(checkPack(manifest, { "画板/a.ugcboard.json": newer }).kind).toBe("newer");
   });
 
+  it("本机支持包格式 v2；导出仍写 v1（导出 v2 另票落地）", () => {
+    expect(PACK_FORMAT_VERSION).toBe(2);
+    expect(JSON.parse(buildManifest("0.2.0", [])).pack_format_version).toBe(1);
+    const v2 = JSON.stringify({ pack_format_version: 2, app_version: "0.4.0", boards: ["画板/豆包测试.ugcboard.json"], duplicates: {} });
+    expect(checkPack(v2, { "画板/豆包测试.ugcboard.json": boardText }).kind).toBe("ok");
+  });
+
   it("清单缺失 / 损坏、画板缺失或损坏时判为损坏", () => {
     expect(checkPack(null, {}).kind).toBe("corrupt");
     expect(checkPack("{", {}).kind).toBe("corrupt");
@@ -277,6 +284,74 @@ describe("导入前检查包内容", () => {
       const check = await inspectPack([...ok, ...extra], reader(texts).readTexts);
       expect(check.kind, extra.join()).toBe("corrupt");
     }
+  });
+
+  describe("包格式 v2：duplicates", () => {
+    const OTHER = "2026-09-16/20260916T020000Z-0000000b";
+    const v2 = (duplicates: unknown) => ({
+      ...texts,
+      [PACK_MANIFEST]: JSON.stringify({ pack_format_version: 2, app_version: "0.4.0", boards: [boardEntry], duplicates }),
+    });
+    const present = [PACK_MANIFEST, boardEntry, `${TASK}/task.json`, `${TASK}/result.png`, `${OTHER}/task.json`, "导入参考图/aa.png"];
+
+    it("合法的 v2 包：被省略的路径计入布局，合并单元与 v1 相同，返回按路径排序的还原清单", async () => {
+      const duplicates = {
+        [`${OTHER}/references/01.png`]: `${TASK}/result.png`,
+        [`${OTHER}/result.png`]: `${TASK}/result.png`,
+        "导入参考图/bb.png": "导入参考图/aa.png",
+      };
+      const check = await inspectPack(present, reader(v2(duplicates)).readTexts);
+      expect(check).toMatchObject({ kind: "ok" });
+      if (check.kind !== "ok") return;
+      expect(check.units).toEqual<MergeUnit[]>([
+        { path: TASK, identity: "task.json" },
+        { path: OTHER, identity: "task.json" },
+        { path: "导入参考图/aa.png", identity: null },
+        { path: "导入参考图/bb.png", identity: null },
+      ]);
+      expect(check.duplicates).toEqual([
+        { path: `${OTHER}/references/01.png`, source: `${TASK}/result.png` },
+        { path: `${OTHER}/result.png`, source: `${TASK}/result.png` },
+        { path: "导入参考图/bb.png", source: "导入参考图/aa.png" },
+      ]);
+    });
+
+    it("被省略的 task.json 仍算任务目录含 task.json", async () => {
+      const entries = [PACK_MANIFEST, boardEntry, `${TASK}/task.json`, `${OTHER}/result.png`];
+      const check = await inspectPack(entries, reader(v2({ [`${OTHER}/task.json`]: `${TASK}/task.json` })).readTexts);
+      expect(check.kind).toBe("ok");
+      if (check.kind === "ok") expect(check.units.map((u) => u.path)).toEqual([TASK, OTHER]);
+    });
+
+    it("没有 duplicates 的 v2 包与 v1 一样；v1 包的还原清单为空", async () => {
+      const v2Check = await inspectPack(present, reader(v2(undefined)).readTexts);
+      expect(v2Check).toMatchObject({ kind: "ok", duplicates: [] });
+      const v1Check = await inspectPack(present, reader(texts).readTexts);
+      expect(v1Check).toMatchObject({ kind: "ok", duplicates: [] });
+    });
+
+    const violations: [string, unknown][] = [
+      ["duplicates 不是对象", ["导入参考图/bb.png"]],
+      ["值不是字符串", { "导入参考图/bb.png": 1 }],
+      ["键不在白名单（任意位置）", { "素材/猫.png": "导入参考图/aa.png" }],
+      ["键是清单", { [PACK_MANIFEST]: "导入参考图/aa.png" }],
+      ["键是画板", { "画板/乙.ugcboard.json": boardEntry }],
+      ["键是不安全路径", { [`${TASK}/../../evil.png`]: "导入参考图/aa.png" }],
+      ["键同时是实存条目", { [`${TASK}/result.png`]: "导入参考图/aa.png" }],
+      ["值不是实存条目", { "导入参考图/bb.png": "导入参考图/没有.png" }],
+      ["链式映射", { "导入参考图/bb.png": "导入参考图/cc.png", "导入参考图/cc.png": "导入参考图/aa.png" }],
+    ];
+    for (const [rule, duplicates] of violations) {
+      it(`违规判为损坏：${rule}`, async () => {
+        const check = await inspectPack(present, reader(v2(duplicates)).readTexts);
+        expect(check.kind, rule).toBe("corrupt");
+      });
+    }
+
+    it("被省略路径计入布局后仍须合法：省略路径所在任务目录缺 task.json 判为损坏", async () => {
+      const check = await inspectPack(present, reader(v2({ "2026-09-16/20260916T030000Z-0000000c/result.png": `${TASK}/result.png` })).readTexts);
+      expect(check).toMatchObject({ kind: "corrupt", reason: expect.stringContaining("task.json") });
+    });
   });
 });
 
@@ -351,6 +426,7 @@ describe("导入画板包", () => {
   function memoryPackIo(pack: Record<string, string>, opts: { failAfterMove?: unknown; failUpload?: unknown } = {}) {
     const moved: string[] = [];
     const steps: string[] = [];
+    const restored: { path: string; source: string }[] = [];
     const io: PackIo = {
       cancel: async (cancelled) => void steps.push(`cancel(${cancelled})`),
       upload: async (file) => {
@@ -367,8 +443,9 @@ describe("导入画板包", () => {
         return Object.fromEntries(names.filter((n) => n in pack).map((n) => [n, pack[n]]));
       },
       discard: async (id) => void steps.push(`discard(${id})`),
-      importUnits: async (id, units) => {
+      importUnits: async (id, units, duplicates) => {
         steps.push(`import(${id})`);
+        restored.push(...duplicates);
         for (const unit of units) {
           moved.push(unit.path);
           if (opts.failAfterMove !== undefined) throw opts.failAfterMove;
@@ -376,7 +453,7 @@ describe("导入画板包", () => {
         return { outcomes: units.map((u) => ({ path: u.path, outcome: "moved" as const })), bytes: 1234 };
       },
     };
-    return { io, moved, steps };
+    return { io, moved, steps, restored };
   }
 
   function run(io: PackIo, addBoard: (board: Board) => Promise<string> = async (b) => `${ROOT}\\画板\\${b.title}.ugcboard.json`) {
@@ -487,6 +564,17 @@ describe("导入画板包", () => {
     expect(r.logs).toEqual([
       { kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", task_dirs: 1, skipped: 0, conflicts: 0, bytes: 1234, board_file: "甲 (2).ugcboard.json, 乙 (2).ugcboard.json", result: "ok" },
     ]);
+  });
+
+  it("v2 包：被省略路径的还原清单随合并单元一起交给壳；v1 包为空", async () => {
+    const v2Pack = { ...goodPack, [PACK_MANIFEST]: JSON.stringify({ pack_format_version: 2, app_version: "0.4.0", boards: [boardA, boardB], duplicates: { [`${TASK}/references/01.png`]: `${TASK}/result.png` } }) };
+    const v2 = memoryPackIo(v2Pack);
+    expect(await run(v2.io).outcome).toMatchObject({ kind: "done" });
+    expect(v2.moved).toEqual([TASK]);
+    expect(v2.restored).toEqual([{ path: `${TASK}/references/01.png`, source: `${TASK}/result.png` }]);
+    const v1 = memoryPackIo(goodPack);
+    await run(v1.io).outcome;
+    expect(v1.restored).toEqual([]);
   });
 
   it("第 2 个画板写失败：第 1 个保留、第一个失败即停、writeError 有值、日志记 board_write_failed", async () => {

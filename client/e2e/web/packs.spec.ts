@@ -13,6 +13,7 @@ import { openApp, readJson, readText, taskRecords } from "./kit";
 const TASK_ID = "20260916T010000Z-0000000a";
 const DIR = `2026-09-16/${TASK_ID}`;
 const V032 = fileURLToPath(new URL("../../fixtures/packs/v0.3.2-flash-layers.ugcpack", import.meta.url));
+const V2 = fileURLToPath(new URL("../../fixtures/packs/v2-duplicates.ugcpack", import.meta.url));
 const REF_ENTRY = "导入参考图/5e4b079355f5f06363744c0778c5174040645713e06e6877eae22f573d46e6b0.png";
 
 const dialog = (page: Page) => page.getByRole("dialog", { name: "画板包" });
@@ -114,6 +115,25 @@ test("导入桌面 v0.3.2 画板包：图层与 layers.json 落盘、画板打�
   expect(sent[0]).toBe(`data:image/png;base64,${readFileSync(path.join(root, DIR, "layers/02.png")).toString("base64")}`);
   // 新任务落盘（含结局 / 结果中转提交），导入的画板可继续工作。
   await expect.poll(() => taskRecords(rig).length).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test("导入包格式 v2：被省略的参考图快照在服务端还原为硬链接，画板打开、所有图片可显示", async ({ page, rig }) => {
+  const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
+  await importPack(page, V2);
+  await expect(toast(page)).toHaveText("导入 2 个任务，跳过 0 个");
+  await expect(page.locator(".tab.tab-active .tab-title")).toHaveText("去重画板");
+  const root = rig.userRoot(GOOD_KEY);
+  const representative = path.join(root, "2026-09-16/20260916T010000Z-0000000a/result.png");
+  const omitted = path.join(root, "2026-09-16/20260916T020000Z-0000000b/references/01.png");
+  expect(readFileSync(omitted).equals(readFileSync(representative))).toBe(true);
+  if (process.platform !== "win32") expect(statSync(omitted).ino).toBe(statSync(representative).ino);
+  for (const id of ["ra", "rb", "snap"]) {
+    const img = page.locator(`.react-flow__node[data-id="${id}"] img.thumb`);
+    await expect(img, id).toBeVisible();
+    await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth), { message: id }).toBe(64);
+  }
+  expect(existsSync(path.join(root, ".kacha/packs"))).toBe(false);
   expect(errors).toEqual([]);
 });
 
@@ -307,7 +327,7 @@ function makeZip(rig: Rig, file: string, lines: string[]): string {
 
 test("包格式版本较新：弹「无法导入画板包」，不进进度、不写文件", async ({ page, rig }) => {
   await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
-  const newer = makePack(rig, "newer.ugcpack", {}, { pack_format_version: 2 });
+  const newer = makePack(rig, "newer.ugcpack", {}, { pack_format_version: 3 });
   const alerts: string[] = [];
   page.on("dialog", async (d) => {
     alerts.push(d.message());
@@ -315,7 +335,7 @@ test("包格式版本较新：弹「无法导入画板包」，不进进度、�
   });
   await importPack(page, newer);
   await expect.poll(() => alerts.length).toBe(1);
-  expect(alerts[0]).toContain("格式版本 2 高于本机支持的 1（由 9.9.9 导出）");
+  expect(alerts[0]).toContain("格式版本 3 高于本机支持的 2（由 9.9.9 导出）");
   expect(existsSync(path.join(rig.userRoot(GOOD_KEY), DIR))).toBe(false);
   await expect(dialog(page)).toHaveCount(0);
   expect(existsSync(path.join(rig.userRoot(GOOD_KEY), ".kacha/packs"))).toBe(false);

@@ -111,6 +111,10 @@ impl Harness {
         *self.now.lock().unwrap() += by;
     }
 
+    pub fn now(&self) -> SystemTime {
+        *self.now.lock().unwrap()
+    }
+
     pub fn now_secs(&self) -> u64 {
         self.now.lock().unwrap().duration_since(UNIX_EPOCH).unwrap().as_secs()
     }

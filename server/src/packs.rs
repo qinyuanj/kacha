@@ -5,6 +5,7 @@
 //! - 导入：POST /api/packs/uploads 流式上传 zip 到用户元数据目录下的临时文件（不受 64 MB 单文件限制），
 //!   再读条目 / 文本做导入前判定，最后 POST /api/packs/uploads/{id}/import?op=<op> 执行合并。
 //!   导入结束（成功 / 失败 / 取消）或上传中断都删除临时文件。
+//!   关页等留下的临时文件，在该用户下次上传开始时按修改时间回收（超过 1 小时）。
 //!   上传可带 `?op=<id>`（#59）：总量取 Content-Length，每写一块更新已完成字节数；被取消回 409 并删掉半成品。
 //! - 取消与进度按操作 id 隔离：POST /api/packs/ops/{op}/cancel 只影响该操作；GET 读进度，操作已结束或不存在时回 204。
 
@@ -23,7 +24,7 @@ use futures_util::StreamExt;
 use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
 
-use crate::board_pack::{self, ExportSpec, MergeUnit, CANCELLED};
+use crate::board_pack::{self, ExportSpec, MergeUnit, PackDuplicate, CANCELLED};
 use crate::session::error;
 use crate::{AppState, User, META_DIR};
 
@@ -217,8 +218,34 @@ impl Drop for UploadGuard {
     }
 }
 
+const UPLOAD_SUFFIX: &str = ".ugcpack.tmp";
+
 fn upload_path(root: &Path, id: &str) -> PathBuf {
-    root.join(META_DIR).join(UPLOAD_DIR).join(format!("{id}.ugcpack.tmp"))
+    root.join(META_DIR).join(UPLOAD_DIR).join(format!("{id}{UPLOAD_SUFFIX}"))
+}
+
+/// 该用户的上传暂存：(元数据目录下的子目录, 暂存条目名后缀)。新的上传暂存位置加在这里，
+/// 每次上传开始时一并回收。
+const UPLOAD_STAGING: &[(&str, &str)] = &[(UPLOAD_DIR, UPLOAD_SUFFIX)];
+
+/// 上传暂存最后一次写入超过这个时间才回收：并发进行中的上传在持续写入，等待导入的不会等这么久。
+const STALE_UPLOAD_AGE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// 回收关页、`discard` 没发出去等情况留下的上传暂存。只删过期条目；删除失败留给下次，不影响本次上传。
+fn sweep_stale_uploads(root: &Path, now: std::time::SystemTime) {
+    for (dir, suffix) in UPLOAD_STAGING {
+        for entry in std::fs::read_dir(root.join(META_DIR).join(dir)).into_iter().flatten().flatten() {
+            if !entry.file_name().to_string_lossy().ends_with(suffix) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            let stale = meta.modified().is_ok_and(|m| now.duration_since(m).is_ok_and(|age| age >= STALE_UPLOAD_AGE));
+            if !stale {
+                continue;
+            }
+            let _ = if meta.is_dir() { std::fs::remove_dir_all(entry.path()) } else { std::fs::remove_file(entry.path()) };
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -241,6 +268,7 @@ pub async fn upload(State(state): State<AppState>, user: User, Query(q): Query<U
         op.total.store(total, Ordering::Relaxed);
     }
     let root = state.user_root(&user.fingerprint);
+    sweep_stale_uploads(&root, state.now());
     let _permit = state.heavy().acquire().await;
     let id = format!("{:x}", rand_u64());
     let file = upload_path(&root, &id);
@@ -331,13 +359,27 @@ pub async fn upload_texts(State(state): State<AppState>, user: User, AxPath(id):
     }
 }
 
+/// 导入请求体：v1 包只有合并单元列表；v2 包另带被省略路径的还原清单（为空时与 v1 相同）。
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ImportRequest {
+    Units(Vec<MergeUnit>),
+    WithDuplicates {
+        units: Vec<MergeUnit>,
+        #[serde(default)]
+        duplicates: Vec<PackDuplicate>,
+    },
+}
+
 /// 执行导入：结束后无论结局都删除上传临时文件（已移入的单元保留）。
 pub async fn import(State(state): State<AppState>, user: User, AxPath(id): AxPath<String>, Query(q): Query<OpQuery>, body: axum::body::Bytes) -> Response {
     if let Err(r) = crate::fs::ensure_space(&state) {
         return r;
     }
-    let Ok(units) = serde_json::from_slice::<Vec<MergeUnit>>(&body) else {
-        return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表");
+    let (units, duplicates) = match serde_json::from_slice::<ImportRequest>(&body) {
+        Ok(ImportRequest::Units(units)) => (units, Vec::new()),
+        Ok(ImportRequest::WithDuplicates { units, duplicates }) => (units, duplicates),
+        Err(_) => return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表"),
     };
     let file = match resolve_upload(&state, &user, &id) {
         Ok(f) => f,
@@ -353,7 +395,7 @@ pub async fn import(State(state): State<AppState>, user: User, AxPath(id): AxPat
     let _permit = state.heavy().acquire().await;
     let progress = progress_fn(&op);
     let cancel = op.clone();
-    let result = tokio::task::spawn_blocking(move || board_pack::import(&file, &root, &units, &progress, &cancel.cancel)).await;
+    let result = tokio::task::spawn_blocking(move || board_pack::import(&file, &root, &units, &duplicates, &progress, &cancel.cancel)).await;
     drop(cleanup);
     match result {
         Ok(Ok(report)) => Json(report).into_response(),
