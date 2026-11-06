@@ -55,3 +55,13 @@ test("撤销 / 重做、右键菜单、悬浮动作条、平移与拖线建节�
   await page.mouse.up({ button: "right" });
   await expect(page.locator(".react-flow__viewport")).not.toHaveAttribute("style", before!);
 });
+
+test("中文输入法提交单个标点不重复", async ({ page, rig }) => {
+  await openApp(page, rig, { title: "输入法", boardText: board("输入法", [promptNode("p1", "")], []) });
+  const field = task(page, "p1").locator("textarea");
+  await field.focus();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.imeSetComposition", { text: "。", selectionStart: 1, selectionEnd: 1, replacementStart: 0, replacementEnd: 0 });
+  await cdp.send("Input.insertText", { text: "。" });
+  await expect(field).toHaveValue("。");
+});

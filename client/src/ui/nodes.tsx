@@ -259,7 +259,10 @@ export const PromptNodeView = memo(function PromptNodeView({ data }: NodeProps<P
             fork();
           } else if (e.key === "Escape") setPending(null);
         }}
-        onChange={(e) => change(e.target.value)}
+        onChange={(e) => {
+          if (e.nativeEvent instanceof InputEvent && e.nativeEvent.isComposing) return;
+          change(e.target.value);
+        }}
       />
       {guides.length > 0 && (
         <div className="reference-guide nodrag">
