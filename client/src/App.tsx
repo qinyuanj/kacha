@@ -99,9 +99,9 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const confirmItemsOf = useCallback(
     async (board: Board, ids: string[], root: string) => {
       const { missingNodes, alphaByNode } = await collectRunFacts(imageProbe, board, ids, root);
-      return buildConfirmItems(board, table, ids, { discovery: settings.discovery, missingNodes, alphaByNode });
+      return buildConfirmItems(board, table, ids, { discovery: settings.discovery, concurrency: settings.settings.concurrency, missingNodes, alphaByNode });
     },
-    [settings.discovery, table],
+    [settings.discovery, settings.settings.concurrency, table],
   );
 
   const startRun = useCallback(

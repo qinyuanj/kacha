@@ -439,7 +439,7 @@ export function BoardCanvas({
         }
         case "task": {
           // 节点用缓存事实；运行前 App 逐张重新探测，同样的事实得出同样的原因。
-          const view = taskView(board, table, n.id, { missingNodes: missing, alphaByNode, discovery })!;
+          const view = taskView(board, table, n.id, { missingNodes: missing, alphaByNode, discovery, concurrency })!;
           const taskEdges = imageEdges(board, n.id);
           const render = effectiveRegionRender(findModel(table, n.model));
           const slots: ImageSlotInfo[] = imagePortSlots(board, table, n.id).map((s) => {
@@ -481,7 +481,7 @@ export function BoardCanvas({
         }
       }
     });
-  }, [board, table, userRoot, selectedNodes, measured, statusOf, locked, discovery, highlighted, missing, focusPrompt, alphaByNode, imageInfos, expanded, menuFacts, drag]);
+  }, [board, table, userRoot, selectedNodes, measured, statusOf, locked, discovery, concurrency, highlighted, missing, focusPrompt, alphaByNode, imageInfos, expanded, menuFacts, drag]);
 
   const dragging = drag !== null;
   const edges = useMemo<Edge[]>(

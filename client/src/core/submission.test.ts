@@ -172,7 +172,7 @@ describe("运行范围", () => {
 });
 
 describe("二次确认清单", () => {
-  const ctx = { discovery: { source: "none" as const }, missingNodes: new Set<string>(), alphaByNode: new Map<string, boolean>() };
+  const ctx = { discovery: { source: "none" as const }, missingNodes: new Set<string>(), alphaByNode: new Map<string, boolean>(), concurrency: 4 };
 
   it("每项：模型名 + 提示词首行 + 完整发送文本；可运行的默认勾选", () => {
     const [item] = buildConfirmItems(editBoard(), BUILTIN_TABLE, ["t"], ctx);
@@ -214,6 +214,7 @@ describe("二次确认清单", () => {
       discovery: { source: "cached", ids: ["qwen-image-3.0"], fetchedAt: "t" },
       missingNodes: new Set(["r1"]),
       alphaByNode: new Map(),
+      concurrency: 4,
     });
     expect(texts(items[0])).toContain("正向提示词未连接");
     expect(texts(items[1])).toEqual(expect.arrayContaining(["正向提示词为空", "模型 Seedream 5.0 pro 的请求形态尚未接入"]));
@@ -230,7 +231,7 @@ describe("二次确认清单", () => {
 
   it("Seedream 请求形态已接入，不因请求形态标红", () => {
     const b = board([prompt("p", "一只橘猫"), task("t", { model: "doubao-seedream-5-0-flash-260915" })], [edge("p", "t", "positive")]);
-    const [item] = buildConfirmItems(b, BUILTIN_TABLE, ["t"], { discovery: { source: "none" }, missingNodes: new Set(), alphaByNode: new Map() });
+    const [item] = buildConfirmItems(b, BUILTIN_TABLE, ["t"], { discovery: { source: "none" }, missingNodes: new Set(), alphaByNode: new Map(), concurrency: 4 });
     expect(texts(item).join()).not.toContain("请求形态");
   });
 });
@@ -273,8 +274,39 @@ describe("运行分派", () => {
   });
 });
 
+describe("份数超过并发上限", () => {
+  const facts = (concurrency: number) => ({ discovery: { source: "none" as const }, missingNodes: new Set<string>(), alphaByNode: new Map<string, boolean>(), concurrency });
+  const counted = (count?: number) => board([prompt("p", "一只橘猫"), task("t", count === undefined ? {} : { count })], [edge("p", "t", "positive")]);
+
+  it("超限产生警告「份数 X，本次按 Y」，不产生不可运行原因", () => {
+    const [item] = buildConfirmItems(counted(6), BUILTIN_TABLE, ["t"], facts(4));
+    expect(item.warnings).toEqual(["份数 6，本次按 4"]);
+    expect(item.reasons).toEqual([]);
+  });
+
+  it("超限的单节点运行因带警告弹确认", () => {
+    expect(runDispatch(buildConfirmItems(counted(6), BUILTIN_TABLE, ["t"], facts(4)))).toEqual({ kind: "confirm" });
+  });
+
+  it("份数等于并发上限：没有警告，单节点运行直接提交", () => {
+    const items = buildConfirmItems(counted(4), BUILTIN_TABLE, ["t"], facts(4));
+    expect(items[0].warnings).toEqual([]);
+    expect(runDispatch(items)).toEqual({ kind: "submit", taskId: "t" });
+  });
+
+  it("缺省份数按 1：并发上限为 1 时也没有警告", () => {
+    expect(buildConfirmItems(counted(), BUILTIN_TABLE, ["t"], facts(1))[0].warnings).toEqual([]);
+  });
+
+  it("调回并发上限后警告消失，画板上的份数不变", () => {
+    const b = counted(6);
+    expect(buildConfirmItems(b, BUILTIN_TABLE, ["t"], facts(2))[0].warnings).toEqual(["份数 6，本次按 2"]);
+    expect(buildConfirmItems(b, BUILTIN_TABLE, ["t"], facts(6))[0].warnings).toEqual([]);
+  });
+});
+
 describe("二次确认：「图N」校验与提示", () => {
-  const ctx = { discovery: { source: "none" as const }, missingNodes: new Set<string>(), alphaByNode: new Map<string, boolean>() };
+  const ctx = { discovery: { source: "none" as const }, missingNodes: new Set<string>(), alphaByNode: new Map<string, boolean>(), concurrency: 4 };
 
   it("引用越界为红（硬阻断），有线未被引用为黄（仅警告）", () => {
     const b = editBoard();
@@ -464,7 +496,7 @@ describe("已中断：重开时推导", () => {
 });
 
 describe("区域指示：图N 校验与发送文本", () => {
-  const ctx = { discovery: { source: "none" as const }, missingNodes: new Set<string>(), alphaByNode: new Map<string, boolean>() };
+  const ctx = { discovery: { source: "none" as const }, missingNodes: new Set<string>(), alphaByNode: new Map<string, boolean>(), concurrency: 4 };
   const REGION = { rects: [[0.1, 0.1, 0.5, 0.5] as [number, number, number, number]], render: "highlight_overlay" as const };
   const regionBoard = (text: string) =>
     board([prompt("p", text), reference("r1"), task("t")], [edge("p", "t", "positive"), { ...edge("r1", "t", "image:0"), region: REGION }]);
@@ -595,9 +627,9 @@ describe("透明背景：二次确认标红", () => {
       [prompt("p", "抠出@图1 的主体"), reference("r1"), task("t", { transparent_background: true, model: "doubao-seedream-5-0-pro-260628", size_spec: { tier: "2K", ratio: "1:1", width: null, height: null } })],
       [edge("p", "t", "positive"), edge("r1", "t", "image:0")],
     );
-    const [bad] = buildConfirmItems(b, BUILTIN_TABLE, ["t"], { discovery: { source: "none" }, missingNodes: new Set(), alphaByNode: new Map([["r1", false]]) });
+    const [bad] = buildConfirmItems(b, BUILTIN_TABLE, ["t"], { discovery: { source: "none" }, missingNodes: new Set(), alphaByNode: new Map([["r1", false]]), concurrency: 4 });
     expect(texts(bad)).toContain("该图不带透明通道");
-    const [unknown] = buildConfirmItems(b, BUILTIN_TABLE, ["t"], { discovery: { source: "none" }, missingNodes: new Set(), alphaByNode: new Map() });
+    const [unknown] = buildConfirmItems(b, BUILTIN_TABLE, ["t"], { discovery: { source: "none" }, missingNodes: new Set(), alphaByNode: new Map(), concurrency: 4 });
     expect(texts(unknown)).not.toContain("该图不带透明通道");
   });
 });
