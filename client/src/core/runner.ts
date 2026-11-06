@@ -6,6 +6,7 @@ import type { CapabilityTable } from "./capabilities";
 import type { BoardChange } from "./edit";
 import { GatewayError } from "./gateway";
 import { CancelledError, executeJob, failureLabel, prepareJob, prepareRegenerate, writeJob, type Prepared, type PreparedJob, type RunDeps, type TaskStatus, type WrittenJob } from "./run";
+import { groupCopies, type NodeCopyEntry } from "./nodeCopies";
 import { tableDigest, writeOutcome, type TaskOutcome } from "./taskDir";
 
 /** 第 1、2、3 次 429 后的等待；第 4 次按失败。 */
@@ -195,13 +196,6 @@ interface Job {
   controller: AbortController;
 }
 
-/** 已结束（失败 / 已取消）的一份。 */
-interface Finished {
-  taskNodeId: string;
-  total: number;
-  taskId: string | null;
-  status: TaskStatus;
-}
 
 const EMPTY_BOARD: BoardRunState = { nodes: new Map(), locked: new Set(), handled: new Set() };
 
@@ -222,7 +216,7 @@ export function createRunner(ports: RunnerPorts): Runner {
   let pausedUntil = 0;
   let cancelTimer: (() => void) | null = null;
   /** 画板键 → 已结束的各份（失败 / 已取消），按结束先后。 */
-  const finished = new Map<string, Finished[]>();
+  const finished = new Map<string, NodeCopyEntry[]>();
   const handled = new Map<string, Set<string>>();
   /** 已关闭的画板键（键不复用）：关闭前已开始、还在算摘要的提交不再入队。 */
   const closed = new Set<string>();
@@ -247,25 +241,20 @@ export function createRunner(ports: RunnerPorts): Runner {
   }
 
   function buildSnapshot(): RunnerSnapshot {
-    const boards = new Map<string, { nodes: Map<string, { copies: TaskCopy[]; counts: StatusCounts; total: number }>; locked: Set<string>; handled: ReadonlySet<string> }>();
-    const of = (key: string) => {
-      let b = boards.get(key);
-      if (!b) boards.set(key, (b = { nodes: new Map(), locked: new Set(), handled: handled.get(key) ?? new Set() }));
-      return b;
-    };
-    const add = (key: string, taskNodeId: string, total: number, copy: TaskCopy) => {
-      const nodes = of(key).nodes;
-      let n = nodes.get(taskNodeId);
-      if (!n) nodes.set(taskNodeId, (n = { copies: [], counts: {}, total }));
-      n.copies.push(copy);
-      n.counts[copy.status.kind] = (n.counts[copy.status.kind] ?? 0) + 1;
-    };
-    for (const [key, list] of finished) for (const f of list) add(key, f.taskNodeId, f.total, { taskId: f.taskId, status: f.status });
-    for (const key of handled.keys()) of(key);
+    // 每个画板：已结束的份在前，未结束的按提交顺序在后。
+    const entries = new Map<string, NodeCopyEntry[]>([...finished].map(([key, list]) => [key, [...list]]));
+    const locked = new Map<string, Set<string>>();
     for (const job of jobs) {
-      add(job.target.boardKey, job.taskNodeId, job.total, { taskId: job.prepared?.taskId ?? null, status: statusOf(job) });
-      of(job.target.boardKey).locked.add(job.taskNodeId);
+      const key = job.target.boardKey;
+      if (!entries.has(key)) entries.set(key, []);
+      entries.get(key)!.push({ taskNodeId: job.taskNodeId, total: job.total, copy: { taskId: job.prepared?.taskId ?? null, status: statusOf(job) } });
+      if (!locked.has(key)) locked.set(key, new Set());
+      locked.get(key)!.add(job.taskNodeId);
     }
+    const keys = new Set([...entries.keys(), ...handled.keys()]);
+    const boards = new Map<string, BoardRunState>(
+      [...keys].map((key) => [key, { nodes: groupCopies(entries.get(key) ?? []), locked: locked.get(key) ?? new Set(), handled: handled.get(key) ?? new Set() }]),
+    );
     const row = (state: ActiveTask["state"]) => (job: Job): ActiveTask => ({ taskId: job.prepared!.taskId, boardKey: job.target.boardKey, taskNodeId: job.taskNodeId, state });
     const live = [...jobs];
     return {
@@ -285,7 +274,7 @@ export function createRunner(ports: RunnerPorts): Runner {
     const key = job.target.boardKey;
     let list = finished.get(key);
     if (!list) finished.set(key, (list = []));
-    list.push({ taskNodeId: job.taskNodeId, total: job.total, taskId: job.prepared?.taskId ?? null, status });
+    list.push({ taskNodeId: job.taskNodeId, total: job.total, copy: { taskId: job.prepared?.taskId ?? null, status } });
   }
 
   /** 重新运行前清掉该节点上次的终态（每次提交每个节点一次，见 expand）。 */

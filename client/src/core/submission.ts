@@ -8,7 +8,8 @@ import type { SendPlan } from "./sendPlan";
 import type { SizeSpec } from "./size";
 import { readOutcome, type TaskFs, type TaskOutcome } from "./taskDir";
 import { sendPlanOf, taskView, type TaskFacts, type UnrunnableReason } from "./taskView";
-import type { CopiesByNode, NodeRunState, StatusCounts, TaskCopy } from "./runner";
+import { groupCopies } from "./nodeCopies";
+import type { CopiesByNode, NodeRunState } from "./runner";
 
 export type SnapshotImage =
   | { kind: "reference"; path: string; sha256: string; region: Region | null }
@@ -153,15 +154,11 @@ export async function storedStatuses(
       return { nodeId, taskId, status: (outcome ?? { kind: "interrupted" }) as StoredStatus };
     }),
   );
-  const statuses = new Map<string, { copies: TaskCopy[]; counts: StatusCounts; total: number }>();
-  for (const { nodeId, taskId, status } of copies) {
+  for (const { nodeId, taskId, status } of copies)
     if (status.kind === "interrupted") interruptedEvents.push({ task_id: taskId, board_file: boardFile, task_node_id: nodeId, from_status: "running", to_status: "interrupted" });
-    let node = statuses.get(nodeId);
-    // 份数按最近一次提交的各份总数（含已有结果的份）。
-    if (!node) statuses.set(nodeId, (node = { copies: [], counts: {}, total: submittedTaskIds(findTask(board, nodeId)?.last_submitted ?? null).length }));
-    node.copies.push({ taskId, status });
-    node.counts[status.kind] = (node.counts[status.kind] ?? 0) + 1;
-  }
+  // 份数按最近一次提交的各份总数（含已有结果的份）。
+  const total = (nodeId: string) => submittedTaskIds(findTask(board, nodeId)?.last_submitted ?? null).length;
+  const statuses = groupCopies(copies.map(({ nodeId, taskId, status }) => ({ taskNodeId: nodeId, total: total(nodeId), copy: { taskId, status } })));
   return { statuses, interruptedEvents };
 }
 
