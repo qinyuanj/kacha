@@ -1363,3 +1363,23 @@ button.primary[aria-disabled="true"] {
   align-items: center;
   gap: 8px;
 }
+.board-list .board-list-delete {
+  margin-left: auto;
+  color: var(--red);
+}
+.delete-notes {
+  margin: 0;
+  padding-left: 20px;
+  color: #57606a;
+}
+button.danger {
+  background: var(--red);
+  border: 1px solid #a40e26;
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+}
+button.danger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

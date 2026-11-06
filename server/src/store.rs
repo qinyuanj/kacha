@@ -171,16 +171,23 @@ pub fn rename_board(from: &Path, to: &Path) -> io::Result<()> {
     rename_board_guarded(from, to, None)
 }
 
-pub fn rename_board_guarded(from: &Path, to: &Path, version: Option<&str>) -> io::Result<()> {
-    if !from.exists() && !bak_path(from).exists() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, format!("画板不存在，可能已在别处改名或删除：{}", from.display())));
+/// 改名与删除前的共同检查（调用方持锁）：主文件与 `.bak` 都不存在 → NotFound；
+/// 带版本而主文件内容已变（或主文件已不在）→ InvalidInput（即 board_conflict）。
+pub fn check_board_guard(path: &Path, version: Option<&str>) -> io::Result<()> {
+    if !path.exists() && !bak_path(path).exists() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, format!("画板不存在，可能已在别处改名或删除：{}", path.display())));
     }
     if let Some(expected) = version {
-        match board_version(from)? {
+        match board_version(path)? {
             Some(actual) if actual == expected => {}
             _ => return Err(io::Error::new(io::ErrorKind::InvalidInput, "board_conflict")),
         }
     }
+    Ok(())
+}
+
+pub fn rename_board_guarded(from: &Path, to: &Path, version: Option<&str>) -> io::Result<()> {
+    check_board_guard(from, version)?;
     if from == to {
         return Ok(());
     }

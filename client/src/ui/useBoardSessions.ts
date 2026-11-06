@@ -1,4 +1,4 @@
-// 多画板标签页：打开 / 新建 / 关闭 / 重命名 / 去抖自动保存 / 另存到。
+// 多画板标签页：打开 / 新建 / 关闭 / 重命名 / 删除 / 去抖自动保存 / 另存到。
 import { useCallback, useRef, useState } from "react";
 import {
   DEFAULT_BOARD_TITLE,
@@ -22,7 +22,19 @@ import { knownImageInfo } from "./context";
 export const AUTOSAVE_DEBOUNCE_MS = 1000;
 
 export type Session =
-  | { key: string; path: string; status: "ok"; board: Board; history: History; notice: string | null; saveError: string | null; version: string | null; conflicted: boolean }
+  | {
+      key: string;
+      path: string;
+      status: "ok";
+      board: Board;
+      history: History;
+      notice: string | null;
+      saveError: string | null;
+      version: string | null;
+      conflicted: boolean;
+      /** 服务端已没有这块画板（在别处删除或改名）：不能重新载入，只能导出画板包或关闭。 */
+      missing: boolean;
+    }
   | { key: string; path: string; status: "newer"; version: number }
   | { key: string; path: string; status: "corrupt"; reason: string };
 
@@ -73,6 +85,9 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
 
   /** 409 = 过期保存 / 旧名已改名 / 同名已存在：不自动合并，也不再自动重试，等用户重新载入或改名。 */
   const isConflict = (e: unknown) => e instanceof ApiError && e.status === 409;
+  /** 画板已不存在（另一页面删除或改名）：带版本保存回 board_missing，服务端不会重建它；删除回 404。 */
+  const isMissing = (e: unknown) => e instanceof ApiError && (e.code === "board_missing" || (e.status === 404 && e.code === "not_found"));
+  const MISSING_TEXT = "该画板已不存在，可能已在别处改名或删除";
 
   /** 唯一写入实现：带内容版本（新建则只新建不覆盖），成功后用同一算法回写新版本。 */
   const writeSession = async (key: string, s: OkSession) => {
@@ -95,7 +110,8 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
           await writeSession(key, s);
         } catch (e) {
           logEvent("board_save_failed", { board_file: basename(s.path), reason: "autosave", message: errorText(e) });
-          patch(key, (x) => ({ ...x, saveError: `未能保存到 ${s.path}：${errorText(e)}`, ...(isConflict(e) ? { conflicted: true } : {}) }));
+          const saveError = isMissing(e) ? `未能保存：${MISSING_TEXT}。本页内容仍在，可先导出画板包再关闭` : `未能保存到 ${s.path}：${errorText(e)}`;
+          patch(key, (x) => ({ ...x, saveError, ...(isConflict(e) ? { conflicted: true } : {}), ...(isMissing(e) ? { missing: true } : {}) }));
         }
       });
       return saver.chain;
@@ -224,6 +240,7 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
               saveError: null,
               version: texts.version ?? null,
               conflicted: false,
+              missing: false,
             }
           : opened.kind === "newer"
             ? { key, path, status: "newer", version: opened.version }
@@ -242,7 +259,7 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
     const openHere = sessionsRef.current.filter((s) => samePath(dirname(s.path), dir)).map((s) => basename(s.path));
     const path = joinPath(dir, uniqueBoardFileName(DEFAULT_BOARD_TITLE, [...onDisk, ...openHere]));
     const key = newId();
-    setSessions([...sessionsRef.current, { key, path, status: "ok", board: newBoard(), history: emptyHistory(), notice: null, saveError: null, version: null, conflicted: false }]);
+    setSessions([...sessionsRef.current, { key, path, status: "ok", board: newBoard(), history: emptyHistory(), notice: null, saveError: null, version: null, conflicted: false, missing: false }]);
     setActiveKey(key);
     // 立即落盘占住文件名。
     await flush(key);
@@ -271,6 +288,16 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
       // 保存失败不能丢改动：标签页留着，修好后重试或先导出画板包。
       const current = sessionsRef.current.find((s) => s.key === key);
       if (current?.status === "ok" && current.saveError) return;
+      dropSession(key);
+    },
+    [flush],
+  );
+
+  /** 关掉标签页且不再保存：画板已删除，或用户放弃一块服务端已不存在的画板。 */
+  const dropSession = useCallback(
+    (key: string) => {
+      const saver = savers.current.get(key);
+      if (saver?.timer) clearTimeout(saver.timer);
       savers.current.delete(key);
       const list = sessionsRef.current;
       const index = list.findIndex((s) => s.key === key);
@@ -278,10 +305,34 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
       setSessions(next);
       setActiveKey((active) => (active === key ? (next[Math.min(index, next.length - 1)]?.key ?? null) : active));
     },
-    [flush, setSessions],
+    [setSessions],
+  );
+
+  /** 删除本页已打开的画板：先保存未保存的改动，再带最新版本删除（进回收区的是最新内容），成功后关闭标签页。
+   *  保存失败或版本已变（另一页面刚改过）时不删除、不关标签页，以错误抛给调用方。 */
+  const deleteBoard = useCallback(
+    async (key: string) => {
+      await flush(key);
+      const s = sessionsRef.current.find((x) => x.key === key);
+      if (!s) return;
+      if (s.status === "ok" && s.saveError) throw new Error(`未删除：${s.missing ? MISSING_TEXT : s.conflicted ? "画板已在别处修改，请先重新载入" : `未保存的改动没能保存（${s.saveError}）`}`);
+      try {
+        await ipc.deleteBoard(s.path, s.status === "ok" ? (s.version ?? undefined) : undefined);
+      } catch (e) {
+        // 已不存在：与保存时同样处理（导出画板包或关闭）；内容已变：等用户重新载入。标签页都不关。
+        if (isMissing(e)) patch(key, (x) => ({ ...x, saveError: `${MISSING_TEXT}。本页内容仍在，可先导出画板包再关闭`, conflicted: true, missing: true }));
+        else if (isConflict(e)) patch(key, (x) => ({ ...x, saveError: `删除失败：${errorText(e)}`, conflicted: true }));
+        throw e;
+      }
+      dropSession(key);
+    },
+    [flush, patch, dropSession],
   );
 
   closeBoardRef.current = closeBoard;
+
+  /** 本页打开该路径画板的标签页 key；没打开为 null。 */
+  const keyOf = useCallback((path: string): string | null => sessionsRef.current.find((s) => samePath(s.path, path))?.key ?? null, []);
 
   /** 改标题：文件名由标题派生，重名加 (2)，连同 .bak 一起改名。 */
   const renameBoard = useCallback(
@@ -329,7 +380,7 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
         return;
       }
       if (userRootRef.current) opened.board = await restoreResultLayers({ readFile: ipc.readFileBytes }, userRootRef.current, opened.board);
-      patch(key, (x) => ({ ...x, board: opened.board, history: emptyHistory(), version: texts.version ?? null, saveError: null, conflicted: false, notice: null }));
+      patch(key, (x) => ({ ...x, board: opened.board, history: emptyHistory(), version: texts.version ?? null, saveError: null, conflicted: false, missing: false, notice: null }));
     } catch (e) {
       patch(key, (x) => ({ ...x, notice: `重新载入失败：${errorText(e)}` }));
     }
@@ -343,6 +394,9 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
     createBoard,
     addImportedBoard,
     closeBoard,
+    deleteBoard,
+    dropSession,
+    keyOf,
     renameBoard,
     apply,
     check,

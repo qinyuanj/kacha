@@ -258,6 +258,11 @@ export const ipc: Ipc = {
   },
   renameBoard: async (from, to, version) =>
     void (await api("/api/boards/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: stripRoot(from), to: stripRoot(to), ...(version ? { version } : {}) }) })),
+  deleteBoard: async (path, version) => {
+    const params = new URLSearchParams({ path: stripRoot(path) });
+    if (version) params.set("version", version);
+    await api(`/api/boards?${params}`, { method: "DELETE" });
+  },
   listBoardNames: (dir) => api(`/api/boards/names?dir=${encodeURIComponent(stripRoot(dir))}`),
   readUiState: () => apiText("/api/ui-state"),
   writeUiState: async (text) => void (await api("/api/ui-state", textBody(text))),

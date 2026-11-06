@@ -8,6 +8,7 @@
 //! 任一画板读不懂（损坏 / 版本更高）时该用户本轮不清理任务目录。正式执行把候选移入
 //! `<数据根>/recycle/<UTC 时刻>/…`（保持原相对路径，便于管理员搬回），超过 14 天的批次在下次执行时彻底删除；
 //! `--purge` 跳过回收区。任务目录的缩略图缓存直接删除，不进回收区（#49）。不自动运行：只有管理员命令与用户自助清理两个入口。
+//! 用户删除的画板（#68）也进同一回收区、按同样期限彻底删除，可用 `cleanup restore` 连同 `.bak` 搬回。
 
 use std::collections::BTreeSet;
 use std::io;
@@ -283,6 +284,36 @@ fn move_to_recycle(data_root: &Path, rel: &str, now: SystemTime) -> io::Result<(
     Ok(())
 }
 
+/// 用户删除的画板（#68）：主文件与 `.bak`（存在者）移进同一批次、保持原相对路径（`rel` 相对数据根）。
+/// 该批次里已有同名（同一秒内删了又建又删）时顺延到下一秒的批次，不加后缀：每一份都保持原文件名，
+/// 都能被 `cleanup restore` 列出并恢复。
+pub fn recycle_board(data_root: &Path, rel: &str, now: SystemTime) -> io::Result<()> {
+    let main = data_root.join(rel);
+    let mut at = now;
+    let mut batch = batch_dir(data_root, at);
+    while batch.join(rel).exists() || crate::store::bak_path(&batch.join(rel)).exists() {
+        at += Duration::from_secs(1);
+        batch = batch_dir(data_root, at);
+    }
+    let target = batch.join(rel);
+    let moves: Vec<_> = [(main.clone(), target.clone()), (crate::store::bak_path(&main), crate::store::bak_path(&target))].into_iter().filter(|(from, _)| from.exists()).collect();
+    move_together(&moves)
+}
+
+/// 一组文件一起搬（画板主文件与 `.bak`）：中途失败时把已搬的搬回，不留下一半在回收区、一半在原处。
+fn move_together(moves: &[(PathBuf, PathBuf)]) -> io::Result<()> {
+    for (i, (from, to)) in moves.iter().enumerate() {
+        let moved = to.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::rename(from, to));
+        if let Err(e) = moved {
+            for (from, to) in moves[..i].iter().rev() {
+                let _ = std::fs::rename(to, from);
+            }
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
 /// 任务目录移走后，空的日期目录一并去掉（失败忽略）。
 fn remove_empty_parent(src: &Path) {
     if let Some(parent) = src.parent() {
@@ -417,11 +448,30 @@ const USAGE: &str = "用法：kacha-server cleanup [--dry-run | --purge] [--data
   默认       候选移入 <数据根>/recycle/<UTC 时刻>/，超过 14 天的批次彻底删除\n\
   数据根也可用环境变量 KACHA_DATA_ROOT；--now 只供测试与演练\n\
   恢复：kacha-server cleanup restore [--data-root <目录>] [<批次>/<原路径>]\n\
-  恢复     不带条目时列出回收区；带条目时把它搬回原位置，目标已存在则拒绝";
+  恢复     不带条目时列出回收区（闲置用户、未引用任务目录、用户删除的画板）；带条目时把它搬回原位置，目标已存在则拒绝";
 
 const RESTORE_USAGE: &str = "用法：kacha-server cleanup restore [--data-root <目录>] [<批次>/<原路径>]";
 
-/// 回收区里可独立恢复的条目：整个闲置用户数据根，或一个未引用任务目录。
+/// 回收区批次里一个用户目录下被删除的画板（相对该用户目录；`.bak` 归入主文件名，只有 `.bak` 的也算）。
+/// 日期目录是任务目录，不往里找。
+fn recycled_boards(user: &Path, rel: &str, out: &mut BTreeSet<String>) -> io::Result<()> {
+    for entry in std::fs::read_dir(user.join(rel))? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let child = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            if !name.starts_with('.') && !(rel.is_empty() && is_date_dir(&name)) {
+                recycled_boards(user, &child, out)?;
+            }
+        } else if kind.is_file() && is_board_file(&name) {
+            out.insert(child.strip_suffix(".bak").unwrap_or(&child).to_string());
+        }
+    }
+    Ok(())
+}
+
+/// 回收区里可独立恢复的条目：整个闲置用户数据根、一个未引用任务目录，或一块用户删除的画板（连同 `.bak`）。
 fn recycle_entries(data_root: &Path) -> io::Result<Vec<String>> {
     let mut entries = Vec::new();
     let recycle = data_root.join(RECYCLE_DIR);
@@ -449,6 +499,9 @@ fn recycle_entries(data_root: &Path) -> io::Result<Vec<String>> {
                     entries.push(format!("{prefix}/{date}/{task}"));
                 }
             }
+            let mut boards = BTreeSet::new();
+            recycled_boards(&user, "", &mut boards)?;
+            entries.extend(boards.into_iter().map(|b| format!("{prefix}/{b}")));
         }
     }
     entries.sort();
@@ -472,17 +525,20 @@ fn restore_entry(data_root: &Path, entry: &str) -> io::Result<()> {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "回收区条目必须来自 users/"));
     }
     let source = data_root.join(RECYCLE_DIR).join(path);
-    if !source.exists() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "回收区条目不存在"));
-    }
     let target = data_root.join(original);
-    if target.exists() {
+    // 画板条目连同 `.bak` 一起搬；原位置主文件或 `.bak` 任一已存在（用户后来新建了同名画板）即拒绝。
+    let mut moves = vec![(source.clone(), target.clone())];
+    if entry.ends_with(BOARD_EXTENSION) {
+        moves.push((crate::store::bak_path(&source), crate::store::bak_path(&target)));
+    }
+    if moves.iter().any(|(_, to)| to.exists()) {
         return Err(io::Error::new(io::ErrorKind::AlreadyExists, "原位置已存在，未覆盖"));
     }
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)?;
+    moves.retain(|(from, _)| from.exists());
+    if moves.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "回收区条目不存在"));
     }
-    std::fs::rename(source, target)
+    move_together(&moves)
 }
 
 fn run_restore_cli(args: &[String]) -> i32 {

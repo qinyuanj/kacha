@@ -27,6 +27,8 @@ export interface Ipc {
   readBoard(path: string): Promise<BoardTexts>;
   writeBoard(path: string, text: string, options?: BoardWriteOptions): Promise<void>;
   renameBoard(from: string, to: string, version?: string): Promise<void>;
+  /** 删除画板：主文件与 .bak 移入回收区（只有管理员能恢复）；带版本时内容已变 409。 */
+  deleteBoard(path: string, version?: string): Promise<void>;
   listBoardNames(dir: string): Promise<string[]>;
   readUiState(): Promise<string | null>;
   writeUiState(text: string): Promise<void>;
