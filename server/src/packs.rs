@@ -1,6 +1,7 @@
 //! 画板包 HTTP 接口（#24）。包格式与合并规则在前端 core/boardPack.ts；这里只搬字节、守路径与资源预算。
 //!
-//! - 导出：POST /api/packs/export?op=<id>，请求体是 ExportSpec（source 一律相对用户数据根），
+//! - 导出：先 POST /api/packs/export/facts?op=<id> 取逐文件长度与 sha256（前端核心据此按内容去重），
+//!   再 POST /api/packs/export?op=<id>，请求体是 ExportSpec（source 一律相对用户数据根，omitted 里的条目不写），
 //!   响应体是边打包边发送的 zip 下载流（不落临时文件，单个大请求不进内存）。
 //! - 导入：POST /api/packs/uploads 流式上传 zip 到用户元数据目录下的临时文件（不受 64 MB 单文件限制），
 //!   再读条目 / 文本做导入前判定，最后 POST /api/packs/uploads/{id}/import?op=<op> 执行合并。
@@ -193,6 +194,29 @@ impl Write for ChannelWriter {
     }
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
+    }
+}
+
+/// 导出前的字节事实（包格式 v2 的 hash 阶段）：请求体是不含文本条目的导出规格，返回每个要写的文件的长度与 sha256。
+/// 与导出同样读全部文件，故占一个大请求名额；进度按已读字节，可按操作 id 取消（409）。
+pub async fn export_facts(State(state): State<AppState>, user: User, Query(q): Query<OpQuery>, body: axum::body::Bytes) -> Response {
+    let Ok(spec) = serde_json::from_slice::<ExportSpec>(&body) else {
+        return error(StatusCode::BAD_REQUEST, "bad_request", "需要画板包导出规格");
+    };
+    let (op, _guard) = match begin_op(&state, &user, &q.op) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let root = state.user_root(&user.fingerprint);
+    let _permit = state.heavy().acquire().await;
+    let progress = progress_fn(&op);
+    let cancel = op.clone();
+    match tokio::task::spawn_blocking(move || board_pack::entry_facts(&root, &spec, &progress, &cancel.cancel)).await {
+        Ok(Ok(facts)) => Json(facts).into_response(),
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::Interrupted => error(StatusCode::CONFLICT, "cancelled", CANCELLED),
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidData => error(StatusCode::UNPROCESSABLE_ENTITY, "export_failed", &e.to_string()),
+        Ok(Err(e)) => crate::fs::io_error(e),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
     }
 }
 

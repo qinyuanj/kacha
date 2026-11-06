@@ -1,15 +1,14 @@
 // 画板包（ADR 0013）：把一块画板连同它直接引用的任务目录与图片打成单个 .ugcpack，供另一台机器导入。
 // 包格式的全部规则在这里：导出计划（带哪些任务目录 / 参考图、画板路径改写）、清单、导入前的版本与布局判定、
+// 按内容去重（包格式 v2：据服务端给的逐文件 sha256 与长度选代表条目、生成 duplicates、算预估大小）、
 // 合并单元（任务目录按 task.json 比对，参考图按整文件比对）与结果文案。
 // server/src/board_pack.rs 只按给定条目与合并单元搬字节。文件系统由调用方注入。
 import { copyTaskIds, parseBoard, serializeBoard, type Board, type BoardNode } from "./board";
 import { BOARDS_DIR_NAME, basename, resolveFromRoot, toRootRelative } from "./paths";
 import { TASK_RECORD_FILE, taskDirOfRelPath, taskDirOfTaskId } from "./taskDir";
 
-/** 本机能导入的最高包格式版本。v2 = 导出时按内容去重，被省略的路径记在清单的 duplicates 里（ADR 0013 补记）。 */
+/** 本机能导入、也是导出写的包格式版本。v2 = 导出时按内容去重，被省略的路径记在清单的 duplicates 里（ADR 0013 补记）。 */
 export const PACK_FORMAT_VERSION = 2;
-/** 导出写的包格式版本：导出 v2 落地前仍写 v1，保证导出的包总能被导回来。 */
-const EXPORT_PACK_FORMAT_VERSION = 1;
 export const PACK_EXTENSION = ".ugcpack";
 /** 系统对话框的扩展名过滤器。 */
 export const PACK_FILE_FILTER = { name: "画板包", extensions: [PACK_EXTENSION.slice(1)] };
@@ -94,30 +93,84 @@ export async function planExport(board: Board, userRoot: string, fs: PackFs): Pr
   };
 }
 
+// ---- 按内容去重（包格式 v2） ----
+
+/** 服务端给出的字节事实：导出计划里每个要写的文件（任务目录展开后）的包内路径、长度与 sha256。 */
+export interface PackEntryFact {
+  entry: string;
+  size: number;
+  sha256: string;
+}
+
+/** 去重后的包内容：省略路径 → 包内实存路径；bytes = 实存条目字节和（预估大小），totalBytes = 不去重时的字节和。 */
+export interface PackContents {
+  duplicates: Record<string, string>;
+  bytes: number;
+  totalBytes: number;
+}
+
+const byPath = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** 能被省略的路径：只有任务目录与导入参考图下的条目（清单、画板不行，与 inspectPack 的校验规则一致）。 */
+const omittable = (entry: string) => {
+  const parts = entry.split("/");
+  return taskDirOfRelPath(entry) !== null || (parts.length === 2 && parts[0] === IMPORTED_REFERENCES_DIR);
+};
+
+/**
+ * 导出规划：内容相同（sha256 与长度都相同）的条目只存一份，代表条目按路径排序取第一个，其余写进 duplicates。
+ * 代表条目从不作为键，于是没有链式映射；结果与 facts 的顺序无关。
+ */
+export function planPackContents(facts: PackEntryFact[]): PackContents {
+  const sorted = [...facts].sort((a, b) => byPath(a.entry, b.entry));
+  const kept = new Map<string, string>();
+  const duplicates: Record<string, string> = {};
+  let bytes = 0;
+  let totalBytes = 0;
+  for (const fact of sorted) {
+    totalBytes += fact.size;
+    const key = `${fact.sha256}:${fact.size}`;
+    const source = kept.get(key);
+    if (source !== undefined && omittable(fact.entry)) {
+      duplicates[fact.entry] = source;
+      continue;
+    }
+    if (source === undefined && omittable(fact.entry)) kept.set(key, fact.entry);
+    bytes += fact.size;
+  }
+  return { duplicates, bytes, totalBytes };
+}
+
 // ---- 清单与导出规格 ----
 
 const packBoardEntry = (boardFileName: string) => `${BOARDS_DIR_NAME}/${boardFileName}`;
 
-export function buildManifest(appVersion: string, boards: string[]): string {
-  return `${JSON.stringify({ pack_format_version: EXPORT_PACK_FORMAT_VERSION, app_version: appVersion, boards }, null, 2)}\n`;
+export function buildManifest(appVersion: string, boards: string[], duplicates: Record<string, string> = {}): string {
+  return `${JSON.stringify({ pack_format_version: PACK_FORMAT_VERSION, app_version: appVersion, boards, duplicates }, null, 2)}\n`;
 }
 
-/** 交给壳的导出规格：文本条目直接写入，任务目录整目录、参考图逐个流式写入。 */
+/** 交给壳的导出规格：文本条目直接写入，任务目录整目录、参考图逐个流式写入；omitted 里的条目不写（v2 去重）。 */
 export interface PackExportSpec {
   texts: { entry: string; text: string }[];
   task_dirs: string[];
   files: { source: string; entry: string }[];
+  omitted: string[];
 }
 
-export function buildExportSpec(appVersion: string, boardFileName: string, plan: ExportPlan): PackExportSpec {
+/** 让壳算字节事实用的规格：与导出规格同一组文件，不含文本条目。 */
+export function exportSources(plan: ExportPlan): Pick<PackExportSpec, "task_dirs" | "files"> {
+  return { task_dirs: plan.taskDirs, files: plan.files };
+}
+
+export function buildExportSpec(appVersion: string, boardFileName: string, plan: ExportPlan, contents: PackContents): PackExportSpec {
   const entry = packBoardEntry(boardFileName);
   return {
     texts: [
-      { entry: PACK_MANIFEST, text: buildManifest(appVersion, [entry]) },
+      { entry: PACK_MANIFEST, text: buildManifest(appVersion, [entry], contents.duplicates) },
       { entry, text: serializeBoard(plan.board) },
     ],
-    task_dirs: plan.taskDirs,
-    files: plan.files,
+    ...exportSources(plan),
+    omitted: Object.keys(contents.duplicates).sort(byPath),
   };
 }
 
@@ -204,7 +257,7 @@ export async function inspectPack(entries: string[], readTexts: (names: string[]
 
   const names = new Set(entries);
   const duplicates: PackDuplicate[] = [];
-  for (const [path, source] of Object.entries(versions.duplicates).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+  for (const [path, source] of Object.entries(versions.duplicates).sort(([a], [b]) => byPath(a, b))) {
     if (!path.split("/").every(isSafeSegment)) return { kind: "corrupt", reason: `duplicates 含无效路径：${path}` };
     if (path === PACK_MANIFEST || isBoardEntry(path)) return { kind: "corrupt", reason: `duplicates 不能省略 ${path}` };
     if (names.has(path)) return { kind: "corrupt", reason: `duplicates 的省略路径 ${path} 同时是包内条目` };

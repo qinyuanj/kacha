@@ -11,7 +11,9 @@ import {
   importSummary,
   inspectPack,
   planExport,
+  planPackContents,
   runCancellable,
+  type PackEntryFact,
   type MergeUnit,
   type PackFs,
   type PackIo,
@@ -117,12 +119,13 @@ describe("导出计划", () => {
 
   it("导出规格：清单与画板作为文本条目，任务目录与参考图原样传给壳", async () => {
     const plan = await planExport(boardWith(reference("a", "D:\\猫.png")), ROOT, memoryFs({ "D:\\猫.png": "aa" }));
-    const spec = buildExportSpec("0.2.0", "千问测试.ugcboard.json", plan);
+    const spec = buildExportSpec("0.2.0", "千问测试.ugcboard.json", plan, planPackContents([]));
     expect(spec.texts.map((t) => t.entry)).toEqual([PACK_MANIFEST, "画板/千问测试.ugcboard.json"]);
-    expect(JSON.parse(spec.texts[0].text)).toEqual({ pack_format_version: 1, app_version: "0.2.0", boards: ["画板/千问测试.ugcboard.json"] });
+    expect(JSON.parse(spec.texts[0].text)).toEqual({ pack_format_version: 2, app_version: "0.2.0", boards: ["画板/千问测试.ugcboard.json"], duplicates: {} });
     expect(spec.texts[1].text).toBe(serializeBoard(plan.board));
     expect(spec.task_dirs).toEqual([]);
     expect(spec.files).toEqual(plan.files);
+    expect(spec.omitted).toEqual([]);
   });
 
   /** Flash 结果：两层，其中 02 的图层文件不在磁盘上。 */
@@ -168,6 +171,80 @@ describe("导出计划", () => {
   });
 });
 
+describe("导出 v2：按内容去重", () => {
+  const A = "2026-09-16/20260916T010000Z-0000000a";
+  const B = "2026-09-16/20260916T020000Z-0000000b";
+  const C = "2026-09-17/20260917T010000Z-0000000c";
+  const fact = (entry: string, sha256: string, size: number): PackEntryFact => ({ entry, sha256, size });
+  /** B 的参考图快照是 A 的结果，C 的结果与 B 的快照同内容；导入参考图与 C 的参考图快照同内容。 */
+  const facts = [
+    fact(`${B}/references/01.png`, "s1", 100),
+    fact(`${A}/task.json`, "ta", 10),
+    fact(`${C}/result.png`, "s1", 100),
+    fact(`${A}/result.png`, "s1", 100),
+    fact(`${B}/task.json`, "tb", 12),
+    fact(`${B}/result.png`, "s2", 200),
+    fact(`${C}/task.json`, "tc", 11),
+    fact(`${C}/references/01.png`, "s3", 50),
+    fact("导入参考图/s3.png", "s3", 50),
+  ];
+
+  it("内容相同的条目只保留路径排序第一的，其余写进 duplicates 指向它", () => {
+    const contents = planPackContents(facts);
+    expect(contents.duplicates).toEqual({
+      [`${B}/references/01.png`]: `${A}/result.png`,
+      [`${C}/result.png`]: `${A}/result.png`,
+      "导入参考图/s3.png": `${C}/references/01.png`,
+    });
+  });
+
+  it("同一输入导出规划稳定：与条目顺序无关", () => {
+    const expected = planPackContents(facts);
+    for (const shuffled of [[...facts].reverse(), [...facts.slice(4), ...facts.slice(0, 4)]]) {
+      const again = planPackContents(shuffled);
+      expect(again).toEqual(expected);
+      expect(JSON.stringify(again.duplicates)).toBe(JSON.stringify(expected.duplicates));
+    }
+  });
+
+  it("预估大小等于实存条目的字节和；也给出未去重的字节和", () => {
+    const contents = planPackContents(facts);
+    // 实存：A/task.json 10、A/result.png 100、B/task.json 12、B/result.png 200、C/task.json 11、C/references/01.png 50。
+    expect(contents.bytes).toBe(10 + 100 + 12 + 200 + 11 + 50);
+    expect(contents.totalBytes).toBe(facts.reduce((n, f) => n + f.size, 0));
+  });
+
+  it("没有重复时 duplicates 为空，预估大小等于全部字节", () => {
+    const contents = planPackContents([fact(`${A}/task.json`, "ta", 10), fact(`${A}/result.png`, "s1", 100)]);
+    expect(contents).toEqual({ duplicates: {}, bytes: 110, totalBytes: 110 });
+  });
+
+  it("任务目录与导入参考图以外的条目不会被省略", () => {
+    const contents = planPackContents([fact(`${A}/result.png`, "s1", 100), fact("别处/猫.png", "s1", 100)]);
+    expect(contents.duplicates).toEqual({});
+    expect(contents.bytes).toBe(200);
+  });
+
+  it("导出规格只省略 duplicates 的键，清单写 v2 与 duplicates；按规格写出的包通过 v2 导入校验并还原全部路径", async () => {
+    const board = boardWith(result("ra", "20260916T010000Z-0000000a"), result("rc", "20260917T010000Z-0000000c", "2026-09-17"));
+    const plan = await planExport(board, ROOT, memoryFs({ [abs(`${A}/result.png`)]: "", [abs(`${C}/result.png`)]: "" }));
+    const contents = planPackContents(facts);
+    const spec = buildExportSpec("0.4.0", "千问测试.ugcboard.json", plan, contents);
+    expect(spec.omitted).toEqual(Object.keys(contents.duplicates).sort());
+    const manifest = JSON.parse(spec.texts[0].text);
+    expect(manifest).toMatchObject({ pack_format_version: 2, duplicates: contents.duplicates });
+
+    // 服务端只写实存条目：文本条目 + 未被省略的文件。
+    const written = [...spec.texts.map((t) => t.entry), ...facts.map((f) => f.entry).filter((e) => !spec.omitted.includes(e))];
+    const textMap = Object.fromEntries(spec.texts.map((t) => [t.entry, t.text]));
+    const check = await inspectPack(written, async (names) => Object.fromEntries(names.filter((n) => n in textMap).map((n) => [n, textMap[n]])));
+    expect(check.kind).toBe("ok");
+    if (check.kind !== "ok") return;
+    expect(check.units.map((u) => u.path)).toEqual([A, B, C, "导入参考图/s3.png"]);
+    expect(Object.fromEntries(check.duplicates.map((d) => [d.path, d.source]))).toEqual(contents.duplicates);
+  });
+});
+
 describe("份数随画板包导出与导入", () => {
   const task = (id: string, count?: number): TaskNode => ({
     ...base,
@@ -184,7 +261,7 @@ describe("份数随画板包导出与导入", () => {
 
   it("导出的画板带份数，导入后原样保留（超过并发上限也不改写）；旧包没有份数按 1", async () => {
     const plan = await planExport(boardWith(task("t", 3), task("big", 50), task("old")), ROOT, memoryFs({}));
-    const spec = buildExportSpec("0.3.0", "千问测试.ugcboard.json", plan);
+    const spec = buildExportSpec("0.3.0", "千问测试.ugcboard.json", plan, planPackContents([]));
     const [manifest, boardText] = spec.texts;
     const check = checkPack(manifest.text, { [boardText.entry]: boardText.text });
     if (check.kind !== "ok") throw new Error(check.kind);
@@ -226,9 +303,9 @@ describe("包清单与版本判定", () => {
     expect(checkPack(manifest, { "画板/a.ugcboard.json": newer }).kind).toBe("newer");
   });
 
-  it("本机支持包格式 v2；导出仍写 v1（导出 v2 另票落地）", () => {
+  it("本机支持包格式 v2，导出一律写 v2", () => {
     expect(PACK_FORMAT_VERSION).toBe(2);
-    expect(JSON.parse(buildManifest("0.2.0", [])).pack_format_version).toBe(1);
+    expect(JSON.parse(buildManifest("0.2.0", [])).pack_format_version).toBe(2);
     const v2 = JSON.stringify({ pack_format_version: 2, app_version: "0.4.0", boards: ["画板/豆包测试.ugcboard.json"], duplicates: {} });
     expect(checkPack(v2, { "画板/豆包测试.ugcboard.json": boardText }).kind).toBe("ok");
   });
