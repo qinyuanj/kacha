@@ -1,7 +1,7 @@
 // 提交前的纯函数：脏判据快照、运行范围、二次确认清单。
 import type { OutputOptions } from "./gateway";
 import { outputOptions } from "./gateway";
-import type { Board, Region, TaskNode } from "./board";
+import { actualCount, taskCount, type Board, type Region, type TaskNode } from "./board";
 import { findModel, type CapabilityTable } from "./capabilities";
 import { imageEdges, imageSources, promptText } from "./graph";
 import type { SendPlan } from "./sendPlan";
@@ -255,4 +255,24 @@ export function runDispatch(items: ConfirmItem[]): RunDispatch {
     return { kind: "toast", message: `无法运行：${item.reasons[0].text}${more}` };
   }
   return item.warnings.length > 0 ? { kind: "confirm" } : { kind: "submit", taskId: item.taskId };
+}
+
+/**
+ * 点「重新生成」后的分派：实际份数 = min(份数, 并发上限)，为 1 时直接提交；大于 1 时先弹轻量确认，
+ * 写明份数与所用模型（重新生成重跑上次提交，取上次提交的模型），截断时 note 说明设定值与本次值。
+ * 不含发送文本清单。生成变体固定一份，不经过这里。
+ */
+export type RegenerateDispatch =
+  | { kind: "submit"; copies: number }
+  | { kind: "confirm"; copies: number; modelName: string; note: string | null };
+
+export function regenerateDispatch(board: Board, table: CapabilityTable, taskId: string, concurrency: number): RegenerateDispatch {
+  const task = findTask(board, taskId);
+  if (!task) return { kind: "submit", copies: 1 };
+  const copies = actualCount(task, concurrency);
+  if (copies <= 1) return { kind: "submit", copies };
+  const lastModel = task.last_submitted?.model;
+  const model = typeof lastModel === "string" ? lastModel : task.model;
+  const set = taskCount(task);
+  return { kind: "confirm", copies, modelName: findModel(table, model)?.display_name ?? model, note: set > copies ? `节点设为 ${set}，本次按 ${copies}` : null };
 }

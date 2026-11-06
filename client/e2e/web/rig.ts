@@ -83,7 +83,12 @@ export async function startStub(): Promise<Stub> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   stub.url = `http://127.0.0.1:${port}`;
-  stub.close = () => new Promise((resolve) => server.close(() => resolve()));
+  // 浏览器直连本桩；Chrome 预开、尚未发请求的连接不算空闲，server.close() 不会关它，拆除会一直等到超时。
+  stub.close = () =>
+    new Promise((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    });
   return stub;
 }
 

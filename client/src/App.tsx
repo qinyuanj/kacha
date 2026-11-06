@@ -6,7 +6,7 @@ import type { BoardChange } from "./core/edit";
 import { redoLabel, undoLabel } from "./core/history";
 import { basename, boardsDir } from "./core/paths";
 import type { Runner, RunTarget } from "./core/runner";
-import { runDispatch, runScope, buildConfirmItems, collectRunFacts, type ConfirmItem } from "./core/submission";
+import { regenerateDispatch, runDispatch, runScope, buildConfirmItems, collectRunFacts, type ConfirmItem } from "./core/submission";
 import { parseUiState, serializeUiState, type UiState } from "./core/uiState";
 import { imageProbe } from "./shell/adapters";
 import { copyTextToClipboard } from "./shell/clipboard";
@@ -168,10 +168,20 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       const board = boards.getBoard(activeKey);
       if (!board) return;
       const target: RunTarget = { boardKey: activeKey, boardFile: boards.boardFileName(activeKey), table, userRoot, baseUrl: settings.settings.base_url, apiKey: settings.apiKey };
-      const problem = await runner.regenerate(target, board, taskNodeId, fromTaskId);
+      // 生成变体固定一份；重新生成按此刻的 min(份数, 并发上限) 固化，多于一份先轻量确认，免得忘了份数多花钱。
+      let copies = 1;
+      if (fromTaskId === undefined) {
+        const dispatch = regenerateDispatch(board, table, taskNodeId, settings.settings.concurrency);
+        copies = dispatch.copies;
+        if (dispatch.kind === "confirm") {
+          const text = `将生成 ${dispatch.copies} 份，模型 ${dispatch.modelName}。${dispatch.note ? `\n${dispatch.note}。` : ""}`;
+          if (!(await browser.ask(text, { title: "确认重新生成", okLabel: `重新生成 ${dispatch.copies} 份`, cancelLabel: "取消" }))) return;
+        }
+      }
+      const problem = await runner.regenerate(target, board, taskNodeId, fromTaskId, copies);
       if (problem) toast(`${fromTaskId ? "生成变体" : "重新生成"}失败：${problem}`);
     },
-    [activeKey, userRoot, boards, runner, settings.apiKey, settings.settings.base_url, table, toast],
+    [activeKey, userRoot, boards, runner, settings.apiKey, settings.settings.base_url, settings.settings.concurrency, table, toast],
   );
 
   const cancelTask = useCallback((taskNodeId: string) => activeKey && runner.cancel({ kind: "task", boardKey: activeKey, taskNodeId }), [activeKey, runner]);
