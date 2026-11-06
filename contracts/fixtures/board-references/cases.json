@@ -70,6 +70,22 @@
       "expected": { "readable": true, "task_dirs": ["2026-05-20/20260520T000000Z-00000003", "2026-06-01/20260601T000000Z-00000002", "2026-06-10/20260610T120000Z-deadbeef"] }
     },
     {
+      "name": "任务节点：同一次提交各份的任务编号（last_submitted.copy_task_ids）都算引用，非本工具编号与非字符串忽略",
+      "board": {
+        "format_version": 1, "title": "a", "viewport": { "zoom": 1, "x": 0, "y": 0 }, "edges": [],
+        "nodes": [
+          { "id": "t", "type": "task", "pos": [0, 0], "size": [1, 1], "model": "m", "size_spec": {}, "image_ports": 0, "count": 3,
+            "layer_decomposition": false, "transparent_background": false,
+            "last_submitted": {
+              "task_id": "20261106T080000Z-0000000c",
+              "copy_task_ids": ["20261106T080000Z-0000000a", "20261106T080000Z-0000000b", "20261106T080000Z-0000000c", "legacy-1", 7],
+              "images": []
+            } }
+        ]
+      },
+      "expected": { "readable": true, "task_dirs": ["2026-11-06/20261106T080000Z-0000000a", "2026-11-06/20261106T080000Z-0000000b", "2026-11-06/20261106T080000Z-0000000c"] }
+    },
+    {
       "name": "提示词文本像路径也不算引用",
       "board": {
         "format_version": 1, "title": "a", "viewport": { "zoom": 1, "x": 0, "y": 0 }, "edges": [],

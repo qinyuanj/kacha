@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { BoardNode } from "./board";
+import type { Board, BoardNode } from "./board";
 import { parseOutcome } from "./taskDir";
 import { board, harness, settle } from "./testing/runnerHarness";
-import { createRunner, nodeStatus, nodeSummary } from "./runner";
+import { createRunner, nodeCopyDetail, nodeStatus, nodeSummary } from "./runner";
 import { BUILTIN_TABLE } from "./capabilities";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
 import { sendPlanOf } from "./taskView";
@@ -342,6 +342,9 @@ describe("任务运行器：按份数展开", () => {
   const node = (h: ReturnType<typeof harness>, id: string) => h.runner.getSnapshot().board("A").nodes.get(id);
   const results = (h: ReturnType<typeof harness>) => h.changes.filter((c) => c.change.kind === "runResult");
   const submittedIds = (h: ReturnType<typeof harness>) => h.changes.flatMap((c) => (c.change.kind === "submitted" ? [c.change.lastSubmitted?.task_id] : []));
+  /** 最后一次写到任务节点上的 last_submitted。 */
+  const lastSubmitted = (h: ReturnType<typeof harness>) => h.changes.flatMap((c) => (c.change.kind === "submitted" ? [c.change.lastSubmitted as Record<string, unknown>] : [])).at(-1)!;
+  const boardWithLast = (b: Board, last: Record<string, unknown>): Board => ({ ...b, nodes: b.nodes.map((n) => (n.type === "task" ? { ...n, last_submitted: last } : n)) });
   /** 各任务目录 task.json 去掉任务编号后的内容。 */
   const records = (h: ReturnType<typeof harness>) =>
     [...h.files].filter(([k]) => k.endsWith("/task.json")).map(([, v]) => {
@@ -387,6 +390,43 @@ describe("任务运行器：按份数展开", () => {
     const dispatched = h.logs.filter((l) => l.kind === "queue_dispatch").map((l) => l.fields.task_id);
     expect(dispatched).toHaveLength(2);
     expect(submittedIds(h)).toEqual(dispatched);
+  });
+
+  it("last_submitted 记下同一次提交已派发的各份任务编号", async () => {
+    const h = harness({ concurrency: 1 });
+    await h.runner.submit(h.target(), board(), ["t1"], { t1: 3 });
+    await settle();
+    const dispatched = h.logs.filter((l) => l.kind === "queue_dispatch").map((l) => l.fields.task_id);
+    const last = lastSubmitted(h);
+    expect(last.task_id).toBe(dispatched[2]);
+    expect(last.copy_task_ids).toEqual(dispatched);
+  });
+
+  it("排队中取消、从未派发的份不进 last_submitted", async () => {
+    const h = harness({ concurrency: 1 });
+    h.gateway.closed = true;
+    await h.runner.submit(h.target(), board(), ["t1"], { t1: 3 });
+    await settle();
+    h.runner.cancel({ kind: "waiting" });
+    h.gateway.open();
+    await settle();
+    const [first] = h.logs.filter((l) => l.kind === "queue_dispatch").map((l) => l.fields.task_id);
+    expect(lastSubmitted(h)).toMatchObject({ task_id: first, copy_task_ids: [first] });
+    expect(h.taskDirs().size).toBe(1);
+  });
+
+  it("一份时 last_submitted 不带各份任务编号；之后的单份重新生成不沿用上次各份", async () => {
+    const h = harness();
+    await h.runner.submit(h.target(), board(), ["t1"]);
+    await settle();
+    expect(lastSubmitted(h)).not.toHaveProperty("copy_task_ids");
+    const h2 = harness();
+    await h2.runner.submit(h2.target(), board(), ["t1"], { t1: 2 });
+    await settle();
+    const withCopies = boardWithLast(board(), lastSubmitted(h2));
+    await h2.runner.regenerate(h2.target(), withCopies, "t1");
+    await settle();
+    expect(lastSubmitted(h2)).not.toHaveProperty("copy_task_ids");
   });
 
   it("提交后调低并发上限，不影响已排队任务的数量", async () => {
@@ -709,6 +749,16 @@ describe("任务节点状态显示", () => {
   it("多份时给出计数摘要，执行中、排队（含限流退避）、失败、已取消依次排列", () => {
     expect(nodeSummary({ copies: [copy("failed"), copy("running"), copy("running"), copy("queued")], counts: { failed: 1, running: 2, queued: 1 } })).toBe("执行中 2 · 排队 1 · 失败 1");
     expect(nodeSummary({ copies: [copy("cancelled"), copy("backoff"), copy("queued")], counts: { cancelled: 1, backoff: 1, queued: 1 } })).toBe("排队 2 · 已取消 1");
+  });
+
+  it("悬停明细：多份时逐份列出状态与失败原因；一份时没有", () => {
+    const failed = (label: string) => ({ taskId: null, status: { kind: "failed" as const, label } });
+    expect(nodeCopyDetail({ copies: [failed("网关超时"), failed("内容审核未通过"), copy("cancelled"), copy("running")], counts: { failed: 2, cancelled: 1, running: 1 } })).toBe(
+      "第 1 份：失败 · 网关超时\n第 2 份：失败 · 内容审核未通过\n第 3 份：已取消\n第 4 份：执行中",
+    );
+    expect(nodeCopyDetail({ copies: [{ taskId: null, status: { kind: "interrupted" } }, copy("backoff"), copy("queued")], counts: {} })).toBe("第 1 份：已中断\n第 2 份：网关限流，等待重试\n第 3 份：排队中");
+    expect(nodeCopyDetail({ copies: [failed("x")], counts: { failed: 1 } })).toBeNull();
+    expect(nodeCopyDetail(undefined)).toBeNull();
   });
 });
 

@@ -4,7 +4,7 @@ import type { CapabilityTable, ModelCapability } from "../core/capabilities";
 import type { BoardAction, MenuTarget } from "../core/contextMenu";
 import type { BoardChange } from "../core/edit";
 import { resolveFromRoot } from "../core/paths";
-import type { TaskStatus } from "../core/run";
+import type { NodeRunState } from "../core/runner";
 import { createInterruptedLog, interruptedCandidates, storedStatuses } from "../core/submission";
 import type { TaskFs } from "../core/taskDir";
 import { taskFs } from "../shell/adapters";
@@ -155,8 +155,8 @@ const interruptedLog = createInterruptedLog();
 /**
  * 本次运行没经手过、提交过却没有结果的任务的状态（规则在 core/submission.ts 的 storedStatuses）。读完之前不显示徽标。
  */
-export function useStoredStatuses(board: Board, boardFile: string, userRoot: string, handled: ReadonlySet<string>): ReadonlyMap<string, TaskStatus> {
-  const [statuses, setStatuses] = useState<ReadonlyMap<string, TaskStatus>>(new Map());
+export function useStoredStatuses(board: Board, boardFile: string, userRoot: string, handled: ReadonlySet<string>): ReadonlyMap<string, NodeRunState> {
+  const [statuses, setStatuses] = useState<ReadonlyMap<string, NodeRunState>>(new Map());
   const signature = JSON.stringify([userRoot, boardFile, interruptedCandidates(board, handled)]);
   useEffect(() => {
     let alive = true;

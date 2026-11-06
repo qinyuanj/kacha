@@ -83,6 +83,30 @@ export function nodeSummary(node: NodeRunState | undefined): string | null {
   }).join(" · ");
 }
 
+/** 悬停明细里一份的状态文字（计时类状态不带读秒）。 */
+function copyText(status: TaskStatus): string {
+  switch (status.kind) {
+    case "queued":
+      return "排队中";
+    case "running":
+      return "执行中";
+    case "backoff":
+      return "网关限流，等待重试";
+    case "failed":
+      return `失败 · ${status.label}`;
+    case "cancelled":
+      return "已取消";
+    case "interrupted":
+      return "已中断";
+  }
+}
+
+/** 多份时计数摘要的悬停明细：逐份一行，含失败原因；只有一份（或没有）时为 null。 */
+export function nodeCopyDetail(node: NodeRunState | undefined): string | null {
+  if (!node || node.copies.length < 2) return null;
+  return node.copies.map((c, i) => `第 ${i + 1} 份：${copyText(c.status)}`).join("\n");
+}
+
 export interface BoardRunState {
   /** 任务节点 id → 本次运行里的各份（含失败 / 已取消）；已中断等由任务目录推导的不在这里。 */
   nodes: ReadonlyMap<string, NodeRunState>;
@@ -142,6 +166,8 @@ interface Job {
   prepared?: PreparedJob;
   /** 派发时写到任务节点上；undefined = 不改（生成变体）。 */
   lastSubmitted?: TaskNode["last_submitted"];
+  /** 展开为多份时同一节点各份共用：已派发（任务目录已写）的各份任务编号，随 last_submitted 落到画板。 */
+  dispatched?: string[];
   /** 任务目录已写、提交记录已落地后的任务（429 重试不再写）。 */
   written?: WrittenJob;
   /** 已自动重试的次数（仅 429）。 */
@@ -248,6 +274,15 @@ export function createRunner(ports: RunnerPorts): Runner {
     if (list) finished.set(boardKey, list.filter((f) => f.taskNodeId !== taskNodeId));
   }
 
+  /** 派发时写的 last_submitted：多份时带上同一次提交已派发的各份任务编号（不参与脏判据），一份时不带；
+   *  不沿用上一次提交的各份（重新生成以上次的 last_submitted 为底）。 */
+  function withCopyTaskIds(job: Job): TaskNode["last_submitted"] {
+    const { copy_task_ids: _stale, ...last } = job.lastSubmitted ?? {};
+    if (!job.dispatched) return last;
+    job.dispatched.push(job.prepared!.taskId);
+    return { ...last, copy_task_ids: [...job.dispatched] };
+  }
+
   /** 任务迁移事件带画板文件名 + 任务节点 id。 */
   function taskFields(job: Job) {
     const p = job.prepared!;
@@ -302,7 +337,7 @@ export function createRunner(ports: RunnerPorts): Runner {
     try {
       if (!job.written) {
         job.written = await writeJob(deps, target.userRoot, job.prepared!);
-        if (job.lastSubmitted !== undefined) ports.apply(target.boardKey, { kind: "submitted", taskId: job.taskNodeId, lastSubmitted: job.lastSubmitted });
+        if (job.lastSubmitted !== undefined) ports.apply(target.boardKey, { kind: "submitted", taskId: job.taskNodeId, lastSubmitted: withCopyTaskIds(job) });
         // 写目录期间被取消：取消时目录还没写，这里补记结局。
         if (aborted()) recordOutcome(job, { kind: "cancelled", gatewayMayContinue: false });
       }
@@ -376,7 +411,9 @@ export function createRunner(ports: RunnerPorts): Runner {
       guardedAtEntry();
       return [];
     }
-    const batch = Array.from({ length: Math.max(1, Math.floor(copies)) }, (): Job => ({ target, taskNodeId, phase: "reading", submission, retries: 0, startedAt: 0, controller: new AbortController() }));
+    const count = Math.max(1, Math.floor(copies));
+    const dispatched = count > 1 ? [] : undefined;
+    const batch = Array.from({ length: count }, (): Job => ({ target, taskNodeId, phase: "reading", submission, dispatched, retries: 0, startedAt: 0, controller: new AbortController() }));
     batch.forEach((job) => jobs.add(job));
     clearFinished(target.boardKey, taskNodeId);
     publish();

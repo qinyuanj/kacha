@@ -271,3 +271,21 @@ fn boards_outside_boards_dir_still_protect_their_task_dirs() {
     let (_, out, _) = r.run(&["--dry-run"], NOW);
     assert!(out.lines().any(|l| l.starts_with('#') && l.contains("备份/旧/另存.ugcboard.json")), "{out}");
 }
+
+/// 份数展开的同一次提交：失败 / 已取消 / 已中断的份没有结果节点，只靠 `last_submitted.copy_task_ids` 引用，不能被当成未引用清走。
+#[test]
+fn copy_task_ids_of_one_submission_protect_every_copy() {
+    let r = scenario();
+    let board = format!(
+        r#"{{"format_version":1,"title":"b","viewport":{{"zoom":1,"x":0,"y":0}},"edges":[],"nodes":[{{"id":"t","type":"task","pos":[0,0],"size":[1,1],"model":"m","size_spec":{{}},"image_ports":0,"count":2,"layer_decomposition":false,"transparent_background":false,"last_submitted":{{"task_id":"{last}","copy_task_ids":["{first}","{last}"],"images":[]}}}}]}}"#,
+        first = OLD.split('/').nth(1).unwrap(),
+        last = OLD_C.split('/').nth(1).unwrap(),
+    );
+    r.board("active", "份数.ugcboard.json", &board);
+    let (code, out, err) = r.run(&["--dry-run"], NOW);
+    assert_eq!(code, 0, "{err}");
+    assert!(!out.contains("未引用任务目录"), "OLD 是同一次提交的另一份，仍被引用：\n{out}");
+    let (code, _, err) = r.run(&[], NOW);
+    assert_eq!(code, 0, "{err}");
+    assert!(r.user("active").join(OLD).join("task.json").is_file(), "执行清理后 OLD 仍在原处");
+}

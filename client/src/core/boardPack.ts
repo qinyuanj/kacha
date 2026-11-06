@@ -4,7 +4,7 @@
 // server/src/board_pack.rs 只按给定条目与合并单元搬字节。文件系统由调用方注入。
 import { parseBoard, serializeBoard, type Board, type BoardNode } from "./board";
 import { BOARDS_DIR_NAME, basename, resolveFromRoot, toRootRelative } from "./paths";
-import { TASK_RECORD_FILE, taskDirOfRelPath } from "./taskDir";
+import { TASK_RECORD_FILE, taskDirOfRelPath, taskDirOfTaskId } from "./taskDir";
 
 export const PACK_FORMAT_VERSION = 1;
 export const PACK_EXTENSION = ".ugcpack";
@@ -46,6 +46,13 @@ export async function planExport(board: Board, userRoot: string, fs: PackFs): Pr
   const nodes: BoardNode[] = [];
   for (const node of board.nodes) {
     if (node.type !== "result" && node.type !== "reference") {
+      // 份数展开的同一次提交：各份的任务目录都带上（失败 / 已取消 / 已中断的份没有结果节点）；本机已不在的由壳跳过。
+      const copies = node.type === "task" ? node.last_submitted?.copy_task_ids : undefined;
+      if (Array.isArray(copies))
+        for (const id of copies) {
+          const dir = typeof id === "string" ? taskDirOfTaskId(id) : null;
+          if (dir) taskDirs.add(dir);
+        }
       nodes.push(node);
       continue;
     }
