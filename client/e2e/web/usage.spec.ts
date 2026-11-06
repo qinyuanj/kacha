@@ -55,6 +55,7 @@ test("高级设置显示用量，预览未引用任务目录，取消不动磁�
   // 用量：总量 = 全部文件字节之和；只列 OLD 一个未引用任务目录。
   const total = dirBytes(root);
   await expect(panel.getByTestId("usage-total")).toHaveText(bytesLabel(total));
+  await expect(panel.getByTestId("usage-note"), "用量说明注明按文件长度计、共享内容重复计入").toContainText("重复计入");
   await expect(panel.getByTestId("usage-dates")).toContainText("2026-10-01");
   await expect(panel.getByTestId("usage-dates")).toContainText(`${keptBytes} B`);
   await expect(panel.getByTestId("usage-dates")).toContainText("2027-01-01");

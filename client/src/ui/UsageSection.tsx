@@ -63,6 +63,9 @@ export function UsageSection() {
           <div className="muted small form-hint">
             画板 {formatBytes(usage.boards_bytes)}；设置与缓存 {formatBytes(usage.meta_bytes)}；最后访问 {new Date(usage.last_access * 1000).toLocaleString()}
           </div>
+          <div className="muted small form-hint" data-testid="usage-note">
+            用量按文件长度累加：导入画板包时内容相同的文件共用一份磁盘空间，这里会重复计入，实际占用可能更小；清理也不一定释放显示的全部字节。
+          </div>
           <div className="muted small form-hint" data-testid="usage-dates">
             {usage.by_date.length === 0 ? "还没有任务目录" : usage.by_date.map((d) => `${d.date}：${formatBytes(d.bytes)}`).join("；")}
           </div>
