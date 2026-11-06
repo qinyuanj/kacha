@@ -5,6 +5,7 @@
 //! - 导入：POST /api/packs/uploads 流式上传 zip 到用户元数据目录下的临时文件（不受 64 MB 单文件限制），
 //!   再读条目 / 文本做导入前判定，最后 POST /api/packs/uploads/{id}/import?op=<op> 执行合并。
 //!   导入结束（成功 / 失败 / 取消）或上传中断都删除临时文件。
+//!   关页等留下的临时文件，在该用户下次上传开始时按修改时间回收（超过 1 小时）。
 //! - 取消与进度按操作 id 隔离：POST /api/packs/ops/{op}/cancel 只影响该操作；GET 读进度。
 
 use std::collections::HashMap;
@@ -199,8 +200,34 @@ impl Drop for UploadGuard {
     }
 }
 
+const UPLOAD_SUFFIX: &str = ".ugcpack.tmp";
+
 fn upload_path(root: &Path, id: &str) -> PathBuf {
-    root.join(META_DIR).join(UPLOAD_DIR).join(format!("{id}.ugcpack.tmp"))
+    root.join(META_DIR).join(UPLOAD_DIR).join(format!("{id}{UPLOAD_SUFFIX}"))
+}
+
+/// 该用户的上传暂存：(元数据目录下的子目录, 暂存条目名后缀)。新的上传暂存位置加在这里，
+/// 每次上传开始时一并回收。
+const UPLOAD_STAGING: &[(&str, &str)] = &[(UPLOAD_DIR, UPLOAD_SUFFIX)];
+
+/// 上传暂存最后一次写入超过这个时间才回收：并发进行中的上传在持续写入，等待导入的不会等这么久。
+const STALE_UPLOAD_AGE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// 回收关页、`discard` 没发出去等情况留下的上传暂存。只删过期条目；删除失败留给下次，不影响本次上传。
+fn sweep_stale_uploads(root: &Path, now: std::time::SystemTime) {
+    for (dir, suffix) in UPLOAD_STAGING {
+        for entry in std::fs::read_dir(root.join(META_DIR).join(dir)).into_iter().flatten().flatten() {
+            if !entry.file_name().to_string_lossy().ends_with(suffix) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            let stale = meta.modified().is_ok_and(|m| now.duration_since(m).is_ok_and(|age| age >= STALE_UPLOAD_AGE));
+            if !stale {
+                continue;
+            }
+            let _ = if meta.is_dir() { std::fs::remove_dir_all(entry.path()) } else { std::fs::remove_file(entry.path()) };
+        }
+    }
 }
 
 pub async fn upload(State(state): State<AppState>, user: User, body: Body) -> Response {
@@ -208,6 +235,7 @@ pub async fn upload(State(state): State<AppState>, user: User, body: Body) -> Re
         return r;
     }
     let root = state.user_root(&user.fingerprint);
+    sweep_stale_uploads(&root, state.now());
     let _permit = state.heavy().acquire().await;
     let id = format!("{:x}", rand_u64());
     let file = upload_path(&root, &id);

@@ -21,7 +21,8 @@ use crate::{paths, AppState, User};
 
 /// 单文件上限（ADR 0018 的 64 MB 请求预算同样适用于中转结果）。
 const MAX_RESULT_BYTES: u64 = 64 * 1024 * 1024;
-const STAGING_DIR: &str = ".staging";
+/// 任务目录内的暂存区：中转结果待校验，内容会被替换，因此不按不可变缓存（见 `cache`）。
+pub(crate) const STAGING_DIR: &str = ".staging";
 
 /// 默认可下载的结果主机后缀：火山引擎对象存储（Seedream 结果所在）及其 CDN 域名，以及阿里云 OSS（Qwen 结果所在）。
 pub fn default_result_hosts() -> &'static [&'static str] {

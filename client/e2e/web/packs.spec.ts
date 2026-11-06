@@ -137,6 +137,40 @@ test("导入包格式 v2：被省略的参考图快照在服务端还原为硬�
   expect(errors).toEqual([]);
 });
 
+test("选中文件后窗口重新获得焦点、上传超过 1 秒：仍正常导入并打开，不残留上传临时文件（#55）", async ({ page, rig }) => {
+  const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
+  await page.route("**/api/packs/uploads", async (route) => {
+    await new Promise((r) => setTimeout(r, 1000));
+    await route.continue();
+  });
+  await importPack(page, V032);
+  // 文件对话框关闭后窗口会重新获得焦点；旧实现据此 300ms 后把选择判为取消。
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(toast(page)).toHaveText("导入 1 个任务，跳过 0 个");
+  await expect(page.locator(".tab.tab-active .tab-title")).toHaveText("旧版画板");
+  expect(existsSync(path.join(rig.userRoot(GOOD_KEY), DIR, "task.json"))).toBe(true);
+  expect(existsSync(path.join(rig.userRoot(GOOD_KEY), ".kacha/packs"))).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+test("关掉文件对话框（input 的 cancel 事件）：不弹对话框，也不发上传请求（#55）", async ({ page, rig }) => {
+  await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
+  const uploads: string[] = [];
+  page.on("request", (r) => { if (r.url().includes("/api/packs/uploads")) uploads.push(r.method()); });
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "画板包 ▾" }).click();
+  await page.getByRole("menuitem", { name: "导入画板包…" }).click();
+  await (await chooser).element().dispatchEvent("cancel");
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForTimeout(500);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(toast(page)).toHaveCount(0);
+  expect(uploads).toEqual([]);
+  // 取消后再次导入照常进行。
+  await importPack(page, V032);
+  await expect(toast(page)).toHaveText("导入 1 个任务，跳过 0 个");
+});
+
 test("重复导入同一包：任务目录跳过不覆盖，同名画板改名写入", async ({ page, rig }) => {
   await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
   await importPack(page, V032);
