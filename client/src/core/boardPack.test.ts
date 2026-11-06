@@ -868,7 +868,7 @@ describe("导入画板包", () => {
     });
 
     it("服务端已有但 task.json 不一致：照 ADR 0013 报冲突、不覆盖，也不 hash、不上传", async () => {
-      const { io, hashed, moved } = memoryPackIo(v1Pack, { existing: { [TASK]: sha("本机的另一份记录") } });
+      const { io, hashed, moved } = memoryPackIo(v1Pack, { existing: { [TASK]: sha("用户数据根里的另一份记录") } });
       expect(await run(io, undefined, zipFile(v1Pack)).outcome).toMatchObject({ kind: "done", summary: { imported: 1, skipped: 0, conflicts: [TASK] } });
       expect(hashed.filter((n) => n.startsWith(`${TASK}/`))).toEqual([]);
       expect(moved).not.toContain(TASK);

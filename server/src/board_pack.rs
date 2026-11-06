@@ -992,7 +992,7 @@ mod tests {
             #[cfg(unix)]
             assert_eq!(inode(&omitted), inode(&root.join(TASK_A).join("result.png")), "应是硬链接：{}", omitted.display());
         }
-        // 再导一次：还原后的单元与本机一致，全部跳过。
+        // 再导一次：还原后的单元与用户数据根里的一致，全部跳过。
         let again = import(&pack, &root, &units, &duplicates, &no_progress, &AtomicBool::new(false)).unwrap();
         assert!(again.outcomes.iter().all(|o| o.outcome == MergeOutcome::Identical), "{:?}", again.outcomes);
     }

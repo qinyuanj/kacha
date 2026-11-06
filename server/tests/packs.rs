@@ -482,7 +482,7 @@ async fn export_facts_report_size_and_sha256_of_every_file_the_export_would_writ
     let facts = reply.json();
     let facts = facts.as_array().unwrap();
     let entries: Vec<&str> = facts.iter().map(|f| f["entry"].as_str().unwrap()).collect();
-    // 本机不存在的任务目录跳过，与导出一致；文本条目不在其中。
+    // 用户数据根里不存在的任务目录跳过，与导出一致；文本条目不在其中。
     assert_eq!(entries, vec![format!("{TASK}/result.png").as_str(), format!("{TASK}/task.json").as_str(), "导入参考图/abc.png"]);
     let fact = |entry: &str| facts.iter().find(|f| f["entry"] == entry).unwrap().clone();
     let result = fact(&format!("{TASK}/result.png"));
