@@ -452,6 +452,14 @@ describe("已存状态", () => {
       expect(handled.statuses.get("t3")?.copies).toEqual([{ taskId: NO_RECORD, status: { kind: "interrupted" } }]);
     });
 
+    it("按提交的份数判断：2 份里 1 份有结果、1 份已中断，仍给计数摘要", async () => {
+      const b = withCopies(only(submittedTasks(), "t3"), "t3", [SUCCEEDED, NO_RECORD]);
+      const withResult: Board = { ...b, nodes: [...b.nodes, { ...(result("ok") as Extract<BoardNode, { type: "result" }>), task_id: SUCCEEDED }] };
+      const { statuses } = await storedStatuses(await outcomesFs(), withResult, new Set(), "/root", "猫.ugcboard.json");
+      expect(statuses.get("t3")?.copies).toEqual([{ taskId: NO_RECORD, status: { kind: "interrupted" } }]);
+      expect(nodeSummary(statuses.get("t3"))).toBe("已中断 1");
+    });
+
     it("全部份都有结果：没有已存状态", async () => {
       const b = withCopies(executed(only(submittedTasks(), "t4"), "t4"), "t4", ["sub-t4"]);
       const { statuses } = await storedStatuses(await outcomesFs(), b, new Set(), "/root", "猫.ugcboard.json");

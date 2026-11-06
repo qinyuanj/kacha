@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import { type Board, type BoardEdge } from "../core/board";
 import { findModel, modelsByTier, type CapabilityTable, type InputImageRule } from "../core/capabilities";
 import type { TaskStatus } from "../core/run";
-import { nodeCopyDetail, nodeStatus, nodeSummary, type NodeRunState } from "../core/runner";
+import { nodeCopyDetail, nodeStatus, nodeSummary, summaryTone, type NodeRunState } from "../core/runner";
 import { availableModels, defaultTaskModel, type Discovery } from "../core/settings";
 import {
   canConnect,
@@ -444,6 +444,8 @@ export function BoardCanvas({
           const view = taskView(board, table, n.id, { missingNodes: missing, alphaByNode, discovery, concurrency })!;
           const taskEdges = imageEdges(board, n.id);
           const render = effectiveRegionRender(findModel(table, n.model));
+          const runState = runStateOf(n.id);
+          const summary = nodeSummary(runState);
           const slots: ImageSlotInfo[] = imagePortSlots(board, table, n.id).map((s) => {
             const src = labelOf(s.edge.from[0]);
             return s.kind === "overlay"
@@ -475,8 +477,7 @@ export function BoardCanvas({
                 regionRender: render,
                 hasPositive: board.edges.some((e) => e.to[0] === n.id && e.to[1] === "positive"),
                 status: statusOf(n.id),
-                summary: nodeSummary(runStateOf(n.id)),
-                summaryDetail: nodeCopyDetail(runStateOf(n.id)),
+                summary: summary && runState ? { text: summary, detail: nodeCopyDetail(runState), tone: summaryTone(runState.counts) } : null,
                 expanded: expanded.has(n.id),
                 run: menuItems({ kind: "node", nodeId: n.id }, menuFacts(new Set([n.id]))).find((i) => i.action === "run")!,
               },

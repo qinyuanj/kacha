@@ -160,11 +160,12 @@ export async function storedStatuses(
       return { nodeId, taskId, status: (outcome ?? { kind: "interrupted" }) as StoredStatus };
     }),
   );
-  const statuses = new Map<string, { copies: TaskCopy[]; counts: StatusCounts }>();
+  const statuses = new Map<string, { copies: TaskCopy[]; counts: StatusCounts; total: number }>();
   for (const { nodeId, taskId, status } of copies) {
     if (status.kind === "interrupted") interruptedEvents.push({ task_id: taskId, board_file: boardFile, task_node_id: nodeId, from_status: "running", to_status: "interrupted" });
     let node = statuses.get(nodeId);
-    if (!node) statuses.set(nodeId, (node = { copies: [], counts: {} }));
+    // 份数按最近一次提交的各份总数（含已有结果的份）。
+    if (!node) statuses.set(nodeId, (node = { copies: [], counts: {}, total: submittedTaskIds(findTask(board, nodeId)?.last_submitted ?? null).length }));
     node.copies.push({ taskId, status });
     node.counts[status.kind] = (node.counts[status.kind] ?? 0) + 1;
   }

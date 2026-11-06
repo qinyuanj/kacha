@@ -58,6 +58,8 @@ export interface NodeRunState {
   /** 已结束的份（失败 / 已取消）在前，未结束的按提交顺序在后。 */
   copies: readonly TaskCopy[];
   counts: StatusCounts;
+  /** 本次提交展开的份数（含已成功、不再出现在 copies 里的份）；摘要与明细按它判断是不是多份。 */
+  total: number;
 }
 
 /** 只有一份时即该份的状态（显示与以前一致）；多份时取最后一份，节点上显示的是 nodeSummary。 */
@@ -74,13 +76,24 @@ const SUMMARY_PARTS: [string, TaskStatus["kind"][]][] = [
   ["已中断", ["interrupted"]],
 ];
 
-/** 多份时的计数摘要，如「执行中 2 · 排队 1 · 失败 1」；只有一份（或没有）时为 null，按单份状态显示。 */
+/** 多份时的计数摘要，如「执行中 2 · 排队 1 · 失败 1」；本次提交只有一份（或没有）时为 null，按单份状态显示。 */
 export function nodeSummary(node: NodeRunState | undefined): string | null {
-  if (!node || node.copies.length < 2) return null;
+  if (!node || node.total < 2) return null;
   return SUMMARY_PARTS.flatMap(([label, kinds]) => {
     const n = kinds.reduce((sum, k) => sum + (node.counts[k] ?? 0), 0);
     return n ? [`${label} ${n}`] : [];
   }).join(" · ");
+}
+
+/** 计数摘要徽标的色调：有失败即失败色，否则有执行中为运行色，其余为排队色；有执行中的份时带转圈。 */
+export interface SummaryTone {
+  tone: "running" | "failed" | "queued";
+  spinning: boolean;
+}
+
+export function summaryTone(counts: StatusCounts): SummaryTone {
+  const spinning = (counts.running ?? 0) > 0;
+  return { tone: counts.failed ? "failed" : spinning ? "running" : "queued", spinning };
 }
 
 /** 悬停明细里一份的状态文字（计时类状态不带读秒）。 */
@@ -101,9 +114,9 @@ function copyText(status: TaskStatus): string {
   }
 }
 
-/** 多份时计数摘要的悬停明细：逐份一行，含失败原因；只有一份（或没有）时为 null。 */
+/** 多份时计数摘要的悬停明细：逐份一行，含失败原因；本次提交只有一份（或没有）时为 null。 */
 export function nodeCopyDetail(node: NodeRunState | undefined): string | null {
-  if (!node || node.copies.length < 2) return null;
+  if (!node || node.total < 2) return null;
   return node.copies.map((c, i) => `第 ${i + 1} 份：${copyText(c.status)}`).join("\n");
 }
 
@@ -164,6 +177,8 @@ interface Job {
   phase: Phase;
   /** 同一次提交的一组任务共用；按画板 / 全部取消时，其中还没读图的不再提交。 */
   submission: { cancelled: boolean };
+  /** 本次提交为该节点展开的份数。 */
+  total: number;
   prepared?: PreparedJob;
   /** 派发时写到任务节点上；undefined = 不改（生成变体）。 */
   lastSubmitted?: TaskNode["last_submitted"];
@@ -180,6 +195,7 @@ interface Job {
 /** 已结束（失败 / 已取消）的一份。 */
 interface Finished {
   taskNodeId: string;
+  total: number;
   taskId: string | null;
   status: TaskStatus;
 }
@@ -228,23 +244,23 @@ export function createRunner(ports: RunnerPorts): Runner {
   }
 
   function buildSnapshot(): RunnerSnapshot {
-    const boards = new Map<string, { nodes: Map<string, { copies: TaskCopy[]; counts: StatusCounts }>; locked: Set<string>; handled: ReadonlySet<string> }>();
+    const boards = new Map<string, { nodes: Map<string, { copies: TaskCopy[]; counts: StatusCounts; total: number }>; locked: Set<string>; handled: ReadonlySet<string> }>();
     const of = (key: string) => {
       let b = boards.get(key);
       if (!b) boards.set(key, (b = { nodes: new Map(), locked: new Set(), handled: handled.get(key) ?? new Set() }));
       return b;
     };
-    const add = (key: string, taskNodeId: string, copy: TaskCopy) => {
+    const add = (key: string, taskNodeId: string, total: number, copy: TaskCopy) => {
       const nodes = of(key).nodes;
       let n = nodes.get(taskNodeId);
-      if (!n) nodes.set(taskNodeId, (n = { copies: [], counts: {} }));
+      if (!n) nodes.set(taskNodeId, (n = { copies: [], counts: {}, total }));
       n.copies.push(copy);
       n.counts[copy.status.kind] = (n.counts[copy.status.kind] ?? 0) + 1;
     };
-    for (const [key, list] of finished) for (const f of list) add(key, f.taskNodeId, { taskId: f.taskId, status: f.status });
+    for (const [key, list] of finished) for (const f of list) add(key, f.taskNodeId, f.total, { taskId: f.taskId, status: f.status });
     for (const key of handled.keys()) of(key);
     for (const job of jobs) {
-      add(job.target.boardKey, job.taskNodeId, { taskId: job.prepared?.taskId ?? null, status: statusOf(job) });
+      add(job.target.boardKey, job.taskNodeId, job.total, { taskId: job.prepared?.taskId ?? null, status: statusOf(job) });
       of(job.target.boardKey).locked.add(job.taskNodeId);
     }
     const row = (state: ActiveTask["state"]) => (job: Job): ActiveTask => ({ taskId: job.prepared!.taskId, boardKey: job.target.boardKey, taskNodeId: job.taskNodeId, state });
@@ -266,7 +282,7 @@ export function createRunner(ports: RunnerPorts): Runner {
     const key = job.target.boardKey;
     let list = finished.get(key);
     if (!list) finished.set(key, (list = []));
-    list.push({ taskNodeId: job.taskNodeId, taskId: job.prepared?.taskId ?? null, status });
+    list.push({ taskNodeId: job.taskNodeId, total: job.total, taskId: job.prepared?.taskId ?? null, status });
   }
 
   /** 重新运行前清掉该节点上次的终态（每次提交每个节点一次，见 expand）。 */
@@ -414,7 +430,7 @@ export function createRunner(ports: RunnerPorts): Runner {
     }
     const count = Math.max(1, Math.floor(copies));
     const dispatched = count > 1 ? [] : undefined;
-    const batch = Array.from({ length: count }, (): Job => ({ target, taskNodeId, phase: "reading", submission, dispatched, retries: 0, startedAt: 0, controller: new AbortController() }));
+    const batch = Array.from({ length: count }, (): Job => ({ target, taskNodeId, phase: "reading", submission, total: count, dispatched, retries: 0, startedAt: 0, controller: new AbortController() }));
     batch.forEach((job) => jobs.add(job));
     clearFinished(target.boardKey, taskNodeId);
     publish();

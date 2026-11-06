@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Board, BoardNode } from "./board";
 import { parseOutcome } from "./taskDir";
 import { board, harness, settle } from "./testing/runnerHarness";
-import { createRunner, nodeCopyDetail, nodeStatus, nodeSummary } from "./runner";
+import { createRunner, nodeCopyDetail, nodeStatus, nodeSummary, summaryTone } from "./runner";
 import { BUILTIN_TABLE } from "./capabilities";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
 import { sendPlanOf } from "./taskView";
@@ -467,6 +467,8 @@ describe("任务运行器：按份数展开", () => {
     expect(results(h)).toHaveLength(1);
     expect(h.locked()).toEqual(["t1"]);
     expect(node(h, "t1")?.counts).toEqual({ running: 1 });
+    // 只剩一份未结束：节点仍按本次提交的 2 份显示计数摘要，不变回单份徽标。
+    expect(nodeSummary(node(h, "t1"))).toBe("执行中 1");
     expect(await h.runner.submit(h.target(), board(), ["t1"], { t1: 2 })).toEqual([]);
     expect(await h.runner.regenerate(h.target(), board(), "t1")).toBeNull();
     await settle();
@@ -486,7 +488,10 @@ describe("任务运行器：按份数展开", () => {
     expect(results(h)).toHaveLength(2);
     expect(h.requests).toHaveLength(3);
     const failedTaskId = h.logs.find((l) => l.kind === "task" && l.fields.to_status === "failed")?.fields.task_id;
-    expect(node(h, "t1")).toEqual({ copies: [{ taskId: failedTaskId, status: { kind: "failed", label: expect.any(String) } }], counts: { failed: 1 } });
+    expect(node(h, "t1")).toEqual({ copies: [{ taskId: failedTaskId, status: { kind: "failed", label: expect.any(String) } }], counts: { failed: 1 }, total: 3 });
+    // 摘要按本次提交的份数：3 份里只剩 1 份失败，仍显示计数摘要与悬停明细。
+    expect(nodeSummary(node(h, "t1"))).toBe("失败 1");
+    expect(nodeCopyDetail(node(h, "t1"))).toMatch(/^第 1 份：失败 · /);
   });
 
   it("重新运行前只清除该节点上次的终态一次，展开中的后续份不再清除", async () => {
@@ -782,24 +787,37 @@ describe("任务节点状态显示", () => {
     ({ taskId: null, status: kind === "running" ? { kind, startedAt: 0 } : kind === "failed" ? { kind, label: "x" } : kind === "cancelled" ? { kind, gatewayMayContinue: false } : kind === "backoff" ? { kind, retryAt: 0 } : { kind } }) as const;
 
   it("只有一份时没有计数摘要，状态即该份", () => {
-    const n = { copies: [copy("running")], counts: { running: 1 } };
+    const n = { copies: [copy("running")], counts: { running: 1 }, total: 1 };
     expect(nodeSummary(n)).toBeNull();
     expect(nodeStatus(n)).toEqual({ kind: "running", startedAt: 0 });
     expect(nodeSummary(undefined)).toBeNull();
   });
 
   it("多份时给出计数摘要，执行中、排队（含限流退避）、失败、已取消依次排列", () => {
-    expect(nodeSummary({ copies: [copy("failed"), copy("running"), copy("running"), copy("queued")], counts: { failed: 1, running: 2, queued: 1 } })).toBe("执行中 2 · 排队 1 · 失败 1");
-    expect(nodeSummary({ copies: [copy("cancelled"), copy("backoff"), copy("queued")], counts: { cancelled: 1, backoff: 1, queued: 1 } })).toBe("排队 2 · 已取消 1");
+    expect(nodeSummary({ copies: [copy("failed"), copy("running"), copy("running"), copy("queued")], counts: { failed: 1, running: 2, queued: 1 }, total: 4 })).toBe("执行中 2 · 排队 1 · 失败 1");
+    expect(nodeSummary({ copies: [copy("cancelled"), copy("backoff"), copy("queued")], counts: { cancelled: 1, backoff: 1, queued: 1 }, total: 3 })).toBe("排队 2 · 已取消 1");
+  });
+
+  it("按本次提交的份数判断：多份提交只剩一份未成功时仍给摘要与明细", () => {
+    const n = { copies: [copy("failed")], counts: { failed: 1 }, total: 3 };
+    expect(nodeSummary(n)).toBe("失败 1");
+    expect(nodeCopyDetail(n)).toBe("第 1 份：失败 · x");
+  });
+
+  it("摘要徽标的色调由计数决定：有失败即失败色，有执行中的带转圈", () => {
+    expect(summaryTone({ running: 1, failed: 1 })).toEqual({ tone: "failed", spinning: true });
+    expect(summaryTone({ running: 2, queued: 1 })).toEqual({ tone: "running", spinning: true });
+    expect(summaryTone({ queued: 1, cancelled: 1 })).toEqual({ tone: "queued", spinning: false });
+    expect(summaryTone({ backoff: 1, failed: 2 })).toEqual({ tone: "failed", spinning: false });
   });
 
   it("悬停明细：多份时逐份列出状态与失败原因；一份时没有", () => {
     const failed = (label: string) => ({ taskId: null, status: { kind: "failed" as const, label } });
-    expect(nodeCopyDetail({ copies: [failed("网关超时"), failed("内容审核未通过"), copy("cancelled"), copy("running")], counts: { failed: 2, cancelled: 1, running: 1 } })).toBe(
+    expect(nodeCopyDetail({ copies: [failed("网关超时"), failed("内容审核未通过"), copy("cancelled"), copy("running")], counts: { failed: 2, cancelled: 1, running: 1 }, total: 4 })).toBe(
       "第 1 份：失败 · 网关超时\n第 2 份：失败 · 内容审核未通过\n第 3 份：已取消\n第 4 份：执行中",
     );
-    expect(nodeCopyDetail({ copies: [{ taskId: null, status: { kind: "interrupted" } }, copy("backoff"), copy("queued")], counts: {} })).toBe("第 1 份：已中断\n第 2 份：网关限流，等待重试\n第 3 份：排队中");
-    expect(nodeCopyDetail({ copies: [failed("x")], counts: { failed: 1 } })).toBeNull();
+    expect(nodeCopyDetail({ copies: [{ taskId: null, status: { kind: "interrupted" } }, copy("backoff"), copy("queued")], counts: {}, total: 3 })).toBe("第 1 份：已中断\n第 2 份：网关限流，等待重试\n第 3 份：排队中");
+    expect(nodeCopyDetail({ copies: [failed("x")], counts: { failed: 1 }, total: 1 })).toBeNull();
     expect(nodeCopyDetail(undefined)).toBeNull();
   });
 });
@@ -834,8 +852,8 @@ describe("任务运行器：快照按（画板, 任务节点）聚合", () => {
     await h.runner.submit(h.target(), board(["t1", "t2"]), ["t1", "t2"]);
     await settle();
     expect(activeTaskId(h, "t1")).toMatch(/^\d{8}T\d{6}Z-/);
-    expect(node(h, "t1")).toEqual({ copies: [{ taskId: activeTaskId(h, "t1"), status: expect.objectContaining({ kind: "running" }) }], counts: { running: 1 } });
-    expect(node(h, "t2")).toEqual({ copies: [{ taskId: activeTaskId(h, "t2"), status: { kind: "queued" } }], counts: { queued: 1 } });
+    expect(node(h, "t1")).toEqual({ copies: [{ taskId: activeTaskId(h, "t1"), status: expect.objectContaining({ kind: "running" }) }], counts: { running: 1 }, total: 1 });
+    expect(node(h, "t2")).toEqual({ copies: [{ taskId: activeTaskId(h, "t2"), status: { kind: "queued" } }], counts: { queued: 1 }, total: 1 });
   });
 
   it("读参考图中的份还没有任务编号；读图失败的份明细带失败原因", async () => {
@@ -845,10 +863,10 @@ describe("任务运行器：快照按（画板, 任务节点）聚合", () => {
     const gone = { ...b, nodes: b.nodes.map((n) => (n.id === "r" ? { ...n, path: "refs/gone.png" } : n)) as BoardNode[] };
     const submitting = h.runner.submit(h.target(), gone, ["t1"]);
     await settle();
-    expect(node(h, "t1")).toEqual({ copies: [{ taskId: null, status: { kind: "queued" } }], counts: { queued: 1 } });
+    expect(node(h, "t1")).toEqual({ copies: [{ taskId: null, status: { kind: "queued" } }], counts: { queued: 1 }, total: 1 });
     h.read.open();
     await submitting;
-    expect(node(h, "t1")).toEqual({ copies: [{ taskId: null, status: { kind: "failed", label: "本地文件错误" } }], counts: { failed: 1 } });
+    expect(node(h, "t1")).toEqual({ copies: [{ taskId: null, status: { kind: "failed", label: "本地文件错误" } }], counts: { failed: 1 }, total: 1 });
   });
 
   it("失败的份明细带任务编号与失败原因；再运行成功后不再显示上次的终态", async () => {
@@ -857,7 +875,7 @@ describe("任务运行器：快照按（画板, 任务节点）聚合", () => {
     await h.runner.submit(h.target(), board(), ["t1"]);
     await settle();
     const failedTaskId = h.logs.find((l) => l.kind === "queue_dispatch")?.fields.task_id;
-    expect(node(h, "t1")).toEqual({ copies: [{ taskId: failedTaskId, status: { kind: "failed", label: expect.any(String) } }], counts: { failed: 1 } });
+    expect(node(h, "t1")).toEqual({ copies: [{ taskId: failedTaskId, status: { kind: "failed", label: expect.any(String) } }], counts: { failed: 1 }, total: 1 });
     await h.runner.submit(h.target(), board(), ["t1"]);
     await settle();
     expect(h.runner.getSnapshot().board("A").nodes.size).toBe(0);
@@ -870,7 +888,7 @@ describe("任务运行器：快照按（画板, 任务节点）聚合", () => {
     await settle();
     const taskId = activeTaskId(h, "t1");
     h.runner.cancel({ kind: "task", boardKey: "A", taskNodeId: "t1" });
-    expect(node(h, "t1")).toEqual({ copies: [{ taskId, status: { kind: "cancelled", gatewayMayContinue: true } }], counts: { cancelled: 1 } });
+    expect(node(h, "t1")).toEqual({ copies: [{ taskId, status: { kind: "cancelled", gatewayMayContinue: true } }], counts: { cancelled: 1 }, total: 1 });
     h.runner.closeBoard("A");
     expect(h.runner.getSnapshot().board("A").nodes.size).toBe(0);
   });
