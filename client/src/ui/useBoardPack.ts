@@ -1,6 +1,6 @@
-// 画板包界面流程：导出确认 → 浏览器下载与可取消进度；浏览器选包上传 → 判定 → 导入 → 打开画板。
-import { browser, ipc } from "../shell/ipc";
-import { pickAndUploadPack } from "../shell/packFile";
+// 画板包界面流程：导出确认 → 浏览器下载与可取消进度；浏览器选包 → 上传 → 判定 → 导入 → 打开画板。
+import { browser, ipc, packUpload } from "../shell/ipc";
+import { pickPackFile } from "../shell/packFile";
 import { useCallback, useState } from "react";
 import { BOARD_EXTENSION, type Board } from "../core/board";
 import { buildExportSpec, importPack as importPackIn, PACK_EXTENSION, planExport, runCancellable } from "../core/boardPack";
@@ -60,13 +60,15 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
   const importPack = useCallback(async () => {
     if (!userRoot) return;
     try {
-      const picked = await pickAndUploadPack();
-      if (!picked) return;
+      const file = await pickPackFile();
+      if (!file) return;
+      // 上传暂在导入前调用；后续票会把它移进可取消的导入流程。
+      const id = await packUpload.upload(file);
       const result = await importPackIn(packIo, {
-        packPath: picked.id,
-        displayName: picked.name,
+        packPath: id,
+        displayName: file.name,
         addBoard: (board) => boards.addImportedBoard(board),
-        onStage: progress(`正在导入画板包：${picked.name}`),
+        onStage: progress(`正在导入画板包：${file.name}`),
         log: logEvent,
       });
       switch (result.kind) {
