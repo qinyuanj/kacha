@@ -4,6 +4,7 @@ import { BUILTIN_TABLE } from "./capabilities";
 import { imageSources } from "./graph";
 import { buildConfirmItems, collectRunFacts, createInterruptedLog, isDirty, isInterrupted, regenerateDispatch, runDispatch, runScope, snapshotOf, storedStatuses, withSubmitted, type ConfirmItem } from "./submission";
 import { taskDirOfTaskId, writeOutcome } from "./taskDir";
+import { nodeStatus, nodeSummary } from "./runner";
 import type { UnrunnableReason } from "./taskView";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
 
@@ -69,6 +70,15 @@ function editBoard(): Board {
 
 const submitted = (b: Board, taskId: string, id = "20260916T091500Z-3f9c2a1b") => withSubmitted(b, taskId, id);
 
+/** 给任务节点的 last_submitted 加上同一次提交的各份任务编号。 */
+function withCopies(b: Board, taskId: string, ids: string[]): Board {
+  return { ...b, nodes: b.nodes.map((n) => (n.id === taskId && n.type === "task" ? { ...n, last_submitted: { ...n.last_submitted, copy_task_ids: ids } } : n)) };
+}
+
+function withLastTaskId(b: Board, taskId: string, id: string): Board {
+  return { ...b, nodes: b.nodes.map((n) => (n.id === taskId && n.type === "task" ? { ...n, last_submitted: { ...n.last_submitted, task_id: id } } : n)) };
+}
+
 /** 提交并产出结果节点（结果节点的 task_id 与 last_submitted 对应）。 */
 function executed(b: Board, taskId: string): Board {
   const id = `sub-${taskId}`;
@@ -127,6 +137,11 @@ describe("脏判据快照", () => {
     expect(snapshotOf(recounted, "t")).not.toHaveProperty("count");
   });
 
+  it("各份任务编号不参与脏判据", () => {
+    const b = withCopies(submitted(editBoard(), "t"), "t", ["a", "b"]);
+    expect(isDirty(b, "t")).toBe(false);
+  });
+
   it("不相干的变化（位置、别的节点、快照里的未知字段顺序）不算脏", () => {
     const b = submitted(editBoard(), "t");
     const moved: Board = {
@@ -157,6 +172,18 @@ describe("运行范围", () => {
 
   it("提交过但没有结果（失败、中断）不算已执行，仍在范围内", () => {
     expect(runScope(submitted(twoTasks(), "t1"), [])).toEqual(["t1", "t2"]);
+  });
+
+  it("多份时任一份有结果节点就算已执行，与哪一份最后派发无关", () => {
+    // 第 1 份成功，最后派发的第 2 份失败。
+    const b = withCopies(executed(twoTasks(), "t1"), "t1", ["sub-t1", "20260916T091500Z-0000000f"]);
+    const lastFailed = withLastTaskId(b, "t1", "20260916T091500Z-0000000f");
+    expect(runScope(lastFailed, [])).toEqual(["t2"]);
+  });
+
+  it("多份都没有结果节点：仍在范围内", () => {
+    const b = withCopies(submitted(twoTasks(), "t1", "20260916T091500Z-0000000a"), "t1", ["20260916T091500Z-0000000a", "20260916T091500Z-0000000b"]);
+    expect(runScope(b, [])).toEqual(["t1", "t2"]);
   });
 
   it("有选中：只跑选中子图（选中的任务 + 选中节点直接下游的任务）", () => {
@@ -384,13 +411,52 @@ describe("已存状态", () => {
 
   it("没经手过、提交过却没结果的任务：有结局记录按记录（失败 / 已取消），没有记录 = 已中断", async () => {
     const { statuses } = await storedStatuses(await outcomesFs(), submittedTasks(), new Set(), "/root", "猫.ugcboard.json");
-    expect(statuses).toEqual(
+    expect(new Map([...statuses].map(([id, n]) => [id, nodeStatus(n)]))).toEqual(
       new Map([
         ["t1", { kind: "failed", label: "鉴权失败" }],
         ["t2", { kind: "cancelled", gatewayMayContinue: true }],
         ["t3", { kind: "interrupted" }],
       ]),
     );
+    expect([...statuses.values()].map(nodeSummary)).toEqual([null, null, null]);
+  });
+
+  describe("多份", () => {
+    const SUCCEEDED = "20260916T091500Z-00000005";
+    /** t1 一次提交 4 份：成功、失败、已取消、无记录；最后派发的是无记录那份。 */
+    const copiesBoard = () => {
+      const b = withCopies(submittedTasks(), "t1", [SUCCEEDED, FAILED, CANCELLED, NO_RECORD]);
+      const withResult: Board = { ...b, nodes: [...b.nodes, { ...(result("ok") as Extract<BoardNode, { type: "result" }>), task_id: SUCCEEDED }] };
+      return withLastTaskId(withResult, "t1", NO_RECORD);
+    };
+    const only = (b: Board, id: string): Board => ({ ...b, nodes: b.nodes.filter((n) => n.type !== "task" || n.id === id) });
+
+    it("按各份任务目录推导失败 / 已取消 / 已中断并按节点聚合；有结果的份不计入", async () => {
+      const { statuses } = await storedStatuses(await outcomesFs(), only(copiesBoard(), "t1"), new Set(), "/root", "猫.ugcboard.json");
+      const t1 = statuses.get("t1")!;
+      expect(t1.copies).toEqual([
+        { taskId: FAILED, status: { kind: "failed", label: "鉴权失败" } },
+        { taskId: CANCELLED, status: { kind: "cancelled", gatewayMayContinue: true } },
+        { taskId: NO_RECORD, status: { kind: "interrupted" } },
+      ]);
+      expect(nodeSummary(t1)).toBe("失败 1 · 已取消 1 · 已中断 1");
+    });
+
+    it("已中断日志按任务编号各记一次；本次运行经手过的份不算", async () => {
+      const second = "20260916T091500Z-0000000d";
+      const b = withCopies(only(submittedTasks(), "t3"), "t3", [NO_RECORD, second]);
+      const { interruptedEvents } = await storedStatuses(await outcomesFs(), b, new Set(), "/root", "猫.ugcboard.json");
+      expect(interruptedEvents.map((e) => [e.task_id, e.task_node_id])).toEqual([[NO_RECORD, "t3"], [second, "t3"]]);
+      const handled = await storedStatuses(await outcomesFs(), b, new Set([second]), "/root", "猫.ugcboard.json");
+      expect(handled.interruptedEvents.map((e) => e.task_id)).toEqual([NO_RECORD]);
+      expect(handled.statuses.get("t3")?.copies).toEqual([{ taskId: NO_RECORD, status: { kind: "interrupted" } }]);
+    });
+
+    it("全部份都有结果：没有已存状态", async () => {
+      const b = withCopies(executed(only(submittedTasks(), "t4"), "t4"), "t4", ["sub-t4"]);
+      const { statuses } = await storedStatuses(await outcomesFs(), b, new Set(), "/root", "猫.ugcboard.json");
+      expect(statuses.has("t4")).toBe(false);
+    });
   });
 
   it("已中断产出一条 running → interrupted 的日志事件；本次运行经手过的不算候选", async () => {

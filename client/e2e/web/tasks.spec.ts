@@ -123,7 +123,7 @@ test.describe("Issue #1 单图默认引用与多图点击插入引导", () => {
     expect(record.send_text).toContain("用户指令：\n把衣服改成红色");
     expect(record.prompt).toBe("把衣服改成红色");
     expect(body.prompt).toBe(record.send_text);
-    expect((body.input as any).messages[0].content.filter((c: { image?: string }) => c.image)).toHaveLength(1);
+    expect(body.image as string[]).toHaveLength(1);
     expect(errors).toEqual([]);
   });
 
@@ -241,13 +241,15 @@ test("#1 带区域的图片编辑：查看发送文本、task.json 的 send_text
   await expect.poll(() => taskRecords(rig).length).toBe(1);
   const record = recordTexts(rig)[0];
   const body = bodies(rig)[0];
-  const content = (body.input as any).messages[0].content as Record<string, string>[];
+  const images = body.image as string[];
 
   expect(record.send_text).toBe(shown);
   expect(body.prompt).toBe(shown);
-  expect(content.at(-1)!.text).toBe(shown);
-  // 叠加图紧随原图：2 张参考图 + 文本。
-  expect(content.filter((c) => c.image).length).toBe(2);
+  // 叠加图紧随原图：顶层 image 按序 2 张参考图，文本只走 prompt。
+  expect(images).toHaveLength(2);
+  expect(images.every((i) => i.startsWith("data:image/"))).toBe(true);
+  expect(images[0]).not.toBe(images[1]);
+  expect(body.input).toBeUndefined();
   expect(errors).toEqual([]);
 });
 
@@ -407,9 +409,9 @@ test.describe("#8 旧任务「重新生成」", () => {
       const record = taskRecords(rig).find((r) => !r.path.includes(old.task_id))!.json;
       const body = bodies(rig)[0];
       expect(body.prompt).toBe(record.send_text);
-      expect((body.input as any).messages[0].content.at(-1).text).toBe(record.send_text);
-      // 快照原样重发：3 张（含叠加图）。
-      expect((body.input as any).messages[0].content.filter((c: { image?: string }) => c.image).length).toBe(3);
+      expect(body.input).toBeUndefined();
+      // 快照原样重发：顶层 image 3 张（含叠加图）。
+      expect(body.image as string[]).toHaveLength(3);
       expect(record.prompt).toBe(old.prompt);
       if (name === "pre-116.task.json") expect(record.send_text).toBe(old.send_text);
       await expect(page.locator(".react-flow__node-result")).toHaveCount(1);

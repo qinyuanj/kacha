@@ -8,6 +8,7 @@ import type { SendPlan } from "./sendPlan";
 import type { SizeSpec } from "./size";
 import { readOutcome, type TaskFs, type TaskOutcome } from "./taskDir";
 import { sendPlanOf, taskView, type TaskFacts, type UnrunnableReason } from "./taskView";
+import type { NodeRunState, StatusCounts, TaskCopy } from "./runner";
 
 export type SnapshotImage =
   | { kind: "reference"; path: string; sha256: string; region: Region | null }
@@ -92,30 +93,43 @@ export function withSubmitted(board: Board, taskId: string, submittedTaskId: str
   };
 }
 
-/** 已执行 = 上次提交产出了画板上的结果节点；失败或中断的提交没有结果，仍需运行。 */
+/**
+ * 最近一次提交的各份任务编号：last_submitted.task_id 加上同一次提交已派发的各份（copy_task_ids，份数 > 1 时才有）。
+ * 不参与脏判据；没有新字段的旧画板只有 task_id。
+ */
+export function submittedTaskIds(last: TaskNode["last_submitted"]): string[] {
+  if (!last) return [];
+  const copies = Array.isArray(last.copy_task_ids) ? last.copy_task_ids : [];
+  return [...new Set([...copies, last.task_id].filter((id): id is string => typeof id === "string"))];
+}
+
+const hasResult = (board: Board, taskId: string) => board.nodes.some((n) => n.type === "result" && n.task_id === taskId);
+
+/** 已执行 = 最近一次提交的任一份产出了画板上的结果节点；全部失败或中断的提交没有结果，仍需运行。 */
 function hasExecuted(board: Board, task: TaskNode): boolean {
-  const submitted = task.last_submitted?.task_id;
-  return typeof submitted === "string" && board.nodes.some((n) => n.type === "result" && n.task_id === submitted);
+  return submittedTaskIds(task.last_submitted).some((id) => hasResult(board, id));
+}
+
+/** 已中断的候选份：最近一次提交里画板上没有结果、且本次程序运行期间队列没经手过的各份任务编号。 */
+function candidateCopies(board: Board, task: TaskNode, handled: ReadonlySet<string>): string[] {
+  return submittedTaskIds(task.last_submitted).filter((id) => !handled.has(id) && !hasResult(board, id));
 }
 
 /**
- * 候选的已中断：提交过、画板上没有结果，且本次程序运行期间队列没经手过这次提交。
+ * 候选的已中断：提交过、至少有一份在画板上没有结果，且本次程序运行期间队列没经手过这一份。
  * 界面再读任务目录的结局记录：有失败 / 取消记录的按记录显示，没有才是已中断。不持久化到画板。
  */
 export function isInterrupted(board: Board, taskId: string, handled: ReadonlySet<string>): boolean {
   const task = findTask(board, taskId);
-  const submitted = task?.last_submitted?.task_id;
-  return !!task && typeof submitted === "string" && !handled.has(submitted) && !hasExecuted(board, task);
+  return !!task && candidateCopies(board, task, handled).length > 0;
 }
 
-/** 画板上已中断的候选：[任务节点 id, 提交的 task_id]。 */
+/** 画板上已中断的候选份：[任务节点 id, 该份的 task_id]。 */
 export function interruptedCandidates(board: Board, handled: ReadonlySet<string>): [nodeId: string, taskId: string][] {
-  return board.nodes.flatMap((n) =>
-    n.type === "task" && typeof n.last_submitted?.task_id === "string" && isInterrupted(board, n.id, handled) ? [[n.id, n.last_submitted.task_id] as [string, string]] : [],
-  );
+  return board.nodes.flatMap((n) => (n.type === "task" ? candidateCopies(board, n, handled).map((id) => [n.id, id] as [string, string]) : []));
 }
 
-/** 重开后推导出的任务状态：有结局记录按记录，没有 = 已中断。 */
+/** 重开后推导出的一份的状态：有结局记录按记录，没有 = 已中断。 */
 export type StoredStatus = TaskOutcome | { kind: "interrupted" };
 
 /** 推导出已中断时要记的日志事件（task 类别）；「每个 task_id 只记一次」的去重见 createInterruptedLog。 */
@@ -128,8 +142,9 @@ export interface InterruptedEvent {
 }
 
 /**
- * 已存状态（#128）：对已中断的候选读任务目录的结局记录——失败 / 已取消按记录，没有记录 = 已中断，
- * 并为每个已中断产出一条 running → interrupted 的日志事件。读结局的缓存归调用方（经 fs 注入）。
+ * 已存状态（#128）：对已中断的候选份逐份读任务目录的结局记录——失败 / 已取消按记录，没有记录 = 已中断，
+ * 按任务节点聚合为各份明细与计数摘要（与运行器快照同形），并为每份已中断产出一条 running → interrupted 的日志事件。
+ * 读结局的缓存归调用方（经 fs 注入）。
  */
 export async function storedStatuses(
   fs: Pick<TaskFs, "readFile">,
@@ -137,16 +152,23 @@ export async function storedStatuses(
   handled: ReadonlySet<string>,
   userRoot: string,
   boardFile: string,
-): Promise<{ statuses: Map<string, StoredStatus>; interruptedEvents: InterruptedEvent[] }> {
+): Promise<{ statuses: Map<string, NodeRunState>; interruptedEvents: InterruptedEvent[] }> {
   const interruptedEvents: InterruptedEvent[] = [];
-  const entries = await Promise.all(
+  const copies = await Promise.all(
     interruptedCandidates(board, handled).map(async ([nodeId, taskId]) => {
       const outcome = await readOutcome(fs, userRoot, taskId);
-      if (!outcome) interruptedEvents.push({ task_id: taskId, board_file: boardFile, task_node_id: nodeId, from_status: "running", to_status: "interrupted" });
-      return [nodeId, outcome ?? { kind: "interrupted" as const }] as const;
+      return { nodeId, taskId, status: (outcome ?? { kind: "interrupted" }) as StoredStatus };
     }),
   );
-  return { statuses: new Map(entries), interruptedEvents };
+  const statuses = new Map<string, { copies: TaskCopy[]; counts: StatusCounts }>();
+  for (const { nodeId, taskId, status } of copies) {
+    if (status.kind === "interrupted") interruptedEvents.push({ task_id: taskId, board_file: boardFile, task_node_id: nodeId, from_status: "running", to_status: "interrupted" });
+    let node = statuses.get(nodeId);
+    if (!node) statuses.set(nodeId, (node = { copies: [], counts: {} }));
+    node.copies.push({ taskId, status });
+    node.counts[status.kind] = (node.counts[status.kind] ?? 0) + 1;
+  }
+  return { statuses, interruptedEvents };
 }
 
 /** 已中断日志的去重：本次运行里每个 task_id 只记一次（跨画板共用，一个应用实例一份）。 */

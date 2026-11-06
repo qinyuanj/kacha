@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import { type Board, type BoardEdge } from "../core/board";
 import { findModel, modelsByTier, type CapabilityTable, type InputImageRule } from "../core/capabilities";
 import type { TaskStatus } from "../core/run";
-import { nodeStatus, nodeSummary, type NodeRunState } from "../core/runner";
+import { nodeCopyDetail, nodeStatus, nodeSummary, type NodeRunState } from "../core/runner";
 import { availableModels, defaultTaskModel, type Discovery } from "../core/settings";
 import {
   canConnect,
@@ -266,7 +266,9 @@ export function BoardCanvas({
   );
 
   const stored = useStoredStatuses(board, boardFile, userRoot, handled);
-  const statusOf = useCallback((taskId: string): TaskStatus | null => nodeStatus(runNodes.get(taskId)) ?? stored.get(taskId) ?? null, [runNodes, stored]);
+  // 本次运行经手过的以运行器为准；否则按任务目录推导（重开后），两者同形、同样按节点聚合。
+  const runStateOf = useCallback((taskId: string): NodeRunState | undefined => runNodes.get(taskId) ?? stored.get(taskId), [runNodes, stored]);
+  const statusOf = useCallback((taskId: string): TaskStatus | null => nodeStatus(runStateOf(taskId)), [runStateOf]);
 
   // perform 依赖每次渲染重建的新建类函数，经 ref 取最新一版，actions 保持稳定。
   const performRef = useRef<BoardActions["perform"]>(() => {});
@@ -473,7 +475,8 @@ export function BoardCanvas({
                 regionRender: render,
                 hasPositive: board.edges.some((e) => e.to[0] === n.id && e.to[1] === "positive"),
                 status: statusOf(n.id),
-                summary: nodeSummary(runNodes.get(n.id)),
+                summary: nodeSummary(runStateOf(n.id)),
+                summaryDetail: nodeCopyDetail(runStateOf(n.id)),
                 expanded: expanded.has(n.id),
                 run: menuItems({ kind: "node", nodeId: n.id }, menuFacts(new Set([n.id]))).find((i) => i.action === "run")!,
               },
@@ -482,7 +485,7 @@ export function BoardCanvas({
         }
       }
     });
-  }, [board, table, userRoot, selectedNodes, measured, statusOf, runNodes, locked, discovery, concurrency, highlighted, missing, focusPrompt, alphaByNode, imageInfos, expanded, menuFacts, drag]);
+  }, [board, table, userRoot, selectedNodes, measured, statusOf, runStateOf, locked, discovery, concurrency, highlighted, missing, focusPrompt, alphaByNode, imageInfos, expanded, menuFacts, drag]);
 
   const dragging = drag !== null;
   const edges = useMemo<Edge[]>(

@@ -108,8 +108,10 @@ export type TaskFlowNode = Node<
     regionRender: RegionRender | null;
     hasPositive: boolean;
     status: TaskStatus | null;
-    /** 本次运行有多份时的计数摘要（如「执行中 2 · 排队 1 · 失败 1」）；一份时为 null，按 status 显示。 */
+    /** 有多份时的计数摘要（如「执行中 2 · 排队 1 · 失败 1」）；一份时为 null，按 status 显示。 */
     summary: string | null;
+    /** 计数摘要的悬停明细：逐份状态与失败原因。 */
+    summaryDetail: string | null;
     /** 设置原地展开（不存盘）。 */
     expanded: boolean;
     /** 运行按钮：与上下文菜单同一条目（同一置灰原因）。 */
@@ -454,10 +456,10 @@ function StatusBadge({ status }: { status: TaskStatus }) {
 }
 
 /** 多份时的计数摘要；有执行中的份时带转圈。 */
-function SummaryBadge({ summary }: { summary: string }) {
+function SummaryBadge({ summary, detail }: { summary: string; detail: string | null }) {
   const running = summary.startsWith("执行中");
   return (
-    <span className={`status ${running ? "status-running" : summary.includes("失败") ? "status-failed" : "status-queued"}`}>
+    <span className={`status ${running ? "status-running" : summary.includes("失败") ? "status-failed" : "status-queued"}`} title={detail ?? undefined}>
       {running && <span className="spinner" />}
       {summary}
     </span>
@@ -626,7 +628,7 @@ function CountField({ count, limit, disabled, onPick }: { count: number; limit: 
 
 export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskFlowNode>) {
   const { table, apply, availableModels, concurrency, editRegion, previewNode, perform } = useBoardActions();
-  const { node, ports, view, locked, workflow, images, slots, regionRender, hasPositive, status, summary, expanded, run } = data;
+  const { node, ports, view, locked, workflow, images, slots, regionRender, hasPositive, status, summary, summaryDetail, expanded, run } = data;
   const { reasons, warnings, unreferenced, toggles } = view;
   const [infoOpen, setInfoOpen] = useState(false);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
@@ -706,7 +708,7 @@ export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskF
         <span>
           生成任务<span className="muted">{workflow === "image_edit" ? " · 图片编辑" : " · 文生图"}</span>
         </span>
-        {summary ? <SummaryBadge summary={summary} /> : status && <StatusBadge status={status} />}
+        {summary ? <SummaryBadge summary={summary} detail={summaryDetail} /> : status && <StatusBadge status={status} />}
       </div>
 
       {expanded ? (

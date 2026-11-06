@@ -78,6 +78,10 @@ fn add_node(out: &mut BTreeSet<String>, node: &Value) {
         Some("task") => {
             let Some(last) = obj.get("last_submitted").and_then(Value::as_object) else { return };
             add_task_id(out, last.get("task_id"));
+            // 同一次提交按份数展开的各份（失败 / 已取消 / 已中断的份没有结果节点，只靠这里引用）。
+            if let Some(ids) = last.get("copy_task_ids").and_then(Value::as_array) {
+                ids.iter().for_each(|id| add_task_id(out, Some(id)));
+            }
             if let Some(images) = last.get("images").and_then(Value::as_array) {
                 for image in images.iter().filter_map(Value::as_object) {
                     add_task_id(out, image.get("task_id"));

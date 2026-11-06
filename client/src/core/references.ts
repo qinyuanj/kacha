@@ -45,6 +45,8 @@ function addNode(out: Set<string>, node: unknown) {
       const last = node.last_submitted;
       if (!isObject(last)) return;
       addTaskId(out, last.task_id);
+      // 同一次提交按份数展开的各份（失败 / 已取消 / 已中断的份没有结果节点，只靠这里引用）。
+      if (Array.isArray(last.copy_task_ids)) last.copy_task_ids.forEach((id) => addTaskId(out, id));
       if (Array.isArray(last.images))
         for (const image of last.images) {
           if (!isObject(image)) continue;
