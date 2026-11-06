@@ -117,6 +117,20 @@ describe("Lite 停用", () => {
     expect(h.files.size).toBe(1);
     expect(h.files.get(path)).toEqual(old);
   });
+  it.each([
+    [3, "3 份失败：读取上次任务的任务记录失败：/root/2026-09-16/20260916T091500Z-deadbeef/task.json 不存在"],
+    [1, "读取上次任务的任务记录失败：/root/2026-09-16/20260916T091500Z-deadbeef/task.json 不存在"],
+  ])("重新生成在本地失败时按份汇总：%i 份 → 多份给份数与首份原因，与运行一致", async (copies, problem) => {
+    const h = harness({ concurrency: 3 });
+    const b = board();
+    const t = b.nodes.find((n) => n.type === "task")!;
+    if (t.type !== "task") throw new Error("task");
+    // 上次任务的任务记录不在：每份都在读取时失败。
+    t.last_submitted = { task_id: "20260916T091500Z-deadbeef", model: t.model, prompt: "旧猫", negative_prompt: "", size_spec: { tier: "3K", ratio: "1:1", width: null, height: null }, layer_decomposition: false, transparent_background: false, images: [] };
+    expect(await h.runner.regenerate(h.target(), b, "t1", { kind: "regenerate", copies })).toBe(problem);
+    expect(h.runner.getSnapshot().board("A").nodes.get("t1")?.counts).toEqual({ failed: copies });
+    expect(h.requests).toEqual([]);
+  });
   it("旧 Lite 结果作为 Flash 任务的参考图仍可提交，快照与谱系指向旧任务目录", async () => {
     const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), c => c.charCodeAt(0));
     const h = harness({ imageCodec: { decode: async () => ({ width: 1024, height: 1024, hasAlpha: () => false, encode: async () => png, close: () => {} }) } });

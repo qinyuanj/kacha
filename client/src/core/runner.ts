@@ -162,7 +162,7 @@ export interface Runner {
   /** 按顺序读参考图并入队，每个节点按 copies 展开为输入相同的若干个生成任务；board 是二次确认时的画板。
    *  返回本地提交失败的说明（不含密钥与提示词）。 */
   submit(target: RunTarget, board: Board, taskNodeIds: string[], copies?: CopiesByNode): Promise<string[]>;
-  /** 重新生成 / 生成变体（见 RegenerateRequest，缺省为重新生成一份）；board 是当前画板。返回本地失败说明。 */
+  /** 重新生成 / 生成变体（见 RegenerateRequest，缺省为重新生成一份）；board 是当前画板。返回本地失败说明：多份失败时为「N 份失败：首份原因」。 */
   regenerate(target: RunTarget, board: Board, taskNodeId: string, request?: RegenerateRequest): Promise<string | null>;
   cancel(filter: CancelFilter): void;
   /** 关闭画板：取消该画板的任务并遗忘它的状态与经手过的任务编号。 */
@@ -541,10 +541,12 @@ export function createRunner(ports: RunnerPorts): Runner {
     if (occupied(target.boardKey, taskNodeId)) return null;
     // 生成变体固定一份只在这里判断。
     const [copies, fromTaskId] = request.kind === "variant" ? [1, request.fromTaskId] : [request.copies ?? 1, undefined];
-    const [problem] = await expand(target, taskNodeId, { cancelled: false }, copies, () => generation !== submissionGeneration, (submittedAt) =>
+    const problems = await expand(target, taskNodeId, { cancelled: false }, copies, () => generation !== submissionGeneration, (submittedAt) =>
       prepareRegenerate(deps, { board, table: target.table, tableSha256, userRoot: target.userRoot, taskNodeId, fromTaskId, submittedAt }),
     );
-    return problem ?? null;
+    // 与运行一样汇总本地失败：多份给份数与首份原因，一份只给原因。
+    if (problems.length > 1) return `${problems.length} 份失败：${problems[0]}`;
+    return problems[0] ?? null;
   }
 
   return {
