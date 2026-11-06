@@ -125,9 +125,13 @@ export function taskCount(task: TaskNode): number {
   return task.count ?? 1;
 }
 
-/** 一次运行实际展开的份数：min(份数, 页面当前并发上限)，由调用方在提交时算出并随任务固化。 */
-export function actualCount(task: TaskNode, concurrency: number): number {
-  return Math.max(1, Math.min(taskCount(task), concurrency));
+/**
+ * 一次运行（或重新生成）的份数：set = 节点设定的份数，actual = 实际展开的 min(set, 页面当前并发上限)（至少 1）；
+ * actual < set 即本次被截断。截断规则只在这里，调用方在提交时算出并随任务固化。生成变体总是一份，不经过这里。
+ */
+export function runCopies(task: TaskNode, concurrency: number): { set: number; actual: number } {
+  const set = taskCount(task);
+  return { set, actual: Math.max(1, Math.min(set, concurrency)) };
 }
 
 export type ParsedBoard =

@@ -1,12 +1,12 @@
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { actualCount, type Board } from "./core/board";
+import { type Board } from "./core/board";
 import { BUILTIN_TABLE, effectiveTable, type CapabilityTable } from "./core/capabilities";
 import type { BoardChange } from "./core/edit";
 import { redoLabel, undoLabel } from "./core/history";
 import { basename, boardsDir } from "./core/paths";
 import type { Runner, RunTarget } from "./core/runner";
-import { regenerateDispatch, runDispatch, runScope, buildConfirmItems, collectRunFacts, type ConfirmItem } from "./core/submission";
+import { copiesByNode, regenerateDispatch, runDispatch, runScope, buildConfirmItems, collectRunFacts, type ConfirmItem } from "./core/submission";
 import { parseUiState, serializeUiState, type UiState } from "./core/uiState";
 import { imageProbe } from "./shell/adapters";
 import { copyTextToClipboard } from "./shell/clipboard";
@@ -110,8 +110,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       if (!userRoot) return;
       const target: RunTarget = { boardKey, boardFile: boards.boardFileName(boardKey), table, userRoot, baseUrl: settings.settings.base_url, apiKey: settings.apiKey };
       // 实际份数按此刻的并发上限算出并随任务固化；之后改并发上限不影响已排队的任务数。
-      const copies = Object.fromEntries(board.nodes.flatMap((n) => (n.type === "task" && taskIds.includes(n.id) ? [[n.id, actualCount(n, settings.settings.concurrency)]] : [])));
-      const problems = await runner.submit(target, board, taskIds, copies);
+      const problems = await runner.submit(target, board, taskIds, copiesByNode(board, taskIds, settings.settings.concurrency));
       if (problems.length) toast(`${problems.length} 个任务提交失败：${problems[0]}`);
     },
     [userRoot, runner, boards, table, settings.settings.base_url, settings.settings.concurrency, settings.apiKey, toast],

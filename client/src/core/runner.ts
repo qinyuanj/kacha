@@ -147,7 +147,7 @@ export type CancelFilter =
   | { kind: "waiting" }
   | { kind: "all" };
 
-/** 任务节点 id → 本次实际份数（调用方按 min(份数, 并发上限) 算出，提交时固化）；缺省为 1。 */
+/** 任务节点 id → 本次实际份数（调用方经 core 的 runCopies / copiesByNode 算出，提交时固化）；缺省为 1。 */
 export type CopiesByNode = Readonly<Record<string, number>>;
 
 export interface Runner {
@@ -428,9 +428,8 @@ export function createRunner(ports: RunnerPorts): Runner {
       guardedAtEntry();
       return [];
     }
-    const count = Math.max(1, Math.floor(copies));
-    const dispatched = count > 1 ? [] : undefined;
-    const batch = Array.from({ length: count }, (): Job => ({ target, taskNodeId, phase: "reading", submission, total: count, dispatched, retries: 0, startedAt: 0, controller: new AbortController() }));
+    const dispatched = copies > 1 ? [] : undefined;
+    const batch = Array.from({ length: copies }, (): Job => ({ target, taskNodeId, phase: "reading", submission, total: copies, dispatched, retries: 0, startedAt: 0, controller: new AbortController() }));
     batch.forEach((job) => jobs.add(job));
     clearFinished(target.boardKey, taskNodeId);
     publish();

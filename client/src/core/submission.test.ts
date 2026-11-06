@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Board, BoardEdge, BoardNode, TaskNode } from "./board";
 import { BUILTIN_TABLE } from "./capabilities";
 import { imageSources } from "./graph";
-import { buildConfirmItems, collectRunFacts, createInterruptedLog, interruptedCandidates, isDirty, regenerateDispatch, runDispatch, runScope, snapshotOf, storedStatuses, withSubmitted, type ConfirmItem } from "./submission";
+import { buildConfirmItems, collectRunFacts, copiesByNode, createInterruptedLog, interruptedCandidates, isDirty, regenerateDispatch, runDispatch, runScope, snapshotOf, storedStatuses, withSubmitted, type ConfirmItem } from "./submission";
 import { taskDirOfTaskId, writeOutcome } from "./taskDir";
 import { nodeStatus, nodeSummary } from "./runner";
 import type { UnrunnableReason } from "./taskView";
@@ -329,6 +329,13 @@ describe("份数超过并发上限", () => {
     const b = counted(6);
     expect(buildConfirmItems(b, BUILTIN_TABLE, ["t"], facts(2))[0].warnings).toEqual(["份数 6，本次按 2"]);
     expect(buildConfirmItems(b, BUILTIN_TABLE, ["t"], facts(6))[0].warnings).toEqual([]);
+  });
+});
+
+describe("运行的实际份数", () => {
+  it("各任务节点按 min(份数, 并发上限) 算出；不是任务节点的 id 不出现", () => {
+    const b = board([prompt("p", "猫"), task("a", { count: 6 }), task("b", { count: 2 }), task("c")], []);
+    expect(copiesByNode(b, ["a", "b", "c", "p", "gone"], 4)).toEqual({ a: 4, b: 2, c: 1 });
   });
 });
 

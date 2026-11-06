@@ -1,14 +1,14 @@
 // 提交前的纯函数：脏判据快照、运行范围、二次确认清单。
 import type { OutputOptions } from "./gateway";
 import { outputOptions } from "./gateway";
-import { actualCount, taskCount, type Board, type Region, type TaskNode } from "./board";
+import { runCopies, type Board, type Region, type TaskNode } from "./board";
 import { findModel, type CapabilityTable } from "./capabilities";
 import { imageEdges, imageSources, promptText } from "./graph";
 import type { SendPlan } from "./sendPlan";
 import type { SizeSpec } from "./size";
 import { readOutcome, type TaskFs, type TaskOutcome } from "./taskDir";
 import { sendPlanOf, taskView, type TaskFacts, type UnrunnableReason } from "./taskView";
-import type { NodeRunState, StatusCounts, TaskCopy } from "./runner";
+import type { CopiesByNode, NodeRunState, StatusCounts, TaskCopy } from "./runner";
 
 export type SnapshotImage =
   | { kind: "reference"; path: string; sha256: string; region: Region | null }
@@ -275,7 +275,7 @@ export function runDispatch(items: ConfirmItem[]): RunDispatch {
 }
 
 /**
- * 点「重新生成」后的分派：实际份数 = min(份数, 并发上限)，为 1 时直接提交；大于 1 时先弹轻量确认，
+ * 点「重新生成」后的分派：实际份数见 runCopies，为 1 时直接提交；大于 1 时先弹轻量确认，
  * 写明份数与所用模型（重新生成重跑上次提交，取上次提交的模型），截断时 note 说明设定值与本次值。
  * 不含发送文本清单。生成变体固定一份，不经过这里。
  */
@@ -286,10 +286,19 @@ export type RegenerateDispatch =
 export function regenerateDispatch(board: Board, table: CapabilityTable, taskId: string, concurrency: number): RegenerateDispatch {
   const task = findTask(board, taskId);
   if (!task) return { kind: "submit", copies: 1 };
-  const copies = actualCount(task, concurrency);
-  if (copies <= 1) return { kind: "submit", copies };
+  const { set, actual } = runCopies(task, concurrency);
+  if (actual <= 1) return { kind: "submit", copies: actual };
   const lastModel = task.last_submitted?.model;
   const model = typeof lastModel === "string" ? lastModel : task.model;
-  const set = taskCount(task);
-  return { kind: "confirm", copies, modelName: findModel(table, model)?.display_name ?? model, note: set > copies ? `节点设为 ${set}，本次按 ${copies}` : null };
+  return { kind: "confirm", copies: actual, modelName: findModel(table, model)?.display_name ?? model, note: actual < set ? `节点设为 ${set}，本次按 ${actual}` : null };
+}
+
+/** 一次运行各任务节点的实际份数（runCopies），交给运行器随任务固化。 */
+export function copiesByNode(board: Board, taskIds: readonly string[], concurrency: number): CopiesByNode {
+  return Object.fromEntries(
+    taskIds.flatMap((id) => {
+      const task = findTask(board, id);
+      return task ? [[id, runCopies(task, concurrency).actual]] : [];
+    }),
+  );
 }
