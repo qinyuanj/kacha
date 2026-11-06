@@ -139,7 +139,7 @@ test("导入包格式 v2：被省略的参考图快照在服务端还原为硬�
 
 test("选中文件后窗口重新获得焦点、上传超过 1 秒：仍正常导入并打开，不残留上传临时文件（#55）", async ({ page, rig }) => {
   const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
-  await page.route("**/api/packs/uploads", async (route) => {
+  await page.route("**/api/packs/uploads?*", async (route) => {
     await new Promise((r) => setTimeout(r, 1000));
     await route.continue();
   });
@@ -152,6 +152,101 @@ test("选中文件后窗口重新获得焦点、上传超过 1 秒：仍正常�
   expect(existsSync(path.join(rig.userRoot(GOOD_KEY), ".kacha/packs"))).toBe(false);
   expect(errors).toEqual([]);
 });
+
+test("上传延迟期间进度对话框可见；点「取消」后提示已取消，不出现新画板，不残留上传暂存（#59）", async ({ page, rig }) => {
+  const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
+  // 上传请求被拦住不放：模拟慢连接，进度对话框必须在上传期间就出现，且可取消。
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const aborted = new Promise<void>((resolve) => page.on("requestfailed", (r) => r.url().includes("/api/packs/uploads?") && resolve()));
+  await page.route("**/api/packs/uploads?*", async (route) => {
+    await held;
+    await route.continue().catch(() => undefined);
+  });
+  await importPack(page, V032);
+  await expect(dialog(page)).toContainText("正在导入画板包：v0.3.2-flash-layers.ugcpack");
+  await dialog(page).getByRole("button", { name: "取消" }).click();
+  await expect(toast(page)).toHaveText("已取消导入；已移入的任务目录保留");
+  await expect(dialog(page)).toHaveCount(0);
+  // 上传请求被中止（不是等它传完）。
+  await aborted;
+  release();
+  await page.waitForTimeout(300);
+  await expect(page.locator(".tab")).toHaveCount(1);
+  const root = rig.userRoot(GOOD_KEY);
+  expect(readdirSync(path.join(root, "画板"))).toEqual(["空.ugcboard.json"]);
+  expect(existsSync(path.join(root, DIR))).toBe(false);
+  const packs = path.join(root, ".kacha/packs");
+  expect(existsSync(packs) ? readdirSync(packs) : []).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("正常导入大包：上传与合并阶段都有进度，结束后不再轮询进度、没有 404（#59）", async ({ page, rig }) => {
+  const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
+  const big = bigPack(rig);
+  const size = statSync(big).size;
+  const progress: { op: string; done: number; total: number }[] = [];
+  const notFound: string[] = [];
+  let polls = 0;
+  page.on("response", async (r) => {
+    if (!r.url().includes("/api/packs/ops/") || r.request().method() !== "GET") return;
+    polls += 1;
+    if (r.status() === 404) notFound.push(r.url());
+    if (r.status() === 200) progress.push({ op: r.url(), ...(await r.json()) });
+  });
+  const consoleErrors: string[] = [];
+  page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
+  // 合并在本机很快，页面每 200ms 的轮询未必赶上：合并请求进行期间由测试按 10ms 直接查同一个进度接口。
+  const merge: { done: number; total: number }[] = [];
+  let merging: Promise<void> | null = null;
+  page.on("request", (req) => {
+    const m = /\/api\/packs\/uploads\/[^/]+\/import\?op=([^&]+)/.exec(req.url());
+    if (!m) return;
+    // kacha.test 只在浏览器里解析：测试端直连回环地址，带上页面的会话 cookie。
+    const url = `${rig.localURL}/api/packs/ops/${m[1]}`;
+    merging = (async () => {
+      const headers = { cookie: (await page.context().cookies()).map((c) => `${c.name}=${c.value}`).join("; ") };
+      for (let finished = false; !finished; ) {
+        const pending = req.response().then(() => (finished = true));
+        const r = await fetch(url, { headers });
+        if (r.status === 200) merge.push(await r.json());
+        await Promise.race([pending, new Promise((t) => setTimeout(t, 10))]);
+      }
+    })();
+  });
+  // 上传限速到约 2 秒传完，上传阶段的进度才看得到。
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Network.enable");
+  await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: size / 2 });
+  await importPack(page, big);
+  await expect(dialog(page)).toContainText(/MB \/ [\d.]+ MB/);
+  await expect(toast(page)).toHaveText("导入 1 个任务，跳过 0 个");
+  await expect(dialog(page)).toHaveCount(0);
+  // 上传阶段：总量是包文件大小（Content-Length）；合并阶段：总量是要解出的条目字节数。
+  expect(progress.some((p) => p.total === size && p.done > 0), JSON.stringify(progress)).toBe(true);
+  await merging;
+  expect(merge.some((p) => p.total > 48 * 1024 * 1024 && p.total !== size && p.done > 0), JSON.stringify(merge)).toBe(true);
+  const after = polls;
+  await page.waitForTimeout(600);
+  expect(polls).toBe(after);
+  expect(notFound).toEqual([]);
+  expect(consoleErrors.filter((t) => t.includes("404"))).toEqual([]);
+  expect(existsSync(path.join(rig.userRoot(GOOD_KEY), ".kacha/packs"))).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+/** 在 v0.3.2 包的任务目录里加一个 48 MB 的随机文件：上传与合并都不是瞬间完成。 */
+function bigPack(rig: Rig): string {
+  const file = path.join(rig.dataRoot, "big.ugcpack");
+  execFileSync("python3", ["-I", "-c", [
+    "import zipfile,sys,os",
+    "src=zipfile.ZipFile(sys.argv[1]);z=zipfile.ZipFile(sys.argv[2],'w',zipfile.ZIP_DEFLATED)",
+    "[z.writestr(i,src.read(i.filename)) for i in src.infolist()]",
+    `z.writestr(${JSON.stringify(`${DIR}/big.bin`)},os.urandom(48*1024*1024))`,
+    "z.close()",
+  ].join(";"), V032, file]);
+  return file;
+}
 
 test("关掉文件对话框（input 的 cancel 事件）：不弹对话框，也不发上传请求（#55）", async ({ page, rig }) => {
   await openApp(page, rig, { title: "空", boardText: board("空", [], []) });

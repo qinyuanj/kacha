@@ -6,7 +6,8 @@
 //!   再读条目 / 文本做导入前判定，最后 POST /api/packs/uploads/{id}/import?op=<op> 执行合并。
 //!   导入结束（成功 / 失败 / 取消）或上传中断都删除临时文件。
 //!   关页等留下的临时文件，在该用户下次上传开始时按修改时间回收（超过 1 小时）。
-//! - 取消与进度按操作 id 隔离：POST /api/packs/ops/{op}/cancel 只影响该操作；GET 读进度。
+//!   上传可带 `?op=<id>`（#59）：总量取 Content-Length，每写一块更新已完成字节数；被取消回 409 并删掉半成品。
+//! - 取消与进度按操作 id 隔离：POST /api/packs/ops/{op}/cancel 只影响该操作；GET 读进度，操作已结束或不存在时回 204。
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -39,13 +40,28 @@ pub struct PackOps {
 
 pub struct Op {
     cancel: AtomicBool,
+    /// 取消时唤醒在异步里等待的一方（上传停在等下一块请求体时也要能立刻结束）。
+    cancelled: tokio::sync::Notify,
     done: AtomicU64,
     total: AtomicU64,
 }
 
+impl Op {
+    /// 等到该操作被取消；先登记再查标记，取消发生在两者之间也不会漏。
+    async fn wait_cancelled(&self) {
+        let notified = self.cancelled.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if self.cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        notified.await;
+    }
+}
+
 impl PackOps {
     fn register(&self, user: &str, id: &str) -> Arc<Op> {
-        let op = Arc::new(Op { cancel: AtomicBool::new(false), done: AtomicU64::new(0), total: AtomicU64::new(0) });
+        let op = Arc::new(Op { cancel: AtomicBool::new(false), cancelled: tokio::sync::Notify::new(), done: AtomicU64::new(0), total: AtomicU64::new(0) });
         self.map.lock().unwrap().insert((user.to_string(), id.to_string()), op.clone());
         op
     }
@@ -95,7 +111,8 @@ fn begin_op(state: &AppState, user: &User, id: &str) -> Result<(Arc<Op>, OpGuard
 pub async fn op_progress(State(state): State<AppState>, user: User, AxPath(id): AxPath<String>) -> Response {
     match state.pack_ops().get(&user.fingerprint, &id) {
         Some(op) => Json(serde_json::json!({ "done": op.done.load(Ordering::Relaxed), "total": op.total.load(Ordering::Relaxed) })).into_response(),
-        None => error(StatusCode::NOT_FOUND, "not_found", "操作已结束或不存在"),
+        // 操作已结束或尚未开始：轮询与阶段切换难免撞上这个间隙，不当错误（不回 404，见 #59）。
+        None => StatusCode::NO_CONTENT.into_response(),
     }
 }
 
@@ -103,6 +120,7 @@ pub async fn op_cancel(State(state): State<AppState>, user: User, AxPath(id): Ax
     match state.pack_ops().get(&user.fingerprint, &id) {
         Some(op) => {
             op.cancel.store(true, Ordering::Relaxed);
+            op.cancelled.notify_waiters();
             StatusCode::NO_CONTENT.into_response()
         }
         // 操作已结束（或从未存在）：取消是幂等的，不当错误。
@@ -230,9 +248,24 @@ fn sweep_stale_uploads(root: &Path, now: std::time::SystemTime) {
     }
 }
 
-pub async fn upload(State(state): State<AppState>, user: User, body: Body) -> Response {
+#[derive(Deserialize)]
+pub struct UploadQuery {
+    op: Option<String>,
+}
+
+pub async fn upload(State(state): State<AppState>, user: User, Query(q): Query<UploadQuery>, headers: axum::http::HeaderMap, body: Body) -> Response {
     if let Err(r) = crate::fs::ensure_space(&state) {
         return r;
+    }
+    // 带操作 id 时报进度、可取消；不带时照旧（进度与取消都没有）。
+    let tracked = match q.op.as_deref().map(|id| begin_op(&state, &user, id)).transpose() {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let op = tracked.as_ref().map(|(op, _)| op.clone());
+    let total = headers.get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    if let Some(op) = &op {
+        op.total.store(total, Ordering::Relaxed);
     }
     let root = state.user_root(&user.fingerprint);
     sweep_stale_uploads(&root, state.now());
@@ -248,13 +281,30 @@ pub async fn upload(State(state): State<AppState>, user: User, body: Body) -> Re
         Err(e) => return crate::fs::io_error(e),
     };
     let mut stream = body.into_data_stream();
-    while let Some(chunk) = stream.next().await {
+    let mut done = 0u64;
+    loop {
+        // 等下一块时也看取消：请求体停在半路（慢连接、卡住）时取消要立刻生效；守卫删掉写了一半的文件。
+        let next = match &op {
+            Some(op) => tokio::select! {
+                chunk = stream.next() => chunk,
+                _ = op.wait_cancelled() => return error(StatusCode::CONFLICT, "cancelled", CANCELLED),
+            },
+            None => stream.next().await,
+        };
+        let Some(chunk) = next else { break };
         let chunk = match chunk {
             Ok(c) => c,
             Err(_) => return error(StatusCode::BAD_REQUEST, "upload_failed", "上传中断"),
         };
         if let Err(e) = out.write_all(&chunk).await {
             return crate::fs::io_error(e);
+        }
+        done += chunk.len() as u64;
+        if let Some(op) = &op {
+            op.done.store(done, Ordering::Relaxed);
+            if op.cancel.load(Ordering::Relaxed) {
+                return error(StatusCode::CONFLICT, "cancelled", CANCELLED);
+            }
         }
     }
     if let Err(e) = out.sync_all().await {
