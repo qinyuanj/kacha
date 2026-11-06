@@ -1,5 +1,5 @@
-// 画板包界面流程：导出 = 可取消的 hash 阶段 → 确认（含预估大小）→ 可取消的打包阶段与浏览器下载；浏览器选包 → 上传 → 判定 → 导入 → 打开画板。
-import { browser, ipc, packUpload } from "../shell/ipc";
+// 画板包界面流程：导出 = 可取消的 hash 阶段 → 确认（含预估大小）→ 可取消的打包阶段与浏览器下载；浏览器选包 → 可取消进度里上传、判定、导入 → 打开画板。
+import { browser, ipc } from "../shell/ipc";
 import { pickPackFile } from "../shell/packFile";
 import { useCallback, useState } from "react";
 import { BOARD_EXTENSION, type Board } from "../core/board";
@@ -72,20 +72,19 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
     try {
       const file = await pickPackFile();
       if (!file) return;
-      // 上传暂在导入前调用；后续票会把它移进可取消的导入流程。
-      const id = await packUpload.upload(file);
       const result = await importPackIn(packIo, {
-        packPath: id,
-        displayName: file.name,
+        file,
         addBoard: (board) => boards.addImportedBoard(board),
         onStage: progress(`正在导入画板包：${file.name}`),
         log: logEvent,
       });
       switch (result.kind) {
         case "newer":
+          setDialog(null);
           await browser.message(result.message, { title: "无法导入画板包" });
           return;
         case "corrupt":
+          setDialog(null);
           return toast(`无法导入画板包：${result.reason}`);
         case "cancelled":
           setDialog(null);
@@ -103,6 +102,7 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
         }
       }
     } catch (e) {
+      setDialog(null);
       toast(`导入画板包失败：${errorText(e)}`);
     }
   }, [userRoot, boards, toast]);
