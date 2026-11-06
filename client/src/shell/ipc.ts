@@ -1,10 +1,11 @@
 // 壳层（唯一实现）：业务调用走同源 HTTP，密钥存 localStorage，网关由浏览器直连（ADR 0018）。
 // UI 与 core 不直接调业务 HTTP，都经这里的端口。
 import type { FetchLike } from "../core/gateway";
-import { PACK_CANCELLED, type PackEntryFact } from "../core/boardPack";
+import { PACK_CANCELLED, type PackContent, type PackEntryFact } from "../core/boardPack";
 import type { EntryHash } from "../core/packHash";
 import type { ZipEntry } from "../core/zipIndex";
-import type { HashMessage, HashRequest } from "./packHash.worker";
+import { entryBody } from "../core/packHash";
+import type { WorkerMessage, WorkerRequest } from "./packHash.worker";
 import { ApiError } from "./apiError";
 import { DEFAULT_SETTINGS, serializeSettings } from "../core/settings";
 import type { BrowserPort, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
@@ -408,27 +409,49 @@ async function inOp<T>(run: (op: string, signal: AbortSignal | undefined) => Pro
   }
 }
 
-/** hash 阶段：Worker 里按条目流式算 sha256，进度经 localProgress 报给进度轮询；取消即 terminate。 */
-function hashInWorker(file: File, entries: ZipEntry[]): Promise<EntryHash[]> {
+/**
+ * 在当前操作下跑一次 Worker（见 packHash.worker.ts）：已取消就不起；操作被中止即以「已取消」reject 并 terminate。
+ * onProgress 收到的进度经 localProgress 报给进度轮询。
+ */
+function inWorker<T>(request: WorkerRequest, settle: (m: Exclude<WorkerMessage, { kind: "progress" | "error" }>) => T, onProgress?: (done: number, total: number) => void): Promise<T> {
   const op = requireOp();
   if (cancelledOps.has(op)) return Promise.reject(new Error(PACK_CANCELLED));
   const signal = opAborts.get(op)?.signal;
   const worker = new Worker(new URL("./packHash.worker.ts", import.meta.url), { type: "module" });
-  localProgress.set(op, { done: 0, total: entries.reduce((n, e) => n + e.size, 0) });
-  return new Promise<EntryHash[]>((resolve, reject) => {
-    const onAbort = () => reject(new Error(PACK_CANCELLED));
-    signal?.addEventListener("abort", onAbort, { once: true });
-    worker.onmessage = (e: MessageEvent<HashMessage>) => {
+  return new Promise<T>((resolve, reject) => {
+    signal?.addEventListener("abort", () => reject(new Error(PACK_CANCELLED)), { once: true });
+    worker.onmessage = (e: MessageEvent<WorkerMessage>) => {
       const m = e.data;
-      if (m.kind === "progress") localProgress.set(op, { done: m.done, total: m.total });
-      else if (m.kind === "done") resolve(m.facts);
-      else reject(new Error(`无法读取画板包：${m.message}`));
+      if (m.kind === "progress") onProgress?.(m.done, m.total);
+      else if (m.kind === "error") reject(new Error(`无法读取画板包：${m.message}`));
+      else resolve(settle(m));
     };
     worker.onerror = (e) => reject(new Error(`无法读取画板包：${e.message}`));
-    worker.postMessage({ file, entries } satisfies HashRequest);
-  }).finally(() => {
-    worker.terminate();
-    localProgress.delete(op);
+    worker.postMessage(request);
+  }).finally(() => worker.terminate());
+}
+
+/** hash 阶段：Worker 里按条目流式算 sha256，进度经 localProgress 报给进度轮询；取消即 terminate。 */
+function hashInWorker(file: File, entries: ZipEntry[]): Promise<EntryHash[]> {
+  const op = requireOp();
+  localProgress.set(op, { done: 0, total: entries.reduce((n, e) => n + e.size, 0) });
+  return inWorker(
+    { kind: "hash", file, entries },
+    (m) => {
+      if (m.kind !== "hashed") throw new Error("无法读取画板包：Worker 回了意外的消息");
+      return m.facts;
+    },
+    (done, total) => localProgress.set(op, { done, total }),
+  ).finally(() => localProgress.delete(op));
+}
+
+/** 一份内容的上传体：stored 条目是包文件的切片（浏览器按流发送，不读进内存）；deflate 条目在 Worker 里解压成 Blob，
+ *  解压后的字节不进主线程内存。 */
+async function contentBody({ file, entry }: PackContent): Promise<Blob> {
+  if (entry.method === 0) return entryBody(file, entry);
+  return inWorker({ kind: "body", file, entry }, (m) => {
+    if (m.kind !== "body") throw new Error("无法读取画板包：Worker 回了意外的消息");
+    return m.body;
   });
 }
 
@@ -436,9 +459,9 @@ export const packContent: PackContentPort = {
   existing: (units) => inOp((_op, signal) => api("/api/packs/existing", jsonPost(units, signal))),
   hash: hashInWorker,
   stage: () => inOp(async (_op, signal) => (await api<{ id: string }>("/api/packs/staging", { method: "POST", ...(signal ? { signal } : {}) })).id),
-  // 请求体是 Blob：stored 条目是包文件的切片，浏览器按流发送，不读进内存。
-  uploadContent: (staging, sha256, body, progress) =>
+  uploadContent: (staging, sha256, content, progress) =>
     inOp(async (op, signal) => {
+      const body = await contentBody(content);
       const params = new URLSearchParams({ op, done: String(progress.done), total: String(progress.total) });
       await apiResponse(`/api/packs/staging/${encodeURIComponent(staging)}/contents/${sha256}?${params}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body, ...(signal ? { signal } : {}) });
     }),

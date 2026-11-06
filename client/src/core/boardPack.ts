@@ -6,7 +6,7 @@
 import { copyTaskIds, parseBoard, serializeBoard, type Board, type BoardNode } from "./board";
 import { BOARDS_DIR_NAME, basename, resolveFromRoot, toRootRelative } from "./paths";
 import { TASK_RECORD_FILE, taskDirOfRelPath, taskDirOfTaskId } from "./taskDir";
-import { entryBody, type EntryHash } from "./packHash";
+import type { EntryHash } from "./packHash";
 import { sha256Hex } from "./sha256";
 import { blobSource, readEntryBytes, readZipIndex, type ZipEntry, type ZipSource } from "./zipIndex";
 
@@ -361,6 +361,12 @@ export const PACK_CANCELLED = "已取消";
 /** 单份内容上传的上限，与服务端单文件请求体上限一致（ADR 0018）；包里有更大的条目时回退为整包上传。 */
 export const MAX_CONTENT_BYTES = 64 * 1024 * 1024;
 
+/** 去重上传的一份内容：包文件里承载它的条目。 */
+export interface PackContent {
+  file: File;
+  entry: ZipEntry;
+}
+
 /** 去重上传落盘清单的一项：合并单元里的一个文件与它的内容 sha256（哪个路径对应哪份内容由浏览器给，服务端信任）。 */
 export interface PlacedFile {
   path: string;
@@ -379,8 +385,11 @@ export interface PackIo {
   hash(file: File, entries: ZipEntry[]): Promise<EntryHash[]>;
   /** 开一份去重上传暂存，返回暂存 id。 */
   stage(): Promise<string>;
-  /** 上传一份内容到暂存（服务端自算 sha256 核对）；progress 是本份之前已传的字节与全部要传的字节。取消时以 PACK_CANCELLED reject。 */
-  uploadContent(staging: string, sha256: string, body: Blob, progress: { done: number; total: number }): Promise<void>;
+  /**
+   * 上传一份内容到暂存（服务端自算 sha256 核对）：内容是包里的一个条目，上传体由端口取出（浏览器里 stored 条目直接切片，
+   * deflate 条目在 Web Worker 解压，不进主线程内存）。progress 是本份之前已传的字节与全部要传的字节。取消时以 PACK_CANCELLED reject。
+   */
+  uploadContent(staging: string, sha256: string, content: PackContent, progress: { done: number; total: number }): Promise<void>;
   /** 按落盘清单把暂存的内容放进合并单元并合并（同一份内容第一份落盘、其余硬链接）；结束后服务端删暂存。 */
   importContent(staging: string, units: MergeUnit[], files: PlacedFile[]): Promise<MergeReport>;
   /** 不再合并就放弃暂存（幂等）。 */
@@ -496,7 +505,7 @@ async function importByContent(io: PackIo, file: File, check: OkCheck, entries: 
   try {
     let done = 0;
     for (const [sha256, entry] of contents) {
-      await io.uploadContent(staging, sha256, await entryBody(file, entry), { done, total });
+      await io.uploadContent(staging, sha256, { file, entry }, { done, total });
       done += entry.size;
     }
     phase("merge");

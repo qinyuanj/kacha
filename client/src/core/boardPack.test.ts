@@ -23,7 +23,7 @@ import {
 } from "./boardPack";
 import { resolveFromRoot } from "./paths";
 import { buildZip } from "./testing/zipFixture";
-import { hashEntries } from "./packHash";
+import { entryBody, hashEntries } from "./packHash";
 import { blobSource } from "./zipIndex";
 
 const ROOT = "C:\\Users\\Lzx_8\\Pictures\\UGC AI 生图工具";
@@ -535,9 +535,10 @@ describe("导入画板包", () => {
         steps.push("stage");
         return STAGING_ID;
       },
-      uploadContent: async (_staging, sha256, body, progress) => {
+      uploadContent: async (_staging, sha256, content, progress) => {
         steps.push("uploadContent");
         if (opts.failUpload !== undefined) throw opts.failUpload;
+        const body = await entryBody(content.file, content.entry);
         uploaded.push({ sha256, size: body.size, progress });
       },
       importContent: async (staging, units, files) => {
