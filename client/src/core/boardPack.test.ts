@@ -16,6 +16,7 @@ import {
   planExport,
   planPackContents,
   runCancellable,
+  type ExistingUnit,
   type PackEntryFact,
   type MergeUnit,
   type PackFs,
@@ -514,7 +515,7 @@ describe("导入画板包", () => {
    * 内存包命令：记录各步调用与移入的合并单元；failUpload 让上传以该错误 reject，failAfterMove 让导入移完第一个单元后以该错误 reject。
    * 去重路径：existing 是服务端已有单元的身份 sha256；hash 用真实的流式 hash 并记下算了哪些条目；上传的内容与落盘清单都记下。
    */
-  function memoryPackIo(pack: Record<string, string>, opts: { failAfterMove?: unknown; failUpload?: unknown; existing?: Record<string, string> } = {}) {
+  function memoryPackIo(pack: Record<string, string>, opts: { failAfterMove?: unknown; failUpload?: unknown; existing?: Record<string, string>; unreadable?: string[] } = {}) {
     const moved: string[] = [];
     const steps: string[] = [];
     const restored: { path: string; source: string }[] = [];
@@ -524,7 +525,11 @@ describe("导入画板包", () => {
     const io: PackIo = {
       existing: async (units) => {
         steps.push("existing");
-        return units.map((u) => ({ path: u.path, sha256: opts.existing?.[u.path] ?? null }));
+        return units.map((u): ExistingUnit => {
+          if (opts.unreadable?.includes(u.path)) return { path: u.path, state: "unreadable" };
+          const sha256 = opts.existing?.[u.path];
+          return sha256 === undefined ? { path: u.path, state: "absent" } : { path: u.path, state: "present", sha256 };
+        });
       },
       hash: async (file, entries) => {
         steps.push("hash");
@@ -867,6 +872,14 @@ describe("导入画板包", () => {
       expect(await run(io, undefined, zipFile(v1Pack)).outcome).toMatchObject({ kind: "done", summary: { imported: 1, skipped: 0, conflicts: [TASK] } });
       expect(hashed.filter((n) => n.startsWith(`${TASK}/`))).toEqual([]);
       expect(moved).not.toContain(TASK);
+    });
+
+    it("服务端已有但读不出（任务目录或导入参考图）：按冲突处理、不覆盖，也不上传", async () => {
+      const { io, hashed, moved, placed } = memoryPackIo(v1Pack, { unreadable: [TASK, REF] });
+      expect(await run(io, undefined, zipFile(v1Pack)).outcome).toMatchObject({ kind: "done", summary: { imported: 1, conflicts: [TASK, REF] } });
+      expect(hashed.filter((n) => n.startsWith(`${TASK}/`))).toEqual([]);
+      expect(moved).toEqual([TASK_B]);
+      expect(placed.map((f) => f.path).filter((p) => p === REF || p.startsWith(`${TASK}/`))).toEqual([]);
     });
 
     it("v2 包的代表条目在已有的任务目录里：仍为还原被省略的路径算 hash 并上传那份内容", async () => {

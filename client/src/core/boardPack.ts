@@ -361,6 +361,9 @@ export const PACK_CANCELLED = "已取消";
 /** 单份内容上传的上限，与服务端单文件请求体上限一致（ADR 0018）；包里有更大的条目时回退为整包上传。 */
 export const MAX_CONTENT_BYTES = 64 * 1024 * 1024;
 
+/** 用户数据根里某个合并单元的现状（去重上传前问服务端）。读不出的按冲突处理，与合并时「读不了视为不同」一致。 */
+export type ExistingUnit = { path: string } & ({ state: "absent" } | { state: "present"; sha256: string } | { state: "unreadable" });
+
 /** 去重上传的一份内容：包文件里承载它的条目。 */
 export interface PackContent {
   file: File;
@@ -379,8 +382,8 @@ type MergeReport = { outcomes: { path: string; outcome: MergeOutcome }[]; bytes:
 export interface PackIo {
   /** 置取消标记；开始导出 / 导入前先以 false 复位。 */
   cancel(cancelled: boolean): Promise<void>;
-  /** 服务端已有的合并单元：任务目录给本机 task.json 的 sha256，参考图给整文件的 sha256；没有为 null。 */
-  existing(units: MergeUnit[]): Promise<{ path: string; sha256: string | null }[]>;
+  /** 用户数据根里已有的合并单元：任务目录给 task.json 的 sha256，参考图给整文件的 sha256；没有、或在但读不出各是一种状态。 */
+  existing(units: MergeUnit[]): Promise<ExistingUnit[]>;
   /** 按条目解压并算 sha256（浏览器里在 Web Worker 跑）；带进度，取消时以 PACK_CANCELLED reject。 */
   hash(file: File, entries: ZipEntry[]): Promise<EntryHash[]>;
   /** 开一份去重上传暂存，返回暂存 id。 */
@@ -471,17 +474,18 @@ async function importByContent(io: PackIo, file: File, check: OkCheck, entries: 
   const filesOf = (unit: MergeUnit) => (unit.identity === null ? [unit.path] : paths.filter((p) => p.startsWith(`${unit.path}/`)));
 
   phase("existing");
-  const present = new Map((await io.existing(check.units)).map((p) => [p.path, p.sha256]));
+  const present = new Map((await io.existing(check.units)).map((p) => [p.path, p]));
   const settled: MergeReport["outcomes"] = [];
   const needed: MergeUnit[] = [];
   const compareAfterHash: { path: string; sha256: string }[] = [];
   for (const unit of check.units) {
-    const theirs = present.get(unit.path) ?? null;
-    if (theirs === null) needed.push(unit);
-    else if (unit.identity === null) compareAfterHash.push({ path: unit.path, sha256: theirs });
+    const theirs = present.get(unit.path) ?? { state: "absent" };
+    if (theirs.state === "absent") needed.push(unit);
+    else if (theirs.state === "unreadable") settled.push({ path: unit.path, outcome: "conflict" });
+    else if (unit.identity === null) compareAfterHash.push({ path: unit.path, sha256: theirs.sha256 });
     else {
       const ours = await sha256Hex(await readEntryBytes(src, contentOf(`${unit.path}/${unit.identity}`)));
-      settled.push({ path: unit.path, outcome: ours === theirs ? "identical" : "conflict" });
+      settled.push({ path: unit.path, outcome: ours === theirs.sha256 ? "identical" : "conflict" });
     }
   }
 

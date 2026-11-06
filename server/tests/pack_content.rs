@@ -115,9 +115,12 @@ async fn existing_reports_identity_sha256_of_units_already_on_the_server() {
     std::fs::write(root.join(TASK_A).join("task.json"), record_a()).unwrap();
     std::fs::create_dir_all(root.join("导入参考图")).unwrap();
     std::fs::write(root.join("导入参考图/猫.png"), b"cat").unwrap();
+    // 目录在、身份文件不在：读不出。
+    std::fs::create_dir_all(root.join(TASK_B)).unwrap();
     let body = serde_json::json!([
         { "path": TASK_A, "identity": "task.json" },
         { "path": TASK_B, "identity": "task.json" },
+        { "path": "2026-09-16/20260916T090000Z-000000ff", "identity": "task.json" },
         { "path": "导入参考图/猫.png", "identity": null },
         { "path": "导入参考图/狗.png", "identity": null },
     ]);
@@ -126,10 +129,11 @@ async fn existing_reports_identity_sha256_of_units_already_on_the_server() {
     assert_eq!(
         reply.json(),
         serde_json::json!([
-            { "path": TASK_A, "sha256": sha(&record_a()) },
-            { "path": TASK_B, "sha256": null },
-            { "path": "导入参考图/猫.png", "sha256": sha(b"cat") },
-            { "path": "导入参考图/狗.png", "sha256": null },
+            { "path": TASK_A, "state": "present", "sha256": sha(&record_a()) },
+            { "path": TASK_B, "state": "unreadable" },
+            { "path": "2026-09-16/20260916T090000Z-000000ff", "state": "absent" },
+            { "path": "导入参考图/猫.png", "state": "present", "sha256": sha(b"cat") },
+            { "path": "导入参考图/狗.png", "state": "absent" },
         ])
     );
     let escape = serde_json::json!([{ "path": "../x", "identity": null }]);

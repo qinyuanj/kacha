@@ -496,8 +496,10 @@ pub async fn discard_upload(State(state): State<AppState>, user: User, AxPath(id
 // 另外每份内容遵守单文件 64 MB 上限（413），并边写边算 sha256 与声明核对（不一致按损坏 422）。
 // 问已有（要读身份文件算 sha256）与合并落盘仍拿大请求名额。
 
-/// 服务端已有的合并单元：任务目录给身份文件（task.json）的 sha256，参考图给整文件的 sha256；没有为 null。
-/// 目录在但身份文件读不到时给空串（与任何 sha256 都不等，前端据此判冲突，与合并时的比对一致）。
+/// 用户数据根里已有的合并单元，每个单元一种状态：
+/// - `absent`：没有；
+/// - `present`：有，带 sha256（任务目录给身份文件 task.json 的，参考图给整文件的）；
+/// - `unreadable`：在但身份文件（或参考图本身）读不出——前端按冲突处理，与合并时「读不了视为不同」的比对一致。
 pub async fn existing(State(state): State<AppState>, user: User, body: axum::body::Bytes) -> Response {
     let Ok(units) = serde_json::from_slice::<Vec<MergeUnit>>(&body) else {
         return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表");
@@ -513,8 +515,15 @@ pub async fn existing(State(state): State<AppState>, user: User, body: axum::bod
                 Some(identity) => resolve(&format!("{}/{identity}", unit.path))?,
                 None => path.clone(),
             };
-            let sha256 = if path.exists() { Some(board_pack::sha256_file(&identity).unwrap_or_default()) } else { None };
-            out.push(serde_json::json!({ "path": unit.path, "sha256": sha256 }));
+            let state = if !path.exists() {
+                serde_json::json!({ "path": unit.path, "state": "absent" })
+            } else {
+                match board_pack::sha256_file(&identity) {
+                    Ok(sha256) => serde_json::json!({ "path": unit.path, "state": "present", "sha256": sha256 }),
+                    Err(_) => serde_json::json!({ "path": unit.path, "state": "unreadable" }),
+                }
+            };
+            out.push(state);
         }
         Ok(out)
     })
