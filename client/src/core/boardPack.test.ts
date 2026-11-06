@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { newBoard, parseBoard, serializeBoard, taskCount, uniqueBoardFileName, type Board, type ReferenceNode, type ResultNode, type TaskNode } from "./board";
 import {
@@ -10,6 +11,7 @@ import {
   importPack,
   importSummary,
   inspectPack,
+  inspectPackLocally,
   planExport,
   planPackContents,
   runCancellable,
@@ -19,6 +21,8 @@ import {
   type PackIo,
 } from "./boardPack";
 import { resolveFromRoot } from "./paths";
+import { buildZip } from "./testing/zipFixture";
+import { blobSource } from "./zipIndex";
 
 const ROOT = "C:\\Users\\Lzx_8\\Pictures\\UGC AI 生图工具";
 
@@ -481,7 +485,11 @@ describe("可取消的画板包命令", () => {
 });
 
 describe("导入画板包", () => {
+  /** zip 读取器认不了的包（不是 zip）：跳过本地检查，整包上传后由服务端读条目判定。 */
   const PACK = new File(["zip"], "千问测试.ugcpack");
+  /** 真 zip：本地检查读得了。.json 条目 deflate，其余 stored，都带 data descriptor（与 Web 导出一致）。 */
+  const zipFile = (pack: Record<string, string>) =>
+    new File([buildZip(Object.entries(pack).map(([name, data]) => ({ name, data, method: name.endsWith(".json") ? 8 : 0, descriptor: true })))], "千问测试.ugcpack");
   const UPLOAD_ID = "up-1";
   const TASK = "2026-09-16/20260916T010000Z-0000000a";
   const SECRET = "机密提示词：橘猫";
@@ -533,12 +541,12 @@ describe("导入画板包", () => {
     return { io, moved, steps, restored };
   }
 
-  function run(io: PackIo, addBoard: (board: Board) => Promise<string> = async (b) => `${ROOT}\\画板\\${b.title}.ugcboard.json`) {
+  function run(io: PackIo, addBoard: (board: Board) => Promise<string> = async (b) => `${ROOT}\\画板\\${b.title}.ugcboard.json`, file: File = PACK) {
     const logs: Record<string, unknown>[] = [];
     const added: string[] = [];
     const stages: string[] = [];
     const outcome = importPack(io, {
-      file: PACK,
+      file,
       addBoard: async (board) => {
         added.push(board.title);
         return addBoard(board);
@@ -549,7 +557,7 @@ describe("导入画板包", () => {
     return { outcome, logs, added, stages };
   }
 
-  it("包版本更高：上传后判定，不合并、不写画板，放弃上传，日志记 newer", async () => {
+  it("读取器认不了的包、版本更高：整包上传后由服务端条目判定，不合并、不写画板，放弃上传，日志记 newer", async () => {
     const newer = { ...goodPack, [PACK_MANIFEST]: JSON.stringify({ pack_format_version: PACK_FORMAT_VERSION + 1, app_version: "9", boards: [] }) };
     const { io, moved, steps } = memoryPackIo(newer);
     const r = run(io);
@@ -560,7 +568,7 @@ describe("导入画板包", () => {
     expect(r.logs).toEqual([{ kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", result: "newer" }]);
   });
 
-  it("包损坏（布局不合法或读不了条目）：不写任何文件，日志记 corrupt", async () => {
+  it("读取器认不了的包、损坏（布局不合法或服务端读不了条目）：不写任何文件，日志记 corrupt", async () => {
     const { io, moved } = memoryPackIo({ ...goodPack, "素材/猫.png": "" });
     const r = run(io);
     expect(await r.outcome).toMatchObject({ kind: "corrupt", reason: expect.stringContaining("素材/猫.png") });
@@ -625,7 +633,7 @@ describe("导入画板包", () => {
     expect(r.logs).toEqual([{ kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", board_file: "甲.ugcboard.json, 乙.ugcboard.json", result: "failed" }]);
   });
 
-  it("成功：先复位取消再进入进度，上传后按上传句柄判定与导入，逐个写画板，日志记计数与实际写入的文件名", async () => {
+  it("读取器认不了的包、成功：先复位取消再进入进度，上传后按上传句柄判定与导入，逐个写画板，日志记计数与实际写入的文件名", async () => {
     const { io, steps } = memoryPackIo(goodPack);
     const r = run(io, async (b) => `${ROOT}\\画板\\${b.title} (2).ugcboard.json`);
     const outcome = await r.outcome;
@@ -664,6 +672,91 @@ describe("导入画板包", () => {
     expect(r.logs).toEqual([
       { kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", task_dirs: 1, skipped: 0, conflicts: 0, bytes: 1234, board_file: "甲.ugcboard.json, 乙.ugcboard.json", result: "board_write_failed" },
     ]);
+  });
+
+  describe("浏览器本地检查（#61）", () => {
+    const newerPack = { ...goodPack, [PACK_MANIFEST]: JSON.stringify({ pack_format_version: PACK_FORMAT_VERSION + 1, app_version: "9", boards: [] }) };
+
+    it("清单版本更高：不上传、不读服务端条目，返回 newer，日志记 newer", async () => {
+      const { io, steps } = memoryPackIo(newerPack);
+      const r = run(io, undefined, zipFile(newerPack));
+      expect(await r.outcome).toMatchObject({ kind: "newer", message: expect.stringContaining(`格式版本 ${PACK_FORMAT_VERSION + 1}`) });
+      expect(steps).toEqual(["cancel(false)"]);
+      expect(r.added).toEqual([]);
+      expect(r.logs).toEqual([{ kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", result: "newer" }]);
+    });
+
+    it("包内画板版本更高：不上传，返回 newer", async () => {
+      const pack = { ...goodPack, [boardB]: JSON.stringify({ format_version: 99, title: "乙", nodes: [], edges: [] }) };
+      const { io, steps } = memoryPackIo(pack);
+      expect(await run(io, undefined, zipFile(pack)).outcome).toMatchObject({ kind: "newer" });
+      expect(steps).toEqual(["cancel(false)"]);
+    });
+
+    it("布局不合法：不上传，返回 corrupt 与原因，日志记 corrupt", async () => {
+      const pack = { ...goodPack, "素材/猫.png": "" };
+      const { io, steps } = memoryPackIo(pack);
+      const r = run(io, undefined, zipFile(pack));
+      expect(await r.outcome).toEqual({ kind: "corrupt", reason: "包内含无法识别的路径：素材/猫.png" });
+      expect(steps).toEqual(["cancel(false)"]);
+      expect(r.logs).toEqual([{ kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", result: "corrupt" }]);
+    });
+
+    it("v2 的 duplicates 不合法：不上传，返回 corrupt", async () => {
+      const pack = { ...goodPack, [PACK_MANIFEST]: JSON.stringify({ pack_format_version: 2, app_version: "0.4.0", boards: [boardA, boardB], duplicates: { [`${TASK}/a.png`]: `${TASK}/没有.png` } }) };
+      const { io, steps } = memoryPackIo(pack);
+      expect(await run(io, undefined, zipFile(pack)).outcome).toMatchObject({ kind: "corrupt", reason: expect.stringContaining("不存在的条目") });
+      expect(steps).toEqual(["cancel(false)"]);
+    });
+
+    it("检查通过：整包上传后直接按本地判定合并，不再在服务端读条目与文本", async () => {
+      const { io, steps, moved } = memoryPackIo(goodPack);
+      const r = run(io, undefined, zipFile(goodPack));
+      expect(await r.outcome).toMatchObject({ kind: "done", summary: { imported: 1 }, written: ["甲.ugcboard.json", "乙.ugcboard.json"] });
+      expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", `import(${UPLOAD_ID})`]);
+      expect(moved).toEqual([TASK]);
+      expect(r.stages).toEqual(["progress"]);
+    });
+
+    it("检查通过的 v2 包：本地读出的还原清单交给壳", async () => {
+      const pack = { ...goodPack, [PACK_MANIFEST]: JSON.stringify({ pack_format_version: 2, app_version: "0.4.0", boards: [boardA, boardB], duplicates: { [`${TASK}/references/01.png`]: `${TASK}/result.png` } }) };
+      const v2 = memoryPackIo(pack);
+      expect(await run(v2.io, undefined, zipFile(pack)).outcome).toMatchObject({ kind: "done" });
+      expect(v2.restored).toEqual([{ path: `${TASK}/references/01.png`, source: `${TASK}/result.png` }]);
+    });
+
+    it("目录条目不计入布局（与服务端列条目一致）", async () => {
+      const { io, steps } = memoryPackIo(goodPack);
+      const file = new File([buildZip([...Object.entries(goodPack).map(([name, data]) => ({ name, data })), { name: "2026-09-16/", data: "" }])], "千问测试.ugcpack");
+      expect(await run(io, undefined, file).outcome).toMatchObject({ kind: "done" });
+      expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", `import(${UPLOAD_ID})`]);
+    });
+
+    it("读取器不支持的压缩方法：跳过本地检查，整包上传，由服务端判定", async () => {
+      const { io, steps } = memoryPackIo(goodPack);
+      const file = new File([buildZip(Object.entries(goodPack).map(([name, data]) => ({ name, data, method: name.endsWith(".png") ? 12 : 0 })))], "千问测试.ugcpack");
+      expect(await run(io, undefined, file).outcome).toMatchObject({ kind: "done" });
+      expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", `entries(${UPLOAD_ID})`, "readTexts", `import(${UPLOAD_ID})`]);
+    });
+
+    it("仓库里的 0.2.0 / 0.3.2 桌面包与 v2 包：本地检查通过，合并单元与还原清单齐全", async () => {
+      const local = async (path: string) => inspectPackLocally(blobSource(new File([readFileSync(path)], "x.ugcpack")));
+      expect(await local("../contracts/smoke/board-pack/千问测试.ugcpack")).toMatchObject({ kind: "ok", boards: [{ entry: "画板/千问测试.ugcboard.json" }] });
+      expect(await local("fixtures/packs/v0.3.2-flash-layers.ugcpack")).toMatchObject({ kind: "ok", units: expect.arrayContaining([{ path: TASK, identity: "task.json" }]) });
+      expect(await local("fixtures/packs/v2-duplicates.ugcpack")).toMatchObject({
+        kind: "ok",
+        duplicates: [{ path: "2026-09-16/20260916T020000Z-0000000b/references/01.png", source: `${TASK}/result.png` }],
+      });
+    });
+
+    it("本地读到损坏的 deflate 数据：不当作损坏，整包上传由服务端判定", async () => {
+      const bytes = buildZip(Object.entries(goodPack).map(([name, data]) => ({ name, data, method: name === PACK_MANIFEST ? 8 : 0 })));
+      // 清单是第一个条目：把它的压缩数据改成无效的 deflate 块（BTYPE = 11）。
+      bytes[30 + PACK_MANIFEST.length] = 0xff;
+      const { io, steps } = memoryPackIo(goodPack);
+      expect(await run(io, undefined, new File([bytes], "千问测试.ugcpack")).outcome).toMatchObject({ kind: "done" });
+      expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", `entries(${UPLOAD_ID})`, "readTexts", `import(${UPLOAD_ID})`]);
+    });
   });
 
   it("日志不含提示词与报错原文：只有类别、文件名与计数", async () => {
