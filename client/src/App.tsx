@@ -409,7 +409,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               toast={toast}
               discovery={settings.discovery}
               concurrency={settings.settings.concurrency}
-              statuses={runState.board(active.key).statuses}
+              runNodes={runState.board(active.key).nodes}
               handled={runState.board(active.key).handled}
               onRun={(ids) => void openRunConfirm(ids)}
               onCancelTask={cancelTask}

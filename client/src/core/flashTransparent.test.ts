@@ -5,7 +5,7 @@ import { taskView } from "./taskView";
 import { board } from "./testing/runnerHarness";
 import { collectRunFacts } from "./submission";
 import type { TaskNode } from "./board";
-import { createRunner } from "./runner";
+import { createRunner, nodeStatus } from "./runner";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
 import { settle } from "./testing/runnerHarness";
 import { png as makePng } from "../../e2e/common/boards";
@@ -62,7 +62,7 @@ it.each(["reject", "failDownload"] as const)("透明任务 %s 明确失败，生
   h[mode]();
   await h.runner.submit(h.target, h.board(), ["t1"]);
   await settle();
-  expect(h.runner.getSnapshot().board("A").statuses.get("t1")).toEqual({ kind: "failed", label: "网关拒绝" });
+  expect(nodeStatus(h.runner.getSnapshot().board("A").nodes.get("t1"))).toEqual({ kind: "failed", label: "网关拒绝" });
   expect(h.bodies).toHaveLength(1);
   expect([...h.fs.files.keys()].some(p => p.endsWith("/result.png"))).toBe(false);
 });
@@ -72,7 +72,7 @@ it("透明结果若实际不带 alpha，不保存或伪造成功", async () => {
   h.opaqueOutput();
   await h.runner.submit(h.target, h.board(), ["t1"]);
   await settle();
-  expect(h.runner.getSnapshot().board("A").statuses.get("t1")).toEqual({ kind: "failed", label: "响应无效" });
+  expect(nodeStatus(h.runner.getSnapshot().board("A").nodes.get("t1"))).toEqual({ kind: "failed", label: "响应无效" });
   expect([...h.fs.files.keys()].some(p => p.endsWith("/result.png"))).toBe(false);
 });
 

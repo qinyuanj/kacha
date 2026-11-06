@@ -1,5 +1,5 @@
 // 任务运行器（ADR 0015）：提交（读参考图）→ 全局任务队列按并发上限派发（写任务目录 + 提交记录 → 调网关）→ 运行结果。
-// 队列跨画板 FIFO；429 自动退避重试，其余错误不重试。任务状态以（画板键, 任务节点 id）为键，只在内存。
+// 队列跨画板 FIFO；429 自动退避重试，其余错误不重试。任务状态按任务编号记录、按（画板键, 任务节点 id）聚合，只在内存。
 // 时钟、文件、网关、画板写入与日志都经端口注入；运行器不直接调 Date.now() / setTimeout。
 import type { Board, TaskNode } from "./board";
 import type { CapabilityTable } from "./capabilities";
@@ -44,10 +44,31 @@ export interface ActiveTask {
   state: "running" | "waiting";
 }
 
+/** 任务节点的一份：taskId = 任务编号；读参考图中或读图失败时还没有任务编号，为 null。 */
+export interface TaskCopy {
+  taskId: string | null;
+  status: TaskStatus;
+}
+
+/** 各任务状态的份数；没有的状态不出现。 */
+export type StatusCounts = Partial<Record<TaskStatus["kind"], number>>;
+
+/** 一个任务节点在本次运行里的各份：明细（含失败原因）与计数摘要。 */
+export interface NodeRunState {
+  /** 已结束的份（失败 / 已取消）在前，未结束的按提交顺序在后。 */
+  copies: readonly TaskCopy[];
+  counts: StatusCounts;
+}
+
+/** 只有一份时即该份的状态（显示与以前一致）；多份时暂取最后一份，摘要显示由份数票处理。 */
+export function nodeStatus(node: NodeRunState | undefined): TaskStatus | null {
+  return node?.copies.at(-1)?.status ?? null;
+}
+
 export interface BoardRunState {
-  /** 本次运行里的任务状态（含失败 / 已取消）；已中断等由任务目录推导的不在这里。 */
-  statuses: ReadonlyMap<string, TaskStatus>;
-  /** 读图中、排队、执行、退避的任务节点：参数与输入连线锁定（ADR 0014 环境里的锁定集）。 */
+  /** 任务节点 id → 本次运行里的各份（含失败 / 已取消）；已中断等由任务目录推导的不在这里。 */
+  nodes: ReadonlyMap<string, NodeRunState>;
+  /** 至少有一份在读图中、排队、执行、退避的任务节点：参数与输入连线锁定（ADR 0014 环境里的锁定集）。 */
   locked: ReadonlySet<string>;
   /** 本次运行经手过的任务编号，用于推导「已中断」。 */
   handled: ReadonlySet<string>;
@@ -104,7 +125,14 @@ interface Job {
   controller: AbortController;
 }
 
-const EMPTY_BOARD: BoardRunState = { statuses: new Map(), locked: new Set(), handled: new Set() };
+/** 已结束（失败 / 已取消）的一份。 */
+interface Finished {
+  taskNodeId: string;
+  taskId: string | null;
+  status: TaskStatus;
+}
+
+const EMPTY_BOARD: BoardRunState = { nodes: new Map(), locked: new Set(), handled: new Set() };
 
 /** 日志里的错误字段：只带类别、状态码、网关请求编号与脱敏说明。 */
 function errorFields(error: unknown): Record<string, unknown> {
@@ -122,8 +150,8 @@ export function createRunner(ports: RunnerPorts): Runner {
   /** 429 退避期间整条队列暂停派发，到此刻（毫秒）恢复；0 = 未暂停。 */
   let pausedUntil = 0;
   let cancelTimer: (() => void) | null = null;
-  /** 画板键 → 任务节点 id → 终态（失败 / 已取消）。 */
-  const finished = new Map<string, Map<string, TaskStatus>>();
+  /** 画板键 → 已结束的各份（失败 / 已取消），按结束先后。 */
+  const finished = new Map<string, Finished[]>();
   const handled = new Map<string, Set<string>>();
   /** 已关闭的画板键（键不复用）：关闭前已开始、还在算摘要的提交不再入队。 */
   const closed = new Set<string>();
@@ -148,18 +176,24 @@ export function createRunner(ports: RunnerPorts): Runner {
   }
 
   function buildSnapshot(): RunnerSnapshot {
-    const boards = new Map<string, { statuses: Map<string, TaskStatus>; locked: Set<string>; handled: ReadonlySet<string> }>();
+    const boards = new Map<string, { nodes: Map<string, { copies: TaskCopy[]; counts: StatusCounts }>; locked: Set<string>; handled: ReadonlySet<string> }>();
     const of = (key: string) => {
       let b = boards.get(key);
-      if (!b) boards.set(key, (b = { statuses: new Map(), locked: new Set(), handled: handled.get(key) ?? new Set() }));
+      if (!b) boards.set(key, (b = { nodes: new Map(), locked: new Set(), handled: handled.get(key) ?? new Set() }));
       return b;
     };
-    for (const [key, statuses] of finished) statuses.forEach((st, id) => of(key).statuses.set(id, st));
+    const add = (key: string, taskNodeId: string, copy: TaskCopy) => {
+      const nodes = of(key).nodes;
+      let n = nodes.get(taskNodeId);
+      if (!n) nodes.set(taskNodeId, (n = { copies: [], counts: {} }));
+      n.copies.push(copy);
+      n.counts[copy.status.kind] = (n.counts[copy.status.kind] ?? 0) + 1;
+    };
+    for (const [key, list] of finished) for (const f of list) add(key, f.taskNodeId, { taskId: f.taskId, status: f.status });
     for (const key of handled.keys()) of(key);
     for (const job of jobs) {
-      const b = of(job.target.boardKey);
-      b.statuses.set(job.taskNodeId, statusOf(job));
-      b.locked.add(job.taskNodeId);
+      add(job.target.boardKey, job.taskNodeId, { taskId: job.prepared?.taskId ?? null, status: statusOf(job) });
+      of(job.target.boardKey).locked.add(job.taskNodeId);
     }
     const row = (state: ActiveTask["state"]) => (job: Job): ActiveTask => ({ taskId: job.prepared!.taskId, boardKey: job.target.boardKey, taskNodeId: job.taskNodeId, state });
     const live = [...jobs];
@@ -175,13 +209,18 @@ export function createRunner(ports: RunnerPorts): Runner {
     listeners.forEach((l) => l());
   }
 
-  function setFinished(job: Job, status: TaskStatus | null) {
+  /** 记下一份的终态（按任务编号；读图失败时没有编号）。 */
+  function setFinished(job: Job, status: TaskStatus) {
     const key = job.target.boardKey;
-    let m = finished.get(key);
-    if (status) {
-      if (!m) finished.set(key, (m = new Map()));
-      m.set(job.taskNodeId, status);
-    } else m?.delete(job.taskNodeId);
+    let list = finished.get(key);
+    if (!list) finished.set(key, (list = []));
+    list.push({ taskNodeId: job.taskNodeId, taskId: job.prepared?.taskId ?? null, status });
+  }
+
+  /** 重新运行前清掉该节点上次的终态。 */
+  function clearFinished(boardKey: string, taskNodeId: string) {
+    const list = finished.get(boardKey);
+    if (list) finished.set(boardKey, list.filter((f) => f.taskNodeId !== taskNodeId));
   }
 
   /** 任务迁移事件带画板文件名 + 任务节点 id。 */
@@ -256,7 +295,6 @@ export function createRunner(ports: RunnerPorts): Runner {
       remove(job);
       logTransition(job, "running", "succeeded");
       ports.apply(target.boardKey, { kind: "runResult", result });
-      setFinished(job, null);
     } catch (e) {
       if (aborted() || e instanceof CancelledError) return;
       if (e instanceof GatewayError && e.category === "rate_limited" && job.prepared?.input.model.request_shape !== "seedream_flash_images_generations") rateLimited(job, e);
@@ -289,6 +327,7 @@ export function createRunner(ports: RunnerPorts): Runner {
     publish();
   }
 
+  /** 该节点有任一份未结束。 */
   const occupied = (boardKey: string, taskNodeId: string) => [...jobs].some((j) => j.target.boardKey === boardKey && j.taskNodeId === taskNodeId);
 
   /** 读参考图并入队；读的期间被取消则不入队。返回本地失败说明。 */
@@ -302,7 +341,7 @@ export function createRunner(ports: RunnerPorts): Runner {
     }
     const job: Job = { target, taskNodeId, phase: "reading", submission, retries: 0, startedAt: 0, controller: new AbortController() };
     jobs.add(job);
-    setFinished(job, null);
+    clearFinished(target.boardKey, taskNodeId);
     publish();
     try {
       const prepared = await prepare();
@@ -330,14 +369,10 @@ export function createRunner(ports: RunnerPorts): Runner {
     job.controller.abort();
     const was = job.phase;
     remove(job);
-    if (was === "reading") {
-      setFinished(job, null);
-      return;
-    }
+    if (was === "reading") return;
     if (was === "waiting") {
       // 从未派发：画板与任务目录都没动过，不留痕迹。
       logTransition(job, "queued", "cancelled", { gateway_may_continue: false });
-      setFinished(job, null);
       return;
     }
     // 执行中：请求可能已发出；限流退避中：网关没接这次请求。

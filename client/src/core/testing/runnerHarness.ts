@@ -1,7 +1,7 @@
 import type { Board, BoardEdge, BoardNode, TaskNode } from "../board";
 import { BUILTIN_TABLE } from "../capabilities";
 import type { RunDeps } from "../run";
-import { createRunner, type RunTarget, type RunnerChange } from "../runner";
+import { createRunner, nodeStatus, type RunTarget, type RunnerChange } from "../runner";
 import { memoryTaskFs } from "./memoryTaskFs";
 
 const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
@@ -102,7 +102,8 @@ export function harness(opts: { concurrency?: number; imageCodec?: RunDeps["imag
       timers = timers.filter((t) => t.at > now);
       due.forEach((t) => t.fn());
     },
-    statuses: (boardKey = "A") => Object.fromEntries(runner.getSnapshot().board(boardKey).statuses),
+    /** 单份时各任务节点的状态。 */
+    statuses: (boardKey = "A") => Object.fromEntries([...runner.getSnapshot().board(boardKey).nodes].map(([id, n]) => [id, nodeStatus(n)])),
     locked: (boardKey = "A") => [...runner.getSnapshot().board(boardKey).locked],
     taskDirs: () => new Set([...files.keys()].map((k) => k.split("/").slice(0, 4).join("/"))),
     transitions: () => logs.filter((l) => l.kind === "task").map((l) => `${l.fields.task_node_id}:${l.fields.from_status}→${l.fields.to_status}`),

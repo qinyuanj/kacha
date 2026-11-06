@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BoardNode } from "./board";
 import { parseOutcome } from "./taskDir";
 import { board, harness, settle } from "./testing/runnerHarness";
-import { createRunner } from "./runner";
+import { createRunner, nodeStatus } from "./runner";
 import { BUILTIN_TABLE } from "./capabilities";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
 import { sendPlanOf } from "./taskView";
@@ -34,7 +34,7 @@ describe("Flash 图层运行器：官方契约合成回放", () => {
   it.each([{ layerDownloadFails: true }, { layerJpeg: true }])("任一图层下载或格式失败，整体没有成功结果 %#", async (opts) => {
     const h = fixture(opts);
     await h.runner.submit(h.target, h.b, ["t1"]); await settle();
-    expect(h.runner.getSnapshot().board("A").statuses.get("t1")?.kind).toBe("failed");
+    expect(nodeStatus(h.runner.getSnapshot().board("A").nodes.get("t1"))?.kind).toBe("failed");
     expect(h.changes.filter((c) => c.kind === "runResult")).toHaveLength(0);
     expect([...h.fs.files.keys()].filter((p) => /\/result\.|\/layers\//.test(p))).toEqual([]);
   });
@@ -52,7 +52,7 @@ describe("Flash 图层运行器：官方契约合成回放", () => {
   it("任一图层没有 alpha 则整体失败，没有结果或成功图片落盘", async () => {
     const h = fixture(); h.setAlpha(false);
     await h.runner.submit(h.target, h.b, ["t1"]); await settle();
-    expect(h.runner.getSnapshot().board("A").statuses.get("t1")).toEqual({ kind: "failed", label: "响应无效" });
+    expect(nodeStatus(h.runner.getSnapshot().board("A").nodes.get("t1"))).toEqual({ kind: "failed", label: "响应无效" });
     expect(h.changes.filter((c) => c.kind === "runResult")).toHaveLength(0);
     expect([...h.fs.files.keys()].filter((p) => /\/result\.|\/layers\//.test(p))).toEqual([]);
   });
@@ -165,7 +165,7 @@ describe("Flash 失败政策", () => {
     h.replies.push({ status, body: "{}" });
     await h.runner.submit(h.target(), b, ["t1"]);
     await settle();
-    expect(h.statuses().t1.kind).toBe("failed");
+    expect(h.statuses().t1?.kind).toBe("failed");
     h.advance(300000);
     await settle();
     expect(h.requests).toHaveLength(1);
@@ -320,7 +320,7 @@ describe("任务运行器：取消", () => {
     await settle();
     const before = h.runner.getSnapshot();
     h.runner.cancel({ kind: "task", boardKey: "A", taskNodeId: "zzz" });
-    expect(h.statuses()).toEqual(Object.fromEntries(before.board("A").statuses));
+    expect(h.runner.getSnapshot().board("A").nodes).toEqual(before.board("A").nodes);
     expect(h.logs.filter((l) => l.fields.to_status === "cancelled")).toEqual([]);
   });
 
@@ -355,6 +355,58 @@ describe("任务运行器：读参考图失败", () => {
     expect(h.locked()).toEqual([]);
     expect(h.files.size).toBe(0);
     expect(h.changes).toEqual([]);
+  });
+});
+
+describe("任务运行器：快照按（画板, 任务节点）聚合", () => {
+  const node = (h: ReturnType<typeof harness>, id: string, boardKey = "A") => h.runner.getSnapshot().board(boardKey).nodes.get(id);
+  const activeTaskId = (h: ReturnType<typeof harness>, id: string) => h.runner.getSnapshot().active.find((a) => a.taskNodeId === id)?.taskId;
+
+  it("执行中、排队的各份带任务编号，计数按状态汇总", async () => {
+    const h = harness({ concurrency: 1 });
+    h.gateway.closed = true;
+    await h.runner.submit(h.target(), board(["t1", "t2"]), ["t1", "t2"]);
+    await settle();
+    expect(activeTaskId(h, "t1")).toMatch(/^\d{8}T\d{6}Z-/);
+    expect(node(h, "t1")).toEqual({ copies: [{ taskId: activeTaskId(h, "t1"), status: expect.objectContaining({ kind: "running" }) }], counts: { running: 1 } });
+    expect(node(h, "t2")).toEqual({ copies: [{ taskId: activeTaskId(h, "t2"), status: { kind: "queued" } }], counts: { queued: 1 } });
+  });
+
+  it("读参考图中的份还没有任务编号；读图失败的份明细带失败原因", async () => {
+    const h = harness();
+    h.read.closed = true;
+    const b = board(["t1"], true);
+    const gone = { ...b, nodes: b.nodes.map((n) => (n.id === "r" ? { ...n, path: "refs/gone.png" } : n)) as BoardNode[] };
+    const submitting = h.runner.submit(h.target(), gone, ["t1"]);
+    await settle();
+    expect(node(h, "t1")).toEqual({ copies: [{ taskId: null, status: { kind: "queued" } }], counts: { queued: 1 } });
+    h.read.open();
+    await submitting;
+    expect(node(h, "t1")).toEqual({ copies: [{ taskId: null, status: { kind: "failed", label: "本地文件错误" } }], counts: { failed: 1 } });
+  });
+
+  it("失败的份明细带任务编号与失败原因；再运行成功后不再显示上次的终态", async () => {
+    const h = harness();
+    h.replies.push({ status: 500, body: "{}" });
+    await h.runner.submit(h.target(), board(), ["t1"]);
+    await settle();
+    const failedTaskId = h.logs.find((l) => l.kind === "queue_dispatch")?.fields.task_id;
+    expect(node(h, "t1")).toEqual({ copies: [{ taskId: failedTaskId, status: { kind: "failed", label: expect.any(String) } }], counts: { failed: 1 } });
+    await h.runner.submit(h.target(), board(), ["t1"]);
+    await settle();
+    expect(h.runner.getSnapshot().board("A").nodes.size).toBe(0);
+  });
+
+  it("已取消的份按任务编号保留；关闭画板后遗忘", async () => {
+    const h = harness();
+    h.gateway.closed = true;
+    await h.runner.submit(h.target(), board(), ["t1"]);
+    await settle();
+    const taskId = activeTaskId(h, "t1");
+    h.runner.cancel({ kind: "task", boardKey: "A", taskNodeId: "t1" });
+    expect(node(h, "t1")).toEqual({ copies: [{ taskId, status: { kind: "cancelled", gatewayMayContinue: true } }], counts: { cancelled: 1 } });
+    h.runner.closeBoard("A");
+    expect(h.runner.getSnapshot().board("A").nodes.size).toBe(0);
   });
 });
 

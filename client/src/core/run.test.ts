@@ -185,7 +185,7 @@ describe("Flash 普通任务", () => {
       return;
     }
     expect(problems).toEqual([]);
-    expect([...runner.getSnapshot().board("A").statuses]).toEqual([]);
+    expect([...runner.getSnapshot().board("A").nodes]).toEqual([]);
     expect(changes).toEqual(["submitted", "runResult"]);
     expect(events.slice(0, 8)).toEqual([
       "decode:source1", "encode:source1:6000x6000:png", "close:source1", "decode:fitted1", "close:fitted1",
