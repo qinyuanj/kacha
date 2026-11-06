@@ -147,6 +147,10 @@ export type CancelFilter =
   | { kind: "waiting" }
   | { kind: "all" };
 
+/** 重新生成按 copies 份展开（调用方经 runCopies 算出、提交时固化，缺省为 1）；
+ *  生成变体（fromTaskId = 该结果的任务编号）总是一份，不改 last_submitted。 */
+export type RegenerateRequest = { kind: "regenerate"; copies?: number } | { kind: "variant"; fromTaskId: string };
+
 /** 任务节点 id → 本次实际份数（调用方经 core 的 runCopies / copiesByNode 算出，提交时固化）；缺省为 1。 */
 export type CopiesByNode = Readonly<Record<string, number>>;
 
@@ -154,9 +158,8 @@ export interface Runner {
   /** 按顺序读参考图并入队，每个节点按 copies 展开为输入相同的若干个生成任务；board 是二次确认时的画板。
    *  返回本地提交失败的说明（不含密钥与提示词）。 */
   submit(target: RunTarget, board: Board, taskNodeIds: string[], copies?: CopiesByNode): Promise<string[]>;
-  /** 重新生成 / 生成变体（fromTaskId = 该结果的任务编号）；board 是当前画板。重新生成按 copies 份展开（调用方算出、
-   *  提交时固化，缺省为 1）；生成变体总是一份。返回本地失败说明。 */
-  regenerate(target: RunTarget, board: Board, taskNodeId: string, fromTaskId?: string, copies?: number): Promise<string | null>;
+  /** 重新生成 / 生成变体（见 RegenerateRequest，缺省为重新生成一份）；board 是当前画板。返回本地失败说明。 */
+  regenerate(target: RunTarget, board: Board, taskNodeId: string, request?: RegenerateRequest): Promise<string | null>;
   cancel(filter: CancelFilter): void;
   /** 关闭画板：取消该画板的任务并遗忘它的状态与经手过的任务编号。 */
   closeBoard(boardKey: string): void;
@@ -534,7 +537,7 @@ export function createRunner(ports: RunnerPorts): Runner {
     return problems;
   }
 
-  async function regenerate(target: RunTarget, board: Board, taskNodeId: string, fromTaskId?: string, copies = 1): Promise<string | null> {
+  async function regenerate(target: RunTarget, board: Board, taskNodeId: string, request: RegenerateRequest = { kind: "regenerate" }): Promise<string | null> {
     if (submissionGuard) {
       submissionGuard();
       return null;
@@ -544,7 +547,9 @@ export function createRunner(ports: RunnerPorts): Runner {
     const tableSha256 = await tableDigest(target.table);
     if (generation !== submissionGeneration) return null;
     if (occupied(target.boardKey, taskNodeId)) return null;
-    const [problem] = await expand(target, taskNodeId, { cancelled: false }, fromTaskId === undefined ? copies : 1, () => generation !== submissionGeneration, (submittedAt) =>
+    // 生成变体固定一份只在这里判断。
+    const [copies, fromTaskId] = request.kind === "variant" ? [1, request.fromTaskId] : [request.copies ?? 1, undefined];
+    const [problem] = await expand(target, taskNodeId, { cancelled: false }, copies, () => generation !== submissionGeneration, (submittedAt) =>
       prepareRegenerate(deps, { board, table: target.table, tableSha256, userRoot: target.userRoot, taskNodeId, fromTaskId, submittedAt }),
     );
     return problem ?? null;

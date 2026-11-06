@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Board, BoardNode } from "./board";
 import { parseOutcome } from "./taskDir";
 import { board, harness, settle } from "./testing/runnerHarness";
-import { createRunner, nodeCopyDetail, nodeStatus, nodeSummary, summaryTone } from "./runner";
+import { createRunner, nodeCopyDetail, nodeStatus, nodeSummary, summaryTone, type RegenerateRequest } from "./runner";
 import { BUILTIN_TABLE } from "./capabilities";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
 import { sendPlanOf } from "./taskView";
@@ -101,7 +101,7 @@ describe("Lite 停用", () => {
     expect(h.files.size).toBe(0);
     expect(h.changes).toEqual([]);
   });
-  it.each([undefined, "20260916T091500Z-deadbeef"])("历史 Lite 重新生成/变体在当前节点已改 Flash 后仍阻止且不改历史 (%s)", async (fromTaskId) => {
+  it.each<RegenerateRequest>([{ kind: "regenerate" }, { kind: "variant", fromTaskId: "20260916T091500Z-deadbeef" }])("历史 Lite 重新生成/变体在当前节点已改 Flash 后仍阻止且不改历史 (%j)", async (request) => {
     const h = harness();
     const b = board();
     const t = b.nodes.find((n) => n.type === "task")!;
@@ -112,7 +112,7 @@ describe("Lite 停用", () => {
     h.files.set(path, old);
     t.model = "doubao-seedream-5-0-flash-260915";
     t.last_submitted = { task_id: taskId, model: "doubao-seedream-5-0-lite-260128", prompt: "旧猫", negative_prompt: "", size_spec: { tier: "3K", ratio: "1:1", width: null, height: null }, layer_decomposition: false, transparent_background: false, images: [] };
-    expect(await h.runner.regenerate(h.target(), b, "t1", fromTaskId)).toBe("Lite 已停用，请切换到 Flash");
+    expect(await h.runner.regenerate(h.target(), b, "t1", request)).toBe("Lite 已停用，请切换到 Flash");
     expect(h.requests).toEqual([]);
     expect(h.files.size).toBe(1);
     expect(h.files.get(path)).toEqual(old);
@@ -524,7 +524,7 @@ describe("任务运行器：按份数展开", () => {
   it("重新生成按传入的份数展开：N 个任务目录、N 条运行结果，各份写入 last_submitted", async () => {
     const h = harness({ concurrency: 3 });
     const { b } = await submitted(h);
-    expect(await h.runner.regenerate(h.target(), b, "t1", undefined, 3)).toBeNull();
+    expect(await h.runner.regenerate(h.target(), b, "t1", { kind: "regenerate", copies: 3 })).toBeNull();
     await settle();
     expect(results(h)).toHaveLength(3);
     expect(h.taskDirs().size).toBe(4);
@@ -540,10 +540,10 @@ describe("任务运行器：按份数展开", () => {
     expect(results(h)).toHaveLength(1);
   });
 
-  it("生成变体总是只生成一份，不改 last_submitted", async () => {
+  it("生成变体总是只生成一份（并发上限再高也是），不改 last_submitted", async () => {
     const h = harness({ concurrency: 3 });
     const { b, resultTaskId } = await submitted(h);
-    expect(await h.runner.regenerate(h.target(), b, "t1", resultTaskId, 3)).toBeNull();
+    expect(await h.runner.regenerate(h.target(), b, "t1", { kind: "variant", fromTaskId: resultTaskId })).toBeNull();
     await settle();
     expect(results(h)).toHaveLength(1);
     expect(h.taskDirs().size).toBe(2);
