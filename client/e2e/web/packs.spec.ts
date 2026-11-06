@@ -17,7 +17,9 @@ const V032 = fileURLToPath(new URL("../../fixtures/packs/v0.3.2-flash-layers.ugc
 const V2 = fileURLToPath(new URL("../../fixtures/packs/v2-duplicates.ugcpack", import.meta.url));
 /** 桌面版 0.2.0 导出的真实包（Rust zip 写的可 seek 文件，.json 条目 deflate，图片 stored）。 */
 const V020 = fileURLToPath(new URL("../../../contracts/smoke/board-pack/豆包测试.ugcpack", import.meta.url));
-const REF_ENTRY = "导入参考图/5e4b079355f5f06363744c0778c5174040645713e06e6877eae22f573d46e6b0.png";
+/** 造测试包用的 Python：Windows 上 `python3` 是应用商店占位程序，真解释器叫 `python`。 */
+const PYTHON = process.platform === "win32" ? "python" : "python3";
+const REF_ENTRY ="导入参考图/5e4b079355f5f06363744c0778c5174040645713e06e6877eae22f573d46e6b0.png";
 
 const dialog = (page: Page) => page.getByRole("dialog", { name: "画板包" });
 const toast = (page: Page) => page.locator(".toast");
@@ -452,7 +454,7 @@ test("正常导入大包（条目超过单份 64 MB，整包上传）：上传�
 /** 在 v0.3.2 包的任务目录里加一个 65 MB 的随机文件：超过单份内容上限，回退为整包上传；上传与合并都不是瞬间完成。 */
 function bigPack(rig: Rig): string {
   const file = path.join(rig.dataRoot, "big.ugcpack");
-  execFileSync("python3", ["-I", "-c", [
+  execFileSync(PYTHON, ["-I", "-c", [
     "import zipfile,sys,os",
     "src=zipfile.ZipFile(sys.argv[1]);z=zipfile.ZipFile(sys.argv[2],'w',zipfile.ZIP_DEFLATED)",
     "[z.writestr(i,src.read(i.filename)) for i in src.infolist()]",
@@ -511,7 +513,7 @@ test("同一个包导入两次：第二次没有内容上传请求，结果为�
 /** 用 v2 夹具还原出 v1 包：被省略的快照写回为实存条目，两个任务目录各带一份相同的 4 MB 随机文件。 */
 function duplicatedV1Pack(rig: Rig): string {
   const file = path.join(rig.dataRoot, "dup-v1.ugcpack");
-  execFileSync("python3", ["-I", "-c", [
+  execFileSync(PYTHON, ["-I", "-c", [
     "import zipfile,sys,os,json",
     "src=zipfile.ZipFile(sys.argv[1]);m=json.loads(src.read('manifest.json'));dup=m.pop('duplicates');m['pack_format_version']=1",
     "z=zipfile.ZipFile(sys.argv[2],'w',zipfile.ZIP_STORED)",
@@ -599,8 +601,8 @@ function makePack(rig: Rig, name: string, entries: Record<string, string>, manif
 }
 
 function makeZip(rig: Rig, file: string, lines: string[]): string {
-  // 用 python 标准库写真 zip：e2e 环境已有 python3，避免给客户端加 zip 依赖。
-  execFileSync("python3", ["-I", "-c", `import zipfile,sys;z=zipfile.ZipFile(sys.argv[1],'w');${lines.join(";")};z.close()`, file]);
+  // 用 python 标准库写真 zip：e2e 环境已有 Python，避免给客户端加 zip 依赖。
+  execFileSync(PYTHON, ["-I", "-c", `import zipfile,sys;z=zipfile.ZipFile(sys.argv[1],'w');${lines.join(";")};z.close()`, file]);
   return file;
 }
 
