@@ -49,6 +49,35 @@ async fn write_new_file_only_creates_and_conflicts_with_409() {
 }
 
 #[tokio::test]
+async fn read_file_cache_headers_follow_path_shape() {
+    const IMMUTABLE: &str = "private, max-age=31536000, immutable";
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let root = h.user_root(GOOD_KEY);
+    let files = [
+        ("2026-11-04/20261104T120000Z-abc/result.png", IMMUTABLE),
+        ("2026-11-04/20261104T120000Z-abc/task.json", IMMUTABLE),
+        ("2026-11-04/20261104T120000Z-abc/layers/01.png", IMMUTABLE),
+        ("2026-11-04/20261104T120000Z-abc/.staging/result.png", "no-cache"),
+        ("导入参考图/abc.png", "no-cache"),
+        ("画板/本地.ugcboard.json", "no-cache"),
+        ("2026-11-04/顶层.png", "no-cache"),
+    ];
+    for (rel, _) in files {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"bytes").unwrap();
+    }
+    for (rel, expected) in files {
+        let reply = get_file(&h, &cookie, rel).await;
+        assert_eq!(reply.status, 200, "{rel}: {}", reply.text());
+        assert_eq!(reply.headers.get("cache-control").and_then(|v| v.to_str().ok()), Some(expected), "{rel}");
+        assert!(reply.headers.get("etag").is_none(), "{rel} 不应带 ETag");
+        assert!(reply.headers.get("last-modified").is_none(), "{rel} 不应带 Last-Modified");
+    }
+}
+
+#[tokio::test]
 async fn list_dir_returns_names_and_skips_nothing_outside() {
     let h = Harness::new();
     let cookie = h.session(GOOD_KEY).await;
