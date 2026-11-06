@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Board, BoardEdge, BoardNode, TaskNode } from "./board";
 import { BUILTIN_TABLE } from "./capabilities";
 import { imageSources } from "./graph";
-import { buildConfirmItems, collectRunFacts, createInterruptedLog, isDirty, isInterrupted, runDispatch, runScope, snapshotOf, storedStatuses, withSubmitted, type ConfirmItem } from "./submission";
+import { buildConfirmItems, collectRunFacts, createInterruptedLog, isDirty, isInterrupted, regenerateDispatch, runDispatch, runScope, snapshotOf, storedStatuses, withSubmitted, type ConfirmItem } from "./submission";
 import { taskDirOfTaskId, writeOutcome } from "./taskDir";
 import { nodeStatus, nodeSummary } from "./runner";
 import type { UnrunnableReason } from "./taskView";
@@ -329,6 +329,34 @@ describe("份数超过并发上限", () => {
     const b = counted(6);
     expect(buildConfirmItems(b, BUILTIN_TABLE, ["t"], facts(2))[0].warnings).toEqual(["份数 6，本次按 2"]);
     expect(buildConfirmItems(b, BUILTIN_TABLE, ["t"], facts(6))[0].warnings).toEqual([]);
+  });
+});
+
+describe("重新生成分派", () => {
+  /** 上次以 Flash 提交、当前节点已改回 qwen 的任务节点。 */
+  const counted = (count?: number) => {
+    const b = submitted(board([prompt("p", "一只橘猫"), task("t", count === undefined ? {} : { count })], [edge("p", "t", "positive")]), "t");
+    return { ...b, nodes: b.nodes.map((n) => (n.type === "task" ? { ...n, last_submitted: { ...n.last_submitted!, model: "doubao-seedream-5-0-flash-260915" } } : n)) };
+  };
+
+  it("实际份数为 1 时直接提交，不弹确认", () => {
+    expect(regenerateDispatch(counted(), BUILTIN_TABLE, "t", 4)).toEqual({ kind: "submit", copies: 1 });
+    expect(regenerateDispatch(counted(3), BUILTIN_TABLE, "t", 1)).toEqual({ kind: "submit", copies: 1 });
+  });
+
+  it("实际份数大于 1 时弹确认，写明份数和重新生成所用的模型", () => {
+    expect(regenerateDispatch(counted(3), BUILTIN_TABLE, "t", 4)).toEqual({ kind: "confirm", copies: 3, modelName: "Seedream 5.0 Flash", note: null });
+  });
+
+  it("份数被截断时写明「节点设为 X，本次按 Y」", () => {
+    expect(regenerateDispatch(counted(6), BUILTIN_TABLE, "t", 4)).toEqual({ kind: "confirm", copies: 4, modelName: "Seedream 5.0 Flash", note: "节点设为 6，本次按 4" });
+  });
+
+  it("改完份数后按新的份数", () => {
+    const b = counted(2);
+    expect(regenerateDispatch(b, BUILTIN_TABLE, "t", 4)).toMatchObject({ copies: 2 });
+    const changed = { ...b, nodes: b.nodes.map((n) => (n.type === "task" ? { ...n, count: 3 } : n)) };
+    expect(regenerateDispatch(changed, BUILTIN_TABLE, "t", 4)).toMatchObject({ copies: 3 });
   });
 });
 

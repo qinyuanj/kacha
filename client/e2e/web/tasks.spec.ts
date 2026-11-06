@@ -97,6 +97,33 @@ test("Issue #37 运行指示单行取消：只取消那一份，其余份继续�
   expect(errors).toEqual([]);
 });
 
+test("Issue #35 重新生成按份数展开并二次确认；生成变体只生成一份", async ({ page, rig }) => {
+  const text = board("份数重新生成", [promptNode("p1", "一只猫"), taskNode("t1", { count: 2 })], [edge("p1", "t1", "positive")]);
+  const errors = await openApp(page, rig, { title: "份数重新生成", boardText: text });
+  await task(page, "t1").locator(".task-actions button.primary").click();
+  await expect(page.locator(".react-flow__node-result")).toHaveCount(2);
+  const asked: string[] = [];
+  let accept = false;
+  page.on("dialog", (d) => {
+    asked.push(d.message());
+    void (accept ? d.accept() : d.dismiss());
+  });
+  await openMenu(page, "t1", "重新生成");
+  await expect.poll(() => asked.length).toBe(1);
+  expect(asked[0]).toContain("将生成 2 份，模型 qwen-image-3.0-pro");
+  expect(bodies(rig)).toHaveLength(2);
+  accept = true;
+  await openMenu(page, "t1", "重新生成");
+  await expect(page.locator(".react-flow__node-result")).toHaveCount(4);
+  expect(bodies(rig)).toHaveLength(4);
+  await page.locator(".react-flow__node-result").first().click({ button: "right" });
+  await page.getByRole("menuitem", { name: "生成变体", exact: true }).click();
+  await expect(page.locator(".react-flow__node-result")).toHaveCount(5);
+  expect(bodies(rig)).toHaveLength(5);
+  expect(asked).toHaveLength(2);
+  expect(errors).toEqual([]);
+});
+
 test.describe("Issue #1 单图默认引用与多图点击插入引导", () => {
   const openSingleImage = async (page: Page, rig: Rig, prompt: string, files: Record<string, { b64: string }> = { [REF]: { b64: png(1024, 1024) } }, edges: unknown[] = [edge("p1", "t1", "positive"), edge("r1", "t1", "image:0")]) => {
     const text = board("单图", [promptNode("p1", prompt), referenceNode("r1", REF), taskNode("t1", { image_ports: 1 })], edges);

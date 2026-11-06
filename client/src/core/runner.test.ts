@@ -503,6 +503,48 @@ describe("任务运行器：按份数展开", () => {
     expect(node(h, "t1")?.counts).toEqual({ failed: 2 });
   });
 
+  /** 先运行一次，把 last_submitted 写回画板，供重新生成 / 生成变体使用。 */
+  async function submitted(h: ReturnType<typeof harness>) {
+    const b = board();
+    await h.runner.submit(h.target(), b, ["t1"]);
+    await settle();
+    const t = b.nodes.find((n) => n.id === "t1")!;
+    if (t.type !== "task") throw new Error("task");
+    const last = h.changes.filter((c) => c.change.kind === "submitted").at(-1)!.change;
+    if (last.kind === "submitted") t.last_submitted = last.lastSubmitted ?? null;
+    h.changes.length = 0;
+    return { b, resultTaskId: String(t.last_submitted!.task_id) };
+  }
+
+  it("重新生成按传入的份数展开：N 个任务目录、N 条运行结果，各份写入 last_submitted", async () => {
+    const h = harness({ concurrency: 3 });
+    const { b } = await submitted(h);
+    expect(await h.runner.regenerate(h.target(), b, "t1", undefined, 3)).toBeNull();
+    await settle();
+    expect(results(h)).toHaveLength(3);
+    expect(h.taskDirs().size).toBe(4);
+    expect(submittedIds(h)).toHaveLength(3);
+    expect(new Set(submittedIds(h)).size).toBe(3);
+  });
+
+  it("重新生成不传份数时仍为一份", async () => {
+    const h = harness();
+    const { b } = await submitted(h);
+    expect(await h.runner.regenerate(h.target(), b, "t1")).toBeNull();
+    await settle();
+    expect(results(h)).toHaveLength(1);
+  });
+
+  it("生成变体总是只生成一份，不改 last_submitted", async () => {
+    const h = harness({ concurrency: 3 });
+    const { b, resultTaskId } = await submitted(h);
+    expect(await h.runner.regenerate(h.target(), b, "t1", resultTaskId, 3)).toBeNull();
+    await settle();
+    expect(results(h)).toHaveLength(1);
+    expect(h.taskDirs().size).toBe(2);
+    expect(submittedIds(h)).toEqual([]);
+  });
+
   it("任务迁移与 queue_dispatch 按每份任务各自记录", async () => {
     const h = harness({ concurrency: 2 });
     await h.runner.submit(h.target(), board(), ["t1"], { t1: 2 });
