@@ -106,6 +106,8 @@ interface Props {
 
 const edgeId = (e: BoardEdge) => `${e.from.join(":")}->${e.to.join(":")}`;
 const dims = (w: number | undefined, h: number | undefined) => ({ width: w, height: h });
+/** 尚未回传测量结果的节点：非空即可让 React Flow 保留内部已测得的 handleBounds（见 nodes 的 measured）。 */
+const NOT_MEASURED: { width?: number; height?: number } = {};
 
 function defaultModel(table: CapabilityTable): string | null {
   return modelsByTier(table)[0]?.models[0]?.model_id ?? null;
@@ -170,7 +172,25 @@ export function BoardCanvas({
   const selectedEdgesRef = useRef(selectedEdges);
   selectedEdgesRef.current = selectedEdges;
   const [focusPrompt, setFocusPrompt] = useState<string | null>(null);
+  /** 提示词等待三选一的未提交文本：存在画布而不是节点里，节点离开视口卸载再挂载时仍在。 */
+  const [promptDrafts, setPromptDrafts] = useState<ReadonlyMap<string, string>>(new Map());
+  // 撤销 / 删除后不在画板上的提示词不留未提交文本。
+  useEffect(() => {
+    const present = new Set(board.nodes.map((n) => n.id));
+    setPromptDrafts((d) => ([...d.keys()].every((id) => present.has(id)) ? d : new Map([...d].filter(([id]) => present.has(id)))));
+  }, [board.nodes]);
   const missing = useMissingImages(board, userRoot);
+  // 悬浮动作条：光标在图片节点或动作条上时显示；从节点移到动作条之间留一点宽限。
+  const [hovered, setHovered] = useState<string | null>(null);
+  const unhoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** id = 显示该节点的动作条；null = 只取消待收起。 */
+  const showActionBar = (id: string | null) => {
+    if (unhoverTimer.current !== null) clearTimeout(unhoverTimer.current);
+    unhoverTimer.current = null;
+    if (id !== null) setHovered(id);
+  };
+  /** 节点卸载（离开视口、被删）时立即收起它的动作条：收不到 mouseleave，回到视口时不能无故弹出。 */
+  const unhoverNode = (id: string) => setHovered((h) => (h === id ? null : h));
   const [preview, setPreview] = useState<{ req: PreviewRequest; nonce: number } | null>(null);
   // 上下文菜单：client = 弹出处的窗口坐标，at = 同一点的画布坐标（新建节点落点）。
   const [menu, setMenu] = useState<{ target: MenuTarget; client: { x: number; y: number }; at: { x: number; y: number } } | null>(null);
@@ -289,6 +309,16 @@ export function BoardCanvas({
         if (taskId) setExpandOverrides((o) => new Map([...o, [taskId, true]]));
         setFocusPrompt(promptId);
       },
+      setPromptDraft: (promptId, text) =>
+        setPromptDrafts((d) => {
+          if (text === null ? !d.has(promptId) : d.get(promptId) === text) return d;
+          const next = new Map(d);
+          if (text === null) next.delete(promptId);
+          else next.set(promptId, text);
+          return next;
+        }),
+      promptFocused: (promptId) => setFocusPrompt((f) => (f === promptId ? null : f)),
+      nodeUnmounted: (nodeId) => unhoverNode(nodeId),
       addAsReference: (resultId, sourceLayer = null) => void apply({ kind: "addAsReference", resultId, selected: [...selectedRef.current], sourceLayer }),
       previewNode: openNodePreview,
       editRegion: (taskId, ref) => {
@@ -420,7 +450,10 @@ export function BoardCanvas({
         id: n.id,
         position: { x: n.pos[0], y: n.pos[1] },
         selected: selectedNodes.has(n.id),
-        measured: measured[n.id],
+        // 承重逻辑（xyflow#3816）：开启 onlyRenderVisibleElements 后，React Flow 只强制渲染还没有 handleBounds（未测量）的节点。
+        // 重建的节点不带 measured 时，adoptUserNodes 会清空已测得的 handleBounds，节点（含视口外的）被重新强制渲染、连线闪断；
+        // 还没回传到这里的（刚测完、setMeasured 未提交）也要带一个空对象，否则这次重建清空后不会再测，节点永远留在 DOM 中。
+        measured: measured[n.id] ?? NOT_MEASURED,
         className: nodeClassName(n.id, { lineage: highlighted.nodes.has(n.id), selecting: selectedNodes.size > 0, drag }) || undefined,
       };
       // 图片节点按存的宽度与图片比例显示（不回写 size）；缺图时高度随占位内容。
@@ -430,7 +463,7 @@ export function BoardCanvas({
       };
       switch (n.type) {
         case "prompt":
-          return [{ ...base, type: "prompt", data: { node: n, recorded: hasDownstreamRecords(board, n.id), autoFocus: focusPrompt === n.id, portKind: promptPortKind(board, n.id), guides: promptGuidesOf(n.id) } }];
+          return [{ ...base, type: "prompt", data: { node: n, recorded: hasDownstreamRecords(board, n.id), autoFocus: focusPrompt === n.id, draft: promptDrafts.get(n.id) ?? null, portKind: promptPortKind(board, n.id), guides: promptGuidesOf(n.id) } }];
         case "result":
           // 结果回灌到任务上才按下游模型规则提示；没接任务不提示。
           return [{ ...base, ...imageBox(n.path), type: "result", data: { node: n, rules: rulesOf(downstreamModels(n.id)), missing: missing.has(n.id) } }];
@@ -486,7 +519,7 @@ export function BoardCanvas({
         }
       }
     });
-  }, [board, table, userRoot, selectedNodes, measured, statusOf, runStateOf, locked, discovery, concurrency, highlighted, missing, focusPrompt, alphaByNode, imageInfos, expanded, menuFacts, drag]);
+  }, [board, table, userRoot, selectedNodes, measured, statusOf, runStateOf, locked, discovery, concurrency, highlighted, missing, focusPrompt, promptDrafts, alphaByNode, imageInfos, expanded, menuFacts, drag]);
 
   const dragging = drag !== null;
   const edges = useMemo<Edge[]>(
@@ -538,6 +571,7 @@ export function BoardCanvas({
         if (c.type === "position" && c.position) moves.set(c.id, c.position);
         else if (c.type === "dimensions" && c.dimensions) {
           const { width, height } = c.dimensions;
+          // 测量结果存下来、在重建节点时回传（见 nodes 的 measured）：只渲染可见节点的前提。
           setMeasured((m) => (m[c.id]?.width === width && m[c.id]?.height === height ? m : { ...m, [c.id]: dims(width, height) }));
           // NodeResizer 拖动中带 resizing: true，松开时报一次 resizing: false；普通测量不带 resizing。
           if (c.resizing) resized.set(c.id, c.dimensions);
@@ -798,15 +832,6 @@ export function BoardCanvas({
 
   const menuEntries = menu ? menuItems(menu.target, menuFacts(menu.target.kind === "node" ? selectionForMenu(selectedNodes, menu.target.nodeId) : selectedNodes)) : [];
 
-  // 悬浮动作条：光标在图片节点或动作条上时显示；从节点移到动作条之间留一点宽限。
-  const [hovered, setHovered] = useState<string | null>(null);
-  const unhoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** id = 显示该节点的动作条；null = 只取消待收起。 */
-  const showActionBar = (id: string | null) => {
-    if (unhoverTimer.current !== null) clearTimeout(unhoverTimer.current);
-    unhoverTimer.current = null;
-    if (id !== null) setHovered(id);
-  };
   const hideActionBarSoon = () => {
     showActionBar(null);
     unhoverTimer.current = setTimeout(() => setHovered(null), 150);
@@ -887,6 +912,8 @@ export function BoardCanvas({
           edges={edges}
           nodeTypes={nodeTypes}
           proOptions={{ hideAttribution: true }}
+          // 只渲染视口内的节点与连线：DOM、布局与解码开销随视口而不随画板总量（#66）。依赖上面 measured 的回传。
+          onlyRenderVisibleElements
           edgeTypes={edgeTypes}
           {...nav.flowProps}
           deleteKeyCode={dialogOpen ? null : nav.flowProps.deleteKeyCode}
