@@ -491,7 +491,8 @@ describe("任务运行器：按份数展开", () => {
     expect(node(h, "t1")).toEqual({ copies: [{ taskId: failedTaskId, status: { kind: "failed", label: expect.any(String) } }], counts: { failed: 1 }, total: 3 });
     // 摘要按本次提交的份数：3 份里只剩 1 份失败，仍显示计数摘要与悬停明细。
     expect(nodeSummary(node(h, "t1"))).toBe("失败 1");
-    expect(nodeCopyDetail(node(h, "t1"))).toMatch(/^第 1 份：失败 · /);
+    // 成功的份不在明细里，按下标编号会把失败的那份说成「第 1 份」；明细只列状态与原因，不带序号。
+    expect(nodeCopyDetail(node(h, "t1"))).toMatch(/^失败 · [^\n]+$/);
   });
 
   it("重新运行前只清除该节点上次的终态一次，展开中的后续份不再清除", async () => {
@@ -801,7 +802,7 @@ describe("任务节点状态显示", () => {
   it("按本次提交的份数判断：多份提交只剩一份未成功时仍给摘要与明细", () => {
     const n = { copies: [copy("failed")], counts: { failed: 1 }, total: 3 };
     expect(nodeSummary(n)).toBe("失败 1");
-    expect(nodeCopyDetail(n)).toBe("第 1 份：失败 · x");
+    expect(nodeCopyDetail(n)).toBe("失败 · x");
   });
 
   it("摘要徽标的色调由计数决定：有失败即失败色，有执行中的带转圈", () => {
@@ -811,12 +812,12 @@ describe("任务节点状态显示", () => {
     expect(summaryTone({ backoff: 1, failed: 2 })).toEqual({ tone: "failed", spinning: false });
   });
 
-  it("悬停明细：多份时逐份列出状态与失败原因；一份时没有", () => {
+  it("悬停明细：多份时逐份列出状态与失败原因、不带序号；一份时没有", () => {
     const failed = (label: string) => ({ taskId: null, status: { kind: "failed" as const, label } });
     expect(nodeCopyDetail({ copies: [failed("网关超时"), failed("内容审核未通过"), copy("cancelled"), copy("running")], counts: { failed: 2, cancelled: 1, running: 1 }, total: 4 })).toBe(
-      "第 1 份：失败 · 网关超时\n第 2 份：失败 · 内容审核未通过\n第 3 份：已取消\n第 4 份：执行中",
+      "失败 · 网关超时\n失败 · 内容审核未通过\n已取消\n执行中",
     );
-    expect(nodeCopyDetail({ copies: [{ taskId: null, status: { kind: "interrupted" } }, copy("backoff"), copy("queued")], counts: {}, total: 3 })).toBe("第 1 份：已中断\n第 2 份：网关限流，等待重试\n第 3 份：排队中");
+    expect(nodeCopyDetail({ copies: [{ taskId: null, status: { kind: "interrupted" } }, copy("backoff"), copy("queued")], counts: {}, total: 3 })).toBe("已中断\n网关限流，等待重试\n排队中");
     expect(nodeCopyDetail({ copies: [failed("x")], counts: { failed: 1 }, total: 1 })).toBeNull();
     expect(nodeCopyDetail(undefined)).toBeNull();
   });

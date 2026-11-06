@@ -176,7 +176,7 @@ test.describe("#19 / #20 重开画板后的已存状态", () => {
     });
     const badge = task(page, "tm").locator(".status-failed");
     await expect(badge).toHaveText("失败 2 · 已中断 1");
-    await expect(badge).toHaveAttribute("title", "第 1 份：失败 · 鉴权失败\n第 2 份：失败 · 网关超时\n第 3 份：已中断");
+    await expect(badge).toHaveAttribute("title", "失败 · 鉴权失败\n失败 · 网关超时\n已中断");
   });
 
   test("结局记录读失败（5xx）不显示已中断，恢复后能读到真实状态", async ({ page, rig }) => {

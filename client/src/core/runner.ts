@@ -115,10 +115,13 @@ function copyText(status: TaskStatus): string {
   }
 }
 
-/** 多份时计数摘要的悬停明细：逐份一行，含失败原因；本次提交只有一份（或没有）时为 null。 */
+/**
+ * 多份时计数摘要的悬停明细：未成功的份逐份一行，含失败原因；本次提交只有一份（或没有）时为 null。
+ * 不带序号：成功的份不在 copies 里，下标对不上实际是第几份。
+ */
 export function nodeCopyDetail(node: NodeRunState | undefined): string | null {
   if (!node || node.total < 2) return null;
-  return node.copies.map((c, i) => `第 ${i + 1} 份：${copyText(c.status)}`).join("\n");
+  return node.copies.map((c) => copyText(c.status)).join("\n");
 }
 
 export interface BoardRunState {
