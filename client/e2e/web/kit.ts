@@ -77,4 +77,13 @@ export function taskDir(rig: Rig, taskId: string, key = GOOD_KEY): string {
 }
 
 export const readJson = (path: string) => JSON.parse(readFileSync(path, "utf8"));
+
+/**
+ * 已落盘画板的节点。画布只渲染视口内的节点（#66），视口外的节点不在 DOM 中：
+ * 数节点、找新建节点的 id 以画板文件为准，不数 `.react-flow__node`。
+ */
+export function savedNodes(rig: Rig, title: string, key = GOOD_KEY): { id: string; type: string; pos: [number, number] }[] {
+  const file = path.join(rig.userRoot(key), boardRelPath(title));
+  return existsSync(file) ? readJson(file).nodes : [];
+}
 export const readText = (path: string) => readFileSync(path, "utf8");
