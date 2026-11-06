@@ -50,6 +50,8 @@ export interface TaskNode extends NodeBase {
   /** 缺省沿用 url/png/false；仅适用于 Flash。 */
   output_options?: OutputOptions;
   layer_size?: import("./gateway").LayerSize;
+  /** 份数：一次运行 / 重新生成展开出的生成任务个数（正整数）；缺省 = 1。不进脏判据，不随页面并发上限改写。 */
+  count?: number;
   /** 脏判据快照；未提交过为 null。本切片只读写不解释。 */
   last_submitted: Json | null;
 }
@@ -118,6 +120,11 @@ export interface Board {
   extra: Json;
 }
 
+/** 任务节点的份数：缺省（旧画板、新建节点）为 1。 */
+export function taskCount(task: TaskNode): number {
+  return task.count ?? 1;
+}
+
 export type ParsedBoard =
   | { kind: "ok"; board: Board }
   | { kind: "newer"; version: number }
@@ -178,7 +185,7 @@ function autoRatio(raw: unknown): AutoRatio | null {
 const NODE_KEYS = {
   prompt: ["id", "type", "pos", "size", "text"],
   reference: ["id", "type", "pos", "size", "path", "sha256", "display_name"],
-  task: ["id", "type", "pos", "size", "model", "size_spec", "image_ports", "layer_decomposition", "transparent_background", "output_options", "layer_size", "last_submitted"],
+  task: ["id", "type", "pos", "size", "model", "size_spec", "image_ports", "layer_decomposition", "transparent_background", "output_options", "layer_size", "count", "last_submitted"],
   result: ["id", "type", "pos", "size", "task_id", "file", "path", "layer_count", "record"],
 } as const;
 
@@ -217,6 +224,7 @@ function parseNode(raw: unknown): BoardNode {
         ...(o.layer_size === undefined ? {} : { layer_size: layerSizeOf(o.layer_size) }),
         transparent_background: bool(o, "transparent_background"),
         ...(o.output_options === undefined ? {} : { output_options: outputOptionsOf(o.output_options) }),
+        ...(o.count === undefined ? {} : { count: need<number>(Number.isInteger(o.count) && (o.count as number) >= 1, o.count, "count 必须是正整数") }),
         last_submitted: nullableObj(o, "last_submitted"),
       };
     default: {

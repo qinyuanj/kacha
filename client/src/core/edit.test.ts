@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { newBoard, type Board, type BoardEdge, type BoardNode, type PromptNode, type ReferenceNode, type ResultNode, type TaskNode } from "./board";
+import { newBoard, type Board, type BoardEdge, type BoardNode, type PromptNode, type ReferenceNode, type ResultNode, type TaskNode, taskCount } from "./board";
 import { BUILTIN_TABLE } from "./capabilities";
 import { changeClass, continueEditingChange, editBoard, type BoardChange, type EditEnv } from "./edit";
 import { cardDropConnection } from "./dragCreate";
@@ -225,6 +225,22 @@ describe("用户变更：结果画板、撤销步、建议选中", () => {
     expect(editBoard(set.board, { kind: "setRegion", edge: { from: ["a", "out"], to: ["t", "image:0"] }, region: null }, env()).step).toEqual({ label: "清除修改区域" });
   });
 
+  it("份数：新建任务默认为 1；修改份数构成一个撤销步，不改别的参数", () => {
+    const created = editBoard(board([]), { kind: "newTask", at: [0, 0], promptId: null }, env());
+    expect(taskCount(taskOf(created.board, "n1"))).toBe(1);
+
+    const b = board([task("t")]);
+    const r = editBoard(b, { kind: "setCount", taskId: "t", count: 3 }, env());
+    expect(taskOf(r.board)).toEqual({ ...task("t"), count: 3 });
+    expect(r.step).toEqual({ label: "修改份数" });
+    expect(editBoard(r.board, { kind: "setCount", taskId: "t", count: 3 }, env())).toEqual({ board: r.board, step: null });
+  });
+
+  it("份数只接受正整数；非法值不构成步", () => {
+    const b = board([task("t")]);
+    for (const count of [0, -2, 1.5, Number.NaN]) expect(editBoard(b, { kind: "setCount", taskId: "t", count }, env())).toEqual({ board: b, step: null });
+  });
+
   it("分叉提示词：旧文本留在原位给已提交的任务", () => {
     const b = board([prompt("p"), task("t", { last_submitted: { prompt: "猫" } })], [edge("p", "t", "positive")]);
     const r = editBoard(b, { kind: "forkPrompt", promptId: "p", text: "狗" }, env());
@@ -321,6 +337,7 @@ describe("运行期锁定：后置不变量", () => {
     rejected({ kind: "setRatio", taskId: "t", ratio: "16:9" });
     rejected({ kind: "setTaskFlag", taskId: "t", flag: "layer_decomposition", value: true });
     rejected({ kind: "setModel", taskId: "t", model: QWEN });
+    rejected({ kind: "setCount", taskId: "t", count: 2 });
     rejected({ kind: "setRegion", edge: { from: ["a", "out"], to: ["t", "image:0"] }, region: { rects: [[0, 0, 1, 1]], render: "highlight_overlay" } });
   });
 

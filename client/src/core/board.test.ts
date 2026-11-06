@@ -8,6 +8,7 @@ import {
   openBoard,
   parseBoard,
   serializeBoard,
+  taskCount,
   uniqueBoardFileName,
   type Board,
 } from "./board";
@@ -153,6 +154,34 @@ describe("画板文件读入", () => {
     expect(task.type === "task" && task.layer_size).toBe("1.5K");
     const round = parseBoard(serializeBoard(parsed.board));
     expect(round.kind).toBe("ok");
+  });
+
+  it("份数：旧画板没有该字段按 1 处理；有值时读写往返保持，超过并发上限也不改写", () => {
+    const old = parseBoard(serializeBoard(sample()));
+    if (old.kind !== "ok") throw new Error("应为可读");
+    const oldTask = old.board.nodes[2];
+    expect(oldTask.type === "task" && taskCount(oldTask)).toBe(1);
+    expect(JSON.parse(serializeBoard(old.board)).nodes[2]).not.toHaveProperty("count");
+
+    const raw = JSON.parse(serializeBoard(sample()));
+    raw.nodes[2].count = 25;
+    const parsed = parseBoard(JSON.stringify(raw));
+    if (parsed.kind !== "ok") throw new Error("应为可读");
+    const task = parsed.board.nodes[2];
+    expect(task.type === "task" && task.count).toBe(25);
+    expect(task.type === "task" && taskCount(task)).toBe(25);
+    expect(task.type === "task" && task.extra).toEqual({});
+    expect(JSON.parse(serializeBoard(parsed.board)).nodes[2].count).toBe(25);
+  });
+
+  it("份数不是正整数视为损坏，按字段名给原因", () => {
+    for (const bad of [0, -1, 1.5, "2", null]) {
+      const raw = JSON.parse(serializeBoard(sample()));
+      raw.nodes[2].count = bad;
+      const r = parseBoard(JSON.stringify(raw));
+      expect(r.kind).toBe("corrupt");
+      if (r.kind === "corrupt") expect(r.reason).toContain("count");
+    }
   });
 
   it("手写夹具画板含结果节点可读入", () => {

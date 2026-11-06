@@ -10,6 +10,7 @@ import type {
   RegionRender,
   TaskNode as TaskModel,
 } from "../core/board";
+import { taskCount } from "../core/board";
 import {
   findModel,
   isSupported,
@@ -591,8 +592,27 @@ function RatioCombo({
   );
 }
 
+/**
+ * 份数控件：可选 1 到页面当前并发上限。画板里的份数超过上限时照原值显示、不改写（实际份数在提交时按上限截断）。
+ * 锁定（有任务占着任务队列）时置灰。
+ */
+function CountField({ count, limit, disabled, onPick }: { count: number; limit: number; disabled: boolean; onPick: (count: number) => void }) {
+  const options = Array.from({ length: Math.max(1, limit) }, (_, i) => i + 1);
+  return (
+    <div className="field count-field nodrag">
+      <span className="field-label">份数</span>
+      <select aria-label="份数" value={count} disabled={disabled} onChange={(e) => onPick(Number(e.target.value))}>
+        {options.map((n) => (
+          <option key={n} value={n}>{n}</option>
+        ))}
+        {count > options.length && <option value={count}>{count}</option>}
+      </select>
+    </div>
+  );
+}
+
 export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskFlowNode>) {
-  const { table, apply, availableModels, editRegion, previewNode, perform } = useBoardActions();
+  const { table, apply, availableModels, concurrency, editRegion, previewNode, perform } = useBoardActions();
   const { node, ports, view, locked, workflow, images, slots, regionRender, hasPositive, status, expanded, run } = data;
   const { reasons, warnings, unreferenced, toggles } = view;
   const [infoOpen, setInfoOpen] = useState(false);
@@ -770,6 +790,8 @@ export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskF
           </span>
         )}
       </div>}
+
+      <CountField count={taskCount(node)} limit={concurrency} disabled={locked} onPick={(count) => apply({ kind: "setCount", taskId: node.id, count })} />
 
       <div className="ports">
         <PortRow id="positive" kind="positive" label={ports.negative ? "正向提示词" : "提示词"} className={hasPositive ? "" : "port-required"} connectable={!locked}>

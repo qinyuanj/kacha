@@ -16,6 +16,8 @@ export interface BoardActions {
   userRoot: string;
   /** 任务节点模型下拉：网关发现 ∩ 上架清单。 */
   availableModels: ModelCapability[];
+  /** 页面当前的并发上限：份数控件的可选上界（不据此改写画板里的份数）。 */
+  concurrency: number;
   /** 画板变更的唯一写入口（见 core/edit）：被拒或需告知时提示原因。 */
   apply: (change: BoardChange) => void;
   /** 迭代动作：触发节点在多选内时按选中顺序带上其余图片节点；sourceLayer（1 起）= 接该图层而非合成结果；at = 新任务左上角的画布坐标（拖线建节点）。 */

@@ -84,6 +84,8 @@ interface Props {
   redoLabel: string | null;
   toast: (message: string) => void;
   discovery: Discovery;
+  /** 页面当前的并发上限：份数控件的可选上界。 */
+  concurrency: number;
   statuses: ReadonlyMap<string, TaskStatus>;
   /** 本次程序运行期间队列经手过的提交；其余无结果的提交按任务目录推导失败 / 已取消 / 已中断。 */
   handled: ReadonlySet<string>;
@@ -121,6 +123,7 @@ export function BoardCanvas({
   redoLabel,
   toast,
   discovery,
+  concurrency,
   statuses,
   handled,
   onRun,
@@ -271,6 +274,7 @@ export function BoardCanvas({
       table,
       userRoot,
       availableModels: availableModels(table, discovery),
+      concurrency,
       apply: (change) => void apply(change),
       continueEditing: (nodeId, sourceLayer = null, at) => {
         const r = apply(continueEditingChange(selectedRef.current, nodeId, sourceLayer, at ? posOf(at) : null));

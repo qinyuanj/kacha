@@ -408,6 +408,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               redoLabel={redoLabel(active.history)}
               toast={toast}
               discovery={settings.discovery}
+              concurrency={settings.settings.concurrency}
               statuses={runState.board(active.key).statuses}
               handled={runState.board(active.key).handled}
               onRun={(ids) => void openRunConfirm(ids)}

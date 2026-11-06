@@ -4,7 +4,7 @@
 import type { OutputOptions } from "./gateway";
 import { outputOptions } from "./gateway";
 import { syncAutoRatios } from "./autoRatio";
-import type { Board, BoardEdge, PortRef, PromptNode, Region, TaskNode } from "./board";
+import { taskCount, type Board, type BoardEdge, type PortRef, type PromptNode, type Region, type TaskNode } from "./board";
 import { findModel, type CapabilityTable } from "./capabilities";
 import { attachReferences, newTask } from "./dragCreate";
 import { canConnect, connect, disconnect, forkPrompt, moveImagePort, removeNodes, syncImagePorts, workflowOf, type Connection } from "./graph";
@@ -82,6 +82,8 @@ export type BoardChange =
   | { kind: "setRatio"; taskId: string; ratio: string | null }
   | { kind: "setLayerSize"; taskId: string; size: import("./gateway").LayerSize }
   | { kind: "setOutputOptions"; taskId: string; options: OutputOptions }
+  /** 份数：正整数；可选范围（不超过并发上限）由控件约束，核心不按页面设置改写。 */
+  | { kind: "setCount"; taskId: string; count: number }
   | { kind: "setTaskFlag"; taskId: string; flag: "layer_decomposition" | "transparent_background"; value: boolean }
   /** 切换任务节点的模型，并记为画板最近选择。 */
   | { kind: "setModel"; taskId: string; model: string }
@@ -281,6 +283,9 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
       return { board: mapTask(board, change.taskId, (t) => ({ ...t, layer_size: change.size })), step: { label: "修改图层尺寸" } };
     case "setOutputOptions":
       return { board: mapTask(board, change.taskId, (t) => ({ ...t, output_options: outputOptions(change.options) })), step: { label: "修改输出选项" } };
+    case "setCount":
+      if (!Number.isInteger(change.count) || change.count < 1) return { board };
+      return { board: mapTask(board, change.taskId, (t) => (taskCount(t) === change.count ? t : { ...t, count: change.count })), step: { label: "修改份数" } };
     case "setTaskFlag":
       return {
         board: mapTask(board, change.taskId, (t) => (t[change.flag] === change.value ? t : { ...t, [change.flag]: change.value })),

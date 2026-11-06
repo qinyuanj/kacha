@@ -120,6 +120,13 @@ describe("脏判据快照", () => {
     });
   }
 
+  it("只改份数不算脏，份数也不进快照", () => {
+    const b = submitted(editBoard(), "t");
+    const recounted: Board = { ...b, nodes: b.nodes.map((n) => (n.id === "t" ? { ...n, count: 4 } : n)) as BoardNode[] };
+    expect(isDirty(recounted, "t")).toBe(false);
+    expect(snapshotOf(recounted, "t")).not.toHaveProperty("count");
+  });
+
   it("不相干的变化（位置、别的节点、快照里的未知字段顺序）不算脏", () => {
     const b = submitted(editBoard(), "t");
     const moved: Board = {
@@ -140,6 +147,12 @@ describe("运行范围", () => {
   it("无选中：整个画板的脏任务，已执行且不脏的跳过", () => {
     expect(runScope(twoTasks(), [])).toEqual(["t1", "t2"]);
     expect(runScope(executed(twoTasks(), "t1"), [])).toEqual(["t2"]);
+  });
+
+  it("已执行的任务只改份数：「运行全部」不包含它", () => {
+    const b = executed(twoTasks(), "t1");
+    const recounted: Board = { ...b, nodes: b.nodes.map((n) => (n.id === "t1" ? { ...n, count: 3 } : n)) as BoardNode[] };
+    expect(runScope(recounted, [])).toEqual(["t2"]);
   });
 
   it("提交过但没有结果（失败、中断）不算已执行，仍在范围内", () => {

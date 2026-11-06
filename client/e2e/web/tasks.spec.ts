@@ -4,7 +4,9 @@ import { readFileSync } from "node:fs";
 import { expect, type Page } from "@playwright/test";
 import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
 import { test, type Rig } from "./rig";
-import { openApp, task, taskRecords } from "./kit";
+import path from "node:path";
+import { GOOD_KEY } from "./rig";
+import { boardRelPath, openApp, readJson, task, taskRecords } from "./kit";
 
 const builtin = JSON.parse(readFileSync(new URL("../../src/core/capabilities.builtin.json", import.meta.url), "utf8"));
 const fixture = (name: string) => readFileSync(new URL(`../../src/core/__fixtures__/${name}`, import.meta.url), "utf8");
@@ -48,6 +50,20 @@ test("Issue #15 用户手动选择 Flash，设置 JPEG/水印并运行普通任�
   expect(Object.keys(bodies(rig)[0]).sort()).toEqual(["model", "optimize_prompt_options", "output_format", "prompt", "response_format", "size", "watermark"]);
   await expect(page.locator(".react-flow__node-result")).toHaveCount(1);
   expect(taskRecords(rig)[0].json.output_options).toEqual({ output_format: "jpeg", response_format: "url", watermark: true });
+  expect(errors).toEqual([]);
+});
+
+test("Issue #32 份数控件：可选 1 到并发上限，随画板保存；超限的份数照原值保留", async ({ page, rig }) => {
+  const text = board("份数", [promptNode("p1", "一只猫"), taskNode("t1"), taskNode("t2", { count: 7 }, [800, 0])], [edge("p1", "t1", "positive")]);
+  const errors = await openApp(page, rig, { title: "份数", boardText: text });
+  const saved = () => readJson(path.join(rig.userRoot(GOOD_KEY), boardRelPath("份数"))).nodes as { id: string; count?: number }[];
+  const count = (id: string) => task(page, id).getByRole("combobox", { name: "份数" });
+  await expect(count("t1")).toHaveValue("1");
+  await expect(count("t1").locator("option")).toHaveText(["1", "2", "3", "4"]);
+  await expect(count("t2")).toHaveValue("7");
+  await count("t1").selectOption("3");
+  await expect.poll(() => saved().find((n) => n.id === "t1")?.count).toBe(3);
+  expect(saved().find((n) => n.id === "t2")?.count).toBe(7);
   expect(errors).toEqual([]);
 });
 

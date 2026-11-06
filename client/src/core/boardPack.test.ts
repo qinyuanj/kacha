@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { newBoard, parseBoard, serializeBoard, uniqueBoardFileName, type Board, type ReferenceNode, type ResultNode } from "./board";
+import { newBoard, parseBoard, serializeBoard, taskCount, uniqueBoardFileName, type Board, type ReferenceNode, type ResultNode, type TaskNode } from "./board";
 import {
   PACK_CANCELLED,
   PACK_FORMAT_VERSION,
@@ -165,6 +165,32 @@ describe("导出计划", () => {
     expect(node.record.layers).toEqual(res.record.layers);
     expect(node.layer_count).toBe(2);
     expect(parsed.board.edges[0]).toMatchObject({ source_layer: 2 });
+  });
+});
+
+describe("份数随画板包导出与导入", () => {
+  const task = (id: string, count?: number): TaskNode => ({
+    ...base,
+    id,
+    type: "task",
+    model: "qwen-image-3.0-pro",
+    size_spec: { tier: "2K", ratio: "1:1", width: null, height: null },
+    image_ports: 0,
+    layer_decomposition: false,
+    transparent_background: false,
+    last_submitted: null,
+    ...(count === undefined ? {} : { count }),
+  });
+
+  it("导出的画板带份数，导入后原样保留（超过并发上限也不改写）；旧包没有份数按 1", async () => {
+    const plan = await planExport(boardWith(task("t", 3), task("big", 50), task("old")), ROOT, memoryFs({}));
+    const spec = buildExportSpec("0.3.0", "千问测试.ugcboard.json", plan);
+    const [manifest, boardText] = spec.texts;
+    const check = checkPack(manifest.text, { [boardText.entry]: boardText.text });
+    if (check.kind !== "ok") throw new Error(check.kind);
+    const tasks = check.boards[0].board.nodes as TaskNode[];
+    expect(tasks.map((t) => taskCount(t))).toEqual([3, 50, 1]);
+    expect(tasks[2]).not.toHaveProperty("count");
   });
 });
 
