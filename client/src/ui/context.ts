@@ -40,8 +40,11 @@ export interface BoardActions {
    * 提示词等待三选一的未提交文本（null = 没有），按节点 id 存在画布上，节点卸载后再挂载时仍在。
    */
   setPromptDraft: (promptId: string, text: string | null) => void;
-  /** 新建提示词已自动聚焦过一次：清除聚焦请求，日后进入视口重新挂载时不再抢焦点。 */
-  promptFocused: (promptId: string) => void;
+  /**
+   * 新建提示词的一次性聚焦请求：仍指向该提示词时返回 true 并清除（只聚焦一次）。节点据此决定是否聚焦，
+   * 不只看节点 data 里的 autoFocus——xyflow 拿到的节点数据会晚画布一次提交。
+   */
+  takePromptFocus: (promptId: string) => boolean;
   /** 图片节点卸载（离开视口、被删）：收不到 mouseleave，由它收起该节点的悬浮动作条。 */
   nodeUnmounted: (nodeId: string) => void;
 }
