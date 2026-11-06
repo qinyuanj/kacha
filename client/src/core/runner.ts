@@ -421,13 +421,13 @@ export function createRunner(ports: RunnerPorts): Runner {
       return [];
     }
     const dispatched = copies > 1 ? [] : undefined;
-    const batch = Array.from({ length: copies }, (): Job => ({ target, taskNodeId, phase: "reading", submission, total: copies, dispatched, retries: 0, startedAt: 0, controller: new AbortController() }));
-    batch.forEach((job) => jobs.add(job));
+    const copyJobs = Array.from({ length: copies }, (): Job => ({ target, taskNodeId, phase: "reading", submission, total: copies, dispatched, retries: 0, startedAt: 0, controller: new AbortController() }));
+    copyJobs.forEach((job) => jobs.add(job));
     clearFinished(target.boardKey, taskNodeId);
     publish();
     const problems: string[] = [];
     let submittedAt: Date | undefined;
-    for (const job of batch) {
+    for (const job of copyJobs) {
       if (job.controller.signal.aborted) continue;
       if (stopped()) {
         remove(job);
