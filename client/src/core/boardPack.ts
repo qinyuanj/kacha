@@ -269,6 +269,8 @@ export const PACK_CANCELLED = "已取消";
 export interface PackIo {
   /** 置取消标记；开始导出 / 导入前先以 false 复位。 */
   cancel(cancelled: boolean): Promise<void>;
+  /** 把选中的包上传到服务端临时位置，返回上传句柄；带进度，取消时中止请求并以 PACK_CANCELLED reject。 */
+  upload(file: File): Promise<string>;
   /** 包内条目名（正斜杠）。 */
   entries(pack: string): Promise<string[]>;
   /** 读指定条目的文本；不存在的条目不出现在结果里。 */
@@ -278,7 +280,7 @@ export interface PackIo {
    * 取消时以 PACK_CANCELLED reject，已移入的单元保留。
    */
   importUnits(pack: string, units: MergeUnit[], duplicates: PackDuplicate[]): Promise<{ outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number }>;
-  /** 判定不通过就放弃：Web 版删掉服务端的临时上传文件（桌面无此步骤）。 */
+  /** 不再合并就放弃：删掉服务端的临时上传文件（幂等）。 */
   discard?(pack: string): Promise<void>;
 }
 
@@ -309,10 +311,8 @@ export type ImportResult =
   | { kind: "done"; summary: ImportSummary; written: string[]; writeError: string | null };
 
 export interface ImportOptions {
-  /** 桌面是包路径；Web 是服务端上传句柄 id。 */
-  packPath: string;
-  /** 展示与日志用的包文件名（Web 的 packPath 是句柄，不含文件名）。 */
-  displayName?: string;
+  /** 用户选中的画板包文件；上传是导入流程的第一个阶段。 */
+  file: File;
   /** 按同名改名规则写入画板目录（并打开），返回实际写入的路径；会话状态归调用方。 */
   addBoard(board: Board): Promise<string>;
   /** 复位取消标记之后进入进度阶段。 */
@@ -321,31 +321,50 @@ export interface ImportOptions {
   log(kind: "board_pack", fields: Record<string, unknown>): void;
 }
 
+type Merged = { check: Extract<PackCheck, { kind: "ok" }>; report: Awaited<ReturnType<PackIo["importUnits"]>> };
+
 /**
- * 导入画板包（#128）：判版本与布局（不合格不写任何文件）→ 可取消地解压合并任务目录 → 逐个写画板。
- * 从「已拿到用户选的包路径」开始；选包、进度、结果弹窗与文案都留在 ui（弹窗不是端口，见 #128），这里只返回结局。
- * 取消或失败时已移入的任务目录保留；写画板第一个失败即停，已写的保留。
+ * 导入画板包（#128）：在同一个可取消的进度阶段里依次上传（#59）→ 判版本与布局（不合格不合并）→ 解压合并任务目录，
+ * 之后逐个写画板。从「已拿到用户选的包文件」开始；选包、进度、结果弹窗与文案都留在 ui（弹窗不是端口，见 #128），这里只返回结局。
+ * 上传被取消或失败时不再读包内容；上传之后的阶段不再合并时放弃上传。取消或失败时已移入的任务目录保留；写画板第一个失败即停，已写的保留。
  */
 export async function importPack(io: PackIo, opts: ImportOptions): Promise<ImportResult> {
-  const { packPath } = opts;
-  const packName = opts.displayName ?? basename(packPath);
-  const fields = { action: "import", pack_file: packName };
-  const check = await io
-    .entries(packPath)
-    .then((entries) => inspectPack(entries, (names) => io.readTexts(packPath, names)))
-    .catch((e): Rejected => ({ kind: "corrupt", reason: errorText(e) }));
-  if (check.kind !== "ok") {
-    await io.discard?.(packPath).catch(() => undefined);
-    opts.log("board_pack", { ...fields, result: check.kind });
-    return check;
-  }
-  const packBoards = check.boards.map((b) => basename(b.entry)).join(", ");
-  const outcome = await runCancellable(io, opts.onStage, () => io.importUnits(packPath, check.units, check.duplicates));
+  const { file } = opts;
+  const fields = { action: "import", pack_file: file.name };
+  let packBoards: string | undefined;
+  const outcome = await runCancellable(io, opts.onStage, async (): Promise<Rejected | Merged> => {
+    const pack = await io.upload(file);
+    try {
+      const check = await io
+        .entries(pack)
+        .then((entries) => inspectPack(entries, (names) => io.readTexts(pack, names)))
+        .catch((e): Rejected => {
+          if (errorText(e) === PACK_CANCELLED) throw e;
+          return { kind: "corrupt", reason: errorText(e) };
+        });
+      if (check.kind !== "ok") {
+        await io.discard?.(pack).catch(() => undefined);
+        return check;
+      }
+      packBoards = check.boards.map((b) => basename(b.entry)).join(", ");
+      return { check, report: await io.importUnits(pack, check.units, check.duplicates) };
+    } catch (e) {
+      // 服务端在合并结束时自己删临时文件；这里的放弃覆盖合并之前就被取消 / 失败的情况（幂等）。
+      await io.discard?.(pack).catch(() => undefined);
+      throw e;
+    }
+  });
+  const boardField = packBoards === undefined ? {} : { board_file: packBoards };
   if (!outcome.ok) {
-    opts.log("board_pack", { ...fields, board_file: packBoards, result: outcome.result });
+    opts.log("board_pack", { ...fields, ...boardField, result: outcome.result });
     return outcome.result === "cancelled" ? { kind: "cancelled" } : { kind: "failed", error: outcome.error };
   }
-  const summary = importSummary(check.units, outcome.value.outcomes);
+  if (!("report" in outcome.value)) {
+    opts.log("board_pack", { ...fields, result: outcome.value.kind });
+    return outcome.value;
+  }
+  const { check, report } = outcome.value;
+  const summary = importSummary(check.units, report.outcomes);
   const written: string[] = [];
   let writeError: string | null = null;
   try {
@@ -358,7 +377,7 @@ export async function importPack(io: PackIo, opts: ImportOptions): Promise<Impor
     task_dirs: summary.imported,
     skipped: summary.skipped,
     conflicts: summary.conflicts.length,
-    bytes: outcome.value.bytes,
+    bytes: report.bytes,
     board_file: writeError ? packBoards : written.join(", "),
     result: writeError ? "board_write_failed" : "ok",
   });
