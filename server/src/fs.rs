@@ -12,7 +12,7 @@ use serde::Deserialize;
 use tokio_util::io::ReaderStream;
 
 use crate::session::error;
-use crate::{paths, store, AppState, User, META_DIR};
+use crate::{cache, paths, store, AppState, User, META_DIR};
 
 #[derive(Deserialize)]
 pub struct PathQuery {
@@ -212,7 +212,11 @@ pub async fn read_file(State(state): State<AppState>, user: User, Query(q): Quer
     };
     match tokio::fs::File::open(&path).await {
         Ok(file) => (
-            [(header::CONTENT_LENGTH, meta.len().to_string()), (header::CONTENT_TYPE, content_type(&q.path))],
+            [
+                (header::CONTENT_LENGTH, meta.len().to_string()),
+                (header::CONTENT_TYPE, content_type(&q.path)),
+                (header::CACHE_CONTROL, cache::cache_control(&q.path).to_string()),
+            ],
             Body::from_stream(ReaderStream::new(file)),
         )
             .into_response(),
