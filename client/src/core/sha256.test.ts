@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sha256Hex } from "./sha256";
+import { sha256Hex, sha256Stream } from "./sha256";
 
 const hex = (s: string) => new TextEncoder().encode(s);
 
@@ -18,6 +18,14 @@ describe("sha256Hex（纯 JS，HTTP 非安全上下文下 crypto.subtle 不可�
     expect(await sha256Hex(hex("画板"))).toBe(createHash("sha256").update("画板").digest("hex"));
     const big = new Uint8Array(300000).map((_, i) => i % 251);
     expect(await sha256Hex(big)).toBe(createHash("sha256").update(big).digest("hex"));
+  });
+
+  it("增量接口：分块喂入与一次性结果相同", async () => {
+    const { createHash } = await import("node:crypto");
+    const big = new Uint8Array(300001).map((_, i) => (i * 7) % 253);
+    const h = sha256Stream();
+    for (let at = 0; at < big.length; at += 65536) h.update(big.subarray(at, at + 65536));
+    expect(h.hex()).toBe(createHash("sha256").update(big).digest("hex"));
   });
 
   it("不依赖 crypto.subtle 且保持异步", async () => {

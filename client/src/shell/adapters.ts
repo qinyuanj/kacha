@@ -6,7 +6,7 @@ import type { SettingsPorts } from "../core/settings";
 import type { ImageProbe } from "../core/submission";
 import type { TaskFs } from "../core/taskDir";
 import { imageCodec } from "./imageCodec";
-import { browser, httpFetch, ipc, packUpload, relay, session } from "./ipc";
+import { browser, httpFetch, ipc, packContent, packUpload, relay, session } from "./ipc";
 import { logEvent } from "./log";
 import { composeOverlay } from "./overlay";
 
@@ -44,10 +44,12 @@ export const packFs: PackFs = {
 
 export const packIo: PackIo = {
   cancel: ipc.boardPackCancel,
+  upload: packUpload.upload,
   entries: ipc.boardPackEntries,
   readTexts: ipc.boardPackReadTexts,
   importUnits: ipc.boardPackImport,
   discard: packUpload.discard,
+  ...packContent,
 };
 
 export const imageProbe: ImageProbe = {

@@ -2,7 +2,7 @@
 // 同时承载旧假壳 misc.spec 的 #17–#20（运行前判定与重开后的已存状态）。
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
 import { enterWithKey, GOOD_KEY, OTHER_KEY, test } from "./rig";
 import { openApp, task, taskRecords } from "./kit";
@@ -11,6 +11,10 @@ const REF = "导入参考图/cat.png";
 const singleImage = (prompt = "把衣服改成红色") =>
   board("文生图", [promptNode("p1", prompt), referenceNode("r1", REF), taskNode("t1", { image_ports: 1 })], [edge("p1", "t1", "positive"), edge("r1", "t1", "image:0")]);
 const files = { [REF]: { b64: png(1024, 1024) } };
+/** 结局记录写完的信号：界面先显示失败，结局记录随后才由页面写入（原子写，先写临时文件再改名）；
+ *  等这次写入的响应回来再读任务目录，否则会读到半途的 `.outcome.json.<pid>-…tmp`。须在触发运行前调用。 */
+const outcomeWritten = (page: Page) =>
+  page.waitForResponse((r) => r.request().method() === "PUT" && decodeURIComponent(r.url()).includes("/outcome.json") && r.ok());
 
 test("url 结果由服务端中转写入任务目录，刷新后结果节点仍在；对象存储不带 CORS", async ({ page, rig }) => {
   const errors = await openApp(page, rig, { title: "文生图", boardText: singleImage(), files });
@@ -22,7 +26,7 @@ test("url 结果由服务端中转写入任务目录，刷新后结果节点仍�
   expect(existsSync(path.join(dir, ".staging"))).toBe(false, "提交后不留暂存区");
   // 浏览器没有直接跨域取对象存储：桩的 /objects/* 响应不带 CORS，结果图由 <img> 靠 cookie 从服务端加载。
   const src = await page.locator(".react-flow__node-result img").first().getAttribute("src");
-  expect(src).toContain("/api/fs/file?path=");
+  expect(src).toContain("/api/fs/thumb?path=");
   await page.reload();
   await expect(page.locator(".react-flow__node-result")).toHaveCount(1);
   await expect(task(page, "t1").locator(".status")).toHaveCount(0);
@@ -32,8 +36,10 @@ test("url 结果由服务端中转写入任务目录，刷新后结果节点仍�
 test("下载失败：任务按失败处理，不换模型不重发，不留成品", async ({ page, rig }) => {
   rig.stub.objects.clear();
   await openApp(page, rig, { title: "文生图", boardText: singleImage(), files });
+  const written = outcomeWritten(page);
   await task(page, "t1").locator(".task-actions button.primary").click();
   await expect(task(page, "t1").locator(".status-failed")).toContainText("失败");
+  await written;
   await expect(page.locator(".react-flow__node-result")).toHaveCount(0);
   expect(rig.stub.requests).toHaveLength(1);
   const dir = path.dirname(taskRecords(rig)[0].path);
@@ -45,9 +51,11 @@ test("下载失败：任务按失败处理，不换模型不重发，不留成�
 test("对象存储返回 401：任务失败并如实显示上游状态，不踢回粘贴密钥界面", async ({ page, rig }) => {
   rig.stub.objectStatus = 401;
   await openApp(page, rig, { title: "文生图", boardText: singleImage(), files });
+  const written = outcomeWritten(page);
   await task(page, "t1").locator(".task-actions button.primary").click();
   const failed = task(page, "t1").locator(".status-failed");
   await expect(failed).toContainText("失败");
+  await written;
   await expect(page.getByLabel("API 密钥", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "进入工作台" })).toHaveCount(0);
   await expect(page.locator(".react-flow__node-result")).toHaveCount(0);
@@ -61,8 +69,10 @@ test("结果地址不在允许列表：400 拒绝，任务失败且不写文件"
       ? { json: { data: [{ url: "https://example.com/x.png?sig=abc" }] } }
       : { json: { metadata: { output: { choices: [{ message: { content: [{ image: "https://example.com/x.png?sig=abc" }] } }] } } } };
   await openApp(page, rig, { title: "文生图", boardText: singleImage(), files });
+  const written = outcomeWritten(page);
   await task(page, "t1").locator(".task-actions button.primary").click();
   await expect(task(page, "t1").locator(".status-failed")).toContainText("失败");
+  await written;
   await expect(page.locator(".react-flow__node-result")).toHaveCount(0);
   expect(rig.stub.requests).toHaveLength(1);
   const dir = path.dirname(taskRecords(rig)[0].path);

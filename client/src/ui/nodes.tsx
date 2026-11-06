@@ -44,13 +44,13 @@ import {
   type SizeSpec,
 } from "../core/size";
 import type { TaskView } from "../core/taskView";
-import { fileUrl } from "../shell/ipc";
+import { thumbUrl } from "../shell/ipc";
 import { useBoardActions, useImageInfo } from "./context";
 import { HoverButton, HoverSpan, useHover } from "./hoverInfo";
 import { Port } from "./ports";
 import type { Rect01 } from "./rects";
 
-/** recorded：直接下游有已提交过的任务，编辑时三选；autoFocus：「以此继续编辑」刚新建的空提示词。 */
+/** recorded：直接下游有已提交过的任务，编辑时三选；autoFocus：「以此继续编辑」刚新建的空提示词；draft：等待三选一的未提交文本（画布保管）。 */
 /** portKind：输出端口类型色（只连负向端口 = 负向色）。 */
 export interface PromptReferenceGuideItem {
   /** 用户序号，即该任务提示词里的「图N」。 */
@@ -66,7 +66,7 @@ export interface PromptReferenceGuideTask {
   label: string;
   images: PromptReferenceGuideItem[];
 }
-export type PromptFlowNode = Node<{ node: PromptModel; recorded: boolean; autoFocus: boolean; portKind: PortKind; guides: PromptReferenceGuideTask[] }, "prompt">;
+export type PromptFlowNode = Node<{ node: PromptModel; recorded: boolean; autoFocus: boolean; draft: string | null; portKind: PortKind; guides: PromptReferenceGuideTask[] }, "prompt">;
 /** missing：图片文件读不到，显示占位与「重新定位」。 */
 export type ReferenceFlowNode = Node<{ node: ReferenceModel; rules: InputImageRule[]; missing: boolean }, "reference">;
 /** rules = 下游任务模型的输入规则；没接任务时为空。 */
@@ -134,13 +134,16 @@ function Shell({ kind, title, className = "", children }: { kind: string; title:
   );
 }
 
+/** 节点里的图都延迟加载、异步解码。要写在 src 前面：React 按书写顺序设属性，部分浏览器先见到 src 就立即下载。 */
+const LAZY_IMAGE = { loading: "lazy", decoding: "async" } as const;
+
 function Thumb({ absPath, alt, onOpen }: { absPath: string; alt: string; onOpen?: () => void }) {
   const [missing, setMissing] = useState(false);
   useEffect(() => setMissing(false), [absPath]);
   return missing ? (
     <div className="thumb thumb-missing">图片缺失</div>
   ) : (
-    <img className="thumb" src={fileUrl(absPath)} alt={alt} draggable={false} onError={() => setMissing(true)} onDoubleClick={onOpen} />
+    <img className="thumb" {...LAZY_IMAGE} src={thumbUrl(absPath)} alt={alt} draggable={false} onError={() => setMissing(true)} onDoubleClick={onOpen} />
   );
 }
 
@@ -190,7 +193,11 @@ function ImageNode({
   hover: ReturnType<typeof useHover>;
   children: ReactNode;
 }) {
-  const { previewNode } = useBoardActions();
+  const { previewNode, nodeUnmounted } = useBoardActions();
+  // 离开视口卸载时收不到 mouseleave：收起本节点的悬浮动作条，回到视口时不无故弹出。只在卸载时调用，不随 actions 重建。
+  const onUnmount = useRef(nodeUnmounted);
+  onUnmount.current = nodeUnmounted;
+  useEffect(() => () => onUnmount.current(id), [id]);
   const aspect = width && height ? height / width : null;
   return (
     <div className={`node node-image ${className}`} {...hover}>
@@ -210,15 +217,19 @@ function ImageNode({
   );
 }
 
-export const PromptNodeView = memo(function PromptNodeView({ data }: NodeProps<PromptFlowNode>) {
-  const { apply } = useBoardActions();
-  const { node, recorded, autoFocus, portKind, guides } = data;
+export const PromptNodeView = memo(function PromptNodeView({ data, width, height }: NodeProps<PromptFlowNode>) {
+  const { apply, setPromptDraft, takePromptFocus } = useBoardActions();
+  const { node, recorded, autoFocus, draft: pending, portKind, guides } = data;
   const textarea = useRef<HTMLTextAreaElement>(null);
+  // xyflow 在节点测量完之前以 visibility: hidden 渲染它，此时 focus() 不生效；有了尺寸才可见、才聚焦。
+  const shown = !!width && !!height;
+  // 只聚焦一次：显示出来时向画布取走请求；视口外新建、一直没显示的由画布在视口开始移动时清除（见 BoardCanvas 的 focusPrompt）。
   useEffect(() => {
-    if (autoFocus) textarea.current?.focus();
-  }, [autoFocus]);
+    if (autoFocus && shown && takePromptFocus(node.id)) textarea.current?.focus({ preventScroll: true });
+  }, [autoFocus, shown, node.id, takePromptFocus]);
   // 下游有执行记录时，本次聚焦内第一次改动先三选；选「不断开」后到失焦前不再问。
-  const [pending, setPending] = useState<string | null>(null);
+  // 未提交文本由画布保管：节点离开视口卸载再挂载时仍在。
+  const setPending = (text: string | null) => setPromptDraft(node.id, text);
   const [keep, setKeep] = useState(false);
   const fork = () => {
     if (pending !== null) apply({ kind: "forkPrompt", promptId: node.id, text: pending });
@@ -281,7 +292,7 @@ export const PromptNodeView = memo(function PromptNodeView({ data }: NodeProps<P
                   <button key={`${guide.taskId}:${image.port}`} type="button" className="reference-guide-thumb" title={image.label} onMouseDown={holdFocus} onClick={() => insertReference(image.port)}>
                     {image.absPath && (
                       <>
-                        <img src={fileUrl(image.absPath)} alt="" draggable={false} />
+                        <img {...LAZY_IMAGE} src={thumbUrl(image.absPath)} alt="" draggable={false} />
                         {image.rects.map((r, k) => (
                           <span key={k} className="reference-guide-rect" style={{ left: `${r[0] * 100}%`, top: `${r[1] * 100}%`, width: `${(r[2] - r[0]) * 100}%`, height: `${(r[3] - r[1]) * 100}%` }} />
                         ))}
@@ -855,7 +866,7 @@ export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskF
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => (canRegion ? editRegion(node.id, slot.edgeRef!) : slot.edgeRef && previewNode(slot.edgeRef.from[0]))}
                 >
-                  <img src={fileUrl(slot.absPath)} alt={slot.label} draggable={false} />
+                  <img {...LAZY_IMAGE} src={thumbUrl(slot.absPath)} alt={slot.label} draggable={false} />
                   {slot.rects.map((r, k) => (
                     <span
                       key={k}

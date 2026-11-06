@@ -139,7 +139,11 @@ export const test = base.extend<{ rig: Rig }>({
         return path.join(dataRoot, "users", createHash("sha256").update(key).digest("hex"));
       },
     });
+    // 先等服务端真正退出再删数据根：页面此时还开着，kill 只是发信号，进程退出前仍可能在写缩略图缓存、
+    // 画板或任务文件，与递归删除赛跑会报 ENOTEMPTY。
+    const exited = child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise<void>((resolve) => child.once("exit", () => resolve()));
     child.kill();
+    await exited;
     await stub.close();
     rmSync(dataRoot, { recursive: true, force: true });
   },

@@ -1,5 +1,5 @@
 // Web 壳层端口：UI 只认这些接口，同源 HTTP 与浏览器能力都在 ipc.ts 中实现。
-import type { MergeOutcome, MergeUnit, PackExportSpec } from "../core/boardPack";
+import type { MergeReport, MergeUnit, PackDuplicates, PackEntryFact, PackExportSpec, PackIo } from "../core/boardPack";
 import type { DirEntry } from "../core/relocate";
 
 export interface BoardTexts {
@@ -37,10 +37,12 @@ export interface Ipc {
   readModelsCache(): Promise<string | null>;
   writeModelsCache(text: string): Promise<void>;
   logEvent(kind: string, fields: Record<string, unknown>): Promise<void>;
+  /** 导出前的 hash 阶段：每个要写的文件的长度与 sha256；取消时以 PACK_CANCELLED reject。 */
+  boardPackFacts(spec: Pick<PackExportSpec, "task_dirs" | "files">): Promise<PackEntryFact[]>;
   boardPackExport(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number }>;
   boardPackEntries(pack: string): Promise<string[]>;
   boardPackReadTexts(pack: string, names: string[]): Promise<Record<string, string>>;
-  boardPackImport(pack: string, units: MergeUnit[]): Promise<{ outcomes: { path: string; outcome: MergeOutcome }[]; bytes: number }>;
+  boardPackImport(pack: string, units: MergeUnit[], duplicates: PackDuplicates): Promise<MergeReport>;
   boardPackCancel(cancelled: boolean): Promise<void>;
   listDir(path: string): Promise<DirEntry[]>;
   fileSha256(path: string): Promise<string>;
@@ -103,6 +105,9 @@ export interface PackUploadPort {
   upload(file: File): Promise<string>;
   discard(id: string): Promise<void>;
 }
+
+/** 去重上传（#62）：问已有、Worker 里 hash、开暂存、逐份上传、按落盘清单合并；语义见 core/boardPack 的 PackIo。 */
+export type PackContentPort = Required<Pick<PackIo, "existing" | "hash" | "stage" | "uploadContent" | "importContent" | "discardStaging">>;
 
 export interface SessionPort {
   login(key: string): Promise<{ fingerprint: string }>;

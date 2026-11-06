@@ -1,9 +1,9 @@
-// 画板包界面流程：导出确认 → 浏览器下载与可取消进度；浏览器选包上传 → 判定 → 导入 → 打开画板。
+// 画板包界面流程：导出 = 可取消的 hash 阶段 → 确认（含预估大小）→ 可取消的打包阶段与浏览器下载；浏览器选包 → 可取消进度里上传、判定、导入 → 打开画板。
 import { browser, ipc } from "../shell/ipc";
-import { pickAndUploadPack } from "../shell/packFile";
+import { pickPackFile } from "../shell/packFile";
 import { useCallback, useState } from "react";
 import { BOARD_EXTENSION, type Board } from "../core/board";
-import { buildExportSpec, importPack as importPackIn, PACK_EXTENSION, planExport, runCancellable } from "../core/boardPack";
+import { buildExportSpec, exportSources, importPack as importPackIn, PACK_EXTENSION, planExport, planPackContents, runCancellable, type ImportPhase } from "../core/boardPack";
 import { packFs, packIo } from "../shell/adapters";
 import { logEvent } from "../shell/log";
 import type { PackDialogState } from "./BoardPackDialog";
@@ -14,6 +14,15 @@ interface PackBoards {
   boardFileName: (key: string) => string | null;
   addImportedBoard: (board: Board) => Promise<string>;
 }
+
+/** 导入进度对话框里各步的说明（#62）。 */
+const IMPORT_PHASES: Record<ImportPhase, string> = {
+  check: "正在检查画板包…",
+  existing: "正在比对服务端已有的任务目录…",
+  hash: "正在计算内容校验值…",
+  upload: "正在上传缺少的内容…",
+  merge: "正在合并任务目录…",
+};
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -30,22 +39,32 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
       const board = boards.getBoard(key);
       const boardFile = boards.boardFileName(key);
       if (!board || !boardFile) return;
+      const stem = boardFile.slice(0, -BOARD_EXTENSION.length);
+      let plan;
       try {
-        setDialog({ stage: "confirmExport", boardFile, plan: await planExport(board, userRoot, packFs) });
+        plan = await planExport(board, userRoot, packFs);
       } catch (e) {
-        toast(`无法导出画板包：${errorText(e)}`);
+        return toast(`无法导出画板包：${errorText(e)}`);
       }
+      // hash 阶段：服务端给逐文件长度与 sha256，core 据此去重并算预估大小，再请用户确认（包格式 v2）。
+      const outcome = await runCancellable(packIo, progress(`正在计算画板包大小：${stem}`), () => ipc.boardPackFacts(exportSources(plan)));
+      if (!outcome.ok) {
+        setDialog(null);
+        logEvent("board_pack", { action: "export", board_file: boardFile, stage: "hash", result: outcome.result });
+        return toast(outcome.result === "cancelled" ? "已取消导出画板包" : `无法导出画板包：${outcome.error}`);
+      }
+      setDialog({ stage: "confirmExport", boardFile, plan, contents: planPackContents(outcome.value) });
     },
     [userRoot, boards, toast],
   );
 
   const confirmExport = useCallback(async () => {
     if (!userRoot || dialog?.stage !== "confirmExport") return;
-    const { boardFile, plan } = dialog;
+    const { boardFile, plan, contents } = dialog;
     const stem = boardFile.slice(0, -BOARD_EXTENSION.length);
     const target = `${stem}${PACK_EXTENSION}`;
-    const spec = buildExportSpec(await browser.version(), boardFile, plan);
-    const fields = { action: "export", board_file: boardFile, task_dirs: plan.taskDirs.length, missing: plan.missing.length };
+    const spec = buildExportSpec(await browser.version(), boardFile, plan, contents);
+    const fields = { action: "export", board_file: boardFile, task_dirs: plan.taskDirs.length, missing: plan.missing.length, duplicates: spec.omitted.length, estimated_bytes: contents.bytes };
     const outcome = await runCancellable(packIo, progress(`正在导出画板包：${stem}`), () => ipc.boardPackExport(target, spec));
     setDialog(null);
     if (outcome.ok) {
@@ -60,20 +79,22 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
   const importPack = useCallback(async () => {
     if (!userRoot) return;
     try {
-      const picked = await pickAndUploadPack();
-      if (!picked) return;
+      const file = await pickPackFile();
+      if (!file) return;
       const result = await importPackIn(packIo, {
-        packPath: picked.id,
-        displayName: picked.name,
+        file,
         addBoard: (board) => boards.addImportedBoard(board),
-        onStage: progress(`正在导入画板包：${picked.name}`),
+        onStage: progress(`正在导入画板包：${file.name}`),
+        onPhase: (phase) => setDialog((d) => (d?.stage === "progress" ? { ...d, detail: IMPORT_PHASES[phase] } : d)),
         log: logEvent,
       });
       switch (result.kind) {
         case "newer":
+          setDialog(null);
           await browser.message(result.message, { title: "无法导入画板包" });
           return;
         case "corrupt":
+          setDialog(null);
           return toast(`无法导入画板包：${result.reason}`);
         case "cancelled":
           setDialog(null);
@@ -91,6 +112,7 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
         }
       }
     } catch (e) {
+      setDialog(null);
       toast(`导入画板包失败：${errorText(e)}`);
     }
   }, [userRoot, boards, toast]);

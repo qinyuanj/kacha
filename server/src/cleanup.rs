@@ -7,7 +7,7 @@
 //!
 //! 任一画板读不懂（损坏 / 版本更高）时该用户本轮不清理任务目录。正式执行把候选移入
 //! `<数据根>/recycle/<UTC 时刻>/…`（保持原相对路径，便于管理员搬回），超过 14 天的批次在下次执行时彻底删除；
-//! `--purge` 跳过回收区。不自动运行：只有管理员命令与用户自助清理两个入口。
+//! `--purge` 跳过回收区。任务目录的缩略图缓存直接删除，不进回收区（#49）。不自动运行：只有管理员命令与用户自助清理两个入口。
 
 use std::collections::BTreeSet;
 use std::io;
@@ -244,8 +244,30 @@ fn batch_dir(data_root: &Path, now: SystemTime) -> PathBuf {
     data_root.join(RECYCLE_DIR).join(format_stamp(now))
 }
 
+/// 把一个未引用任务目录（`users/<指纹>/<日期>/<task_id>`）移入回收区，并删掉它的缩略图。
+pub fn recycle_task_dir(data_root: &Path, rel: &str, now: SystemTime) -> io::Result<()> {
+    move_to_recycle(data_root, rel, now)?;
+    drop_thumbs(data_root, rel);
+    Ok(())
+}
+
+/// 任务目录离开用户数据根后，`.kacha/thumbs` 下对应的缩略图直接删除，不进回收区：缓存随时可重建，
+/// `cleanup restore` 搬回任务目录后下次请求自会重新生成。闲置用户整根移走时 `.kacha` 随之移走，不走这里。
+/// 删除失败只记日志，不影响清理结果。
+fn drop_thumbs(data_root: &Path, rel: &str) {
+    let mut parts = rel.splitn(3, '/');
+    let (Some(USERS_DIR), Some(fp), Some(dir)) = (parts.next(), parts.next(), parts.next()) else { return };
+    let meta = data_root.join(USERS_DIR).join(fp).join(crate::META_DIR);
+    let thumbs = meta.join(crate::thumbs::THUMBS_DIR).join(dir);
+    match std::fs::remove_dir_all(&thumbs) {
+        Ok(()) => remove_empty_parent(&thumbs),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => crate::thumbs::log_failure(&meta, dir, format!("清理时删除缩略图失败：{e}")),
+    }
+}
+
 /// 把数据根内的 `rel` 移入回收区（保持相对路径）；同一批次内同名时加序号。
-pub fn move_to_recycle(data_root: &Path, rel: &str, now: SystemTime) -> io::Result<()> {
+fn move_to_recycle(data_root: &Path, rel: &str, now: SystemTime) -> io::Result<()> {
     let src = data_root.join(rel);
     let mut target = batch_dir(data_root, now).join(rel);
     let mut n = 1;
@@ -297,7 +319,11 @@ pub fn execute(data_root: &Path, plan: &Plan, now: SystemTime, purge: bool) -> O
         }
     }
     for c in &plan.candidates {
-        let r = if purge { delete(data_root, &c.rel) } else { move_to_recycle(data_root, &c.rel, now) };
+        let r = match (c.kind, purge) {
+            (_, true) => delete(data_root, &c.rel).inspect(|()| drop_thumbs(data_root, &c.rel)),
+            (Kind::IdleUser, false) => move_to_recycle(data_root, &c.rel, now),
+            (Kind::UnreferencedTaskDir, false) => recycle_task_dir(data_root, &c.rel, now),
+        };
         match r {
             Ok(()) => out.done.push(c.rel.clone()),
             Err(e) => out.failed.push((c.rel.clone(), e.to_string())),

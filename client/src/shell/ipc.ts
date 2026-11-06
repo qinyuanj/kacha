@@ -1,12 +1,15 @@
 // 壳层（唯一实现）：业务调用走同源 HTTP，密钥存 localStorage，网关由浏览器直连（ADR 0018）。
 // UI 与 core 不直接调业务 HTTP，都经这里的端口。
 import type { FetchLike } from "../core/gateway";
-import { PACK_CANCELLED } from "../core/boardPack";
+import { PACK_CANCELLED, type PackContent, type PackEntryFact } from "../core/boardPack";
+import type { ZipEntry } from "../core/zipIndex";
+import { entryBody } from "../core/packHash";
+import type { WorkerMessage, WorkerRequest } from "./packHash.worker";
 import { ApiError } from "./apiError";
 import { DEFAULT_SETTINGS, serializeSettings } from "../core/settings";
-import type { BrowserPort, Ipc, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
+import type { BrowserPort, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
 
-export type { BoardTexts, BrowserPort, ImageInfo, Ipc, PackUploadPort, RelayPort, SessionPort, TransferPort, Usage, UsageCandidate, UsagePort } from "./types";
+export type { BoardTexts, BrowserPort, ImageInfo, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, Usage, UsageCandidate, UsagePort } from "./types";
 
 /** core/ 按「用户数据根 + 相对路径」拼路径；用户数据根在浏览器里是固定的虚拟根，壳层在边界剥掉，服务端只收相对路径。 */
 export const VIRTUAL_ROOT = "/~";
@@ -101,7 +104,42 @@ const newOpId = () => `op-${Date.now().toString(36)}-${Math.random().toString(36
 let currentOp: string | null = null;
 const cancelledOps = new Set<string>();
 
+/** 正在进行、带操作 id 的请求数：进度轮询只在有请求进行时才问服务端，操作结束后不再请求（#59）。 */
+const inFlight = new Map<string, number>();
+/** 每个操作一个中止信号：整包上传，以及去重导入里问已有、hash、开暂存、逐份上传都挂在它上面，取消时一并中止
+ *  （同时通知服务端）。合并请求不挂：合并的取消经服务端的取消标记生效。 */
+const opAborts = new Map<string, AbortController>();
+/** 该操作的中止信号；还没有就建一个（操作 id 也可能由 requireOp 懒生成，没经过 cancel(false)）。 */
+function opSignal(op: string): AbortSignal {
+  let abort = opAborts.get(op);
+  if (!abort) opAborts.set(op, (abort = new AbortController()));
+  return abort.signal;
+}
+/** 浏览器本地阶段（Worker 里 hash）的进度：有值时进度轮询直接报它，不问服务端。 */
+const localProgress = new Map<string, { done: number; total: number }>();
+
 const requireOp = () => (currentOp ??= newOpId());
+
+async function tracked<T>(op: string, run: () => Promise<T>): Promise<T> {
+  inFlight.set(op, (inFlight.get(op) ?? 0) + 1);
+  try {
+    return await run();
+  } finally {
+    const left = (inFlight.get(op) ?? 1) - 1;
+    if (left > 0) inFlight.set(op, left);
+    else inFlight.delete(op);
+  }
+}
+
+/** 上传类请求按状态码给可读的失败文案（#60）：反向代理回的非 JSON 错误体也能看懂。 */
+const UPLOAD_FAILURES: Record<number, string> = {
+  408: "上传中断：超过 60 秒没有收到数据，请检查网络后重试",
+  507: "服务器空间不足，请联系管理员",
+};
+const uploadFailure = (e: unknown) => (e instanceof ApiError && UPLOAD_FAILURES[e.status] ? new ApiError(e.status, e.code, UPLOAD_FAILURES[e.status]) : e);
+
+/** 本操作已被取消，或服务端以 409 cancelled / 文案「已取消」回取消：统一成与桌面一致的取消文案。 */
+const asCancelled = (op: string, e: unknown) => (cancelledOps.has(op) || (e instanceof ApiError && e.message === PACK_CANCELLED) ? new Error(PACK_CANCELLED) : e);
 
 async function apiResponse(url: string, init: RequestInit): Promise<Response> {
   let res: Response;
@@ -143,20 +181,47 @@ function downloadBlob(blob: Blob, fileName: string) {
 async function boardPackExport(spec: unknown, target: string): Promise<{ task_dirs: number; bytes: number }> {
   const op = requireOp();
   try {
-    const res = await apiResponse(`/api/packs/export?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(spec) });
-    const blob = await res.blob();
-    downloadBlob(blob, target);
-    return { task_dirs: (spec as { task_dirs: string[] }).task_dirs.length, bytes: blob.size };
+    return await tracked(op, async () => {
+      const res = await apiResponse(`/api/packs/export?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(spec) });
+      const blob = await res.blob();
+      // 取消请求晚于打包完成到达时，服务端照常发完；以前端的取消为准，不再触发下载。
+      if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
+      downloadBlob(blob, target);
+      return { task_dirs: (spec as { task_dirs: string[] }).task_dirs.length, bytes: blob.size };
+    });
   } catch (e) {
     if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
     throw e;
   }
 }
 
-/** 流式上传：请求体是 File 本身（浏览器按流发送），不读进内存。 */
+/** 导出的 hash 阶段：服务端按操作 id 报进度、可取消（409 已取消）。 */
+async function boardPackFacts(spec: unknown): Promise<PackEntryFact[]> {
+  const op = requireOp();
+  try {
+    return await tracked(op, async () => {
+      const facts = await api<PackEntryFact[]>(`/api/packs/export/facts?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(spec) });
+      // 取消请求晚于服务端算完到达：以前端的取消为准。
+      if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
+      return facts;
+    });
+  } catch (e) {
+    throw asCancelled(op, e);
+  }
+}
+
+/** 流式上传：请求体是 File 本身（浏览器按流发送），不读进内存。带当前操作 id：服务端报进度、可取消（#59）。 */
 async function uploadPack(file: File): Promise<string> {
-  const res = await apiResponse("/api/packs/uploads", { method: "POST", headers: { "Content-Type": "application/zip" }, body: file });
-  return ((await res.json()) as { id: string }).id;
+  const op = requireOp();
+  if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
+  try {
+    return await tracked(op, async () => {
+      const res = await apiResponse(`/api/packs/uploads?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/zip" }, body: file, signal: opSignal(op) });
+      return ((await res.json()) as { id: string }).id;
+    });
+  } catch (e) {
+    throw uploadFailure(asCancelled(op, e));
+  }
 }
 
 const discardUpload = async (id: string) => void (await api(`/api/packs/uploads/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true }));
@@ -165,7 +230,9 @@ const discardUpload = async (id: string) => void (await api(`/api/packs/uploads/
 function onPackProgress(handler: (progress: { done: number; total: number }) => void): () => void {
   let stopped = false;
   const tick = async () => {
-    if (stopped || !currentOp) return;
+    const local = currentOp ? localProgress.get(currentOp) : undefined;
+    if (!stopped && local) return handler(local);
+    if (stopped || !currentOp || !inFlight.has(currentOp)) return;
     try {
       const res = await fetch(`/api/packs/ops/${encodeURIComponent(currentOp)}`, { credentials: "same-origin" });
       if (res.ok) handler((await res.json()) as { done: number; total: number });
@@ -209,17 +276,18 @@ export const ipc: Ipc = {
   logEvent: async (kind, fields) =>
     void (await api("/api/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, fields }) })),
   // spec.files[].source 是 core 拼出的虚拟根绝对路径：在边界剥成相对用户数据根，服务端只收相对路径。
+  boardPackFacts: async (spec) => boardPackFacts({ ...spec, files: spec.files.map((f) => ({ ...f, source: stripRoot(f.source) })) }),
   boardPackExport: async (target, spec) => boardPackExport({ ...spec, files: spec.files.map((f) => ({ ...f, source: stripRoot(f.source) })) }, target),
   boardPackEntries: (pack) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/entries`),
   boardPackReadTexts: (pack, names) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/texts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(names) }),
-  boardPackImport: async (pack, units) => {
+  boardPackImport: async (pack, units, duplicates) => {
     const op = requireOp();
+    // 上传之后、合并之前被取消：服务端还没有这个操作，取消标记只在这里，不再发起合并。
+    if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
     try {
-      return await api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(units) });
+      return await tracked(op, () => api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ units, duplicates: Object.entries(duplicates).map(([path, source]) => ({ path, source })) }) }));
     } catch (e) {
-      // 服务端以 409 cancelled / 文案「已取消」回取消；保持与桌面的文案约定。
-      if (cancelledOps.has(op) || (e instanceof ApiError && e.message === PACK_CANCELLED)) throw new Error(PACK_CANCELLED);
-      throw e;
+      throw asCancelled(op, e);
     }
   },
   boardPackCancel: async (cancelled) => {
@@ -227,9 +295,13 @@ export const ipc: Ipc = {
       const op = currentOp;
       if (!op) return;
       cancelledOps.add(op);
+      opAborts.get(op)?.abort(new Error(PACK_CANCELLED));
       await api(`/api/packs/ops/${encodeURIComponent(op)}/cancel`, { method: "POST", keepalive: true });
     } else {
+      // 换新操作：上一个操作的中止信号不再有人用。
+      if (currentOp) opAborts.delete(currentOp);
       currentOp = newOpId();
+      opSignal(currentOp);
     }
   },
   listDir: (path) => api(`/api/fs/dir?${query(path)}`),
@@ -244,6 +316,9 @@ export const httpFetch: FetchLike = (url, init) => fetch(url, init);
 
 /** 图片地址走同源读文件接口，靠会话 cookie 认人。 */
 export const fileUrl = (path: string) => `/api/fs/file?${query(path)}`;
+
+/** 节点上显示用的缩略图地址；放大预览、图层查看、下载与上传参考图仍用 `fileUrl` / 原图字节。 */
+export const thumbUrl = (path: string) => `/api/fs/thumb?${query(path)}`;
 
 export const browser: BrowserPort = {
   ask: async (text, options) => window.confirm(options?.title ? `${options.title}\n\n${text}` : text),
@@ -267,7 +342,7 @@ export const session: SessionPort = {
 /** 结果中转：地址交给服务端，取消经 AbortSignal 传到服务端（断开即中止下载）。 */
 export const relay: RelayPort = {
   relayResult: ({ url, relDir, stem, signal }) =>
-    api("/api/fs/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, dir: stripRoot(relDir), stem }), ...(signal ? { signal } : {}) }),
+    api("/api/fs/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, dir: stripRoot(relDir), stem }), signal: signal ?? null }),
   commitRelayed: (relDir, from, stem) =>
     api("/api/fs/relay/commit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dir: stripRoot(relDir), from, stem }) }),
   discardRelayed: async (relDir) => void (await api(`/api/fs/relay?dir=${encodeURIComponent(stripRoot(relDir))}`, { method: "DELETE", keepalive: true })),
@@ -319,3 +394,79 @@ export const usage: UsagePort = {
 };
 
 export const packUpload: PackUploadPort = { upload: uploadPack, discard: discardUpload };
+
+// ---- 去重上传（#62）----
+
+const jsonPost = (body: unknown, signal?: AbortSignal): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: signal ?? null });
+
+/** 在当前操作下跑一个可取消的请求：已取消就不发；被中止或服务端回取消都统一成取消文案，上传类状态码给可读文案。 */
+async function inOp<T>(run: (op: string, signal: AbortSignal) => Promise<T>): Promise<T> {
+  const op = requireOp();
+  if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
+  try {
+    return await tracked(op, () => run(op, opSignal(op)));
+  } catch (e) {
+    throw uploadFailure(asCancelled(op, e));
+  }
+}
+
+/**
+ * 在当前操作下跑一次 Worker（见 packHash.worker.ts）：已取消就不起；操作被中止即以「已取消」reject 并 terminate。
+ * onProgress 收到的进度经 localProgress 报给进度轮询。
+ */
+function inWorker<T>(request: WorkerRequest, settle: (m: Exclude<WorkerMessage, { kind: "progress" | "error" }>) => T, onProgress?: (done: number, total: number) => void): Promise<T> {
+  const op = requireOp();
+  if (cancelledOps.has(op)) return Promise.reject(new Error(PACK_CANCELLED));
+  const signal = opSignal(op);
+  const worker = new Worker(new URL("./packHash.worker.ts", import.meta.url), { type: "module" });
+  return new Promise<T>((resolve, reject) => {
+    signal.addEventListener("abort", () => reject(new Error(PACK_CANCELLED)), { once: true });
+    worker.onmessage = (e: MessageEvent<WorkerMessage>) => {
+      const m = e.data;
+      if (m.kind === "progress") onProgress?.(m.done, m.total);
+      else if (m.kind === "error") reject(new Error(`无法读取画板包：${m.message}`));
+      else resolve(settle(m));
+    };
+    worker.onerror = (e) => reject(new Error(`无法读取画板包：${e.message}`));
+    worker.postMessage(request);
+  }).finally(() => worker.terminate());
+}
+
+/** hash 阶段：Worker 里按条目流式算 sha256，进度经 localProgress 报给进度轮询；取消即 terminate。 */
+function hashInWorker(file: File, entries: ZipEntry[]): Promise<PackEntryFact[]> {
+  const op = requireOp();
+  localProgress.set(op, { done: 0, total: entries.reduce((n, e) => n + e.size, 0) });
+  return inWorker(
+    { kind: "hash", file, entries },
+    (m) => {
+      if (m.kind !== "hashed") throw new Error("无法读取画板包：Worker 回了意外的消息");
+      return m.facts;
+    },
+    (done, total) => localProgress.set(op, { done, total }),
+  ).finally(() => localProgress.delete(op));
+}
+
+/** 一份内容的上传体：stored 条目是包文件的切片（浏览器按流发送，不读进内存）；deflate 条目在 Worker 里解压成 Blob，
+ *  解压后的字节不进主线程内存。 */
+async function contentBody({ file, entry }: PackContent): Promise<Blob> {
+  if (entry.method === 0) return entryBody(file, entry);
+  return inWorker({ kind: "body", file, entry }, (m) => {
+    if (m.kind !== "body") throw new Error("无法读取画板包：Worker 回了意外的消息");
+    return m.body;
+  });
+}
+
+export const packContent: PackContentPort = {
+  existing: (units) => inOp((_op, signal) => api("/api/packs/existing", jsonPost(units, signal))),
+  hash: hashInWorker,
+  stage: () => inOp(async (_op, signal) => (await api<{ id: string }>("/api/packs/staging", { method: "POST", signal })).id),
+  uploadContent: (staging, sha256, content, progress) =>
+    inOp(async (op, signal) => {
+      const body = await contentBody(content);
+      const params = new URLSearchParams({ op, done: String(progress.done), total: String(progress.total) });
+      await apiResponse(`/api/packs/staging/${encodeURIComponent(staging)}/contents/${sha256}?${params}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body, signal });
+    }),
+  // 合并不中止请求：取消经服务端的取消标记生效（409），与整包导入一致。
+  importContent: (staging, units, files) => inOp((op) => api(`/api/packs/staging/${encodeURIComponent(staging)}/import?op=${encodeURIComponent(op)}`, jsonPost({ units, files }))),
+  discardStaging: async (staging) => void (await api(`/api/packs/staging/${encodeURIComponent(staging)}`, { method: "DELETE", keepalive: true })),
+};

@@ -1,7 +1,7 @@
 //! 用户数据根内的文件与文本接口：路径一律相对用户数据根，越界 403。
 
 use std::io::ErrorKind;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use axum::body::Body;
 use axum::extract::{Query, State};
@@ -12,11 +12,11 @@ use serde::Deserialize;
 use tokio_util::io::ReaderStream;
 
 use crate::session::error;
-use crate::{paths, store, AppState, User, META_DIR};
+use crate::{cache, paths, store, AppState, User, META_DIR};
 
 #[derive(Deserialize)]
 pub struct PathQuery {
-    path: String,
+    pub(crate) path: String,
 }
 
 #[derive(Deserialize)]
@@ -53,7 +53,12 @@ pub(crate) fn resolve(state: &AppState, user: &User, rel: &str) -> Result<PathBu
 
 /// 写入类接口的磁盘余量检查：不足 507。
 pub(crate) fn ensure_space(state: &AppState) -> Result<(), Response> {
-    if state.disk_guard().enough() {
+    ensure_space_for(state, None)
+}
+
+/// 要写入 `incoming` 字节（如上传的 Content-Length）时的余量预检：写完会低于门槛即 507；长度未知按 ensure_space。
+pub(crate) fn ensure_space_for(state: &AppState, incoming: Option<u64>) -> Result<(), Response> {
+    if state.disk_guard().fits(incoming) {
         Ok(())
     } else {
         Err(error(StatusCode::INSUFFICIENT_STORAGE, "insufficient_storage", "服务器空间不足，请联系管理员"))
@@ -201,18 +206,26 @@ pub async fn list_board_names(State(state): State<AppState>, user: User, Query(q
 
 /// 流式读取；同一路径供 `<img>` 使用（cookie 认人），替代桌面的本地文件 URL。
 pub async fn read_file(State(state): State<AppState>, user: User, Query(q): Query<PathQuery>) -> Response {
-    let path = match resolve(&state, &user, &q.path) {
-        Err(r) => return r,
-        Ok(p) => p,
-    };
-    let meta = match tokio::fs::metadata(&path).await {
+    match resolve(&state, &user, &q.path) {
+        Err(r) => r,
+        Ok(path) => serve_file(&path, &q.path).await,
+    }
+}
+
+/// 流式回传 path 的字节；类型按扩展名、缓存头按相对路径 rel 的形状。不是文件时 404。
+pub(crate) async fn serve_file(path: &Path, rel: &str) -> Response {
+    let meta = match tokio::fs::metadata(path).await {
         Ok(m) if m.is_file() => m,
         Ok(_) => return error(StatusCode::NOT_FOUND, "not_found", "不是文件"),
         Err(_) => return error(StatusCode::NOT_FOUND, "not_found", "文件不存在"),
     };
-    match tokio::fs::File::open(&path).await {
+    match tokio::fs::File::open(path).await {
         Ok(file) => (
-            [(header::CONTENT_LENGTH, meta.len().to_string()), (header::CONTENT_TYPE, content_type(&q.path))],
+            [
+                (header::CONTENT_LENGTH, meta.len().to_string()),
+                (header::CONTENT_TYPE, content_type(rel)),
+                (header::CACHE_CONTROL, cache::cache_control(rel).to_string()),
+            ],
             Body::from_stream(ReaderStream::new(file)),
         )
             .into_response(),
