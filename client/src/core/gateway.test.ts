@@ -218,42 +218,48 @@ describe("网关适配器：请求载荷对照夹具", () => {
     expect(body).not.toHaveProperty("negative_prompt");
   });
 
-  it("图片编辑 POST /v1/images/edits JSON：data-URL 参考图、末尾 text、size 星号、n 固定 1、fixed_params 合并", async () => {
+  it("图片编辑走 generations 顶层 image / negative_prompt / size(WxH)，不再发送旧 JSON 透传字段", () => {
+    const refs = [png, { mediaType: "image/jpeg", bytes: new Uint8Array([1]) }];
+    const { path, body } = buildGenerationRequest(textInput({ nativeNegativePrompt: "模糊", references: refs }));
+    expect(path).toBe("/v1/images/generations");
+    expect(body).toMatchObject({ model: qwenPro.model_id, prompt: "一只橘猫", negative_prompt: "模糊", n: 1, size: "1024x1024", watermark: false });
+    expect(body.image).toHaveLength(2);
+    expect((body.image as string[])[0].startsWith("data:image/png;base64,")).toBe(true);
+    expect((body.image as string[])[1]).toBe("data:image/jpeg;base64,AQ==");
+    expect(body).not.toHaveProperty("input");
+    expect(body).not.toHaveProperty("parameters");
+  });
+
+  it("图片编辑生成请求使用当前网关契约并解析既有响应", async () => {
     const fixture = loadFixture("2026-08-29-team-gateway-edit-json", "edit-json-single.json");
     const { fetch, calls } = replay(fixture);
     await generate({ baseUrl: BASE, apiKey: "sk-test", fetch }, textInput({ text: "本次提供 1 张参考图。\n一只橘猫", references: [png] }));
-    expect(calls[0].url).toBe(`${BASE}/v1/images/edits`);
+    expect(calls[0].url).toBe(`${BASE}/v1/images/generations`);
     expectMatchesFixture(calls[0].headers, fixture.request.headers, "headers");
-    expectMatchesFixture(calls[0].body, fixture.request.body);
-    const body = calls[0].body as { prompt: string; parameters: object; input: { messages: { content: { text?: string }[] }[] } };
-    expect(body.parameters).toEqual({ size: "1024*1024", n: 1, watermark: false });
-    expect(body.input.messages[0].content[1].text).toBe("本次提供 1 张参考图。\n一只橘猫");
-    expect(body.prompt).toBe(body.input.messages[0].content[1].text);
+    expect(calls[0].body).toMatchObject({ model: qwenPro.model_id, prompt: "本次提供 1 张参考图。\n一只橘猫", size: "1024x1024", n: 1, watermark: false });
+    expect(((calls[0].body as Record<string, unknown>).image as string[])[0].startsWith("data:image/png;base64,")).toBe(true);
+    expect(calls[0].body).not.toHaveProperty("input");
+    expect(calls[0].body).not.toHaveProperty("parameters");
   });
 
-  it("三张参考图按序进入 content，发送文本原样放在末尾 text", () => {
-    const fixture = loadFixture("2026-09-16-team-gateway-multiturn-refs-mask", "edit-ref-index-tu-3.json");
+  it("三张参考图按序进入顶层 image，发送文本原样放在 prompt", () => {
     const refs = [png, { mediaType: "image/jpeg", bytes: new Uint8Array([1]) }, { mediaType: "image/webp", bytes: new Uint8Array([2]) }];
-    const { path, body } = buildGenerationRequest(textInput({ text: "本次提供 3 张参考图，按顺序为图1、图2、图3。\n把图3的帽子戴到图1头上", references: refs }));
-    expect(path).toBe("/v1/images/edits");
-    const expected = fixture.request.body as { input: unknown };
-    expectMatchesFixture((body as { input: unknown }).input, expected.input, "input");
-    const content = (body as { input: { messages: { content: Record<string, string>[] }[] } }).input.messages[0].content;
-    expect(content.map((c) => Object.keys(c)[0])).toEqual(["image", "image", "image", "text"]);
-    expect(content[0].image.startsWith("data:image/png;base64,")).toBe(true);
-    expect(content[1].image).toBe("data:image/jpeg;base64,AQ==");
-    expect(content[2].image).toBe("data:image/webp;base64,Ag==");
-    expect(content[3].text).toBe("本次提供 3 张参考图，按顺序为图1、图2、图3。\n把图3的帽子戴到图1头上");
+    const text = "本次提供 3 张参考图，按顺序为图1、图2、图3。\n把图3的帽子戴到图1头上";
+    const { path, body } = buildGenerationRequest(textInput({ text, references: refs }));
+    expect(path).toBe("/v1/images/generations");
+    const images = body.image as string[];
+    expect(images).toHaveLength(3);
+    expect(images[0].startsWith("data:image/png;base64,")).toBe(true);
+    expect(images[1]).toBe("data:image/jpeg;base64,AQ==");
+    expect(images[2]).toBe("data:image/webp;base64,Ag==");
+    expect(body.prompt).toBe(text);
   });
 
-  it("qwen 图片编辑的原生负向放进 input.negative_prompt（8-31 夹具已验证网关接受）", () => {
-    const fixture = loadFixture("2026-08-31-team-gateway-edit-boundaries", "edit-json-native-negative.json");
+  it("qwen 图片编辑的原生负向放进顶层 negative_prompt", () => {
     const { body } = buildGenerationRequest(textInput({ nativeNegativePrompt: "文字", references: [png] }));
-    expect(Object.keys((fixture.request.body as { input: object }).input).sort()).toEqual(["messages", "negative_prompt"]);
-    const b = body as { prompt: string; input: { negative_prompt?: string } };
-    expect(b.input.negative_prompt).toBe("文字");
-    expect(b.prompt).not.toContain("文字");
-    expect((buildGenerationRequest(textInput({ references: [png] })).body as { input: object }).input).not.toHaveProperty("negative_prompt");
+    expect(body.negative_prompt).toBe("文字");
+    expect(body.prompt).not.toContain("文字");
+    expect(buildGenerationRequest(textInput({ references: [png] })).body).not.toHaveProperty("negative_prompt");
   });
 
   it("request_shape 未实现的模型拒绝构造请求", () => {

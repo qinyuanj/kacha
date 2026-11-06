@@ -23,7 +23,6 @@ export function validLayerBox(value: unknown): value is LayerBoundingBox {
 
 export const MODELS_PATH = "/v1/models";
 export const TEXT_TO_IMAGE_PATH = "/v1/images/generations";
-export const IMAGE_EDIT_PATH = "/v1/images/edits";
 
 export interface FetchResponse {
   status: number;
@@ -129,27 +128,14 @@ interface RequestShape {
 
 const dataUrl = (r: ReferenceImage) => `data:${r.mediaType};base64,${toBase64(r.bytes)}`;
 
-/** qwen 系列：文生图顶层字段；图片编辑 JSON 透传（ADR 0006）。负向走原生字段：文生图顶层 negative_prompt，图片编辑 input.negative_prompt。 */
-const buildQwenImagesEdits: RequestShape["build"] = (input) => {
+/** qwen 系列：文生图与图片编辑统一走 generations 顶层字段，参考图按序进入 image。 */
+const buildQwenImagesGenerations: RequestShape["build"] = (input) => {
   const { model, text, nativeNegativePrompt, size, references } = input;
   const native = nativeNegativePrompt ? { negative_prompt: nativeNegativePrompt } : {};
-  if (references.length === 0) {
-    const body: Record<string, unknown> = { model: model.model_id, prompt: text, ...native };
-    Object.assign(body, { n: 1, size: `${size.width}x${size.height}` }, model.fixed_params);
-    return { path: TEXT_TO_IMAGE_PATH, body };
-  }
-  const content = [...references.map((r) => ({ image: dataUrl(r) })), { text }];
-  return {
-    path: IMAGE_EDIT_PATH,
-    body: {
-      model: model.model_id,
-      // 顶层 prompt 是网关必填字段，即使已有 input。
-      prompt: text,
-      // 透传路径不做 x→* 转换，尺寸必须是「宽*高」。
-      parameters: { size: `${size.width}*${size.height}`, n: 1, ...model.fixed_params },
-      input: { messages: [{ role: "user", content }], ...native },
-    },
-  };
+  const body: Record<string, unknown> = { model: model.model_id, prompt: text, ...native };
+  Object.assign(body, { n: 1, size: `${size.width}x${size.height}` }, model.fixed_params);
+  if (references.length) body.image = references.map(dataUrl);
+  return { path: TEXT_TO_IMAGE_PATH, body };
 };
 
 /**
@@ -196,7 +182,7 @@ const buildFlashImagesGenerations: RequestShape["build"] = (input) => {
 /** 按能力表 request_shape 选择请求形态。 */
 const REQUEST_SHAPES: Record<string, RequestShape> = {
   seedream_flash_images_generations: { build: buildFlashImagesGenerations, parse: parseFlashImage },
-  qwen_images_edits: { build: buildQwenImagesEdits, parse: parseGeneratedImages },
+  qwen_images_edits: { build: buildQwenImagesGenerations, parse: parseGeneratedImages },
   seedream_images_generations: { build: buildSeedreamImagesGenerations, parse: parseImageUrls },
 };
 

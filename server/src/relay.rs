@@ -23,9 +23,9 @@ use crate::{paths, AppState, User};
 const MAX_RESULT_BYTES: u64 = 64 * 1024 * 1024;
 const STAGING_DIR: &str = ".staging";
 
-/// 默认可下载的结果主机后缀：火山引擎对象存储（Seedream 结果所在）及其 CDN 域名。
+/// 默认可下载的结果主机后缀：火山引擎对象存储（Seedream 结果所在）及其 CDN 域名，以及阿里云 OSS（Qwen 结果所在）。
 pub fn default_result_hosts() -> &'static [&'static str] {
-    &[".volces.com", ".volccdn.com", ".bytepluses.com"]
+    &[".volces.com", ".volccdn.com", ".bytepluses.com", ".aliyuncs.com"]
 }
 
 /// 主机匹配：条目 `.volces.com` 允许其子域与本体；`127.0.0.1` 这类无点前缀条目只精确匹配。
