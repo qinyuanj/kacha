@@ -33,6 +33,8 @@ pub const EVENT_KINDS: &[&str] = &[
     "board_pack",
     // 服务端每日用量（#24）：各用户数据根大小，只有指纹前缀与字节数。
     "usage",
+    // 缩略图生成失败（#49）：回退原图，只留这一条记录。
+    "thumb_failed",
 ];
 
 fn segment_path(dir: &Path, index: usize) -> PathBuf {

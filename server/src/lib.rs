@@ -24,6 +24,7 @@ pub mod references;
 pub mod relay;
 mod session;
 pub mod store;
+pub mod thumbs;
 pub mod transfer;
 pub mod usage;
 pub mod usage_log;
@@ -205,6 +206,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/boards/rename", axum::routing::post(fs::rename_board))
         .route("/api/boards/names", get(fs::list_board_names))
         .route("/api/fs/file", get(fs::read_file).put(fs::write_new_file))
+        .route("/api/fs/thumb", get(thumbs::read_thumb))
         .route("/api/fs/dir", get(fs::list_dir))
         .route("/api/fs/is-file", get(fs::is_file))
         .route("/api/fs/sha256", get(fs::file_sha256))
