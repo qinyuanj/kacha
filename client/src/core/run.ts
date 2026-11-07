@@ -3,7 +3,7 @@
 import type { Board, ResultRecord, TaskNode } from "./board";
 import { findModel, isRetiredModel, LITE_RETIRED_HINT, type CapabilityTable, type InputImageRule, type ModelCapability } from "./capabilities";
 import { fitImage, type FittedBytes, type ImageCodec } from "./fitImage";
-import { ERROR_CATEGORY_LABELS, categoryForStatus, fetchResultImage, GatewayError, generate, type FetchLike, type GenerationInput, type LayerMetadata, validLayerBox } from "./gateway";
+import { ERROR_CATEGORY_LABELS, categoryForStatus, fetchResultImage, GatewayError, generate, isFlashShape, type FetchLike, type GenerationInput, type LayerMetadata, validLayerBox } from "./gateway";
 import { imagePortSlots, imageSources, imageRuleViolations, workflowOf } from "./graph";
 import type { RunResult } from "./layout";
 import { firstRegionOf, slotsFromReferences } from "./region";
@@ -12,6 +12,7 @@ import { isAutoRatio, resolveSize } from "./size";
 import { joinPath } from "./paths";
 import { snapshotOf } from "./submission";
 import { LocalError, newTaskId, readSubmission, taskDirOfTaskId, saveLayers, saveResult, sniffImage, writeSubmission, layerFileName, layersExportJson, type LayerRecord, type ReferenceSource, type SubmissionPlan, type TaskFs } from "./taskDir";
+import { errorText } from "./errors";
 
 export type TaskStatus =
   | { kind: "queued" }
@@ -75,7 +76,7 @@ export function failureLabel(error: unknown): string {
  *  服务端不回显签名地址，这里也只用服务端文案。 */
 function relayError(e: unknown): Error {
   const { status, upstreamStatus } = (e ?? {}) as { status?: unknown; upstreamStatus?: unknown };
-  const message = e instanceof Error ? e.message : String(e);
+  const message = errorText(e);
   if (typeof upstreamStatus === "number") return new GatewayError(upstreamStatus === 401 ? "rejected" : categoryForStatus(upstreamStatus), message, upstreamStatus);
   if (typeof status !== "number") return e instanceof Error ? e : new Error(message);
   if (status === 422) return new GatewayError("invalid_response", message, status);
@@ -87,7 +88,7 @@ function relayError(e: unknown): Error {
 async function fitForModel(deps: RunDeps, bytes: Uint8Array, model: ModelCapability): Promise<FittedBytes> {
   const rule = model.input_image_rule;
   const fitted = deps.imageCodec ? await fitImage(bytes, rule, deps.imageCodec) : { bytes };
-  if (model.request_shape === "seedream_flash_images_generations") await validateFlashReference(deps, fitted.bytes, rule);
+  if (isFlashShape(model)) await validateFlashReference(deps, fitted.bytes, rule);
   return fitted;
 }
 
@@ -127,7 +128,7 @@ async function validateFlashOrdinaryOutput(deps: RunDeps, bytes: Uint8Array): Pr
 }
 
 function readError(label: string, e: unknown): LocalError {
-  return new LocalError(`读取${label}失败：${e instanceof Error ? e.message : String(e)}`);
+  return new LocalError(`读取${label}失败：${errorText(e)}`);
 }
 
 /** 准备好的任务与派发时要写到任务节点上的 last_submitted；undefined = 不改（生成变体）。 */
@@ -147,10 +148,10 @@ export async function prepareJob(
   const { board, table, userRoot, taskNodeId } = args;
   const task = board.nodes.find((n) => n.id === taskNodeId);
   if (task?.type === "task" && isRetiredModel(task.model)) throw new LocalError(LITE_RETIRED_HINT);
-  const snapshot = snapshotOf(board, taskNodeId);
+  const snapshot = snapshotOf(board, table, taskNodeId);
   const model = task?.type === "task" ? findModel(table, task.model) : undefined;
   if (task?.type !== "task" || !snapshot || !model) throw new LocalError("任务节点或模型不存在");
-  const flashLayers = model.request_shape === "seedream_flash_images_generations" && task.layer_decomposition;
+  const flashLayers = isFlashShape(model) && task.layer_decomposition;
   // 尺寸解析失败明确失败；图层拆分同样不静默兜底——写进 task.json 的尺寸必须是用户选的。
   const size = resolveSize(model.workflows[workflowOf(board, taskNodeId)].size_rule, task.size_spec);
   if (!size) throw new LocalError("生成尺寸不在模型尺寸表内");
@@ -158,8 +159,8 @@ export async function prepareJob(
   const sources = imageSources(board, taskNodeId, userRoot);
   const slots = imagePortSlots(board, table, taskNodeId);
   const send = planSend(model, slots, snapshot.prompt, snapshot.negative_prompt);
-  if (model.request_shape === "seedream_flash_images_generations" && send.referenceProblems.issues.length) throw new LocalError(send.referenceProblems.issues.join("；"));
-  if (model.request_shape === "seedream_flash_images_generations" && slots.length > 10) throw new LocalError("Flash 参考图最多 10 张");
+  if (isFlashShape(model) && send.referenceProblems.issues.length) throw new LocalError(send.referenceProblems.issues.join("；"));
+  if (isFlashShape(model) && slots.length > 10) throw new LocalError("Flash 参考图最多 10 张");
   // 先按用户连线读全部源图，再按展开槽组装：叠加槽由其原图合成。
   // 读到即按该任务模型的输入规则处理成参考图快照；叠加图从处理后的快照合成，两者尺寸一致。
   if (flashLayers && (sources.length !== 1 || slots.length !== 1)) throw new LocalError("图层拆分需要恰好一张参考图，不支持区域派生图");
@@ -222,7 +223,7 @@ export async function prepareJob(
 }
 
 async function validateFlashTransparency(deps: RunDeps, plan: SubmissionPlan, model: ModelCapability): Promise<void> {
-  if (model.request_shape !== "seedream_flash_images_generations" || !plan.transparentBackground) return;
+  if (!isFlashShape(model) || !plan.transparentBackground) return;
   if (plan.references.length !== 1) throw new LocalError("透明背景需要恰好一张实际参考图");
   if (plan.outputOptions?.output_format === "jpeg") throw new LocalError("透明背景输出必须为 PNG");
   if (!deps.imageCodec) throw new LocalError("参考图透明通道尚未确认");
@@ -272,7 +273,7 @@ export async function prepareRegenerate(
   if (!model) throw new LocalError(`模型 ${previous.model} 已不在能力表内`);
   // 快照已按规则处理过，原样重发，不再处理；本次没处理，新任务记录不带 fitted。
   const references: SubmissionPlan["references"] = previous.references.map((ref, i) => ({ bytes: snapshots[i], source: ref.source, ...(ref.region ? { region: ref.region } : {}) }));
-  if (model.request_shape === "seedream_flash_images_generations") {
+  if (isFlashShape(model)) {
     if (references.length > 10) throw new LocalError("Flash 参考图最多 10 张");
     if (previous.layer_decomposition && references.length !== 1) throw new LocalError("图层拆分需要恰好一张参考图");
     for (const ref of references) {
@@ -283,7 +284,7 @@ export async function prepareRegenerate(
   // 按当前规则重算发送计划，不重放 task.json 里的 send_text：旧任务可能按「叠加图占用户序号」的旧口径存（#113），
   // 固定句也要按当前能力表模板重建。
   const send = { ...planSend(model, slotsFromReferences(previous.references), previous.prompt, previous.negative_prompt), ...(previous.layer_decomposition && !previous.prompt.trim() && !previous.negative_prompt.trim() ? { text: "" } : {}) };
-  if (model.request_shape === "seedream_flash_images_generations" && send.referenceProblems.issues.length) throw new LocalError(send.referenceProblems.issues.join("；"));
+  if (isFlashShape(model) && send.referenceProblems.issues.length) throw new LocalError(send.referenceProblems.issues.join("；"));
 
   // 自动宽高比（仅重新生成，生成变体始终按那次提交）：按节点当前的分辨率档与算出的宽高比；换算不出时仍按上次提交。
   const current = args.fromTaskId === undefined && task?.type === "task" && isAutoRatio(task.size_spec) ? task.size_spec : null;
@@ -320,9 +321,9 @@ export async function prepareRegenerate(
 export async function writeJob(deps: RunDeps, userRoot: string, job: PreparedJob): Promise<WrittenJob> {
   try {
     const { relDir, references } = await writeSubmission(deps, userRoot, job.plan);
-    return { ...job, relDir, input: { ...job.input, references: references.map(ref => ({ ...ref, ...(job.plan.transparentBackground && job.input.model.request_shape === "seedream_flash_images_generations" ? { hasAlpha: true } : {}) })) } };
+    return { ...job, relDir, input: { ...job.input, references: references.map(ref => ({ ...ref, ...(job.plan.transparentBackground && isFlashShape(job.input.model) ? { hasAlpha: true } : {}) })) } };
   } catch (e) {
-    throw new LocalError(`写任务目录失败：${e instanceof Error ? e.message : String(e)}`);
+    throw new LocalError(`写任务目录失败：${errorText(e)}`);
   }
 }
 
@@ -349,7 +350,7 @@ export async function executeJob(
   const { images } = await generate({ baseUrl: args.baseUrl, apiKey: args.apiKey, fetch: deps.fetch }, job.input);
   if (signal?.aborted) throw new CancelledError();
   const fetched: { bytes: Uint8Array; layer?: LayerMetadata; staged?: string }[] = [];
-  const flashLayers = job.input.model.request_shape === "seedream_flash_images_generations" && job.plan.layerDecomposition;
+  const flashLayers = isFlashShape(job.input.model) && job.plan.layerDecomposition;
   let baseSize: { width: number; height: number } | undefined;
   try {
     for (const [index, image] of images.entries()) {
@@ -369,7 +370,7 @@ export async function executeJob(
         try {
           bytes = await deps.readFile(joinPath(args.userRoot, saved.path));
         } catch (e) {
-          throw new LocalError(`读回中转结果失败：${e instanceof Error ? e.message : String(e)}`);
+          throw new LocalError(`读回中转结果失败：${errorText(e)}`);
         }
       } else {
         bytes = await fetchResultImage(deps.fetch, image);
@@ -393,7 +394,7 @@ export async function executeJob(
           }
         } finally { decoded.close(); }
       }
-      if (job.input.model.request_shape === "seedream_flash_images_generations" && job.plan.transparentBackground) {
+      if (isFlashShape(job.input.model) && job.plan.transparentBackground) {
         if (sniffImage(bytes)?.ext !== "png" || !deps.imageCodec) throw new GatewayError("invalid_response", "透明背景结果必须为带透明通道的 PNG");
         let decoded;
         try { decoded = await deps.imageCodec.decode(bytes); }
@@ -402,7 +403,7 @@ export async function executeJob(
           if (decoded.hasAlpha() !== true) throw new GatewayError("invalid_response", "透明背景结果未包含透明像素");
         } finally { decoded.close(); }
       }
-      if (job.input.model.request_shape === "seedream_flash_images_generations" && !job.plan.layerDecomposition && !job.plan.transparentBackground) await validateFlashOrdinaryOutput(deps, bytes);
+      if (isFlashShape(job.input.model) && !job.plan.layerDecomposition && !job.plan.transparentBackground) await validateFlashOrdinaryOutput(deps, bytes);
       fetched.push({ bytes, layer: image.layer, ...(staged ? { staged } : {}) });
     }
   } catch (e) {
@@ -459,7 +460,7 @@ export async function executeJob(
     }
   } catch (e) {
     await discard();
-    throw new LocalError(`保存结果图失败：${e instanceof Error ? e.message : String(e)}`);
+    throw new LocalError(`保存结果图失败：${errorText(e)}`);
   }
   return { taskId: job.taskNodeId, submittedTaskId: job.taskId, file: saved.file, path: saved.path, record: job.record, layers };
 }

@@ -122,6 +122,15 @@ def server_command(server: Path) -> list[str]:
     return [sys.executable, path] if server.suffix == ".py" else [path]
 
 
+def server_profile(server: Path) -> str:
+    """所用服务端的构建档：离可执行文件最近的 debug / release 目录说了算（cargo 的 target/debug、
+    打包产物 release/kacha-web 都落在其中），判断不出写 unknown。"""
+    for part in reversed(server.parent.parts):
+        if part.lower() in ("debug", "release"):
+            return part.lower()
+    return "unknown"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--users", type=int, required=True, help="同时使用的用户数；按设计规模取 12")
@@ -187,7 +196,7 @@ def main() -> int:
                 base = f"/api/packs/uploads/{upload_id}"
                 request(port, "GET", base + "/entries", cookie=cookie)
                 request(port, "POST", base + "/texts", json.dumps([manifest_name, board_entry]).encode(), cookie)
-                request(port, "POST", base + "/import?op=" + f"import-{index}", json.dumps(units).encode(), cookie)
+                request(port, "POST", base + "/import?op=" + f"import-{index}", json.dumps({"units": units, "duplicates": []}).encode(), cookie)
                 exported_manifest = {"pack_format_version": 1, "app_version": "load", "boards": ["画板/压力.ugcboard.json"]}
                 export_spec = {
                     "texts": [
@@ -222,7 +231,7 @@ def main() -> int:
         "server_peak_mib": round(peak / 1024 / 1024, 2),
         "budget_mib": args.budget_mib,
         "within_budget": peak <= args.budget_mib * 1024 * 1024,
-        "profile": "release",
+        "profile": server_profile(args.server.resolve()),
         "platform": metric,
     }
     text = json.dumps(result, ensure_ascii=False, indent=2)

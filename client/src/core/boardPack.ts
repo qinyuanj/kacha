@@ -8,6 +8,7 @@ import { BOARDS_DIR_NAME, basename, resolveFromRoot, toRootRelative } from "./pa
 import { TASK_RECORD_FILE, taskDirOfRelPath, taskDirOfTaskId } from "./taskDir";
 import { sha256Hex } from "./sha256";
 import { blobSource, readEntryBytes, readZipIndex, type ZipEntry, type ZipSource } from "./zipIndex";
+import { errorText } from "./errors";
 
 /** 本机能导入、也是导出写的包格式版本。v2 = 导出时按内容去重，被省略的路径记在清单的 duplicates 里（ADR 0013 补记）。 */
 export const PACK_FORMAT_VERSION = 2;
@@ -352,7 +353,10 @@ export function importSummary(units: MergeUnit[], outcomes: { path: string; outc
 /** 取消时包命令以此失败（壳层把服务端的 code cancelled 也统一成它）。 */
 export const PACK_CANCELLED = "已取消";
 
-/** 单份内容上传的上限，与服务端单文件请求体上限一致（ADR 0018）；包里有更大的条目时回退为整包上传。 */
+/**
+ * 单份内容上传的上限，与服务端单文件请求体上限一致（ADR 0018）；包里有更大的条目时回退为整包上传。
+ * 服务端 server/src/lib.rs 的 `MAX_BODY_BYTES` 是它的跨语言副本，改一处要同改另一处。
+ */
 export const MAX_CONTENT_BYTES = 64 * 1024 * 1024;
 
 /** 用户数据根里某个合并单元的现状（去重上传前问服务端）。读不出的按冲突处理，与合并时「读不了视为不同」一致。 */
@@ -408,8 +412,6 @@ export interface PackIo {
 }
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; result: "cancelled" | "failed"; error: string };
-
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** 先复位取消标记，复位之后才进入进度阶段（调用方在此弹进度），再跑命令：进度弹出后立刻点的取消才不会丢。 */
 export async function runCancellable<T>(io: Pick<PackIo, "cancel">, onStage: (stage: "progress") => void, run: () => Promise<T>): Promise<Outcome<T>> {

@@ -7,6 +7,7 @@ import { buildExportSpec, exportSources, importPack as importPackIn, PACK_EXTENS
 import { packFs, packIo } from "../shell/adapters";
 import { logEvent } from "../shell/log";
 import type { PackDialogState } from "./BoardPackDialog";
+import { errorText } from "../core/errors";
 
 interface PackBoards {
   flushAll: () => Promise<void>;
@@ -23,8 +24,6 @@ const IMPORT_PHASES: Record<ImportPhase, string> = {
   upload: "正在上传缺少的内容…",
   merge: "正在合并任务目录…",
 };
-
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function useBoardPack(userRoot: string | null, boards: PackBoards, toast: (message: string) => void) {
   const [dialog, setDialog] = useState<PackDialogState | null>(null);

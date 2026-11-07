@@ -2,7 +2,7 @@
 // 同步、纯：弹确认框、选文件、读图片宽高与 sha 等副作用由界面先做完，把事实放进变更；时钟不进来，撤销步由 sessions 落账。
 // 规则都在这里：变更属于哪一类、撤销步描述与归并键（由变更种类决定）、后置管线（图片端口同步 → 自动宽高比）、运行期锁定。
 import type { OutputOptions } from "./gateway";
-import { outputOptions } from "./gateway";
+import { isLayerSize, outputOptions } from "./gateway";
 import { syncAutoRatios } from "./autoRatio";
 import { taskCount, type Board, type BoardEdge, type PortRef, type PromptNode, type Region, type TaskNode } from "./board";
 import { findModel, type CapabilityTable } from "./capabilities";
@@ -279,7 +279,7 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
         step: { label: "修改尺寸" },
       };
     case "setLayerSize":
-      if (!["1K", "1.5K", "2K", "auto"].includes(change.size)) return { board };
+      if (!isLayerSize(change.size)) return { board };
       return { board: mapTask(board, change.taskId, (t) => ({ ...t, layer_size: change.size })), step: { label: "修改图层尺寸" } };
     case "setOutputOptions":
       return { board: mapTask(board, change.taskId, (t) => ({ ...t, output_options: outputOptions(change.options) })), step: { label: "修改输出选项" } };

@@ -1,6 +1,6 @@
 // 节点图规则：连线合法性、任务节点按能力露出的端口与开关、提示词与图片来源。
 // 全部是 Board → 结果的纯函数；换模型绝不自动删线或改设置。不可运行原因见 taskView。
-import type { Board, BoardEdge, LayerRecord, ResultRecord, TaskNode } from "./board";
+import type { Board, BoardEdge, BoardNode, LayerRecord, ResultRecord, TaskNode } from "./board";
 import {
   findModel,
   isSupported,
@@ -86,6 +86,30 @@ export function sourceLayerRecord(record: ResultRecord, sourceLayer: number): La
   return entry && typeof entry.file === "string" && entry.file !== "" ? entry : null;
 }
 
+/** 结果图层文件相对用户数据根的路径：图层记录的 file 相对任务目录，任务目录即结果文件所在目录。 */
+export function layerRelPath(node: { path: string; file: string }, file: string): string {
+  return `${node.path.slice(0, node.path.length - node.file.length)}${file}`;
+}
+
+/** 缺图集合与透明通道集合共用的图片键：底图（layer 为 null）就是节点 id，图层按序号（1 起）另起一键，与底图互不株连。 */
+export function imageKey(nodeId: string, layer: number | null): string {
+  return layer === null ? nodeId : `${nodeId}:layer:${layer}`;
+}
+
+export interface NodeImage {
+  /** 缺图 / 透明通道集合的键（见 imageKey）。 */
+  key: string;
+  absPath: string;
+}
+
+/** 图片节点的全部图片文件：参考图是它本身；结果节点是底图，再按序跟结果记录里的各图层。其余节点没有图片。 */
+export function nodeImages(node: BoardNode, userRoot: string): NodeImage[] {
+  if (node.type !== "reference" && node.type !== "result") return [];
+  const main = { key: imageKey(node.id, null), absPath: resolveFromRoot(userRoot, node.path) };
+  if (node.type !== "result") return [main];
+  return [main, ...(node.record.layers ?? []).map((layer, i) => ({ key: imageKey(node.id, i + 1), absPath: resolveFromRoot(userRoot, layerRelPath(node, layer.file)) }))];
+}
+
 /** 任务的参考图来源，按端口顺序；结果节点回灌的是文件本身，不带会话参数。 */
 export function imageSources(board: Board, taskId: string, userRoot: string): ImageSource[] {
   return imageEdges(board, taskId).flatMap((e): ImageSource[] => {
@@ -95,8 +119,7 @@ export function imageSources(board: Board, taskId: string, userRoot: string): Im
       // 接了某一图层：路径以结果记录里的图层记录为准（记录无效 = 身份无效，不给路径），标签点明图层序号。
       if (e.source_layer !== null) {
         const layer = sourceLayerRecord(src.record, e.source_layer);
-        const dir = src.path.slice(0, src.path.length - src.file.length);
-        return [{ nodeId: src.id, label: `${src.file} 图层${e.source_layer}`, absPath: layer ? resolveFromRoot(userRoot, `${dir}${layer.file}`) : null, sourceLayer: e.source_layer }];
+        return [{ nodeId: src.id, label: `${src.file} 图层${e.source_layer}`, absPath: layer ? resolveFromRoot(userRoot, layerRelPath(src, layer.file)) : null, sourceLayer: e.source_layer }];
       }
       return [{ nodeId: src.id, label: src.file, absPath: resolveFromRoot(userRoot, src.path), sourceLayer: null }];
     }
@@ -281,6 +304,17 @@ export function forkPrompt(board: Board, promptId: string, fork: { newNodeId: st
 }
 
 // ---- 参考图输入规则 ----
+
+/**
+ * 图片节点按哪些模型的输入规则提示：直接下游任务的模型（去重）。
+ * 未接线的参考图按调用方给的回退模型（新建任务实际会用的默认模型）；结果图没接任务不提示。
+ */
+export function inputRuleModels(board: Board, nodeId: string, fallbackModel: string | null): string[] {
+  const downstream = [...new Set(board.edges.filter((e) => e.from[0] === nodeId).flatMap((e) => findTask(board, e.to[0])?.model ?? []))];
+  if (downstream.length > 0) return downstream;
+  if (board.nodes.find((n) => n.id === nodeId)?.type !== "reference") return [];
+  return fallbackModel ? [fallbackModel] : [];
+}
 
 export interface ImageFacts {
   /** 小写格式名：png / jpeg / webp …；未知为空串。 */

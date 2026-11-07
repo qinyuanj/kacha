@@ -7,11 +7,20 @@ import {
   fetchResultImage,
   generate,
   GatewayError,
+  isFlashShape,
+  isLayerSize,
+  LAYER_SIZES,
   listModels,
   parseGeneratedImages,
   type FetchLike,
   type GenerationInput,
 } from "./gateway";
+
+describe("isFlashShape", () => {
+  it("只有 Flash 请求形态的模型为真，缺模型为假", () => {
+    expect(["doubao-seedream-5-0-flash-260915", "doubao-seedream-5-0-pro-260628", "qwen-image-3.0", "不存在"].map((id) => isFlashShape(findModel(BUILTIN_TABLE, id)))).toEqual([true, false, false, false]);
+  });
+});
 
 describe("Flash 图层官方契约合成回放，非网关实测", () => {
   const model = findModel(BUILTIN_TABLE, "doubao-seedream-5-0-flash-260915")!;
@@ -38,6 +47,20 @@ describe("Flash 图层官方契约合成回放，非网关实测", () => {
     const fetch: FetchLike = async () => ({ status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ data }), arrayBuffer: async () => new ArrayBuffer(0) });
     const result = await generate({ baseUrl: "https://gateway.test", apiKey: "test", fetch }, input());
     expect(result.images).toEqual([{ kind: "url", url: "https://result.test/base", layer: { z_index: 0 } }, { kind: "url", url: "https://result.test/one", layer: { z_index: 1, bounding_box: box } }, { kind: "url", url: "https://result.test/two", layer: { z_index: 2, bounding_box: box, name: "主体" } }]);
+  });
+});
+
+describe("图层尺寸档", () => {
+  it("只有 auto / 1K / 1.5K / 2K 四档，auto 在前", () => {
+    expect(LAYER_SIZES).toEqual(["auto", "1K", "1.5K", "2K"]);
+  });
+
+  it.each(["auto", "1K", "1.5K", "2K"])("%s 是图层尺寸", (value) => {
+    expect(isLayerSize(value)).toBe(true);
+  });
+
+  it.each(["3K", "1k", "", null, undefined, 1])("%s 不是图层尺寸", (value) => {
+    expect(isLayerSize(value)).toBe(false);
   });
 });
 

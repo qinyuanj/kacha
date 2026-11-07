@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { newBoard, parseBoard, serializeBoard, taskCount, type Board, type ReferenceNode, type ResultNode, type TaskNode } from "./board";
 import {
+  MAX_CONTENT_BYTES,
   PACK_CANCELLED,
   PACK_FORMAT_VERSION,
   PACK_MANIFEST,
@@ -915,7 +916,7 @@ describe("导入画板包", () => {
     }
 
     it("有条目超过单份 64 MB 上限：回退为整包上传", async () => {
-      const huge = new Uint8Array(64 * 1024 * 1024 + 1);
+      const huge = new Uint8Array(MAX_CONTENT_BYTES + 1);
       const entries = Object.entries(goodPack).map(([name, data]) => ({ name, data, method: name.endsWith(".json") ? 8 : 0 }));
       const file = new File([buildZip([...entries, { name: `${TASK}/big.bin`, data: huge }])], "千问测试.ugcpack");
       const { io, steps } = memoryPackIo(goodPack);

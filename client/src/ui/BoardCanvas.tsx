@@ -18,7 +18,7 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { type Board, type BoardEdge } from "../core/board";
-import { findModel, modelsByTier, type CapabilityTable, type InputImageRule } from "../core/capabilities";
+import { findModel, type CapabilityTable, type InputImageRule } from "../core/capabilities";
 import type { TaskStatus } from "../core/run";
 import { nodeCopyDetail, nodeStatus, nodeSummary, summaryTone, type NodeRunState } from "../core/runner";
 import { availableModels, defaultTaskModel, type Discovery } from "../core/settings";
@@ -29,6 +29,8 @@ import {
   imageEdges,
   imagePortIndex,
   imagePortSlots,
+  inputRuleModels,
+  nodeImages,
   taskPorts,
   workflowOf,
   type Connection,
@@ -62,6 +64,7 @@ import { ModelOptions, nodeTypes, type ImagePortInfo, type ImageSlotInfo, type P
 import { DragContext } from "./ports";
 import { PreviewDialog, type PreviewRequest, type RegionTarget } from "./PreviewDialog";
 import { isTyping, useCanvasInteraction, type Selection } from "./useCanvasInteraction";
+import { errorText } from "../core/errors";
 
 /** 复制粘贴的剪贴板：应用内共享，可粘到另一个画板（只带节点之间的连线，不跨画板连线）。 */
 let clipboard: Clip | null = null;
@@ -109,10 +112,6 @@ const edgeId = (e: BoardEdge) => `${e.from.join(":")}->${e.to.join(":")}`;
 const dims = (w: number | undefined, h: number | undefined) => ({ width: w, height: h });
 /** 尚未回传测量结果的节点：非空即可让 React Flow 保留内部已测得的 handleBounds（见 nodes 的 measured）。 */
 const NOT_MEASURED: { width?: number; height?: number } = {};
-
-function defaultModel(table: CapabilityTable): string | null {
-  return modelsByTier(table)[0]?.models[0]?.model_id ?? null;
-}
 
 export function BoardCanvas({
   board,
@@ -234,8 +233,8 @@ export function BoardCanvas({
   const previewNonce = useRef(0);
 
   // 每个图片源节点的透明通道（导入 / 定位时已有缓存，未读的批量补读）；未知不进入 Map。
-  const imageNodes = useMemo(() => board.nodes.filter((n) => n.type === "reference" || n.type === "result"), [board.nodes]);
-  const imageAbsPaths = useMemo(() => imageNodes.flatMap((n) => [resolveFromRoot(userRoot, n.path), ...(n.type === "result" ? (n.record.layers ?? []).map(layer => resolveFromRoot(userRoot, `${n.path.slice(0, n.path.length - n.file.length)}${layer.file}`)) : [])]), [imageNodes, userRoot]);
+  const images = useMemo(() => board.nodes.flatMap((n) => nodeImages(n, userRoot)), [board.nodes, userRoot]);
+  const imageAbsPaths = useMemo(() => images.map((img) => img.absPath), [images]);
   const imageInfos = useImageInfos(imageAbsPaths);
   // 图片宽高晚于画板变更读到（刚打开画板、刚重新定位）、任务结束解除锁定、能力表或用户数据根变化时补算自动宽高比：
   // 系统变更，不构成撤销步；环境经 apply 取最新，这里的依赖只决定何时补算。
@@ -244,16 +243,12 @@ export function BoardCanvas({
   }, [board, imageInfos, locked, table, userRoot, applyChange]);
   const alphaByNode = useMemo(() => {
     const map = new Map<string, boolean>();
-    imageNodes.forEach((n) => {
-      const info = imageInfos.get(resolveFromRoot(userRoot, n.path));
-      if (info) map.set(n.id, info.has_alpha);
-      if (n.type === "result") (n.record.layers ?? []).forEach((layer, i) => {
-        const layerInfo = imageInfos.get(resolveFromRoot(userRoot, `${n.path.slice(0, n.path.length - n.file.length)}${layer.file}`));
-        if (layerInfo) map.set(`${n.id}:layer:${i + 1}`, layerInfo.has_alpha);
-      });
-    });
+    for (const img of images) {
+      const info = imageInfos.get(img.absPath);
+      if (info) map.set(img.key, info.has_alpha);
+    }
     return map;
-  }, [imageNodes, imageAbsPaths, imageInfos]);
+  }, [images, imageInfos]);
 
   /** 参考图 / 结果节点扇出到「支持区域指示」任务的图片线，作为弹窗里可编辑区域的目标。 */
   const regionTargetsOf = useCallback(
@@ -378,7 +373,7 @@ export function BoardCanvas({
               logRelocate({ ok: true });
             } catch (e) {
               logRelocate({ ok: false, reason: "unreadable" });
-              toast(`无法读取 ${file.name}：${e instanceof Error ? e.message : String(e)}`);
+              toast(`无法读取 ${file.name}：${errorText(e)}`);
             }
             return;
           }
@@ -397,7 +392,7 @@ export function BoardCanvas({
             logRelocate({ ok: true });
           } catch (e) {
             logRelocate({ ok: false, reason: "unreadable" });
-            toast(`无法读取 ${basename(abs)}：${e instanceof Error ? e.message : String(e)}`);
+            toast(`无法读取 ${basename(abs)}：${errorText(e)}`);
           }
         })(),
     }),
@@ -430,16 +425,11 @@ export function BoardCanvas({
   const drag = useMemo<DragState | null>(() => (dragFrom ? { from: dragFrom, ports: connectablePorts(board, dragFrom, isValidConnection) } : null), [dragFrom, board, isValidConnection]);
 
   const nodes = useMemo<Node[]>(() => {
-    const fallback = defaultModel(table);
     const labelOf = (id: string): ImagePortInfo => {
       const src = board.nodes.find((n) => n.id === id);
       if (src?.type === "reference") return { label: src.display_name, absPath: resolveFromRoot(userRoot, src.path) };
       if (src?.type === "result") return { label: src.file, absPath: resolveFromRoot(userRoot, src.path) };
       return { label: "?", absPath: null };
-    };
-    const downstreamModels = (id: string) => {
-      const tasks = board.edges.filter((e) => e.from[0] === id).map((e) => board.nodes.find((t) => t.id === e.to[0]));
-      return [...new Set(tasks.flatMap((t) => (t?.type === "task" ? [t.model] : [])))];
     };
     const promptGuidesOf = (promptId: string): PromptReferenceGuideTask[] => {
       const groups: PromptReferenceGuideTask[] = [];
@@ -458,7 +448,8 @@ export function BoardCanvas({
       }
       return groups;
     };
-    const rulesOf = (modelIds: string[]): InputImageRule[] => modelIds.flatMap((id) => findModel(table, id)?.input_image_rule ?? []);
+    const fallbackModel = defaultTaskModel(table, discovery, board.last_model);
+    const rulesOf = (id: string): InputImageRule[] => inputRuleModels(board, id, fallbackModel).flatMap((m) => findModel(table, m)?.input_image_rule ?? []);
     return board.nodes.flatMap((n): Node[] => {
       if (n.type === "unknown") return [];
       const base = {
@@ -481,12 +472,10 @@ export function BoardCanvas({
           return [{ ...base, type: "prompt", data: { node: n, recorded: hasDownstreamRecords(board, n.id), autoFocus: focusPrompt === n.id, draft: promptDrafts.get(n.id) ?? null, portKind: promptPortKind(board, n.id), guides: promptGuidesOf(n.id) } }];
         case "result":
           // 结果回灌到任务上才按下游模型规则提示；没接任务不提示。
-          return [{ ...base, ...imageBox(n.path), type: "result", data: { node: n, rules: rulesOf(downstreamModels(n.id)), missing: missing.has(n.id) } }];
-        case "reference": {
-          const modelIds = downstreamModels(n.id);
-          const rules = rulesOf(modelIds.length ? modelIds : fallback ? [fallback] : []);
-          return [{ ...base, ...imageBox(n.path), type: "reference", data: { node: n, rules, missing: missing.has(n.id) } }];
-        }
+          return [{ ...base, ...imageBox(n.path), type: "result", data: { node: n, rules: rulesOf(n.id), missing: missing.has(n.id) } }];
+        case "reference":
+          // 没接任务时按新建任务会用的默认模型提示。
+          return [{ ...base, ...imageBox(n.path), type: "reference", data: { node: n, rules: rulesOf(n.id), missing: missing.has(n.id) } }];
         case "task": {
           // 节点用缓存事实；运行前 App 逐张重新探测，同样的事实得出同样的原因。
           const view = taskView(board, table, n.id, { missingNodes: missing, alphaByNode, discovery, concurrency })!;
@@ -738,7 +727,7 @@ export function BoardCanvas({
           primeImageInfo(abs, info);
           images.push({ path: uploaded.path, sha256: info.sha256, display_name: file.name, width: info.width, height: info.height });
         } catch (e) {
-          toast(`无法导入 ${file.name}：${e instanceof Error ? e.message : String(e)}`);
+          toast(`无法导入 ${file.name}：${errorText(e)}`);
         }
       }
       if (images.length) apply({ kind: "addReferences", images, at: [at.x, at.y], attach: attach ?? null });
@@ -799,7 +788,7 @@ export function BoardCanvas({
       await saveCopyAs(resolveFromRoot(userRoot, node.path));
       toast("已开始下载（结果带图层时为 zip）");
     } catch (e) {
-      toast(`另存失败：${e instanceof Error ? e.message : String(e)}`);
+      toast(`另存失败：${errorText(e)}`);
     }
   };
 

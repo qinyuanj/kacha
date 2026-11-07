@@ -4,8 +4,18 @@
 // 发什么由发送计划（sendPlan.ts）决定；这里只把发送文本与原生负向放进请求体。
 import { withinPixelRange } from "./size";
 import { isSupported, type ModelCapability } from "./capabilities";
+import { errorText } from "./errors";
 
-export type LayerSize = "1K" | "1.5K" | "2K" | "auto";
+/** Flash 图层拆分的尺寸档，顺序即界面下拉顺序。 */
+export const LAYER_SIZES = ["auto", "1K", "1.5K", "2K"] as const;
+export type LayerSize = (typeof LAYER_SIZES)[number];
+
+/** 提示文案里的取值列举，如「1K / 1.5K / 2K / auto」：具体档在前，auto 殿后。 */
+export const LAYER_SIZES_TEXT = [...LAYER_SIZES.filter((s) => s !== "auto"), "auto"].join(" / ");
+
+export function isLayerSize(value: unknown): value is LayerSize {
+  return (LAYER_SIZES as readonly unknown[]).includes(value);
+}
 export interface LayerMetadata { z_index: number; bounding_box?: LayerBoundingBox | number[]; name?: string; description?: string }
 
 /** 图层定位：absolute 为底图像素坐标 [left,top,right,bottom]，normalized 为 0–1000（与提示坐标 0–999 互不相干）。 */
@@ -160,7 +170,7 @@ const buildFlashImagesGenerations: RequestShape["build"] = (input) => {
   if (input.references.length > 10) throw new GatewayError("config", "Flash 参考图最多 10 张");
   if (!input.layerDecomposition && !withinPixelRange({ min_total_pixels: 921600, max_total_pixels: 4624220, min_aspect_ratio: 1 / 16, max_aspect_ratio: 16 }, input.size.width, input.size.height)) throw new GatewayError("config", "Flash 生成尺寸超出范围");
   if (input.layerDecomposition && (input.references.length !== 1 || !["image/png", "image/jpeg"].includes(input.references[0].mediaType) || input.references[0].bytes.length > 30000000)) throw new GatewayError("config", "Flash 图层拆分需要一张 PNG/JPEG 参考图（不超过 30MB）");
-  if (input.layerDecomposition && !["1K", "1.5K", "2K", "auto"].includes(input.layerSize ?? "auto")) throw new GatewayError("config", "Flash 图层尺寸无效");
+  if (input.layerDecomposition && !isLayerSize(input.layerSize ?? "auto")) throw new GatewayError("config", "Flash 图层尺寸无效");
   const options = outputOptions(input.outputOptions);
   if (input.transparentBackground) {
     if (input.references.length !== 1) throw new GatewayError("config", "透明背景需要恰好一张实际参考图");
@@ -179,9 +189,16 @@ const buildFlashImagesGenerations: RequestShape["build"] = (input) => {
   } };
 };
 
+const FLASH_SHAPE = "seedream_flash_images_generations";
+
+/** 模型是否走 Flash 请求形态（参考图、透明背景、图层拆分等 Flash 专有规则都以此为准）。 */
+export function isFlashShape(model: ModelCapability | null | undefined): model is ModelCapability {
+  return model?.request_shape === FLASH_SHAPE;
+}
+
 /** 按能力表 request_shape 选择请求形态。 */
 const REQUEST_SHAPES: Record<string, RequestShape> = {
-  seedream_flash_images_generations: { build: buildFlashImagesGenerations, parse: parseFlashImage },
+  [FLASH_SHAPE]: { build: buildFlashImagesGenerations, parse: parseFlashImage },
   qwen_images_edits: { build: buildQwenImagesGenerations, parse: parseGeneratedImages },
   seedream_images_generations: { build: buildSeedreamImagesGenerations, parse: parseImageUrls },
 };
@@ -219,7 +236,7 @@ async function send(config: GatewayConfig, method: string, path: string, body?: 
   try {
     response = await config.fetch(endpoint(config.baseUrl, path), { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch (e) {
-    throw new GatewayError("network", redact(`无法连接网关：${e instanceof Error ? e.message : String(e)}`, config.apiKey));
+    throw new GatewayError("network", redact(`无法连接网关：${errorText(e)}`, config.apiKey));
   }
   const requestId = response.headers.get("X-Oneapi-Request-Id");
   const text = await response.text().catch(() => "");
@@ -323,7 +340,7 @@ export async function generate(config: GatewayConfig, input: GenerationInput): P
   const shape = requestShapeOf(input.model);
   const { path, body } = buildGenerationRequest(input);
   const response = await send(config, "POST", path, body);
-  const images = input.layerDecomposition && input.model.request_shape === "seedream_flash_images_generations" ? parseFlashLayers(response.body) : shape.parse(response.body);
+  const images = input.layerDecomposition && isFlashShape(input.model) ? parseFlashLayers(response.body) : shape.parse(response.body);
   if (!images.length) throw new GatewayError("invalid_response", "网关没有返回图片", 200, response.requestId);
   return { images, requestId: response.requestId };
 }

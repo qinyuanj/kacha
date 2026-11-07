@@ -4,6 +4,7 @@
 // 区域编号是槽的属性：成像（叠加图上色、画板给框上色）与发送计划各自从同一份槽读 firstRegionOf。文本部分在发送计划（sendPlan.ts）。
 import type { Board, BoardEdge, PortRef, Region, RegionRender } from "./board";
 import { isSupported, type ModelCapability } from "./capabilities";
+import { isFlashShape } from "./gateway";
 
 /**
  * 客户端已实现的渲染方式，按优先级取模型支持的第一个。能力表记模型事实、不记客户端实现（ADR 0004）：
@@ -23,7 +24,7 @@ export function effectiveRegionRender(model: ModelCapability | undefined): Regio
  * 要求有可用渲染方式、Flash 请求形态且支持 bbox_tag。
  */
 export function coordinateRegionAvailable(model: ModelCapability | undefined): boolean {
-  return effectiveRegionRender(model) !== null && model?.request_shape === "seedream_flash_images_generations" && isSupported(model.region_hint.bbox_tag);
+  return effectiveRegionRender(model) !== null && isFlashShape(model) && isSupported(model.region_hint.bbox_tag);
 }
 
 /** 展开后槽位的最小形状（重新生成时由 slotsFromReferences 从 task.json 重建，没有连线对象）。 */

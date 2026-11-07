@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BOARD_EXTENSION } from "../core/board";
 import { joinPath } from "../core/paths";
 import { ipc } from "../shell/ipc";
+import { errorText } from "../core/errors";
 
 interface Props {
   /** 画板目录（绝对路径，含用户数据根）。 */
@@ -17,7 +18,6 @@ interface Props {
   onClose(): void;
 }
 
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const titleOf = (name: string) => name.slice(0, -BOARD_EXTENSION.length);
 
 export function BoardListDialog({ dir, openPaths, onOpen, onDelete, onExport, onClose }: Props) {

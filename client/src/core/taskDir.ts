@@ -24,7 +24,7 @@ export class LocalError extends Error {
 }
 
 function readError(label: string, e: unknown): LocalError {
-  return new LocalError(`读取${label}失败：${e instanceof Error ? e.message : String(e)}`);
+  return new LocalError(`读取${label}失败：${errorText(e)}`);
 }
 
 const pad = (n: number, width = 2) => String(n).padStart(width, "0");
@@ -79,6 +79,7 @@ export function sniffImage(bytes: Uint8Array): { ext: string; mediaType: string 
 }
 
 import { sha256Hex } from "./sha256";
+import { errorText } from "./errors";
 
 /** 生效能力表（内置 + 覆盖合并后）的摘要，记入 task.json 便于追溯当时的能力判断。 */
 export function tableDigest(table: CapabilityTable): Promise<string> {

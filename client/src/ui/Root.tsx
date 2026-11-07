@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App } from "../App";
 import { session } from "../shell/ipc";
+import { errorText } from "../core/errors";
 
 type Phase = "loading" | "enter" | "ready";
 
@@ -24,7 +25,7 @@ export function Root() {
         const config = await session.config();
         setVersion(config.version);
       } catch (e) {
-        setFatal(`无法连接 Kacha 服务端：${e instanceof Error ? e.message : String(e)}`);
+        setFatal(`无法连接 Kacha 服务端：${errorText(e)}`);
         return;
       }
       // 已有会话 cookie（HttpOnly，JS 读不到）且本地还留着密钥：直接进工作台。
@@ -61,7 +62,7 @@ export function Root() {
       setSessionNonce((n) => n + 1);
     } catch (e) {
       // invalid_key（密钥问题）与 gateway_unavailable / network（服务故障）分开显示。
-      setError(e instanceof Error ? e.message : `验证失败：${e instanceof Error ? e.message : String(e)}`);
+      setError(e instanceof Error ? e.message : `验证失败：${String(e)}`);
     } finally {
       setBusy(false);
     }

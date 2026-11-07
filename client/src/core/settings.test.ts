@@ -8,12 +8,14 @@ import {
   isPlainHttp,
   loadSettings,
   modelAvailabilityIssue,
+  parseConcurrency,
   parseModelsCache,
   parseSettings,
   refreshModels,
   saveSettings,
   serializeModelsCache,
   serializeSettings,
+  settingsFromForm,
   validateBaseUrl,
   type SettingsPorts,
 } from "./settings";
@@ -24,6 +26,7 @@ function memoryPorts(stub: Partial<SettingsPorts> = {}) {
   const logs: { kind: string; fields: Record<string, unknown> }[] = [];
   const ports: SettingsPorts = {
     readSettings: async () => null,
+    defaultBaseUrl: async () => DEFAULT_SETTINGS.base_url,
     writeSettings: async (text) => void writes.settings.push(text),
     readModelsCache: async () => null,
     writeModelsCache: async (text) => void writes.cache.push(text),
@@ -75,6 +78,29 @@ describe("高级设置 settings.json", () => {
     expect(parseSettings('{"format_version":1,"concurrency":11}').kind).toBe("corrupt");
     expect(parseSettings('{"format_version":1,"concurrency":2.5}').kind).toBe("corrupt");
     expect(parseSettings('{"format_version":1,"concurrency":0}').kind).toBe("corrupt");
+  });
+});
+
+describe("并发上限输入框草稿", () => {
+  it("解析成整数并钳到 1～10；空或无法解析时回退到原值", () => {
+    expect(parseConcurrency("", 3)).toBe(3);
+    expect(parseConcurrency("7", 3)).toBe(7);
+    expect(parseConcurrency("17", 3)).toBe(10);
+    expect(parseConcurrency("0", 3)).toBe(1);
+    expect(parseConcurrency("3.6", 3)).toBe(4);
+    expect(parseConcurrency("abc", 3)).toBe(3);
+  });
+
+  it("不失焦直接保存：保存值按草稿钳制，清空则保持原值", () => {
+    const saved = { ...DEFAULT_SETTINGS, concurrency: 4 };
+    expect(settingsFromForm(saved, { baseUrl: saved.base_url, concurrencyDraft: "" }).concurrency).toBe(4);
+    expect(settingsFromForm(saved, { baseUrl: saved.base_url, concurrencyDraft: "17" }).concurrency).toBe(10);
+    expect(settingsFromForm(saved, { baseUrl: saved.base_url, concurrencyDraft: "7" }).concurrency).toBe(7);
+  });
+
+  it("保存时网关地址去掉首尾空白与末尾斜杠，其余字段沿用原设置", () => {
+    const saved = { ...DEFAULT_SETTINGS, extra: { future: [1] } };
+    expect(settingsFromForm(saved, { baseUrl: " https://gw.example/ ", concurrencyDraft: "5" })).toEqual({ ...saved, base_url: "https://gw.example", concurrency: 5 });
   });
 });
 
@@ -246,6 +272,26 @@ describe("载入设置", () => {
   it("文件不存在（端口返回 null）与读取失败区分：前者是 ok", async () => {
     const { ports } = memoryPorts({ readSettings: async () => null });
     expect((await loadSettings(ports)).file).toEqual({ kind: "ok", settings: DEFAULT_SETTINGS });
+  });
+
+  it("settings.json 不存在：用服务端给的默认网关地址合成默认设置", async () => {
+    const { ports } = memoryPorts({ readSettings: async () => null, defaultBaseUrl: async () => "http://gw.example:3001" });
+    expect((await loadSettings(ports)).file).toEqual({ kind: "ok", settings: { format_version: 1, base_url: "http://gw.example:3001", concurrency: 4, extra: {} } });
+  });
+
+  it("settings.json 不存在且拿不到默认网关地址：按 unreadable 处理", async () => {
+    const { ports } = memoryPorts({
+      readSettings: async () => null,
+      defaultBaseUrl: async () => {
+        throw new Error("读取失败（HTTP 500）：/api/config");
+      },
+    });
+    expect((await loadSettings(ports)).file).toEqual({ kind: "unreadable", settings: DEFAULT_SETTINGS });
+  });
+
+  it("settings.json 存在但缺 base_url：沿用客户端默认地址，不问服务端", async () => {
+    const { ports } = memoryPorts({ readSettings: async () => JSON.stringify({ format_version: 1 }), defaultBaseUrl: async () => "http://gw.example:3001" });
+    expect((await loadSettings(ports)).file).toMatchObject({ kind: "ok", settings: { base_url: "http://lzxsvn:3001" } });
   });
 
   it("文件由更新版本写入时如实报 newer", async () => {

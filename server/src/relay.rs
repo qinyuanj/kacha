@@ -19,8 +19,6 @@ use tokio::io::AsyncWriteExt;
 use crate::session::error;
 use crate::{paths, AppState, User};
 
-/// 单文件上限（ADR 0018 的 64 MB 请求预算同样适用于中转结果）。
-const MAX_RESULT_BYTES: u64 = 64 * 1024 * 1024;
 /// 任务目录内的暂存区：中转结果待校验，内容会被替换，因此不按不可变缓存（见 `cache`）。
 pub(crate) const STAGING_DIR: &str = ".staging";
 
@@ -197,8 +195,8 @@ pub async fn relay(State(state): State<AppState>, user: User, body: Bytes) -> Re
         )
             .into_response();
     }
-    if response.content_length().is_some_and(|len| len > MAX_RESULT_BYTES) {
-        return error(StatusCode::PAYLOAD_TOO_LARGE, "download_failed", "结果图超过 64 MB 上限");
+    if response.content_length().is_some_and(|len| len > crate::MAX_BODY_BYTES as u64) {
+        return error(StatusCode::PAYLOAD_TOO_LARGE, "download_failed", &format!("结果图超过 {} 上限", crate::max_body_label()));
     }
 
     let staging = dir.join(STAGING_DIR);
@@ -220,8 +218,8 @@ pub async fn relay(State(state): State<AppState>, user: User, body: Bytes) -> Re
             Err(_) => return error(StatusCode::BAD_GATEWAY, "download_failed", "下载结果图失败：读取上游响应中断"),
         };
         total += chunk.len() as u64;
-        if total > MAX_RESULT_BYTES {
-            return error(StatusCode::PAYLOAD_TOO_LARGE, "download_failed", "结果图超过 64 MB 上限");
+        if total > crate::MAX_BODY_BYTES as u64 {
+            return error(StatusCode::PAYLOAD_TOO_LARGE, "download_failed", &format!("结果图超过 {} 上限", crate::max_body_label()));
         }
         if head.len() < 64 {
             head.extend_from_slice(&chunk[..chunk.len().min(64 - head.len())]);

@@ -3,6 +3,7 @@
 // 只接受 method 0（stored）与 8（deflate，经 DecompressionStream("deflate-raw")），支持 zip64 与 UTF-8 文件名。
 // 不靠扫描签名找条目边界：Web 导出的条目都带 data descriptor，大小以中央目录为准。
 // 读不了的包（其他方法、加密、分卷、结构异常）返回「需回退」，由调用方改走整包上传、交服务端判定。
+import { errorText } from "./errors";
 
 /** 随机读取端口：File 用 Blob.slice 实现，单测用内存字节实现。 */
 export interface ZipSource {
@@ -109,7 +110,7 @@ export async function readZipIndex(src: ZipSource): Promise<ZipIndex> {
   } catch (e) {
     if (e instanceof ZipUnsupported) return { kind: "unsupported", reason: e.message };
     // 读取端口自身失败（文件被移走等）也交给服务端判定。
-    return { kind: "unsupported", reason: e instanceof Error ? e.message : String(e) };
+    return { kind: "unsupported", reason: errorText(e) };
   }
 }
 

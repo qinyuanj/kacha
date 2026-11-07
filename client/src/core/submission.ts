@@ -1,9 +1,9 @@
 // 提交前的纯函数：脏判据快照、运行范围、二次确认清单。
 import type { OutputOptions } from "./gateway";
-import { outputOptions } from "./gateway";
+import { isFlashShape, outputOptions } from "./gateway";
 import { copyTaskIds, runCopies, type Board, type Region, type TaskNode } from "./board";
 import { findModel, type CapabilityTable } from "./capabilities";
-import { imageEdges, imageSources, promptText } from "./graph";
+import { imageEdges, imageKey, imageSources, promptText } from "./graph";
 import type { SendPlan } from "./sendPlan";
 import type { SizeSpec } from "./size";
 import { readOutcome, type TaskFs, type TaskOutcome } from "./taskDir";
@@ -33,9 +33,10 @@ function findTask(board: Board, id: string): TaskNode | undefined {
   return node?.type === "task" ? node : undefined;
 }
 
-export function snapshotOf(board: Board, taskId: string): Snapshot | null {
+export function snapshotOf(board: Board, table: CapabilityTable, taskId: string): Snapshot | null {
   const task = findTask(board, taskId);
   if (!task) return null;
+  const flash = isFlashShape(findModel(table, task.model));
   const images = imageEdges(board, taskId).flatMap((e): SnapshotImage[] => {
     const src = board.nodes.find((n) => n.id === e.from[0]);
     if (src?.type === "reference") return [{ kind: "reference", path: src.path, sha256: src.sha256, region: e.region }];
@@ -48,8 +49,8 @@ export function snapshotOf(board: Board, taskId: string): Snapshot | null {
     model: task.model,
     size_spec: { tier: task.size_spec.tier, ratio: task.size_spec.ratio, width: task.size_spec.width, height: task.size_spec.height },
     layer_decomposition: task.layer_decomposition,
-    ...(task.layer_decomposition && task.model === "doubao-seedream-5-0-flash-260915" ? { layer_size: task.layer_size ?? "auto" } : {}),
-    ...(task.model === "doubao-seedream-5-0-flash-260915" ? { output_options: outputOptions(task.output_options) } : {}),
+    ...(task.layer_decomposition && flash ? { layer_size: task.layer_size ?? "auto" } : {}),
+    ...(flash ? { output_options: outputOptions(task.output_options) } : {}),
     transparent_background: task.transparent_background,
     images,
   };
@@ -67,9 +68,9 @@ function canonical(value: unknown): string {
 
 const SNAPSHOT_KEYS: (keyof Snapshot)[] = ["prompt", "negative_prompt", "model", "size_spec", "layer_decomposition", "layer_size", "transparent_background", "output_options", "images"];
 
-export function isDirty(board: Board, taskId: string): boolean {
+export function isDirty(board: Board, table: CapabilityTable, taskId: string): boolean {
   const task = findTask(board, taskId);
-  const current = snapshotOf(board, taskId);
+  const current = snapshotOf(board, table, taskId);
   if (!task || !current) return false;
   const last = task.last_submitted;
   if (last === null) return true;
@@ -171,13 +172,13 @@ export function createInterruptedLog(): InterruptedLog {
 }
 
 /** 有选中时只跑选中子图（选中的任务 + 选中节点直接下游的任务），否则整个画板；跳过不脏的已执行任务与正在排队 / 执行的。 */
-export function runScope(board: Board, selectedIds: string[], busy: ReadonlySet<string> = new Set()): string[] {
+export function runScope(board: Board, table: CapabilityTable, selectedIds: string[], busy: ReadonlySet<string> = new Set()): string[] {
   const selected = new Set(selectedIds);
   const downstream = new Set(board.edges.filter((e) => selected.has(e.from[0])).map((e) => e.to[0]));
   return board.nodes
     .filter((n): n is TaskNode => n.type === "task")
     .filter((n) => selected.size === 0 || selected.has(n.id) || downstream.has(n.id))
-    .filter((n) => !busy.has(n.id) && (isDirty(board, n.id) || !hasExecuted(board, n)))
+    .filter((n) => !busy.has(n.id) && (isDirty(board, table, n.id) || !hasExecuted(board, n)))
     .map((n) => n.id);
 }
 
@@ -212,7 +213,7 @@ export async function collectRunFacts(
   const alphaByNode = new Map<string, boolean>();
   await Promise.all(
     taskIds
-      .flatMap((id) => imageSources(board, id, userRoot).map((src) => ({ ...src, key: src.sourceLayer === null ? src.nodeId : `${src.nodeId}:layer:${src.sourceLayer}` })))
+      .flatMap((id) => imageSources(board, id, userRoot).map((src) => ({ ...src, key: imageKey(src.nodeId, src.sourceLayer) })))
       .map((src) =>
         // 无效来源图层身份（absPath 为 null）不探测也不算缺图：任务视图给出「来源图层无效」的明确原因。
         src.absPath === null

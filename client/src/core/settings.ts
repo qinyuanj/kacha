@@ -1,6 +1,7 @@
 // 高级设置与模型发现。settings.json 在 app-data 目录，只前向迁移；API 密钥不在这里（系统凭据库）。
 import { type CapabilityTable, type ModelCapability, modelsByTier } from "./capabilities";
 import { ERROR_CATEGORY_LABELS, GatewayError, listModels, type FetchLike } from "./gateway";
+import { errorText } from "./errors";
 
 export const SETTINGS_FORMAT_VERSION = 1;
 export const MIN_CONCURRENCY = 1;
@@ -27,7 +28,7 @@ export type LoadedSettings =
   | { kind: "ok"; settings: Settings }
   | { kind: "newer"; version: number; settings: Settings }
   | { kind: "corrupt"; reason: string; settings: Settings }
-  /** 服务端有文件但这次没读到（断网、5xx）：文件不存在已由壳层换成默认值，不会落到这里。 */
+  /** 服务端有文件但这次没读到（断网、5xx）：文件不存在由 loadSettings 合成默认值，不会落到这里。 */
   | { kind: "unreadable"; settings: Settings };
 
 /** 保存时能否写 settings.json：newer 与 unreadable 的原文件不能被本次的默认设置覆盖。 */
@@ -77,6 +78,24 @@ export function parseSettings(text: string | null): LoadedSettings {
     kind: "ok",
     settings: { format_version: SETTINGS_FORMAT_VERSION, base_url: baseUrl, concurrency: concurrency as number, extra },
   };
+}
+
+/** 并发上限输入框的草稿 → 最终值：四舍五入并钳到 MIN～MAX；空或无法解析时用 fallback（打开面板时的原值）。 */
+export function parseConcurrency(draft: string, fallback: number): number {
+  const value = draft.trim() === "" ? NaN : Number(draft);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(MAX_CONCURRENCY, Math.max(MIN_CONCURRENCY, Math.round(value)));
+}
+
+/** 设置面板的表单（原始文本）。 */
+export interface SettingsForm {
+  baseUrl: string;
+  concurrencyDraft: string;
+}
+
+/** 点保存时写入的设置：在已存设置上套用表单。并发草稿此刻才钳制——不失焦直接保存也不会存进空值或越界值。 */
+export function settingsFromForm(saved: Settings, form: SettingsForm): Settings {
+  return { ...saved, base_url: normalizeBaseUrl(form.baseUrl), concurrency: parseConcurrency(form.concurrencyDraft, saved.concurrency) };
 }
 
 export function serializeSettings(settings: Settings): string {
@@ -184,7 +203,10 @@ export function defaultEditModel(table: CapabilityTable, discovery: Discovery, l
 export type KeyPersistence = "persisted" | "session";
 
 export interface SettingsPorts {
+  /** settings.json 原文；文件不存在为 null。 */
   readSettings(): Promise<string | null>;
+  /** 服务端下发的网关地址：settings.json 不存在时作首次使用的默认。 */
+  defaultBaseUrl(): Promise<string>;
   writeSettings(text: string): Promise<void>;
   readModelsCache(): Promise<string | null>;
   writeModelsCache(text: string): Promise<void>;
@@ -213,9 +235,17 @@ export interface InitialSettings {
   cache: ModelsCache | null;
 }
 
+/** 首次使用（还没有 settings.json）时以服务端下发的网关地址为默认，避免两端默认不一致。 */
+async function readSettingsFile(ports: SettingsPorts): Promise<LoadedSettings> {
+  const text = await ports.readSettings();
+  const loaded = parseSettings(text);
+  if (text !== null) return loaded;
+  return { ...loaded, settings: { ...loaded.settings, base_url: await ports.defaultBaseUrl() } };
+}
+
 /** 读 settings.json、模型缓存与浏览器密钥；settings.json 读失败为 unreadable，模型缓存读失败按缺失处理，本地存储抛错退回 session。 */
 export async function loadSettings(ports: SettingsPorts): Promise<InitialSettings> {
-  const file = await ports.readSettings().then(parseSettings, (): LoadedSettings => ({ kind: "unreadable", settings: DEFAULT_SETTINGS }));
+  const file = await readSettingsFile(ports).catch((): LoadedSettings => ({ kind: "unreadable", settings: DEFAULT_SETTINGS }));
   const cache = parseModelsCache(await ports.readModelsCache().catch(() => null));
   try {
     return { file, apiKey: (await ports.readApiKey()) ?? "", keyPersistence: "persisted", cache };
@@ -223,8 +253,6 @@ export async function loadSettings(ports: SettingsPorts): Promise<InitialSetting
     return { file, apiKey: "", keyPersistence: "session", cache };
   }
 }
-
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** 保存设置与密钥。newer / unreadable 时不覆盖 settings.json 但仍存密钥；密钥变了或当前为 session 才写本地存储，失败退回 session。 */
 export async function saveSettings(ports: SettingsPorts, current: SaveBaseline, next: Settings, apiKey: string): Promise<SaveResult> {

@@ -104,16 +104,30 @@ async fn import_uploads_streams_merges_and_deletes_temp_file() {
     let texts = h.send(Method::POST, &format!("/api/packs/uploads/{id}/texts"), Some(&cookie), serde_json::json!(["manifest.json", "画板/旧版画板.ugcboard.json"]).to_string()).await;
     assert!(texts.json()["manifest.json"].as_str().unwrap().contains("0.3.2"));
 
-    let units = serde_json::json!([
-        { "path": TASK, "identity": "task.json" },
-        { "path": "导入参考图/5e4b079355f5f06363744c0778c5174040645713e06e6877eae22f573d46e6b0.png", "identity": null }
-    ]);
-    let reply = h.send(Method::POST, &format!("/api/packs/uploads/{id}/import?op=i1"), Some(&cookie), units.to_string()).await;
+    let body = serde_json::json!({
+        "units": [
+            { "path": TASK, "identity": "task.json" },
+            { "path": "导入参考图/5e4b079355f5f06363744c0778c5174040645713e06e6877eae22f573d46e6b0.png", "identity": null }
+        ],
+        "duplicates": []
+    });
+    let reply = h.send(Method::POST, &format!("/api/packs/uploads/{id}/import?op=i1"), Some(&cookie), body.to_string()).await;
     assert_eq!(reply.status, 200, "{}", reply.text());
     assert_eq!(reply.json()["outcomes"][0]["outcome"], "moved");
     let dir = root.join(TASK);
     assert!(dir.join("layers/01.png").is_file() && dir.join("layers.json").is_file(), "v0.3.x 图层与 layers.json 都要导入");
     assert!(!root.join(".kacha/packs").join(format!("{id}.ugcpack.tmp")).exists(), "导入结束删除临时文件");
+}
+
+#[tokio::test]
+async fn import_rejects_the_v1_bare_unit_array_body() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let id = upload_pack(&h, &cookie, fixture_pack()).await;
+    let bare = serde_json::json!([{ "path": TASK, "identity": "task.json" }]);
+    let reply = h.send(Method::POST, &format!("/api/packs/uploads/{id}/import?op=v1"), Some(&cookie), bare.to_string()).await;
+    assert_eq!(reply.status, 400, "{}", reply.text());
+    assert!(!h.user_root(GOOD_KEY).join(TASK).exists(), "请求体不合格时不写入");
 }
 
 // ---- 过期上传暂存的回收（#56）----
@@ -201,15 +215,14 @@ async fn cancel_only_affects_the_named_operation_and_cleans_temp() {
     let h = Harness::new();
     let cookie = h.session(GOOD_KEY).await;
     let id = upload_pack(&h, &cookie, fixture_pack()).await;
-    let units = serde_json::json!([{ "path": TASK, "identity": "task.json" }]);
+    let body = serde_json::json!({ "units": [{ "path": TASK, "identity": "task.json" }], "duplicates": [] }).to_string();
     // 先取消操作 i-cancel，再执行：该操作应取消，其他操作不受影响。
     assert_eq!(h.send(Method::POST, "/api/packs/ops/i-cancel/cancel", Some(&cookie), Body::empty()).await.status, 204);
-    let units2 = units.to_string();
     // 已结束 / 不存在的操作的取消是幂等的；真正进行中的操作由 worker 在检查点读到标记。
-    let reply = h.send(Method::POST, &format!("/api/packs/uploads/{id}/import?op=i-other"), Some(&cookie), units2).await;
+    let reply = h.send(Method::POST, &format!("/api/packs/uploads/{id}/import?op=i-other"), Some(&cookie), body.clone()).await;
     assert_eq!(reply.status, 200, "取消别的操作不能影响本操作：{}", reply.text());
     // 上传在导入后被清理；对同一上传再导入是 404。
-    let again = h.send(Method::POST, &format!("/api/packs/uploads/{id}/import?op=i-other2"), Some(&cookie), units.to_string()).await;
+    let again = h.send(Method::POST, &format!("/api/packs/uploads/{id}/import?op=i-other2"), Some(&cookie), body).await;
     assert_eq!(again.status, 404);
     // 放弃上传：DELETE 清掉临时文件。
     let id2 = upload_pack(&h, &cookie, fixture_pack()).await;

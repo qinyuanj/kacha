@@ -58,6 +58,7 @@ export const imageProbe: ImageProbe = {
 
 export const settingsPorts: SettingsPorts = {
   readSettings: ipc.readSettings,
+  defaultBaseUrl: async () => (await session.config()).gateway_url,
   writeSettings: ipc.writeSettings,
   readModelsCache: ipc.readModelsCache,
   writeModelsCache: ipc.writeModelsCache,
