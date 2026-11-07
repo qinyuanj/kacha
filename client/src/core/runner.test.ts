@@ -5,7 +5,7 @@ import { board, harness, settle } from "./testing/runnerHarness";
 import { createRunner, nodeCopyDetail, nodeStatus, nodeSummary, summaryTone, type RegenerateRequest } from "./runner";
 import { BUILTIN_TABLE } from "./capabilities";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
-import { PNG_1X1 } from "./testing/png";
+import { PNG_1X1, PNG_1X1_BASE64 } from "./testing/png";
 import { sendPlanOf } from "./taskView";
 import type { RunDeps } from "./run";
 
@@ -72,7 +72,7 @@ it("Flash 区域发送文本、原图/叠加图顺序及任务记录经runner保
   const r = createRunner({ concurrency: 1, log: () => {}, apply: (_, c) => { if (c.kind === "submitted") t.last_submitted = c.lastSubmitted; }, deps: {
     ...fs, now: () => new Date("2026-10-10T10:00:00Z"), schedule: () => () => {},
     imageCodec: { decode: async () => ({ width: 1024, height: 1024, hasAlpha: () => true, encode: async () => png, close() {} }) },
-    fetch: async (_, init) => { bodies.push(JSON.parse(String(init?.body))); return { status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ data: [{ b64_json: btoa(String.fromCharCode(...png)) }] }), arrayBuffer: async () => png.buffer as ArrayBuffer }; },
+    fetch: async (_, init) => { bodies.push(JSON.parse(String(init?.body))); return { status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ data: [{ b64_json: PNG_1X1_BASE64 }] }), arrayBuffer: async () => png.buffer as ArrayBuffer }; },
   }});
   const target = { boardKey: "A", boardFile: "A", table: BUILTIN_TABLE, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" };
   const shown = sendPlanOf(b, BUILTIN_TABLE, "t1")!;
@@ -135,7 +135,7 @@ describe("Lite 停用", () => {
   it("旧 Lite 结果作为 Flash 任务的参考图仍可提交，快照与谱系指向旧任务目录", async () => {
     const png = PNG_1X1.slice();
     const h = harness({ imageCodec: { decode: async () => ({ width: 1024, height: 1024, hasAlpha: () => false, encode: async () => png, close: () => {} }) } });
-    h.replies.push({ status: 200, body: JSON.stringify({ data: [{ b64_json: btoa(String.fromCharCode(...png)) }] }) });
+    h.replies.push({ status: 200, body: JSON.stringify({ data: [{ b64_json: PNG_1X1_BASE64 }] }) });
     const b = board();
     const t = b.nodes.find((n) => n.type === "task")!;
     if (t.type !== "task") throw new Error("task");

@@ -5,7 +5,7 @@ import type { TaskFs } from "./taskDir";
 import { BUILTIN_TABLE } from "./capabilities";
 import { sha256Hex } from "./sha256";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
-import { PNG_1X1 } from "./testing/png";
+import { PNG_1X1 as PNG } from "./testing/png";
 import { layerFileName, layersExportJson, LocalError, newTaskId, parseLayersFile, parseOutcome, readLayers, readOutcome, readSubmission, restoreResultLayers, saveLayers, saveResult, sniffImage, tableDigest, taskDirOfRelPath, taskDirOfTaskId, taskFilePath, writeOutcome, writeSubmission, type SubmissionPlan } from "./taskDir";
 
 /** 最小结果节点（图层真源测试用）。 */
@@ -28,7 +28,6 @@ function boardOf(nodes: BoardNode[]): Board {
   return { format_version: 1, title: "t", viewport: { zoom: 1, x: 0, y: 0 }, nodes, edges: [], extra: {} };
 }
 
-const PNG = PNG_1X1;
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
 const WEBP = new TextEncoder().encode("RIFF\0\0\0\0WEBPVP8 ");
 

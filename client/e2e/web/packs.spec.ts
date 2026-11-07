@@ -500,7 +500,8 @@ test("同一个包导入两次：第二次没有内容上传请求、任务目�
   // 只问了一次服务端已有哪些：不开暂存、不上传、不合并，也不整包上传。
   expect(requests).toEqual(["POST /api/packs/existing"]);
   expect(readText(record)).toBe(before);
-  // 第二份同名画板按 uniqueBoardFileName 改名为「旧版画板 (2)」。
+  // 第二份同名画板按 uniqueBoardFileName 改名为「旧版画板 (2)」。文件名故意手写：这是用户在磁盘上看到的名字，
+  // 用独立期望值断言，避免拿被测的命名函数断言它自己（CODING_STANDARDS「一个含义只定义一处」的例外）。
   expect(readdirSync(path.join(root, "画板")).sort()).toEqual(["旧版画板 (2).ugcboard.json", "旧版画板.ugcboard.json", "空.ugcboard.json"]);
   expect(errors).toEqual([]);
 });
