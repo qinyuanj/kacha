@@ -13,7 +13,6 @@ import type {
 import { taskCount } from "../core/board";
 import {
   findModel,
-  isSupported,
   modelsByTier,
   TIER_LABELS,
   untestedCapabilities,
@@ -29,6 +28,7 @@ import { actionHoverInfo, CANCELLED_HINT, portThumbHoverInfo, referenceHoverInfo
 import type { TaskStatus } from "../core/run";
 import type { SummaryTone } from "../core/runner";
 import { inputImageAdviceAll } from "../core/fitImage";
+import { DEFAULT_OUTPUT_OPTIONS } from "../core/gateway";
 import { IMAGE_PORT_PREFIX, type TaskPorts } from "../core/graph";
 import { imageMinSize } from "../core/nodeSize";
 import { regionCss } from "../core/overlay";
@@ -102,7 +102,6 @@ export type TaskFlowNode = Node<
     /** 排队 / 执行中：参数与连线锁定。 */
     locked: boolean;
     workflow: WorkflowName;
-    images: ImagePortInfo[];
     /** 展开后的端口槽（含区域叠加锁定行）。 */
     slots: ImageSlotInfo[];
     /** 当前模型生效的区域渲染方式；null = 不支持区域指示。 */
@@ -649,7 +648,9 @@ function CountField({ count, limit, disabled, onPick }: { count: number; limit: 
 
 export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskFlowNode>) {
   const { table, apply, availableModels, concurrency, editRegion, previewNode, perform } = useBoardActions();
-  const { node, ports, view, locked, workflow, images, slots, regionRender, hasPositive, status, summary, expanded, run } = data;
+  const { node, ports, view, locked, workflow, slots, regionRender, hasPositive, status, summary, expanded, run } = data;
+  const filledImages = slots.filter((s) => s.kind === "image").length;
+  const outputOptions = node.output_options ?? DEFAULT_OUTPUT_OPTIONS;
   const { reasons, warnings, unreferenced, toggles } = view;
   const [infoOpen, setInfoOpen] = useState(false);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
@@ -746,8 +747,8 @@ export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskF
           </div>
           {model?.request_shape === "seedream_flash_images_generations" && (
             <div className="field nodrag">
-              <label>输出格式 <select aria-label="输出格式" value={node.output_options?.output_format ?? "png"} disabled={locked} onChange={(e) => apply({ kind: "setOutputOptions", taskId: node.id, options: { output_format: e.target.value as "png" | "jpeg", response_format: node.output_options?.response_format ?? "url", watermark: node.output_options?.watermark ?? false } })}><option value="png">PNG</option><option value="jpeg">JPEG</option></select></label>
-              <label><input type="checkbox" checked={node.output_options?.watermark ?? false} disabled={locked} onChange={(e) => apply({ kind: "setOutputOptions", taskId: node.id, options: { output_format: node.output_options?.output_format ?? "png", response_format: node.output_options?.response_format ?? "url", watermark: e.target.checked } })} />水印</label>
+              <label>输出格式 <select aria-label="输出格式" value={outputOptions.output_format} disabled={locked} onChange={(e) => apply({ kind: "setOutputOptions", taskId: node.id, options: { ...outputOptions, output_format: e.target.value as "png" | "jpeg" } })}><option value="png">PNG</option><option value="jpeg">JPEG</option></select></label>
+              <label><input type="checkbox" checked={outputOptions.watermark} disabled={locked} onChange={(e) => apply({ kind: "setOutputOptions", taskId: node.id, options: { ...outputOptions, watermark: e.target.checked } })} />水印</label>
             </div>
           )}
           {infoOpen && <ModelInfo modelId={node.model} onClose={() => setInfoOpen(false)} />}
@@ -908,13 +909,10 @@ export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskF
             </PortRow>
           );
         })}
-        {ports.imageSlots > images.length && (
-          <PortRow id={`${IMAGE_PORT_PREFIX}${images.length}`} kind="image" connectable={!locked} className="nodrag port-empty" label={`图${images.length + 1}`}>
+        {ports.imageSlots > filledImages && (
+          <PortRow id={`${IMAGE_PORT_PREFIX}${filledImages}`} kind="image" connectable={!locked} className="nodrag port-empty" label={`图${filledImages + 1}`}>
             <span className="port-hint">拖图进来</span>
           </PortRow>
-        )}
-        {expanded && model && !isSupported(model.workflows[workflow].supports_negative_prompt) && ports.negative && (
-          <div className="muted small">当前模型不支持负向提示词</div>
         )}
       </div>
 

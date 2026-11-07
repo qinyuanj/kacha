@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Board, BoardEdge, BoardNode, TaskNode } from "./board";
 import { BUILTIN_TABLE, findModel } from "./capabilities";
-import { effectiveRegionRender, expandImageEdges, setEdgeRegion, slotsFromReferences, type SlotRef } from "./region";
+import { coordinateRegionAvailable, effectiveRegionRender, expandImageEdges, setEdgeRegion, slotsFromReferences, type SlotRef } from "./region";
 
 function task(id: string, patch: Partial<TaskNode> = {}): TaskNode {
   return {
@@ -52,6 +52,21 @@ describe("渲染方式推导", () => {
   it("只认客户端已实现的渲染方式：能力表标了 bbox_tag / marked_image 支持、高亮叠加不支持时为 null", () => {
     const model = { ...qwen, region_hint: { highlight_overlay: "unsupported" as const, marked_image: "supported" as const, bbox_tag: "supported" as const } };
     expect(effectiveRegionRender(model)).toBeNull();
+  });
+});
+
+describe("坐标区域可用性", () => {
+  it("Flash 请求形态且支持 bbox_tag 时可用", () => {
+    expect(coordinateRegionAvailable(flash)).toBe(true);
+  });
+
+  it("Flash 请求形态但 bbox_tag 不支持时不可用", () => {
+    expect(coordinateRegionAvailable({ ...flash, region_hint: { ...flash.region_hint, bbox_tag: "unsupported" } })).toBe(false);
+  });
+
+  it("未接坐标通路的模型不可用", () => {
+    expect(coordinateRegionAvailable(seedreamPro)).toBe(false);
+    expect(coordinateRegionAvailable(undefined)).toBe(false);
   });
 });
 

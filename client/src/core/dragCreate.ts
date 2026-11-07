@@ -11,7 +11,7 @@ import { defaultSizeSpec } from "./size";
 import type { DragFrom } from "./ports";
 
 /**
- * 从起点端口拖到空白处可建的节点（候选动作）。单候选松手即建，多候选经上下文菜单选；空 = 什么也不做。
+ * 从起点端口拖到空白处可建的节点（至多一个候选动作），松手即建；空 = 什么也不做。
  * 图片输出 → 以此继续编辑；提示词输出 → 新建生成任务接正向；任务的空图片端口反向 → 添加参考图并接该端口。
  */
 export function dragCreateItems(board: Board, from: DragFrom): MenuItem[] {

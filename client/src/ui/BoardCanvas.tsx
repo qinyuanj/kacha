@@ -33,18 +33,19 @@ import {
   workflowOf,
   type Connection,
 } from "../core/graph";
-import { menuItems, selectionForMenu, actionBarItems, type BoardAction, type MenuFacts, type MenuItem, type MenuTarget } from "../core/contextMenu";
+import { menuItems, selectionForMenu, actionBarItems, type BoardAction, type MenuFacts, type MenuTarget } from "../core/contextMenu";
 import { createPortal } from "react-dom";
 import { expandedTasks, forgetOnSelectionChange, toggleExpanded, type ExpandOverrides } from "../core/expand";
 import { cardDropConnection, dragCreateItems } from "../core/dragCreate";
 import { BoardToolbar } from "./BoardToolbar";
+import { FLASH_UNAVAILABLE_TEXT } from "./boardText";
 import { edgeHoverInfo, type HoverInfo } from "../core/hoverInfo";
 import { connectablePorts, dragKind, edgeClassName, nodeClassName, promptPortKind, type DragFrom, type DragState } from "../core/ports";
 import { continueEditingChange, type BoardChange, type EdgeRef, type EditResult, type ImportedImage } from "../core/edit";
 import { copySelection, lineage, LOCKED_HINT, PASTE_OFFSET, producerOf, type Clip } from "../core/iterate";
 import { renderedImageSize } from "../core/nodeSize";
 import { basename, dirname, joinPath, resolveFromRoot, toRootRelative } from "../core/paths";
-import { effectiveRegionRender } from "../core/region";
+import { coordinateRegionAvailable, effectiveRegionRender } from "../core/region";
 import { findReferenceFile, findResultFile, IMAGE_EXTENSIONS } from "../core/relocate";
 import type { SnapshotImage } from "../core/submission";
 import { taskView } from "../core/taskView";
@@ -204,18 +205,13 @@ export function BoardCanvas({
   const [preview, setPreview] = useState<{ req: PreviewRequest; nonce: number } | null>(null);
   // 上下文菜单：client = 弹出处的窗口坐标，at = 同一点的画布坐标（新建节点落点）。
   const [menu, setMenu] = useState<{ target: MenuTarget; client: { x: number; y: number }; at: { x: number; y: number } } | null>(null);
-  const closeMenu = useCallback(() => {
-    setMenu(null);
-    setDragMenu(null);
-  }, []);
+  const closeMenu = useCallback(() => setMenu(null), []);
   const onMoveStart = useCallback(() => {
     closeMenu();
     requestPromptFocus(null);
   }, [closeMenu, requestPromptFocus]);
-  /** 拖线建节点多候选时弹的菜单（目前三种起点均为单候选，此路径预留）。 */
-  const [dragMenu, setDragMenu] = useState<{ from: DragFrom; items: MenuItem[]; client: { x: number; y: number }; at: { x: number; y: number } } | null>(null);
   // 预览弹窗、上下文菜单开着时快捷键不作用于背后的画板（菜单自己处理 Esc）。
-  const dialogOpen = preview !== null || menu !== null || dragMenu !== null;
+  const dialogOpen = preview !== null || menu !== null;
   const dialogOpenRef = useRef(false);
   dialogOpenRef.current = dialogOpen;
   /** 任务节点参数的原地展开：默认跟随选中，手动切换只在本地、不存盘（见 core/expand）。 */
@@ -266,12 +262,13 @@ export function BoardCanvas({
         if (e.from[0] !== nodeId || imagePortIndex(e.to[1]) === null) return [];
         const task = boardRef.current.nodes.find((n) => n.id === e.to[0]);
         if (task?.type !== "task") return [];
-        const render = effectiveRegionRender(findModel(table, task.model));
+        const model = findModel(table, task.model);
+        const render = effectiveRegionRender(model);
         if (!render) return [];
         const port = imagePortIndex(e.to[1])! + 1;
-        const modelName = findModel(table, task.model)?.display_name ?? task.model;
+        const modelName = model?.display_name ?? task.model;
         const firstRegion = firstRegionOfEdge(boardRef.current, task.id, e.to[1]);
-        return [{ label: `${modelName} 的图${port}`, edgeRef: { from: e.from, to: e.to }, rects: e.region?.rects ?? [], render: e.region?.render ?? render, coordinateKind: e.region?.coordinate_kind, coordinateAvailable: findModel(table, task.model)?.request_shape === "seedream_flash_images_generations", firstRegion }];
+        return [{ label: `${modelName} 的图${port}`, edgeRef: { from: e.from, to: e.to }, rects: e.region?.rects ?? [], render: e.region?.render ?? render, coordinateKind: e.region?.coordinate_kind, coordinateAvailable: coordinateRegionAvailable(model), firstRegion }];
       }),
     [table],
   );
@@ -493,7 +490,6 @@ export function BoardCanvas({
         case "task": {
           // 节点用缓存事实；运行前 App 逐张重新探测，同样的事实得出同样的原因。
           const view = taskView(board, table, n.id, { missingNodes: missing, alphaByNode, discovery, concurrency })!;
-          const taskEdges = imageEdges(board, n.id);
           const render = effectiveRegionRender(findModel(table, n.model));
           const runState = runStateOf(n.id);
           const summary = nodeSummary(runState);
@@ -523,7 +519,6 @@ export function BoardCanvas({
                 view,
                 locked: locked.has(n.id),
                 workflow: workflowOf(board, n.id),
-                images: taskEdges.map((e) => labelOf(e.from[0])),
                 slots,
                 regionRender: render,
                 hasPositive: board.edges.some((e) => e.to[0] === n.id && e.to[1] === "positive"),
@@ -652,10 +647,8 @@ export function BoardCanvas({
         return onConnect(r.connection);
       }
       if (hit?.kind !== "pane") return;
-      const items = dragCreateItems(board, from);
-      const at = flow.screenToFlowPosition(client);
-      if (items.length === 1) performDragCreateRef.current(items[0].action, from, at);
-      else if (items.length > 1) setDragMenu({ from, items, client, at });
+      const [item] = dragCreateItems(board, from);
+      if (item) performDragCreateRef.current(item.action, from, flow.screenToFlowPosition(client));
     },
     [board, table, toast, locked, flow, onConnect],
   );
@@ -886,6 +879,7 @@ export function BoardCanvas({
     };
   }, [flow, importLocalFiles, toast]);
 
+  const toolbarModel = defaultTaskModel(table, discovery, board.last_model);
   return (
     <BoardContext.Provider value={actions}>
       <HoverProvider value={hover.controller}>
@@ -905,11 +899,11 @@ export function BoardCanvas({
                 // 新建生成任务用的模型（board.last_model）：是偏好不是画板编辑，不进撤销。
                 <select
                   className="toolbar-model"
-                  value={defaultTaskModel(table, discovery, board.last_model) ?? ""}
+                  value={toolbarModel ?? ""}
                   onChange={(e) => apply({ kind: "lastModel", model: e.target.value })}
                   aria-label="新建任务模型"
                 >
-                  {!actions.availableModels.some((m) => m.model_id === defaultTaskModel(table, discovery, board.last_model)) && <option disabled value={defaultTaskModel(table, discovery, board.last_model) ?? ""}>Flash 不可用，请刷新模型列表</option>}
+                  {!actions.availableModels.some((m) => m.model_id === toolbarModel) && <option disabled value={toolbarModel ?? ""}>{FLASH_UNAVAILABLE_TEXT}</option>}
                   <ModelOptions table={table} available={actions.availableModels} />
                 </select>
               }
@@ -981,14 +975,6 @@ export function BoardCanvas({
         </ReactFlow>
         {menu && menuEntries.length > 0 && (
           <ContextMenu at={menu.client} items={menuEntries} onPick={(action) => performAction(action, menu.target, menu.at)} onClose={closeMenu} />
-        )}
-        {dragMenu && (
-          <ContextMenu
-            at={dragMenu.client}
-            items={dragMenu.items}
-            onPick={(action) => performDragCreateRef.current(action, dragMenu.from, dragMenu.at)}
-            onClose={() => setDragMenu(null)}
-          />
         )}
         {preview && <PreviewDialog key={preview.nonce} req={preview.req} toast={toast} onClose={() => setPreview(null)} />}
         {hover.layer}

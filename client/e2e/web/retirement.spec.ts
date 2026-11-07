@@ -4,6 +4,7 @@ import { board, edge, png, promptNode, taskNode } from "../common/boards";
 import { FLASH } from "../common/layers";
 import { bodies, enterWithKey, OTHER_KEY, test } from "./rig";
 import { openApp, task, taskRecords } from "./kit";
+import { FLASH_UNAVAILABLE_TEXT } from "../../src/ui/boardText";
 
 const LITE = "doubao-seedream-5-0-lite-260128";
 const ID = "20260916T091500Z-deadbeef";
@@ -67,7 +68,7 @@ test("缺 Flash 缓存先刷新，失败明确不可用，用户可显式选择�
   await openApp(page, rig, scenario);
   const select = page.getByRole("combobox", { name: "新建任务模型" });
   await expect(select).toHaveValue(FLASH);
-  await expect(select.locator("option:checked")).toHaveText("Flash 不可用，请刷新模型列表");
+  await expect(select.locator("option:checked")).toHaveText(FLASH_UNAVAILABLE_TEXT);
   await select.selectOption("qwen-image-3.0");
   await expect(select).toHaveValue("qwen-image-3.0");
   expect(await select.locator(`option[value='${LITE}']`).count()).toBe(0);
