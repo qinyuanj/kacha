@@ -39,6 +39,8 @@ export interface ReferenceNode extends NodeBase {
   path: string;
   sha256: string;
   display_name: string;
+  /** 来源画板名：阶段移出为新画板时，阶段外的上游图片在新画板里成为参考图，记下它来自哪块画板。 */
+  source_board?: string;
 }
 
 export interface TaskNode extends NodeBase {
@@ -224,7 +226,7 @@ function autoRatio(raw: unknown): AutoRatio | null {
 
 const NODE_KEYS = {
   prompt: ["id", "type", "pos", "size", "text"],
-  reference: ["id", "type", "pos", "size", "path", "sha256", "display_name"],
+  reference: ["id", "type", "pos", "size", "path", "sha256", "display_name", "source_board"],
   task: ["id", "type", "pos", "size", "model", "size_spec", "image_ports", "layer_decomposition", "transparent_background", "output_options", "layer_size", "count", "last_submitted"],
   result: ["id", "type", "pos", "size", "task_id", "file", "path", "layer_count", "record", "final"],
 } as const;
@@ -252,7 +254,14 @@ function parseNode(raw: unknown): BoardNode {
     case "prompt":
       return { ...base, type, text: str(o, "text") };
     case "reference":
-      return { ...base, type, path: str(o, "path"), sha256: str(o, "sha256"), display_name: str(o, "display_name") };
+      return {
+        ...base,
+        type,
+        path: str(o, "path"),
+        sha256: str(o, "sha256"),
+        display_name: str(o, "display_name"),
+        ...(o.source_board === undefined ? {} : { source_board: str(o, "source_board") }),
+      };
     case "task":
       return {
         ...base,

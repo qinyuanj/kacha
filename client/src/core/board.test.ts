@@ -75,6 +75,18 @@ describe("画板文件写出", () => {
     expect(raw.edges[2]).toEqual({ from: ["33333333-3333-4333-8333-333333333333", "result"], to: ["r", "in"], system: true });
   });
 
+  it("参考图的来源画板（移出为新画板）读写往返；不是字符串视为损坏", () => {
+    const board = sample();
+    board.nodes[1] = { ...board.nodes[1], source_board: "大画板" } as Board["nodes"][number];
+    const text = serializeBoard(board);
+    expect(JSON.parse(text).nodes[1].source_board).toBe("大画板");
+    expect(parseBoard(text)).toEqual({ kind: "ok", board });
+    expect(JSON.parse(serializeBoard(sample())).nodes[1]).not.toHaveProperty("source_board");
+    const bad = JSON.parse(text);
+    bad.nodes[1].source_board = 3;
+    expect(parseBoard(JSON.stringify(bad)).kind).toBe("corrupt");
+  });
+
   it("读写往返保持一致", () => {
     const board = sample();
     const parsed = parseBoard(serializeBoard(board));

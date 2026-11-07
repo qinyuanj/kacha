@@ -98,4 +98,12 @@ export const TIDY_TEXT = {
   pruneConfirm: (n: number, saved: number | null) =>
     `将收掉 ${n} 张，${saved === null ? "画板体量暂时算不出" : `画板约减少 ${formatBytes(saved)}`}。\n定稿与已被下游使用的结果保留；可以撤销。`,
   nothingToPrune: "这个阶段没有可收掉的结果：定稿与已被下游使用的结果会保留。",
+  /** 阶段框上的「移出为新画板」（#93）。 */
+  moveOut: "移出为新画板",
+  moveOutHint: "把这个阶段拆成一块新画板：跨阶段的连线断开，上游图片在新画板里成为参考图。占一个画板位。",
+  movedOut: (title: string) => `已移出为新画板「${title}」，可在画板列表里打开。撤销只恢复本画板，新画板保留。`,
+  /** 新画板写好之后原画板的移出被拒（期间有任务开始运行）。 */
+  movedOutKept: (title: string, reason: string | null) => `新画板「${title}」已建好，但本画板没有删去这些节点${reason ? `：${reason}` : ""}`,
+  moveOutFailed: (reason: string) => `移出失败：${reason}`,
+  moveOutBusy: "正在移出另一个阶段，请稍候",
 } as const;

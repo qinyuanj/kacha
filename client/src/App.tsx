@@ -582,6 +582,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               focus={focus?.boardKey === active.key ? focus : null}
               tidying={tidyKey === active.key}
               onTidyChange={(on) => setTidyKey(on ? active.key : null)}
+              onMoveOutStage={(stageId) => boards.moveOutStage(active.key, stageId)}
             />
           </ReactFlowProvider>
         )}

@@ -13,6 +13,10 @@ export interface StageTidy {
   /** 「收掉未定稿」会收掉几张。 */
   prunable: (stageId: string) => number;
   onPrune: (stageId: string) => void;
+  /** 移出为新画板（#93）。 */
+  onMoveOut: (stageId: string) => void;
+  /** 正在移出（按钮置灰）。 */
+  movingOut: boolean;
 }
 
 interface Props {
@@ -108,6 +112,9 @@ function StageTidyActions({ stageId, tidy }: { stageId: string; tidy: StageTidy 
       </span>
       <button type="button" className="stage-prune" disabled={n === 0} title={n === 0 ? TIDY_TEXT.nothingToPrune : undefined} onClick={() => tidy.onPrune(stageId)}>
         {TIDY_TEXT.prune(n)}
+      </button>
+      <button type="button" className="stage-move-out" disabled={tidy.movingOut} title={TIDY_TEXT.moveOutHint} onClick={() => tidy.onMoveOut(stageId)}>
+        {TIDY_TEXT.moveOut}
       </button>
     </>
   );

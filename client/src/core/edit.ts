@@ -13,6 +13,7 @@ import { addAsReference, addAsReferenceTarget, continueEditing, LOCKED_HINT, pas
 import { addResultNode, PROMPT_NODE_SIZE, type RunResult } from "./layout";
 import { IMAGE_NODE_WIDTH, imageNodeSize } from "./nodeSize";
 import { setEdgeRegion } from "./region";
+import { movedIds } from "./moveOut";
 import { duplicateNodes, nudgeNodes, settleAltDrag } from "./selection";
 import type { Discovery } from "./settings";
 import { autoSizeSpec, manualSizeSpec, withSizeTier } from "./size";
@@ -112,6 +113,8 @@ export type BoardChange =
   | { kind: "setFinal"; nodes: string[]; final: boolean }
   /** 收掉未定稿：删去选中阶段里未定稿且没有下游连线的结果（判定见 prunableResults）；任务目录不删，按清理规则释放。 */
   | { kind: "pruneUnfinal"; stageIds: string[] }
+  /** 移出为新画板之后，原画板删去移出的节点（见 moveOut.movedIds）；新画板已由界面写好，撤销只恢复本画板。 */
+  | { kind: "moveOutStage"; stageId: string }
   // ---- 视图变更 ----
   | { kind: "viewport"; viewport: Board["viewport"] }
   /** 工具栏的新建任务模型：偏好不是编辑。 */
@@ -358,6 +361,10 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
       const ids = prunableResults(board, change.stageIds);
       if (!ids.length) return { board };
       return { board: removeNodes(board, ids).board, step: { label: countLabel("收掉", ids.length, "张未定稿") } };
+    }
+    case "moveOutStage": {
+      const ids = movedIds(board, change.stageId);
+      return ids ? { board: removeNodes(board, ids).board, step: { label: "移出为新画板" }, selection: [] } : { board };
     }
     case "viewport": {
       const { x, y, zoom } = change.viewport;

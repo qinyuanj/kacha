@@ -114,6 +114,8 @@ interface Props {
   /** 整理模式（#92）：画布的一种界面状态，其它编辑照常可用。 */
   tidying: boolean;
   onTidyChange: (tidying: boolean) => void;
+  /** 把阶段移出为新画板（#93）；返回要提示的话（成功、画板位满或其它拒绝原因）。 */
+  onMoveOutStage: (stageId: string) => Promise<string>;
 }
 
 const edgeId = (e: BoardEdge) => `${e.from.join(":")}->${e.to.join(":")}`;
@@ -146,6 +148,7 @@ export function BoardCanvas({
   focus,
   tidying,
   onTidyChange,
+  onMoveOutStage,
 }: Props) {
   const flow = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
@@ -415,6 +418,7 @@ export function BoardCanvas({
   const [editingStage, setEditingStage] = useState<string | null>(null);
   // 整理模式：各阶段体量、「收掉未定稿」的张数与预计减少的体量（按任务目录，服务端量）。
   const tidyMeasure = useTidyMeasure(board, tidying);
+  const [movingOut, setMovingOut] = useState(false);
   const stageTidy = useMemo((): StageTidy | null => {
     if (!tidying) return null;
     const { measure } = tidyMeasure;
@@ -430,8 +434,15 @@ export function BoardCanvas({
           if (ok) apply({ kind: "pruneUnfinal", stageIds: [id] });
         });
       },
+      movingOut,
+      onMoveOut: (id) => {
+        setMovingOut(true);
+        void onMoveOutStage(id)
+          .then(toast, (e) => toast(TIDY_TEXT.moveOutFailed(errorText(e))))
+          .finally(() => setMovingOut(false));
+      },
     };
-  }, [tidying, tidyMeasure, board, toast, apply]);
+  }, [tidying, tidyMeasure, board, toast, apply, movingOut, onMoveOutStage]);
   const newStage = (ids: string[]) => {
     const before = new Set(stagesOf(boardRef.current).map((s) => s.id));
     const r = apply({ kind: "newStage", name: nextStageName(boardRef.current), nodes: ids });

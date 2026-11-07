@@ -13,7 +13,8 @@ import { newId } from "../core/ids";
 import { emptyHistory, recordChange, redo, undo, type History } from "../core/history";
 import { basename, boardsDir, dirname, joinPath, resolveFromRoot } from "../core/paths";
 import { restoreResultLayers } from "../core/taskDir";
-import { BOARD_MISSING_TEXT, BOARD_SLOTS_FULL, slotsRefusal } from "./boardText";
+import { moveOutSources, splitStage } from "../core/moveOut";
+import { BOARD_MISSING_TEXT, BOARD_SLOTS_FULL, slotsRefusal, TIDY_TEXT } from "./boardText";
 import { sha256Hex } from "../core/sha256";
 import { ipc } from "../shell/ipc";
 import { ApiError } from "../shell/apiError";
@@ -285,6 +286,63 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
     return null;
   }, [userRoot, flush, setSessions]);
 
+  const movingOut = useRef(false);
+  /**
+   * 移出为新画板（#93）：先试算（运行中的任务锁定时拒绝）、查画板位，读阶段外上游结果图的 sha256，
+   * 按最新画板拆出新画板只新建不覆盖地写好，最后才在原画板删去这些节点（一次用户变更，撤销不删新画板）。
+   * 任何一步被拒都不改原画板、不写文件。返回要提示的话。
+   */
+  const moveOutStage = useCallback(
+    async (key: string, stageId: string): Promise<string> => {
+      const root = userRootRef.current;
+      const boardOf = () => {
+        const s = sessionsRef.current.find((x) => x.key === key);
+        return s?.status === "ok" ? s.board : null;
+      };
+      const tryRemove = () => {
+        const b = boardOf();
+        return b ? editBoard(b, { kind: "moveOutStage", stageId }, envOf(key)) : null;
+      };
+      const dry = tryRemove();
+      if (!root || !dry) return TIDY_TEXT.moveOutFailed("画板不可编辑");
+      if (!dry.step) return dry.hint ?? TIDY_TEXT.moveOutFailed("阶段已不存在");
+      if (movingOut.current) return TIDY_TEXT.moveOutBusy;
+      movingOut.current = true;
+      try {
+        // 读不到列表时不拦：服务端新建时仍会检查。
+        const slots = await ipc.listBoards().then((l) => l.slots, () => null);
+        const refusal = slots && slotsRefusal(slots, 1);
+        if (refusal) return refusal;
+        const shas = new Map<string, string>();
+        const current = boardOf();
+        for (const path of current ? moveOutSources(current, stageId) : []) {
+          const sha = await ipc.fileSha256(resolveFromRoot(root, path)).catch(() => null);
+          if (sha) shas.set(path, sha);
+        }
+        // 等待期间画板可能又改了：按最新画板拆分、再试算一次。
+        const latest = boardOf();
+        const check = tryRemove();
+        const fresh = latest && splitStage(latest, stageId, { sha256: (p) => shas.get(p) ?? null, newId });
+        if (!latest || !check?.step || !fresh) return check?.hint ?? TIDY_TEXT.moveOutFailed("阶段已不存在");
+        const dir = boardsDir(root);
+        const onDisk = await ipc.listBoardNames(dir).catch(() => [] as string[]);
+        const openHere = sessionsRef.current.filter((s) => samePath(dirname(s.path), dir)).map((s) => basename(s.path));
+        const path = joinPath(dir, uniqueBoardFileName(fresh.title, [...onDisk, ...openHere]));
+        try {
+          await ipc.writeBoard(path, serializeBoard(fresh), { createOnly: true });
+        } catch (e) {
+          return isSlotsFull(e) ? errorText(e) : TIDY_TEXT.moveOutFailed(errorText(e));
+        }
+        const r = apply(key, { kind: "moveOutStage", stageId });
+        // 写好之后才被拒（期间有任务开始运行）：新画板已在列表里，原画板不动。
+        return r?.step ? TIDY_TEXT.movedOut(fresh.title) : TIDY_TEXT.movedOutKept(fresh.title, r?.hint ?? null);
+      } finally {
+        movingOut.current = false;
+      }
+    },
+    [envOf, apply],
+  );
+
   /** 导入的画板写进用户数据根画板目录：同名沿用 (2) 自动改名、永不覆盖；写好后在新标签页打开。 */
   const addImportedBoard = useCallback(
     async (board: Board): Promise<string> => {
@@ -412,6 +470,7 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
     setActiveKey,
     openPath,
     createBoard,
+    moveOutStage,
     addImportedBoard,
     closeBoard,
     deleteBoard,
