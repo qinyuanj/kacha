@@ -433,7 +433,8 @@ test("正常导入大包（条目超过单份 64 MB，整包上传）：上传�
   await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: size / 2 });
   await importPack(page, big);
   await expect(dialog(page)).toContainText(/MB \/ [\d.]+ MB/);
-  await expect(toast(page)).toHaveText("导入 1 个任务，跳过 0 个");
+  // 完成要等约 2 秒的限速上传加上 debug 构建合并 64 MB 以上的条目，并行负载下会超过默认的 5 秒。
+  await expect(toast(page)).toHaveText("导入 1 个任务，跳过 0 个", { timeout: 20_000 });
   await expect(dialog(page)).toHaveCount(0);
   // 上传阶段：总量是包文件大小（Content-Length）；合并阶段：总量是要解出的条目字节数。
   expect(progress.some((p) => p.total === size && p.done > 0), JSON.stringify(progress)).toBe(true);
