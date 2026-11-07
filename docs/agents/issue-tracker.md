@@ -10,7 +10,7 @@
    gh issue view <number> --repo qinyuanj/kacha --json number,title,body,comments,labels,state,assignees,url
    ```
 
-   涉及关系时，同时读取下文的原生关系接口。完成标准：取得所有将被修改的字段及其现值。
+   涉及关系时，同时读取下文的原生关系接口。实现一张票前，查一遍正文引用的每张票的当前状态；已关闭的票可能让某条需求过时，在实现说明或 PR 里写明受了什么影响。完成标准：取得所有将被修改的字段及其现值。
 
 2. 只修改请求涉及的字段。替换正文前保留最新全文；多行正文和评论使用 UTF-8 临时文件配合 `--body-file`，以保留换行和字面字符。应用标签前用 `gh label list --repo qinyuanj/kacha --json name,color,description` 核对名称。
 
