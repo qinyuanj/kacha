@@ -10,11 +10,13 @@ import {
   runCopies,
   taskCount,
   uniqueBoardFileName,
+  isFinal,
+  stagesOf,
   type Board,
 } from "./board";
 
 const sample = (): Board => ({
-  format_version: 1,
+  format_version: BOARD_FORMAT_VERSION,
   title: "角色设定",
   viewport: { zoom: 1, x: 0, y: 0 },
   nodes: [
@@ -51,9 +53,9 @@ const sample = (): Board => ({
 });
 
 describe("画板文件写出", () => {
-  it("UTF-8 缩进 JSON，顶层 format_version 1，连线无 id，不含选中/运行状态", () => {
+  it("UTF-8 缩进 JSON，顶层 format_version 2，连线无 id，不含选中/运行状态", () => {
     const text = serializeBoard(sample());
-    expect(text).toContain('\n  "format_version": 1');
+    expect(text).toContain('\n  "format_version": 2');
     expect(text).toContain("一只猫");
     const raw = JSON.parse(text);
     expect(Object.keys(raw)).toEqual(["format_version", "title", "viewport", "nodes", "edges"]);
@@ -209,6 +211,64 @@ describe("画板文件读入", () => {
   });
 });
 
+describe("阶段与定稿（format_version 2）", () => {
+  // 旧格式画板手写：独立于 serializeBoard，固定 v1 文件的真实形状（防同义反复）。
+  const V1 = JSON.stringify({
+    format_version: 1,
+    title: "旧画板",
+    viewport: { zoom: 1, x: 0, y: 0 },
+    nodes: [
+      { id: "r", type: "result", pos: [0, 0], size: [240, 240], task_id: "20260916T091500Z-3f9c2a1b", file: "result.png", path: "2026-09-16/20260916T091500Z-3f9c2a1b/result.png", layer_count: 0, record: { model: "m", prompt: "", negative_prompt: "", size_spec: { tier: null, ratio: null, width: null, height: null }, submitted_at: "2026-09-16T09:15:00Z" } },
+    ],
+    edges: [],
+  });
+
+  it("旧格式画板读入后阶段为空、无定稿；写回升为新版本", () => {
+    const parsed = parseBoard(V1);
+    if (parsed.kind !== "ok") throw new Error(parsed.kind);
+    expect(stagesOf(parsed.board)).toEqual([]);
+    expect(parsed.board.nodes.some((n) => n.type === "result" && isFinal(n))).toBe(false);
+    const raw = JSON.parse(serializeBoard(parsed.board));
+    expect(raw.format_version).toBe(2);
+    expect(BOARD_FORMAT_VERSION).toBe(2);
+  });
+
+  it("阶段与定稿读写往返；阶段未知字段保留", () => {
+    const raw = JSON.parse(V1);
+    raw.format_version = 2;
+    raw.nodes[0].final = true;
+    raw.stages = [{ id: "s1", name: "第一轮", nodes: ["r"], collapsed: true, color: "blue" }];
+    const parsed = parseBoard(JSON.stringify(raw));
+    if (parsed.kind !== "ok") throw new Error(parsed.kind);
+    expect(stagesOf(parsed.board)).toEqual([{ id: "s1", name: "第一轮", nodes: ["r"], collapsed: true, extra: { color: "blue" } }]);
+    expect(isFinal(parsed.board.nodes[0])).toBe(true);
+    const again = JSON.parse(serializeBoard(parsed.board));
+    expect(again.stages).toEqual(raw.stages);
+    expect(again.nodes[0].final).toBe(true);
+  });
+
+  it("没有阶段、没有定稿时不写这两个字段", () => {
+    const parsed = parseBoard(V1);
+    if (parsed.kind !== "ok") throw new Error(parsed.kind);
+    const raw = JSON.parse(serializeBoard(parsed.board));
+    expect(raw).not.toHaveProperty("stages");
+    expect(raw.nodes[0]).not.toHaveProperty("final");
+  });
+
+  it("阶段或定稿字段形状不对视为损坏", () => {
+    const bad = (patch: (raw: Record<string, any>) => void) => {
+      const raw = JSON.parse(V1);
+      raw.format_version = 2;
+      patch(raw);
+      return parseBoard(JSON.stringify(raw)).kind;
+    };
+    expect(bad((r) => (r.stages = {}))).toBe("corrupt");
+    expect(bad((r) => (r.stages = [{ id: "s", name: "a", nodes: "r", collapsed: false }]))).toBe("corrupt");
+    expect(bad((r) => (r.stages = [{ id: "s", name: "a", nodes: ["r"], collapsed: "no" }]))).toBe("corrupt");
+    expect(bad((r) => (r.nodes[0].final = "yes"))).toBe("corrupt");
+  });
+});
+
 describe("主文件损坏回退 .bak", () => {
   const good = serializeBoard(sample());
 
@@ -229,7 +289,7 @@ describe("主文件损坏回退 .bak", () => {
   });
 
   it("主文件是更新版本 → 拒开，不回退 .bak", () => {
-    const newer = good.replace('"format_version": 1', '"format_version": 99');
+    const newer = good.replace(/"format_version": \d+/, '"format_version": 99');
     expect(openBoard(newer, good)).toEqual({ kind: "newer", version: 99 });
   });
 });

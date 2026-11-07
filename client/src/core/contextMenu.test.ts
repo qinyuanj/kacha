@@ -3,6 +3,7 @@ import type { Board, BoardEdge, BoardNode, TaskNode } from "./board";
 import { BUILTIN_TABLE } from "./capabilities";
 import { LOCKED_HINT, TASK_BUSY } from "./iterate";
 import { clampMenuPosition, menuItems, selectionForMenu, actionBarItems, type MenuFacts } from "./contextMenu";
+import { finalToggle } from "./stages";
 
 const SPEC_2K = { tier: "2K", ratio: "16:9", width: null, height: null };
 
@@ -88,6 +89,8 @@ describe("图片节点菜单", () => {
       ["preview", "放大预览", null],
       ["saveAs", "另存为…", null],
       "---",
+      ["newStage", "建为阶段", null],
+      "---",
       ["delete", "删除", null],
     ]);
   });
@@ -101,6 +104,9 @@ describe("图片节点菜单", () => {
       "---",
       ["preview", "放大预览", null],
       ["saveAs", "另存为…", null],
+      "---",
+      ["newStage", "建为阶段", null],
+      ["toggleFinal", "标记定稿", null],
       "---",
       ["delete", "删除", null],
     ]);
@@ -126,6 +132,8 @@ describe("任务 / 提示词节点菜单", () => {
       ["toggleSettings", "展开", null],
       ["viewSendText", "查看发送文本", null],
       "---",
+      ["newStage", "建为阶段", null],
+      "---",
       ["delete", "删除", null],
     ]);
   });
@@ -139,6 +147,8 @@ describe("任务 / 提示词节点菜单", () => {
       "---",
       ["toggleSettings", "展开", null],
       ["viewSendText", "查看发送文本", TASK_BUSY],
+      "---",
+      ["newStage", "建为阶段", null],
       "---",
       ["delete", "删除", null],
     ]);
@@ -156,9 +166,37 @@ describe("任务 / 提示词节点菜单", () => {
     expect(items.find((i) => i.action === "regenerate")?.disabledReason).toBeNull();
   });
 
-  it("提示词：只有删除", () => {
+  it("提示词：建为阶段与删除", () => {
     const b = board([{ id: "p", type: "prompt", pos: [0, 0], size: [240, 140], extra: {}, text: "" }]);
-    expect(summary(menuItems({ kind: "node", nodeId: "p" }, facts({ board: b, selected: new Set(["p"]) })))).toEqual([["delete", "删除", null]]);
+    expect(summary(menuItems({ kind: "node", nodeId: "p" }, facts({ board: b, selected: new Set(["p"]) })))).toEqual([["newStage", "建为阶段", null], "---", ["delete", "删除", null]]);
+  });
+});
+
+describe("整理：阶段与定稿", () => {
+  const tidy = (items: ReturnType<typeof menuItems>) => summary(items.filter((i) => ["newStage", "removeFromStage", "toggleFinal"].includes(i.action)));
+
+  it("未定稿的结果：建为阶段、标记定稿；整理一组放在删除之前", () => {
+    const b = board([result("res")]);
+    const items = menuItems({ kind: "node", nodeId: "res" }, facts({ board: b, selected: new Set(["res"]) }));
+    expect(tidy(items)).toEqual(["---", ["newStage", "建为阶段", null], ["toggleFinal", "标记定稿", null]]);
+    expect(items.at(-1)?.action).toBe("delete");
+  });
+
+  it("已定稿的结果给取消定稿；在阶段里的节点另给移出阶段", () => {
+    const b = { ...board([{ ...result("res"), final: true } as BoardNode, reference("r")]), stages: [{ id: "s", name: "a", nodes: ["res"], collapsed: false, extra: {} }] };
+    const items = menuItems({ kind: "node", nodeId: "res" }, facts({ board: b, selected: new Set(["res"]) }));
+    expect(tidy(items)).toEqual(["---", ["newStage", "建为阶段", null], ["removeFromStage", "移出阶段", null], ["toggleFinal", "取消定稿", null]]);
+  });
+
+  it("多选：结果里有未定稿的就是标记定稿；没有结果不给定稿项", () => {
+    const b = board([{ ...result("a"), final: true } as BoardNode, result("b"), reference("r")]);
+    const mixed = menuItems({ kind: "node", nodeId: "a" }, facts({ board: b, selected: new Set(["a", "b", "r"]) }));
+    expect(tidy(mixed)).toEqual(["---", ["newStage", "建为阶段", null], ["toggleFinal", "标记定稿", null]]);
+    expect(finalToggle(b, ["a", "b", "r"])).toEqual({ nodes: ["a", "b"], final: true });
+    expect(finalToggle(b, ["a"])).toEqual({ nodes: ["a"], final: false });
+    expect(finalToggle(b, ["r"])).toBeNull();
+    const plain = menuItems({ kind: "node", nodeId: "r" }, facts({ board: b, selected: new Set(["r"]) }));
+    expect(tidy(plain)).toEqual(["---", ["newStage", "建为阶段", null]]);
   });
 });
 
@@ -172,11 +210,14 @@ describe("右键与选区", () => {
     expect(selectionForMenu(selected, "b")).toBe(selected);
   });
 
-  it("多选：只给以此继续编辑与删除", () => {
+  it("多选：给以此继续编辑、整理与删除", () => {
     const b = board([reference("r"), result("res"), task("t")]);
     const items = menuItems({ kind: "node", nodeId: "t" }, facts({ board: b, selected: new Set(["r", "res", "t"]) }));
     expect(summary(items)).toEqual([
       ["continueEditing", "以此继续编辑", null],
+      "---",
+      ["newStage", "建为阶段", null],
+      ["toggleFinal", "标记定稿", null],
       "---",
       ["delete", "删除 3 个节点", null],
     ]);
@@ -189,14 +230,17 @@ describe("右键与选区", () => {
       ["continueEditing", "以此继续编辑", null],
       ["addAsReference", "加为参考图", null],
       "---",
+      ["newStage", "建为阶段", null],
+      ["toggleFinal", "标记定稿", null],
+      "---",
       ["delete", "删除 2 个节点", null],
     ]);
   });
 
-  it("多选里没有图片节点：只给删除", () => {
+  it("多选里没有图片节点：只给整理与删除", () => {
     const b = board([task("t1"), task("t2")]);
     const items = menuItems({ kind: "node", nodeId: "t1" }, facts({ board: b, selected: new Set(["t1", "t2"]) }));
-    expect(summary(items)).toEqual([["delete", "删除 2 个节点", null]]);
+    expect(summary(items)).toEqual([["newStage", "建为阶段", null], "---", ["delete", "删除 2 个节点", null]]);
   });
 });
 

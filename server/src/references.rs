@@ -9,7 +9,8 @@ use regex::Regex;
 use serde_json::Value;
 
 /// 画板文件格式版本上限（与前端 `BOARD_FORMAT_VERSION` 一致）。
-pub const BOARD_FORMAT_VERSION: u64 = 1;
+/// 2 加入的阶段（顶层 stages，只列节点 id）与定稿（结果节点 final）都不带来新的引用，规则不变。
+pub const BOARD_FORMAT_VERSION: u64 = 2;
 
 fn date_dir() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
