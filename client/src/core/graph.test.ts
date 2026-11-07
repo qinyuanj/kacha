@@ -17,6 +17,7 @@ import {
   nodeImages,
   taskPorts,
 } from "./graph";
+import { defaultTaskModel } from "./settings";
 
 const SEEDREAM_PRO = "doubao-seedream-5-0-pro-260628";
 
@@ -334,12 +335,13 @@ describe("图片节点按哪些模型给输入规则提示", () => {
   const FLASH = "doubao-seedream-5-0-flash-260915";
 
   it("未接线参考图：画板没有最近选择时按新建任务的默认模型 Flash，而非旗舰档第一个", () => {
-    expect(inputRuleModels(board([node("r", "reference")]), table, none, "r")).toEqual([FLASH]);
+    const b = board([node("r", "reference")]);
+    expect(inputRuleModels(b, "r", defaultTaskModel(table, none, b.last_model))).toEqual([FLASH]);
   });
 
   it("未接线参考图：画板有最近选择时按该模型", () => {
     const b = { ...board([node("r", "reference")]), last_model: SEEDREAM_PRO };
-    expect(inputRuleModels(b, table, none, "r")).toEqual([SEEDREAM_PRO]);
+    expect(inputRuleModels(b, "r", defaultTaskModel(table, none, b.last_model))).toEqual([SEEDREAM_PRO]);
   });
 
   it("有下游任务的参考图仍按下游任务的模型，去重", () => {
@@ -351,12 +353,12 @@ describe("图片节点按哪些模型给输入规则提示", () => {
       ]),
       last_model: FLASH,
     };
-    expect(inputRuleModels(b, table, none, "r")).toEqual(["qwen-image-3.0-pro", SEEDREAM_PRO]);
+    expect(inputRuleModels(b, "r", FLASH)).toEqual(["qwen-image-3.0-pro", SEEDREAM_PRO]);
   });
 
   it("结果图只按下游任务提示，没接任务不提示", () => {
-    expect(inputRuleModels(board([node("res", "result")]), table, none, "res")).toEqual([]);
+    expect(inputRuleModels(board([node("res", "result")]), "res", FLASH)).toEqual([]);
     const b = board([node("res", "result"), task("t1", SEEDREAM_PRO)], [edge("res", "out", "t1", "image:0")]);
-    expect(inputRuleModels(b, table, none, "res")).toEqual([SEEDREAM_PRO]);
+    expect(inputRuleModels(b, "res", FLASH)).toEqual([SEEDREAM_PRO]);
   });
 });

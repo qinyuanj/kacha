@@ -448,7 +448,8 @@ export function BoardCanvas({
       }
       return groups;
     };
-    const rulesOf = (id: string): InputImageRule[] => inputRuleModels(board, table, discovery, id).flatMap((m) => findModel(table, m)?.input_image_rule ?? []);
+    const fallbackModel = defaultTaskModel(table, discovery, board.last_model);
+    const rulesOf = (id: string): InputImageRule[] => inputRuleModels(board, id, fallbackModel).flatMap((m) => findModel(table, m)?.input_image_rule ?? []);
     return board.nodes.flatMap((n): Node[] => {
       if (n.type === "unknown") return [];
       const base = {
