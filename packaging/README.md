@@ -43,6 +43,11 @@ Linux 上命令相同，只需把 `python` 换成 `python3`、路径分隔符换
 | `--static-dir` | `KACHA_STATIC_DIR` | 无 | 前端构建目录；部署时指到复制后的 `static` |
 | `--result-hosts` | `KACHA_RESULT_HOSTS` | 空 | 逗号分隔的额外结果对象存储主机或后缀；默认已含 `.volces.com`、`.volccdn.com`、`.bytepluses.com`、`.aliyuncs.com` |
 | `--min-free-gb` | `KACHA_MIN_FREE_GB` | `20` | 数据盘最低余量（GiB）；低于它时写入接口返回 507 |
+| `--board-slots` | `KACHA_BOARD_SLOTS` | `10` | 画板位：每人可同时持有的可编辑画板数（ADR 0019） |
+| `--board-warn-mb` | `KACHA_BOARD_WARN_MB` | `500` | 画板体量黄线（MiB）：画板列表标黄、画布顶部提示整理，不阻止生成 |
+| `--board-alert-mb` | `KACHA_BOARD_ALERT_MB` | `1024` | 画板体量红线（MiB）：画板列表标红、再提示一次，不阻止生成 |
+
+画板位与体量提醒线是初值，按服务端每日用量日志调整：改服务参数后重启服务即可，不用重新发版。
 
 结果下载只允许 HTTP/HTTPS 与允许列表中的主机，重定向也逐次校验。不要把不可信内网主机加入列表。若允许用户把前端网关改为非 `KACHA_GATEWAY_URL` 的地址，还需同步调整服务端 CSP；当前部署应保持一致。
 

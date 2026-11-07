@@ -1478,9 +1478,35 @@ button.primary[aria-disabled="true"] {
   align-items: center;
   gap: 8px;
 }
-.board-list .board-list-delete {
+.board-list .board-list-size {
   margin-left: auto;
+  font-size: 12px;
+  color: #57606a;
+  white-space: nowrap;
+}
+/* 画板体量越过提醒线（#87）：黄线标黄、红线标红，只提醒。 */
+.board-list .board-list-size.size-warn {
+  color: #7d4e00;
+  background: #fff8c5;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.board-list .board-list-size.size-alert {
+  color: #fff;
+  background: var(--red);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.board-list .board-list-delete {
   color: var(--red);
+}
+.board-list-group {
+  margin: 8px 0 4px;
+  font-size: 12px;
+}
+.bar-alert {
+  background: #ffebe9;
+  border-bottom: 1px solid var(--red);
 }
 .delete-notes {
   margin: 0;

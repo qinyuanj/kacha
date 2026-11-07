@@ -24,3 +24,21 @@ export const BACKUP_HINT_TEXT = "服务端不备份，重要画板请导出。";
 
 /** 设置 › 用量：闲置用户规则（画板没有有效期）。 */
 export const IDLE_USER_RULE_TEXT = "画板不会因为时间被删。60 天没用 Kacha，全部数据可能被清理。";
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let v = bytes;
+  let u = -1;
+  do {
+    v /= 1024;
+    u += 1;
+  } while (v >= 1024 && u < units.length - 1);
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[u]}`;
+}
+
+/** 画板体量一律写「约 X」：服务端按任务目录累加、不去重，可能略大于导出画板包时的预估（#87）。 */
+export const approxSizeText = (bytes: number) => `约 ${formatBytes(bytes)}`;
+
+/** 当前画板越过体量提醒线时画布顶部的提示。 */
+export const sizeNoticeText = (bytes: number) => `这块画板已经${approxSizeText(bytes)} 了，整理一下？`;

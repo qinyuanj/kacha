@@ -29,6 +29,17 @@ describe("界面状态 ui-state.json", () => {
     expect("last_seen_version" in parsed).toBe(false);
   });
 
+  it("往返：各画板已提醒到的体量档位", () => {
+    const state = { open_boards: ["/a"], active_board: "/a", size_notices: { "/a": "warn" as const, "/b": "alert" as const } };
+    expect(parseUiState(serializeUiState(state))).toEqual(state);
+  });
+
+  it("体量档位里认不得的值丢掉，其余照常", () => {
+    const parsed = parseUiState(JSON.stringify({ open_boards: ["/a"], active_board: "/a", size_notices: { "/a": "red", "/b": "alert", "/c": 1 } }));
+    expect(parsed.size_notices).toEqual({ "/b": "alert" });
+    expect(parseUiState(JSON.stringify({ open_boards: ["/a"], active_board: "/a", size_notices: [] })).size_notices).toBeUndefined();
+  });
+
   it("上次看过的版本不是字符串时忽略，标签页照常恢复", () => {
     const parsed = parseUiState(JSON.stringify({ open_boards: ["/a"], active_board: "/a", last_seen_version: 120 }));
     expect(parsed).toStrictEqual({ open_boards: ["/a"], active_board: "/a" });
