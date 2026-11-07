@@ -133,6 +133,36 @@ async fn existing_reports_identity_sha256_of_units_already_on_the_server() {
     assert!(reply.status.is_client_error(), "越界路径必须被拒：{}", reply.status);
 }
 
+/// 问已有的响应逐字节固定（#81）：已有、缺少、读不了三种状态的字段与字段顺序都不随实现改动变化。
+#[tokio::test]
+async fn existing_response_bytes_are_fixed_for_present_absent_and_unreadable_units() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let root = h.user_root(GOOD_KEY);
+    std::fs::create_dir_all(root.join(TASK_A)).unwrap();
+    std::fs::write(root.join(TASK_A).join("task.json"), b"task a").unwrap();
+    std::fs::create_dir_all(root.join(TASK_B)).unwrap();
+    std::fs::create_dir_all(root.join("导入参考图")).unwrap();
+    std::fs::write(root.join("导入参考图/猫.png"), b"cat").unwrap();
+    let body = serde_json::json!([
+        { "path": TASK_A, "identity": "task.json" },
+        { "path": TASK_B, "identity": "task.json" },
+        { "path": "导入参考图/猫.png", "identity": null },
+        { "path": "导入参考图/狗.png", "identity": null },
+    ]);
+    let reply = h.send(Method::POST, "/api/packs/existing", Some(&cookie), body.to_string()).await;
+    assert_eq!(reply.status, 200, "{}", reply.text());
+    assert_eq!(
+        reply.text(),
+        concat!(
+            r#"[{"path":"2026-09-16/20260916T010000Z-0000000a","sha256":"2f1c6ae9742efa12f5d8a5129b61c2c0150c15ffa56a3aa87aab61362a944e27","state":"present"},"#,
+            r#"{"path":"2026-09-16/20260916T020000Z-0000000b","state":"unreadable"},"#,
+            r#"{"path":"导入参考图/猫.png","sha256":"77af778b51abd4a3c51c5ddd97204a9c3ae614ebccb75a606c3b6865aed6744e","state":"present"},"#,
+            r#"{"path":"导入参考图/狗.png","state":"absent"}]"#,
+        )
+    );
+}
+
 #[tokio::test]
 async fn content_whose_sha256_differs_from_the_declared_one_is_rejected_as_corrupt() {
     let h = Harness::new();
@@ -198,7 +228,9 @@ async fn content_over_the_64_mb_body_limit_is_rejected_with_413() {
         .header(header::CONTENT_LENGTH, (kacha_server::MAX_BODY_BYTES + 1).to_string())
         .body(Body::empty())
         .unwrap();
-    assert_eq!(h.app.clone().oneshot(req).await.unwrap().status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let reply = reply_of(h.app.clone().oneshot(req).await.unwrap()).await;
+    assert_eq!(reply.status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(reply.json()["message"], "单份内容超过 64 MB 上限");
     // 没有 Content-Length、实际超限：写到上限即拒绝并删掉半成品。
     let big = vec![0u8; kacha_server::MAX_BODY_BYTES + 1];
     let req = Request::builder()

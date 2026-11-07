@@ -187,7 +187,7 @@ def main() -> int:
                 base = f"/api/packs/uploads/{upload_id}"
                 request(port, "GET", base + "/entries", cookie=cookie)
                 request(port, "POST", base + "/texts", json.dumps([manifest_name, board_entry]).encode(), cookie)
-                request(port, "POST", base + "/import?op=" + f"import-{index}", json.dumps(units).encode(), cookie)
+                request(port, "POST", base + "/import?op=" + f"import-{index}", json.dumps({"units": units, "duplicates": []}).encode(), cookie)
                 exported_manifest = {"pack_format_version": 1, "app_version": "load", "boards": ["画板/压力.ugcboard.json"]}
                 export_spec = {
                     "texts": [
