@@ -435,6 +435,11 @@ export type ImportResult =
   | { kind: "corrupt"; reason: string }
   | { kind: "cancelled" }
   | { kind: "failed"; error: string }
+  /**
+   * 服务端导入请求（合并任务目录并提交画板）失败：画板一块都没写入；请求到达前就失败时什么都没合并，
+   * 合并中途失败时已移入的任务目录保留。
+   */
+  | { kind: "commitFailed"; error: string }
   /** 画板位不够放下包里的画板（#89）：什么都没上传或合并；message 是统一文案。 */
   | { kind: "slotsFull"; message: string }
   /** 任务目录与画板已由服务端提交；written = 已打开的实际画板文件名，writeError = 打开画板失败的报错。 */
@@ -551,7 +556,12 @@ async function discardOnError<T>(run: () => Promise<T>, discard: () => Promise<v
  */
 export async function importPack(io: PackIo, opts: ImportOptions): Promise<ImportResult> {
   const { file } = opts;
-  const phase = (p: ImportPhase) => opts.onPhase?.(p);
+  /** 最近进入的一步：失败发生在服务端导入请求里（merge）时，结局与此前各步不同。 */
+  const reached: { phase: ImportPhase | null } = { phase: null };
+  const phase = (p: ImportPhase) => {
+    reached.phase = p;
+    opts.onPhase?.(p);
+  };
   const fields = { action: "import", pack_file: file.name };
   /** 通过检查的包（日志里的画板文件名由它给出）。 */
   let checked: OkCheck | undefined;
@@ -611,7 +621,8 @@ export async function importPack(io: PackIo, opts: ImportOptions): Promise<Impor
   const boardField = packBoards === undefined ? {} : { board_file: packBoards };
   if (!outcome.ok) {
     opts.log("board_pack", { ...fields, ...boardField, result: outcome.result });
-    return outcome.result === "cancelled" ? { kind: "cancelled" } : { kind: "failed", error: outcome.error };
+    if (outcome.result === "cancelled") return { kind: "cancelled" };
+    return { kind: reached.phase === "merge" ? "commitFailed" : "failed", error: outcome.error };
   }
   if ("kind" in outcome.value && outcome.value.kind === "slotsFull") {
     opts.log("board_pack", { ...fields, ...boardField, result: "board_slots_full" });

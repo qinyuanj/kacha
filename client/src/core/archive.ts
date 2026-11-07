@@ -1,5 +1,5 @@
 // 归档画板（#90，ADR 0019）：放在画板目录下的归档子目录里，只读、不占画板位；画板文件格式不变。
-import policy from "../../../contracts/board-policy.json";
+import policy from "../../../contracts/board-policy.json" with { type: "json" };
 import type { BoardAction, MenuItem } from "./contextMenu";
 import { boardsDir, dirname, joinPath } from "./paths";
 

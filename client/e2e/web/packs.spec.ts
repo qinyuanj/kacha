@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { board, png, promptNode, referenceNode } from "../common/boards";
 import { FLASH } from "../common/layers";
+import { PACK_IMPORT_TEXT } from "../../src/ui/boardText";
 import { UPLOAD_FAILURES } from "../../src/shell/uploadText";
 import { unzip, zipBytes, zipNames, zipText } from "../common/zip";
 import { expect, GOOD_KEY, OTHER_KEY, test, type Rig } from "./rig";
@@ -352,7 +353,7 @@ for (const status of [408, 507]) {
     const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
     await page.route(CONTENT_UPLOAD, (route) => route.fulfill({ status, contentType: "text/html", body: "<html>error</html>" }));
     await importPack(page, V032);
-    await expect(toast(page)).toHaveText(`导入画板包失败：${reason}`);
+    await expect(toast(page)).toHaveText(PACK_IMPORT_TEXT.failed(reason));
     await expect(dialog(page)).toHaveCount(0);
     await expect(page.locator(".tab")).toHaveCount(1);
     expect(existsSync(path.join(rig.userRoot(GOOD_KEY), DIR))).toBe(false);
@@ -378,7 +379,7 @@ test("上传延迟期间进度对话框可见；点「取消」后提示已取�
   await expect(dialog(page)).toContainText("正在导入画板包：v0.3.2-flash-layers.ugcpack");
   await started;
   await dialog(page).getByRole("button", { name: "取消" }).click();
-  await expect(toast(page)).toHaveText("已取消导入；已移入的任务目录保留");
+  await expect(toast(page)).toHaveText(PACK_IMPORT_TEXT.cancelled);
   await expect(dialog(page)).toHaveCount(0);
   // 上传请求被中止（不是等它传完）。
   await aborted;
@@ -496,8 +497,13 @@ test("同一个包导入两次：第二次没有内容上传请求、任务目�
   requests.length = 0;
   await importPack(page, V032);
   await expect(toast(page)).toHaveText("导入 0 个任务，跳过 1 个");
-  // 只问了一次服务端已有哪些：不开暂存、不上传、不合并，也不整包上传。
-  expect(requests).toEqual(["POST /api/packs/existing"]);
+  // 只问了一次服务端已有哪些，没有内容上传，也不整包上传。画板随导入请求由服务端在画板锁内原子提交（#86），
+  // 所以仍开一份空暂存并以它提交画板。
+  expect(requests.map((r) => r.replace(/\/staging\/[^/]+\//, "/staging/<id>/"))).toEqual([
+    "POST /api/packs/existing",
+    "POST /api/packs/staging",
+    "POST /api/packs/staging/<id>/import",
+  ]);
   expect(readText(record)).toBe(before);
   // 第二份同名画板按 uniqueBoardFileName 改名为「旧版画板 (2)」。文件名故意手写：这是用户在磁盘上看到的名字，
   // 用独立期望值断言，避免拿被测的命名函数断言它自己（CODING_STANDARDS「一个含义只定义一处」的例外）。
@@ -615,13 +621,19 @@ test("导出缺图：列出缺失并改「仍然导出…」；取消则不产�
   await expect(toast(page)).toHaveCount(0);
 });
 
-test("导入后写画板失败：任务目录已导入，弹窗说明写画板失败", async ({ page, rig }) => {
-  await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
-  await page.route("**/api/boards?*", (route) => (route.request().method() === "PUT" ? route.fulfill({ status: 507, contentType: "application/json", body: JSON.stringify({ code: "insufficient_storage", message: "服务器空间不足，请联系管理员" }) }) : route.continue()));
+test("服务端导入请求失败：弹窗说明导入失败、画板没有写入，不出现新画板，暂存已放弃（#86）", async ({ page, rig }) => {
+  const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
+  // 合并任务目录与提交画板在同一个导入请求里（原子提交），前端不再单独 PUT 画板：让这个请求失败。
+  await page.route("**/api/packs/staging/*/import*", (route) => route.fulfill({ status: 507, contentType: "application/json", body: JSON.stringify({ code: "insufficient_storage", message: "服务器空间不足，请联系管理员" }) }));
   await importPack(page, V032);
-  await expect(dialog(page)).toContainText("导入 1 个任务，跳过 0 个");
-  await expect(dialog(page)).toContainText("任务目录已导入，但写画板失败：服务器空间不足，请联系管理员");
-  expect(existsSync(path.join(rig.userRoot(GOOD_KEY), DIR, "layers.json"))).toBe(true);
+  await expect(dialog(page)).toContainText(PACK_IMPORT_TEXT.failed("服务器空间不足，请联系管理员"));
+  await expect(dialog(page)).toContainText(PACK_IMPORT_TEXT.commitFailed);
+  await expect(toast(page)).toHaveCount(0);
+  const root = rig.userRoot(GOOD_KEY);
+  expect(readdirSync(path.join(root, "画板"))).toEqual(["空.ugcboard.json"]);
+  await expect(page.locator(".tab")).toHaveCount(1);
+  await expect.poll(() => readdirSync(path.join(root, ".kacha/pack-content"))).toEqual([]);
   await dialog(page).getByRole("button", { name: "知道了" }).click();
   await expect(dialog(page)).toHaveCount(0);
+  expect(errors).toEqual([]);
 });

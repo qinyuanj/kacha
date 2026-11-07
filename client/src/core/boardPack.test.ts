@@ -662,10 +662,11 @@ describe("导入画板包", () => {
     expect(r.logs).toEqual([{ kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", board_file: "甲.ugcboard.json, 乙.ugcboard.json", result: "cancelled" }]);
   });
 
-  it("导入命令失败：返回 failed 与报错原文，日志只记类别", async () => {
+  it("服务端导入请求失败：返回 commitFailed 与报错原文，不打开画板，日志只记类别", async () => {
     const { io } = memoryPackIo(goodPack, { failAfterMove: new Error(`磁盘已满 ${SECRET}`) });
     const r = run(io);
-    expect(await r.outcome).toEqual({ kind: "failed", error: `磁盘已满 ${SECRET}` });
+    expect(await r.outcome).toEqual({ kind: "commitFailed", error: `磁盘已满 ${SECRET}` });
+    expect(r.added).toEqual([]);
     expect(r.logs).toEqual([{ kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", board_file: "甲.ugcboard.json, 乙.ugcboard.json", result: "failed" }]);
   });
 
@@ -934,7 +935,7 @@ describe("导入画板包", () => {
       expect(differ.placed.map((f) => f.path)).not.toContain(REF);
     });
 
-    it("全部已存在：只问一次服务端，不 hash、不开暂存、不上传、不合并，结果为全部跳过", async () => {
+    it("全部已存在：只问一次服务端，不上传内容，以空暂存提交画板，结果为全部跳过", async () => {
       const { io, steps } = memoryPackIo(v1Pack, { existing: { [TASK]: sha(RECORD_A), [TASK_B]: sha(RECORD_B), [REF]: sha("猫") } });
       const r = run(io, undefined, zipFile(v1Pack));
       expect(await r.outcome).toMatchObject({ kind: "done", summary: { imported: 0, skipped: 2, conflicts: [], message: "导入 0 个任务，跳过 2 个" }, written: ["甲.ugcboard.json"] });
@@ -956,7 +957,9 @@ describe("导入画板包", () => {
             return failing(error)();
           }) as never;
           const r = run(m.io, undefined, zipFile(v1Pack));
-          expect(await r.outcome).toEqual(result === "cancelled" ? { kind: "cancelled" } : { kind: "failed", error: "服务端返回 HTTP 500" });
+          // 导入请求（合并并提交画板）本身失败是单独的结局：此前各步失败时服务端什么都没合并。
+          const failed = phase === "importContent" ? "commitFailed" : "failed";
+          expect(await r.outcome).toEqual(result === "cancelled" ? { kind: "cancelled" } : { kind: failed, error: "服务端返回 HTTP 500" });
           const order = ["existing", "hash", "stage", "uploadContent", `importContent(${STAGING_ID})`];
           const at = m.steps.findIndex((s) => s === phase || s.startsWith(`${phase}(`));
           const later = order.slice(order.findIndex((s) => s === phase || s.startsWith(`${phase}(`)) + 1);

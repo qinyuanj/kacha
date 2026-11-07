@@ -153,8 +153,12 @@ test("整理可进入退出，收起阶段的画板归档后默认展开并保�
   await expect.poll(() => existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).nodes.length : 0).toBe(1);
   const raw = JSON.parse(readFileSync(file, "utf8"));
   raw.stages = [{ id: "s", name: "收起的阶段", nodes: [raw.nodes[0].id], collapsed: true }];
-  const response = await page.request.put(`/api/boards?path=${encodeURIComponent("画板/归档查看.ugcboard.json")}`, { data: JSON.stringify(raw) });
-  expect(response.status()).toBe(204);
+  // 在页面里用同源 fetch 写入：会话 cookie 属于 kacha.test，APIRequestContext 走回环地址带不上它。
+  const status = await page.evaluate(
+    ([url, body]) => fetch(url, { method: "PUT", credentials: "same-origin", body }).then((r) => r.status),
+    [`/api/boards?path=${encodeURIComponent("画板/归档查看.ugcboard.json")}`, JSON.stringify(raw)] as const,
+  );
+  expect(status).toBe(204);
   await page.reload();
   const member = page.locator(`.react-flow__node[data-id="${raw.nodes[0].id}"]`);
   await expect(member).not.toBeVisible();

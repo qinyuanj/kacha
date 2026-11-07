@@ -503,11 +503,16 @@ where F: FnOnce(&Path) -> std::io::Result<board_pack::ImportReport> + Send + 'st
             _ => crate::fs::io_error(e),
         })?;
         if cancel.cancel.load(Ordering::Relaxed) { return Err(error(StatusCode::CONFLICT, "cancelled", CANCELLED)); }
-        let paths = planned.into_iter().map(|(path, board)| {
-            crate::store::write_board_guarded(&path, &board.text, crate::store::BoardWriteGuard::CreateOnly)
-                .map_err(crate::fs::board_save_error)?;
-            Ok(format!("{}/{}", crate::cleanup::BOARDS_DIR, path.file_name().unwrap().to_string_lossy()))
-        }).collect::<Result<Vec<_>, Response>>()?;
+        // 画板要么全部写好要么一块都不留：前端据此告诉用户「画板没有写入」。只新建，删掉的都是本次刚写的文件。
+        let mut written: Vec<PathBuf> = Vec::new();
+        for (path, board) in &planned {
+            if let Err(e) = crate::store::write_board_guarded(path, &board.text, crate::store::BoardWriteGuard::CreateOnly) {
+                for done in &written { let _ = std::fs::remove_file(done); }
+                return Err(crate::fs::board_save_error(e));
+            }
+            written.push(path.clone());
+        }
+        let paths = written.iter().map(|path| format!("{}/{}", crate::cleanup::BOARDS_DIR, path.file_name().unwrap().to_string_lossy())).collect();
         Ok(ImportOutcome { report, boards: paths })
     }).await;
     match report {

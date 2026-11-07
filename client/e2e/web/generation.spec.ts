@@ -88,6 +88,8 @@ test("另一把密钥的画板列表里看不到这份画板（按用户隔离�
   const other = await browser.newContext();
   const page2 = await other.newPage();
   await enterWithKey(page2, rig.baseURL, OTHER_KEY);
+  // 新画板先落盘再出标签页（#89）；列表打开时只向服务端取一次，所以先等标签页出现。
+  await expect(page2.locator(".tab").first()).toBeVisible();
   await page2.getByRole("button", { name: "画板列表", exact: true }).click();
   const list = page2.getByRole("dialog", { name: "画板列表" });
   await expect(list.locator("ul.board-list li"), "另一把密钥只有它自己新建的空画板").toHaveCount(1);

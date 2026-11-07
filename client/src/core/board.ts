@@ -1,6 +1,6 @@
 // 画板文件：用户数据根/画板/<标题>.ugcboard.json。
 // 任务目录是真源、画板只是视图；本模块只负责文件格式的读写、版本与未知字段保留、文件名派生。
-import policy from "../../../contracts/board-policy.json";
+import policy from "../../../contracts/board-policy.json" with { type: "json" };
 import { isLayerSize, LAYER_SIZES_TEXT, type LayerSize, type OutputOptions } from "./gateway";
 import type { AutoRatio, SizeSpec } from "./size";
 

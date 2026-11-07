@@ -8,7 +8,7 @@ import { packFs, packIo } from "../shell/adapters";
 import { logEvent } from "../shell/log";
 import type { PackDialogState } from "./BoardPackDialog";
 import { errorText } from "../core/errors";
-import { isSlotsFullText, slotsRefusal } from "./boardText";
+import { isSlotsFullText, PACK_IMPORT_TEXT, slotsRefusal } from "./boardText";
 
 interface PackBoards {
   flushAll: () => Promise<void>;
@@ -103,17 +103,24 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
           return toast(`无法导入画板包：${result.reason}`);
         case "cancelled":
           setDialog(null);
-          return toast("已取消导入；已移入的任务目录保留");
+          return toast(PACK_IMPORT_TEXT.cancelled);
         case "slotsFull":
           setDialog(null);
           return toast(result.message);
         case "failed":
+        case "commitFailed":
+          // 服务端合并前按画板位拒绝（两页抢最后的位）：它的报错就是统一文案，不加前缀，此时什么都没合并。
+          if (isSlotsFullText(result.error)) {
+            setDialog(null);
+            return toast(result.error);
+          }
+          // 导入请求失败时任务目录可能已移入一部分：用弹窗说明画板没有写入，而不是一闪而过的提示。
+          if (result.kind === "commitFailed") return setDialog({ stage: "importDone", message: PACK_IMPORT_TEXT.failed(result.error), conflicts: [], notice: PACK_IMPORT_TEXT.commitFailed });
           setDialog(null);
-          // 服务端合并前按画板位拒绝（两页抢最后的位）：它的报错就是统一文案，不加前缀。
-          return toast(isSlotsFullText(result.error) ? result.error : `导入画板包失败：${result.error}`);
+          return toast(PACK_IMPORT_TEXT.failed(result.error));
         case "done": {
           const { summary, writeError } = result;
-          if (writeError || summary.conflicts.length) setDialog({ stage: "importDone", message: summary.message, conflicts: summary.conflicts, error: writeError });
+          if (writeError || summary.conflicts.length) setDialog({ stage: "importDone", message: summary.message, conflicts: summary.conflicts, notice: writeError && PACK_IMPORT_TEXT.openFailed(writeError) });
           else {
             setDialog(null);
             toast(summary.message);
@@ -122,7 +129,7 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
       }
     } catch (e) {
       setDialog(null);
-      toast(`导入画板包失败：${errorText(e)}`);
+      toast(PACK_IMPORT_TEXT.failed(errorText(e)));
     }
   }, [userRoot, boards, toast]);
 

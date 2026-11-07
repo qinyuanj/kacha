@@ -7,8 +7,8 @@ export type PackDialogState =
   | { stage: "confirmExport"; boardFile: string; plan: ExportPlan; contents: PackContents }
   /** detail：进度阶段内正在做的一步（导入时按 ImportPhase 换）。 */
   | { stage: "progress"; title: string; detail?: string }
-  /** 有冲突或写画板失败时才弹；任务目录的导入结果照常给出。 */
-  | { stage: "importDone"; message: string; conflicts: string[]; error: string | null };
+  /** 有冲突、服务端导入请求失败或打开画板失败时才弹：message 是结局，notice 是完整的补充说明（文案见 boardText）。 */
+  | { stage: "importDone"; message: string; conflicts: string[]; notice: string | null };
 
 export interface BoardPackDialogProps {
   state: PackDialogState;
@@ -96,7 +96,7 @@ export function BoardPackDialog({ state, onExport, onCancelProgress, onClose }: 
             <div className="modal-head">
               <strong>{state.message}</strong>
             </div>
-            {state.error && <div className="badge-warn">任务目录已导入，但写画板失败：{state.error}</div>}
+            {state.notice && <div className="badge-warn">{state.notice}</div>}
             {state.conflicts.length > 0 && (
               <>
                 <div>以下内容与本机已有的不一致，已跳过、未覆盖：</div>

@@ -1,5 +1,5 @@
 // 画板相关的用户可见提示文案；跨语言的值由共享契约定义。
-import policy from "../../../contracts/board-policy.json";
+import policy from "../../../contracts/board-policy.json" with { type: "json" };
 
 /** 画板已不存在（另一页面删除或改名）。 */
 export const BOARD_MISSING_TEXT = "该画板已不存在，可能已在别处改名或删除";
@@ -61,6 +61,16 @@ export const ARCHIVE_TEXT = {
   group: "已归档",
   /** 在归档画板上试图编辑时的提示。 */
   readOnly: policy.archived_read_only,
+} as const;
+
+/** 导入画板包的结局（#86：任务目录合并与画板提交在服务端同一个导入请求里完成）。 */
+export const PACK_IMPORT_TEXT = {
+  failed: (error: string) => `导入画板包失败：${error}`,
+  cancelled: "已取消导入；已移入的任务目录保留",
+  /** 服务端导入请求失败时弹窗里的说明：画板一块都没写入。 */
+  commitFailed: "画板没有写入。已移入的任务目录保留，重新导入时会跳过它们。",
+  /** 服务端已写好画板，只是本页打开失败。 */
+  openFailed: (error: string) => `画板已导入，但打开失败：${error}。可从画板列表打开。`,
 } as const;
 
 /** 已超出画板位的老用户：现有画板照常编辑，列表顶部提示。 */
