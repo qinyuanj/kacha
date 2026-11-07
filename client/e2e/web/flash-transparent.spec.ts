@@ -3,10 +3,10 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { expect, type Page } from "@playwright/test";
 import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
+import { FLASH } from "../common/layers";
 import { bodies, test, type Rig } from "./rig";
 import { openApp, task, taskRecords } from "./kit";
 
-const FLASH = "doubao-seedream-5-0-flash-260915";
 const REF = "导入参考图/alpha.png";
 
 async function setup(page: Page, rig: Rig, alpha = true, region = false) {

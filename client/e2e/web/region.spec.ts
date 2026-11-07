@@ -2,10 +2,10 @@
 // 参考图向用户数据根预置；结果默认 url 形式，经服务端中转落任务目录。
 import { expect, type Page } from "@playwright/test";
 import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
+import { FLASH } from "../common/layers";
 import { bodies, test } from "./rig";
 import { openApp, task, taskRecords } from "./kit";
 
-const FLASH = "doubao-seedream-5-0-flash-260915";
 const REGION = { rects: [[0, 0, 1, 1]], render: "highlight_overlay" };
 const A = "导入参考图/a.png";
 const B = "导入参考图/b.png";

@@ -81,3 +81,23 @@ export function savedNodes(rig: Rig, title: string, key = GOOD_KEY): { id: strin
   return existsSync(file) ? readJson(file).nodes : [];
 }
 export const readText = (path: string) => readFileSync(path, "utf8");
+
+export interface DroppedFile {
+  name: string;
+  mimeType: string;
+  /** 文件内容（base64）。 */
+  b64: string;
+}
+
+/** 模拟从本机 HTML5 拖入一个文件，落在画布的页面坐标 (x, y) 处：依次派发 dragover 与 drop。 */
+export async function dropFile(page: Page, file: DroppedFile, at: { x: number; y: number }) {
+  await page.evaluate(
+    ({ file, at }) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([Uint8Array.from(atob(file.b64), (c) => c.charCodeAt(0))], file.name, { type: file.mimeType }));
+      const el = document.querySelector(".canvas")!;
+      for (const type of ["dragover", "drop"]) el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: at.x, clientY: at.y }));
+    },
+    { file, at },
+  );
+}

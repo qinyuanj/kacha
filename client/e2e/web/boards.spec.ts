@@ -28,7 +28,7 @@ test("画板新建、重命名与内容都落服务端，同密钥另一个浏�
   await page.getByRole("button", { name: "＋ 提示词", exact: true }).click();
   await expect.poll(() => boardFiles(rig.userRoot(GOOD_KEY))).toEqual(["服务端画板.ugcboard.json"]);
   await expect.poll(() => JSON.parse(readFileSync(path.join(boardsDir(rig.userRoot(GOOD_KEY)), "服务端画板.ugcboard.json"), "utf8")).nodes.length).toBe(1);
-  // 关掉标签页后仍能从服务端列表重新打开（桌面版靠拖入文件，Web 版靠列表）。
+  // 关掉标签页后仍能从服务端列表重新打开。
   await page.locator(".tab-close").click();
   await expect(page.locator(".tab")).toHaveCount(0);
   await page.getByRole("button", { name: "画板列表", exact: true }).click();

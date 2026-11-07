@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { expect, type Page } from "@playwright/test";
 import { board, edge, png, promptNode, taskNode } from "../common/boards";
 import { unzip } from "../common/zip";
-import { BASE, boardWithResult, BOX1, BOX2, DIR, flashResult, L2, TASK_ID, taskFiles } from "../common/layers";
+import { BASE, boardWithResult, BOX1, BOX2, DIR, FLASH, flashResult, L2, TASK_ID, taskFiles } from "../common/layers";
 import { GOOD_KEY, test } from "./rig";
 import { openApp, task, taskRecords } from "./kit";
 
@@ -41,7 +41,7 @@ test("图层下载：zip 内含底图 + layers/ 图层 + 完整元数据 layers.
 
 test("缺图层文件 / 无效来源图层身份：明确阻断运行，不回落底图、不发送请求", async ({ page, rig }) => {
   const mk = (sourceLayer: number) =>
-    board("阻断", [promptNode("p1", "改一改"), flashResult("res", [0, 300]), taskNode("t1", { model: "doubao-seedream-5-0-flash-260915", image_ports: 1 })], [
+    board("阻断", [promptNode("p1", "改一改"), flashResult("res", [0, 300]), taskNode("t1", { model: FLASH, image_ports: 1 })], [
       edge("p1", "t1", "positive"),
       edge("res", "t1", "image:0", { source_layer: sourceLayer }),
     ]);
@@ -78,7 +78,7 @@ test("旧结果兼容：无 layers.json、旧版四元数组 bbox 的 Flash 结�
 });
 
 test("来源图层继续创作：连线带图层身份，提交发送所选图层实际字节，谱系指向产出处", async ({ page, rig }) => {
-  const text = board("图层创作", [promptNode("p1", "改成蓝色"), flashResult("res", [0, 300]), taskNode("t1", { model: "doubao-seedream-5-0-flash-260915", image_ports: 1 })], [edge("p1", "t1", "positive")]);
+  const text = board("图层创作", [promptNode("p1", "改成蓝色"), flashResult("res", [0, 300]), taskNode("t1", { model: FLASH, image_ports: 1 })], [edge("p1", "t1", "positive")]);
   await openApp(page, rig, { title: "图层创作", boardText: text, files: taskFiles() });
   rig.stub.imageResponse = () => ({ json: { data: [{ b64_json: png(64, 64) }] } });
   // 先选中目标任务（点标题栏避开输入控件），再按 Shift 多选键双击结果缩略图打开预览（不挤掉任务选区）。

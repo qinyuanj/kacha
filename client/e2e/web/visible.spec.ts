@@ -61,6 +61,7 @@ test("视口外的节点不在 DOM 中；一端在视口外的连线照常显示
   await expect(task(page, "p1")).toHaveClass(/selected/);
   await task(page, "t1").locator(".node-title").click();
   await expect(task(page, "t1")).toHaveClass(/selected/);
+  // 要证明的是「没有挂载」，没有可等待的正向条件：留一段窗口，让重建后可能的强制渲染（及其测量后卸载）被 MutationObserver 记下。
   await page.waitForTimeout(300);
   expect(await page.evaluate(() => (window as unknown as { __mounted: string[] }).__mounted)).toEqual([]);
 
@@ -187,6 +188,7 @@ test("新建落在视口外的提示词，之后平移使其进入视口，焦�
   await moveToBlank(page);
   await pan(page, 0, 600);
   await expect(task(page, created)).toBeVisible();
+  // 要证明的是焦点「没有被抢走」，没有可等待的正向条件：新节点挂载后留一段窗口，让可能的自动聚焦先发生。
   await page.waitForTimeout(200);
   await expect(field).toBeFocused();
   await page.keyboard.type("焦点");

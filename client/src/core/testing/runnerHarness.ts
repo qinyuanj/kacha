@@ -3,10 +3,9 @@ import { BUILTIN_TABLE } from "../capabilities";
 import type { RunDeps } from "../run";
 import { createRunner, nodeStatus, type RunTarget, type RunnerChange } from "../runner";
 import { memoryTaskFs } from "./memoryTaskFs";
+import { PNG_1X1 as PNG, PNG_1X1_BASE64 } from "./png";
 
-const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
-const PNG_B64 = btoa(String.fromCharCode(...PNG));
-const OK_BODY = JSON.stringify({ metadata: { output: { choices: [{ message: { content: [{ image: PNG_B64 }] } }] } } });
+const OK_BODY = JSON.stringify({ metadata: { output: { choices: [{ message: { content: [{ image: PNG_1X1_BASE64 }] } }] } } });
 
 /** 提示词 p 接到每个任务节点；withReference 时 t1 另接参考图 r。 */
 export function board(taskIds: string[] = ["t1"], withReference = false): Board {

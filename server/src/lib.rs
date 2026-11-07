@@ -12,6 +12,7 @@ use axum::{Json, Router};
 
 pub mod board_pack;
 pub mod cache;
+mod civil;
 pub mod cleanup;
 pub mod fs;
 pub mod image_info;

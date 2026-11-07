@@ -197,11 +197,13 @@
 - 第三方参考：[srsholmes/tauri-playwright](https://github.com/srsholmes/tauri-playwright)
 - React Flow：[Testing](https://reactflow.dev/learn/advanced-use/testing)、[xyflow/xyflow tests/playwright](https://github.com/xyflow/xyflow/tree/main/tests/playwright)；本地 `client/node_modules/@xyflow/react/dist/esm/index.js`
 
-## 已落地（2026-09-19）
+## 已落地
 
-按第 6 节的推荐方案落地于 `client/e2e/`，`npm run test:e2e` 运行（Vite 开发服务器 1421 端口，Chromium）：
+2026-09-19 先按第 6 节的页面内假壳方案落地过一版。应用改为 Web 版（浏览器 + Rust 服务端）后，那套假壳与它的专用入口、配置都已删除，以上调研保留作背景。当前 e2e 只有一个接缝：真浏览器 + 真服务端 + 每个测试独立的临时数据根。`client/` 下 `npm run test:e2e` 运行：
 
-- `e2e/harness.ts`：页面内假壳，内存文件系统实现 `ipc.ts` 全部命令、对话框 / 事件 / 窗口插件；`convertFileSrc` 直接返回 blob URL（未采用 3.2 节的 `asset.localhost` 路由）。`@tauri-apps/plugin-http` 由 `vite.e2e.config.ts` 别名到浏览器 `fetch`，网关用 `page.route` 同源伪造（3.3 节的做法之一）。
-- `e2e/specs/`：`task.spec.ts`（#1–#8）、`pack.spec.ts`（#9–#16）、`misc.spec.ts`（#17–#26）、`smoke.spec.ts`，共 37 条，首轮验收全部通过，未发现应用缺陷。实际把第 5 节的 (b) 类也各做了一条 UI 冒烟。
-- 验收中发现的口径不一致：测试连接失败只显示网关原文、不带错误类别，见 #129。
-- 仍需手测：#21 的真 Keychain；真实 zip 读写、真网关由 Rust 单测与发版冒烟承担。
+- `client/playwright.config.ts`：Chromium，用例在 `e2e/web/`；`--host-resolver-rules` 把非回环主机名 `kacha.test` 映射到 127.0.0.1，让页面在 HTTP 下处于非安全上下文，覆盖内网真实使用形态。
+- `client/e2e/global-setup.ts`：先 debug 构建服务端（`cargo build`），再 `vite build` 出前端静态文件。
+- `client/e2e/web/rig.ts`：每个测试的 `rig` fixture 在随机端口起一个本地桩（同时扮演 new-api 网关和不带 CORS 的对象存储，记录生成请求体），再以临时数据根、桩地址和静态目录启动 `server/target/debug/kacha-server`；测试结束先等服务端退出，再删数据根。
+- `client/e2e/web/kit.ts`：直接向临时用户数据根预置画板、任务目录与元数据后真登录进入（`seed` / `openApp`），以及读落盘文件、模拟拖入文件等场景工具。
+- `client/e2e/common/`：画板 JSON、Flash 图层任务目录、zip 读取等夹具；PNG 生成在 `client/src/core/testing/png.ts`，与 core 单测共用。
+- 网关请求由桩实际接收，断言直接读桩记下的请求体；需要改响应或制造延迟、失败时，用桩的开关或 `page.route`。

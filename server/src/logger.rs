@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
 
+use crate::civil::civil_from_days;
 use crate::redact;
 
 pub const LOG_FILENAME: &str = "diagnostics.log";
@@ -59,16 +60,7 @@ pub fn utc_timestamp(now: SystemTime) -> String {
     let d = now.duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = d.as_secs() as i64;
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
-    // Howard Hinnant 的 civil_from_days。
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
+    let (year, month, day) = civil_from_days(days);
     format!(
         "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
         rem / 3600,
@@ -212,5 +204,32 @@ mod tests {
         let t = UNIX_EPOCH + std::time::Duration::from_millis(1_789_632_000_123);
         assert_eq!(utc_timestamp(t), "2026-09-17T08:00:00.123Z");
         assert_eq!(utc_timestamp(UNIX_EPOCH), "1970-01-01T00:00:00.000Z");
+    }
+
+    #[test]
+    fn timestamp_handles_leap_days_and_month_and_year_ends() {
+        // 期望值由 Python datetime 独立算出。
+        let cases = [
+            (946_684_799_999, "1999-12-31T23:59:59.999Z"),
+            (951_782_400_000, "2000-02-29T00:00:00.000Z"),
+            (951_868_799_001, "2000-02-29T23:59:59.001Z"),
+            (1_677_628_799_500, "2023-02-28T23:59:59.500Z"),
+            (1_677_628_800_000, "2023-03-01T00:00:00.000Z"),
+            (1_704_067_199_999, "2023-12-31T23:59:59.999Z"),
+            (1_704_067_200_000, "2024-01-01T00:00:00.000Z"),
+            (1_709_210_096_789, "2024-02-29T12:34:56.789Z"),
+            (1_709_251_200_000, "2024-03-01T00:00:00.000Z"),
+            (4_107_542_399_999, "2100-02-28T23:59:59.999Z"),
+            (4_107_542_400_000, "2100-03-01T00:00:00.000Z"),
+        ];
+        for (millis, expected) in cases {
+            assert_eq!(utc_timestamp(UNIX_EPOCH + std::time::Duration::from_millis(millis)), expected);
+        }
+    }
+
+    #[test]
+    fn timestamp_clamps_times_before_the_epoch() {
+        let t = UNIX_EPOCH - std::time::Duration::from_secs(1);
+        assert_eq!(utc_timestamp(t), "1970-01-01T00:00:00.000Z");
     }
 }

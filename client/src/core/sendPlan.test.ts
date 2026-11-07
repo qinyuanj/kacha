@@ -7,6 +7,13 @@ import { planSend, promptLanguage, referenceProblemsOf } from "./sendPlan";
 
 const flash = findModel(BUILTIN_TABLE, "doubao-seedream-5-0-flash-260915")!;
 
+// 单图说明全文：这是发给模型的文案，故意手写一份独立于 sendPlan.ts 中 singleImageNote 的期望值，
+// 防止拿被测代码自己的文案断言自己（CODING_STANDARDS「一个含义只定义一处」的例外）；本文件其余处都引用它。
+const SINGLE_NOTE = {
+  zh: "本次提供一张参考图，编号为图1。请依据图1的视觉内容执行下方用户指令；指令中省略编号的图片指代均指图1。\n\n用户指定参考用途时，按指定用途使用图1。用户要求修改图片时，以图1为编辑基础，保留与修改要求无关的内容。\n\n用户指令：",
+  en: "This request provides one reference image, identified as Image 1. Use the visual content of Image 1 to follow the user instructions below; image references without a number in those instructions refer to Image 1.\n\nWhen the user specifies a reference purpose, use Image 1 for that purpose. When the user asks to modify the image, use Image 1 as the editing base and preserve content unrelated to the requested changes.\n\nUser instructions:",
+};
+
 it("Flash 跨图坐标区域按输入顺序用图N，提示坐标端点为0–999", () => {
   const edges: BoardEdge[] = [
     { from: ["a", "out"], to: ["t", "image:0"], source_layer: null, system: false, extra: {}, region: { rects: [[0, 0, 1, 1]], render: "bbox_tag" } },
@@ -82,8 +89,8 @@ const CASES: Case[] = [
     name: "1 图",
     slots: [image(1, 1)],
     workflow: "image_edit",
-    zh: { prompt: "把@图1 调亮", head: "本次提供一张参考图，编号为图1。请依据图1的视觉内容执行下方用户指令；指令中省略编号的图片指代均指图1。\n\n用户指定参考用途时，按指定用途使用图1。用户要求修改图片时，以图1为编辑基础，保留与修改要求无关的内容。\n\n用户指令：\n把图1 调亮", tail: "" },
-    en: { prompt: "Make @图1 brighter", head: "This request provides one reference image, identified as Image 1. Use the visual content of Image 1 to follow the user instructions below; image references without a number in those instructions refer to Image 1.\n\nWhen the user specifies a reference purpose, use Image 1 for that purpose. When the user asks to modify the image, use Image 1 as the editing base and preserve content unrelated to the requested changes.\n\nUser instructions:\nMake Image 1 brighter", tail: "" },
+    zh: { prompt: "把@图1 调亮", head: `${SINGLE_NOTE.zh}\n把图1 调亮`, tail: "" },
+    en: { prompt: "Make @图1 brighter", head: `${SINGLE_NOTE.en}\nMake Image 1 brighter`, tail: "" },
   },
   {
     name: "2 图",
@@ -96,8 +103,8 @@ const CASES: Case[] = [
     name: "1 图带区域",
     slots: [image(1, 1), overlay(2, 1, 1, 1)],
     workflow: "image_edit",
-    zh: { prompt: "把@图1 的区域1 改成红色", head: "本次提供一张参考图，编号为图1。请依据图1的视觉内容执行下方用户指令；指令中省略编号的图片指代均指图1。\n\n用户指定参考用途时，按指定用途使用图1。用户要求修改图片时，以图1为编辑基础，保留与修改要求无关的内容。\n\n用户指令：\n把图1 的紫色区域 改成红色", tail: `\n${PHRASE_ZH(2, 1, "紫色")}` },
-    en: { prompt: "Paint region 1 of @图1 red", head: "This request provides one reference image, identified as Image 1. Use the visual content of Image 1 to follow the user instructions below; image references without a number in those instructions refer to Image 1.\n\nWhen the user specifies a reference purpose, use Image 1 for that purpose. When the user asks to modify the image, use Image 1 as the editing base and preserve content unrelated to the requested changes.\n\nUser instructions:\nPaint the purple region of Image 1 red", tail: `\n${PHRASE_EN(2, 1, "purple")}` },
+    zh: { prompt: "把@图1 的区域1 改成红色", head: `${SINGLE_NOTE.zh}\n把图1 的紫色区域 改成红色`, tail: `\n${PHRASE_ZH(2, 1, "紫色")}` },
+    en: { prompt: "Paint region 1 of @图1 red", head: `${SINGLE_NOTE.en}\nPaint the purple region of Image 1 red`, tail: `\n${PHRASE_EN(2, 1, "purple")}` },
   },
   {
     name: "2 图带多区域（图1 两个区域、图2 一个）",
@@ -130,7 +137,7 @@ it("单张用户参考图默认引用，按已确认文本说明参考用途与�
   const prompt = "把衣服改成红色";
   const plan = planSend(qwenPro, [image(1, 1)], prompt, "");
   expect(plan.text).toBe(
-    "本次提供一张参考图，编号为图1。请依据图1的视觉内容执行下方用户指令；指令中省略编号的图片指代均指图1。\n\n用户指定参考用途时，按指定用途使用图1。用户要求修改图片时，以图1为编辑基础，保留与修改要求无关的内容。\n\n用户指令：\n把衣服改成红色",
+    `${SINGLE_NOTE.zh}\n把衣服改成红色`,
   );
   expect(plan.referenceProblems).toEqual({ issues: [], warnings: [], unreferenced: [] });
   expect(plan.referenceCount).toBe(1);
@@ -214,11 +221,11 @@ describe("发送计划：区域改写与固定句", () => {
   });
 
   it("没有叠加槽时「区域N」是普通文字，不改写", () => {
-    expect(planSend(qwenPro, [image(1, 1)], "把@图1 的区域1 调亮", "").text).toBe("本次提供一张参考图，编号为图1。请依据图1的视觉内容执行下方用户指令；指令中省略编号的图片指代均指图1。\n\n用户指定参考用途时，按指定用途使用图1。用户要求修改图片时，以图1为编辑基础，保留与修改要求无关的内容。\n\n用户指令：\n把图1 的区域1 调亮");
+    expect(planSend(qwenPro, [image(1, 1)], "把@图1 的区域1 调亮", "").text).toBe(`${SINGLE_NOTE.zh}\n把图1 的区域1 调亮`);
   });
 
   it("模型没有固定句模板时不追加固定句", () => {
-    expect(planSend(noPhrases, [image(1, 1), overlay(2, 1, 1, 1)], "改区域1", "").text).toBe("本次提供一张参考图，编号为图1。请依据图1的视觉内容执行下方用户指令；指令中省略编号的图片指代均指图1。\n\n用户指定参考用途时，按指定用途使用图1。用户要求修改图片时，以图1为编辑基础，保留与修改要求无关的内容。\n\n用户指令：\n改紫色区域");
+    expect(planSend(noPhrases, [image(1, 1), overlay(2, 1, 1, 1)], "改区域1", "").text).toBe(`${SINGLE_NOTE.zh}\n改紫色区域`);
   });
 
   it("越界的区域编号原样保留", () => {

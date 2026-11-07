@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { expect, type Page } from "@playwright/test";
 import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
+import { FLASH } from "../common/layers";
 import { bodies, GOOD_KEY, test, type Rig } from "./rig";
 import path from "node:path";
 import { boardRelPath, openApp, readJson, savedNodes, task, taskRecords } from "./kit";
@@ -34,17 +35,16 @@ const REF = "导入参考图/cat.png";
 
 test("Issue #15 用户手动选择 Flash，设置 JPEG/水印并运行普通任务（b64_json 结果只新建写入）", async ({ page, rig }) => {
   const text = board("Flash", [promptNode("p1", "一只猫"), taskNode("t1")], [edge("p1", "t1", "positive")]);
-  const flash = "doubao-seedream-5-0-flash-260915";
   const errors = await openApp(page, rig, { title: "Flash", boardText: text });
   rig.stub.imageResponse = () => ({ json: { data: [{ b64_json: RESULT_PNG }] } });
   await expand(page, "t1");
-  await task(page, "t1").getByRole("combobox", { name: "模型", exact: true }).selectOption(flash);
+  await task(page, "t1").getByRole("combobox", { name: "模型", exact: true }).selectOption(FLASH);
   await task(page, "t1").getByRole("combobox", { name: "分辨率档" }).selectOption("2K");
   await task(page, "t1").getByRole("combobox", { name: "输出格式" }).selectOption("jpeg");
   await task(page, "t1").getByRole("checkbox", { name: "水印" }).check();
   await task(page, "t1").locator(".task-actions button.primary").click();
   await expect.poll(() => bodies(rig).length).toBe(1);
-  expect(bodies(rig)[0]).toMatchObject({ model: flash, size: "2048x2048", output_format: "jpeg", watermark: true, response_format: "url", optimize_prompt_options: { mode: "standard" } });
+  expect(bodies(rig)[0]).toMatchObject({ model: FLASH, size: "2048x2048", output_format: "jpeg", watermark: true, response_format: "url", optimize_prompt_options: { mode: "standard" } });
   expect(Object.keys(bodies(rig)[0]).sort()).toEqual(["model", "optimize_prompt_options", "output_format", "prompt", "response_format", "size", "watermark"]);
   await expect(page.locator(".react-flow__node-result")).toHaveCount(1);
   expect(taskRecords(rig)[0].json.output_options).toEqual({ output_format: "jpeg", response_format: "url", watermark: true });

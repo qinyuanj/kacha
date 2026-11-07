@@ -1,41 +1,7 @@
-// e2e 与 core 单测共用的夹具：PNG 生成与画板 JSON 构造（不涉及服务端）。
-import { deflateSync } from "node:zlib";
+// e2e 夹具：画板 JSON 构造（不涉及服务端）；PNG 生成在 core/testing，与 core 单测共用。
 import type { Page } from "@playwright/test";
 
-const crcTable = Array.from({ length: 256 }, (_, n) => {
-  let c = n;
-  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-  return c >>> 0;
-});
-const crc32 = (buf: Buffer) => {
-  let c = 0xffffffff;
-  for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-};
-const chunk = (type: string, data: Buffer) => {
-  const len = Buffer.alloc(4);
-  len.writeUInt32BE(data.length);
-  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(body));
-  return Buffer.concat([len, body, crc]);
-};
-
-/** 纯色 PNG（base64）。alpha = true 时颜色类型 6（带透明通道），否则 2。 */
-export function png(width: number, height: number, opts: { alpha?: boolean; rgb?: [number, number, number] } = {}): string {
-  const [r, g, b] = opts.rgb ?? [80, 120, 200];
-  const bpp = opts.alpha ? 4 : 3;
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8;
-  ihdr[9] = opts.alpha ? 6 : 2;
-  const row = Buffer.alloc(1 + width * bpp);
-  for (let x = 0; x < width; x++) row.set(opts.alpha ? [r, g, b, 128] : [r, g, b], 1 + x * bpp);
-  const raw = Buffer.concat(Array.from({ length: height }, () => row));
-  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  return Buffer.concat([sig, chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]).toString("base64");
-}
+export { png } from "../../src/core/testing/png";
 
 type Json = Record<string, unknown>;
 

@@ -628,7 +628,7 @@ mod tests {
         PackText { entry: entry.into(), text: text.into() }
     }
 
-    fn spec(f: &Fixture) -> ExportSpec {
+    fn spec() -> ExportSpec {
         ExportSpec {
             texts: vec![text("manifest.json", "{\"pack_format_version\":1}"), text("画板/千问测试.ugcboard.json", "{\"title\":\"千问测试\"}")],
             task_dirs: vec![TASK_A.into(), TASK_B.into(), "2026-09-17/20260917T000000Z-missing".into()],
@@ -675,7 +675,7 @@ mod tests {
     fn export_writes_texts_dirs_and_files_storing_images() {
         let f = fixture();
         let target = f.tmp.path().join("千问测试.ugcpack");
-        let report = export_to_writer(&f.root, &spec(&f), File::create(&target).unwrap(), &no_progress, &AtomicBool::new(false)).unwrap();
+        let report = export_to_writer(&f.root, &spec(), File::create(&target).unwrap(), &no_progress, &AtomicBool::new(false)).unwrap();
         let task_json_bytes: u64 = [TASK_A, TASK_B].iter().map(|d| fs::metadata(f.root.join(d).join("task.json")).unwrap().len()).sum();
         assert_eq!(report, ExportReport { task_dirs: 2, bytes: 7 + 7 + 5 + 3 + task_json_bytes });
         let entries = zip_entries(&target);
@@ -703,10 +703,10 @@ mod tests {
     fn export_rejects_unsafe_or_duplicate_entries_before_writing() {
         let f = fixture();
         let mut buf = Vec::new();
-        let mut traversal = spec(&f);
+        let mut traversal = spec();
         traversal.task_dirs = vec!["../outside".into()];
         assert!(export_to_writer(&f.root, &traversal, &mut buf, &no_progress, &AtomicBool::new(false)).is_err());
-        let mut duplicate = spec(&f);
+        let mut duplicate = spec();
         duplicate.files.push(PackFile { source: REF_SOURCE.into(), entry: "manifest.json".into() });
         let err = export_to_writer(&f.root, &duplicate, &mut buf, &no_progress, &AtomicBool::new(false)).unwrap_err();
         assert!(err.to_string().contains("重复"), "{err}");
@@ -716,13 +716,13 @@ mod tests {
     #[test]
     fn cancelled_export_stops_with_cancelled_error() {
         let f = fixture();
-        let err = export_to_writer(&f.root, &spec(&f), Vec::new(), &no_progress, &AtomicBool::new(true)).unwrap_err();
+        let err = export_to_writer(&f.root, &spec(), Vec::new(), &no_progress, &AtomicBool::new(true)).unwrap_err();
         assert_eq!(err.to_string(), CANCELLED);
     }
 
     fn exported(f: &Fixture) -> PathBuf {
         let target = f.tmp.path().join("p.ugcpack");
-        export_to_writer(&f.root, &spec(f), File::create(&target).unwrap(), &no_progress, &AtomicBool::new(false)).unwrap();
+        export_to_writer(&f.root, &spec(), File::create(&target).unwrap(), &no_progress, &AtomicBool::new(false)).unwrap();
         target
     }
 

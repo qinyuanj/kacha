@@ -5,6 +5,7 @@ import { board, harness, settle } from "./testing/runnerHarness";
 import { createRunner, nodeCopyDetail, nodeStatus, nodeSummary, summaryTone, type RegenerateRequest } from "./runner";
 import { BUILTIN_TABLE } from "./capabilities";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
+import { PNG_1X1 } from "./testing/png";
 import { sendPlanOf } from "./taskView";
 import type { RunDeps } from "./run";
 
@@ -65,7 +66,7 @@ it("Flash 区域发送文本、原图/叠加图顺序及任务记录经runner保
   t.model = "doubao-seedream-5-0-flash-260915";
   const image = b.edges.find((e) => e.to[1] === "image:0")!;
   image.region = { rects: [[0, 0, 1, 1]], render: "bbox_tag", coordinate_kind: "point" };
-  const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), c => c.charCodeAt(0));
+  const png = PNG_1X1.slice();
   fs.files.set("/root/refs/cat.png", png);
   const bodies: any[] = [];
   const r = createRunner({ concurrency: 1, log: () => {}, apply: (_, c) => { if (c.kind === "submitted") t.last_submitted = c.lastSubmitted; }, deps: {
@@ -132,7 +133,7 @@ describe("Lite 停用", () => {
     expect(h.requests).toEqual([]);
   });
   it("旧 Lite 结果作为 Flash 任务的参考图仍可提交，快照与谱系指向旧任务目录", async () => {
-    const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), c => c.charCodeAt(0));
+    const png = PNG_1X1.slice();
     const h = harness({ imageCodec: { decode: async () => ({ width: 1024, height: 1024, hasAlpha: () => false, encode: async () => png, close: () => {} }) } });
     h.replies.push({ status: 200, body: JSON.stringify({ data: [{ b64_json: btoa(String.fromCharCode(...png)) }] }) });
     const b = board();

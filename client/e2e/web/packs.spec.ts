@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { board, png, promptNode, referenceNode } from "../common/boards";
+import { FLASH } from "../common/layers";
 import { unzip, zipBytes, zipNames, zipText } from "../common/zip";
 import { expect, GOOD_KEY, OTHER_KEY, test, type Rig } from "./rig";
 import { openApp, readJson, readText, taskRecords, type WebScenario } from "./kit";
@@ -60,7 +61,7 @@ function layerBoard(title: string): WebScenario {
     [
       promptNode("p1", "本地提示词"),
       { id: "res", type: "result", pos: [400, 0], size: [220, 280], task_id: TASK_ID, file: "result.png", path: `${DIR}/result.png`, layer_count: 2,
-        record: { model: "doubao-seedream-5-0-flash-260915", prompt: "p", negative_prompt: "", size_spec: { tier: "2K", ratio: "1:1", width: null, height: null }, submitted_at: "2026-09-16T01:00:00Z", layers } },
+        record: { model: FLASH, prompt: "p", negative_prompt: "", size_spec: { tier: "2K", ratio: "1:1", width: null, height: null }, submitted_at: "2026-09-16T01:00:00Z", layers } },
       referenceNode("ref1", "别处/猫.png", [0, 400]),
     ],
     [],
@@ -69,7 +70,7 @@ function layerBoard(title: string): WebScenario {
     title,
     boardText: text,
     files: {
-      [`${DIR}/task.json`]: { text: JSON.stringify({ task_id: TASK_ID, model: "doubao-seedream-5-0-flash-260915", prompt: "p" }) },
+      [`${DIR}/task.json`]: { text: JSON.stringify({ task_id: TASK_ID, model: FLASH, prompt: "p" }) },
       [`${DIR}/result.png`]: { b64: png(64, 64) },
       [`${DIR}/layers.json`]: { text: JSON.stringify({ base: { z_index: 0, file: "result.png" }, layers }) },
       [`${DIR}/layers/01.png`]: { b64: png(64, 64, { alpha: true, rgb: [255, 0, 0] }) },
@@ -229,6 +230,7 @@ for (const stage of [
     await expect(dialog(page)).toHaveCount(0);
     // 晚到的请求在服务端照常结束后，仍不触发下载、不留临时文件。
     await settled;
+    // 要证明的是页面丢弃晚到的响应，没有可等待的正向条件：响应到达后留一段窗口，误触发的下载会在此期间出现。
     await page.waitForTimeout(300);
     expect(downloads).toEqual([]);
     expect(leftovers(rig)).toEqual([]);
@@ -382,15 +384,15 @@ test("上传延迟期间进度对话框可见；点「取消」后提示已取�
   // 上传请求被中止（不是等它传完）。
   await aborted;
   release();
-  await page.waitForTimeout(300);
-  await expect(page.locator(".tab")).toHaveCount(1);
+  // 先等暂存清空（取消流程走完），再断言没有新画板、没有导入任务目录，免得这些断言在取消收尾前就提前通过。
   const root = rig.userRoot(GOOD_KEY);
-  expect(readdirSync(path.join(root, "画板"))).toEqual(["空.ugcboard.json"]);
-  expect(existsSync(path.join(root, DIR))).toBe(false);
   for (const staging of [".kacha/packs", ".kacha/pack-content"]) {
     const dir = path.join(root, staging);
     await expect.poll(() => (existsSync(dir) ? readdirSync(dir) : []), { message: staging }).toEqual([]);
   }
+  await expect(page.locator(".tab")).toHaveCount(1);
+  expect(readdirSync(path.join(root, "画板"))).toEqual(["空.ugcboard.json"]);
+  expect(existsSync(path.join(root, DIR))).toBe(false);
   expect(errors).toEqual([]);
 });
 
@@ -441,6 +443,7 @@ test("正常导入大包（条目超过单份 64 MB，整包上传）：上传�
   await merging;
   expect(merge.some((p) => p.total > 48 * 1024 * 1024 && p.total !== size && p.done > 0), JSON.stringify(merge)).toBe(true);
   const after = polls;
+  // 要证明的是「不再轮询」，没有可等待的正向条件：留出三个以上 200ms 轮询周期的窗口，有残留轮询就会在此期间计数。
   await page.waitForTimeout(600);
   expect(polls).toBe(after);
   expect(notFound).toEqual([]);
@@ -471,6 +474,8 @@ test("关掉文件对话框（input 的 cancel 事件）：不弹对话框，也
   await page.getByRole("menuitem", { name: "导入画板包…" }).click();
   await (await chooser).element().dispatchEvent("cancel");
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  // 要证明的是「什么都没发生」，没有可等待的正向条件：留出比旧实现聚焦后 300ms 判定更长的窗口，
+  // 若取消被误判为选中，对话框或上传请求会在此期间出现。
   await page.waitForTimeout(500);
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(toast(page)).toHaveCount(0);
@@ -495,8 +500,8 @@ test("同一个包导入两次：第二次没有内容上传请求、任务目�
   // 只问了一次服务端已有哪些：不开暂存、不上传、不合并，也不整包上传。
   expect(requests).toEqual(["POST /api/packs/existing"]);
   expect(readText(record)).toBe(before);
-  const boards = readdirSync(path.join(root, "画板")).filter((n) => n.endsWith(".ugcpack.json") || n.endsWith(".ugcboard.json"));
-  expect(boards.length).toBeGreaterThanOrEqual(3); // 空 + 两份旧版画板（改名）
+  // 第二份同名画板按 uniqueBoardFileName 改名为「旧版画板 (2)」。
+  expect(readdirSync(path.join(root, "画板")).sort()).toEqual(["旧版画板 (2).ugcboard.json", "旧版画板.ugcboard.json", "空.ugcboard.json"]);
   expect(errors).toEqual([]);
 });
 

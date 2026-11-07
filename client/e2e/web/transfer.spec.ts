@@ -4,11 +4,12 @@ import { createHash } from "node:crypto";
 import { expect } from "@playwright/test";
 import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
 import { unzip } from "../common/zip";
-import { DIR, flashResult, taskFiles, TASK_ID } from "../common/layers";
+import { DIR, FLASH, flashResult, taskFiles, TASK_ID } from "../common/layers";
 import { GOOD_KEY, test, type Rig } from "./rig";
-import { boardRelPath, openApp, task } from "./kit";
+import { boardRelPath, dropFile, openApp, task } from "./kit";
 
 const sha = (b64: string) => createHash("sha256").update(Buffer.from(b64, "base64")).digest("hex");
+const dropPng = (b64: string) => ({ name: "拖入.png", mimeType: "image/png", b64 });
 const savedBoard = (rig: Rig, title: string) => JSON.parse(readFileSync(`${rig.userRoot(GOOD_KEY)}/${boardRelPath(title)}`, "utf8"));
 
 test("浏览器选择本机图片：上传进 导入参考图/，画板引用它", async ({ page, rig }) => {
@@ -30,22 +31,10 @@ test("浏览器选择本机图片：上传进 导入参考图/，画板引用它
 test("拖进页面：图片上传为参考图；非图片给出提示", async ({ page, rig }) => {
   const image = png(64, 64);
   const errors = await openApp(page, rig, { title: "拖入", boardText: board("拖入", [], []) });
-  const drop = async (b64: string | null, x: number, y: number) =>
-    page.evaluate(
-      ({ b64, x, y }) => {
-        const dt = new DataTransfer();
-        if (b64 === null) dt.items.add(new File(["{}"], "说明.txt", { type: "text/plain" }));
-        else dt.items.add(new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], "拖入.png", { type: "image/png" }));
-        const el = document.querySelector(".canvas")!;
-        el.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
-        el.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
-      },
-      { b64, x, y },
-    );
-  await drop(image, 300, 300);
+  await dropFile(page, dropPng(image), { x: 300, y: 300 });
   await expect(page.locator(".react-flow__node-reference")).toHaveCount(1);
   expect(readdirSync(`${rig.userRoot(GOOD_KEY)}/导入参考图`)).toEqual([`${sha(image)}.png`]);
-  await drop(null, 300, 300);
+  await dropFile(page, { name: "说明.txt", mimeType: "text/plain", b64: Buffer.from("{}").toString("base64") }, { x: 300, y: 300 });
   await expect(page.locator(".toast")).toContainText("只支持拖入图片文件");
   await expect(page.locator(".react-flow__node-reference")).toHaveCount(1);
   expect(errors).toEqual([]);
@@ -53,18 +42,9 @@ test("拖进页面：图片上传为参考图；非图片给出提示", async ({
 
 test("拖到任务卡片上：上传后自动接到空图片端口，可提交图片编辑生成", async ({ page, rig }) => {
   const image = png(1024, 1024, { rgb: [180, 20, 30] });
-  const errors = await openApp(page, rig, { title: "拖入编辑", boardText: board("拖入编辑", [promptNode("p", "把图1 改成蓝色"), taskNode("t", { model: "doubao-seedream-5-0-flash-260915", image_ports: 1 })], [edge("p", "t", "positive")]) });
+  const errors = await openApp(page, rig, { title: "拖入编辑", boardText: board("拖入编辑", [promptNode("p", "把图1 改成蓝色"), taskNode("t", { model: FLASH, image_ports: 1 })], [edge("p", "t", "positive")]) });
   const box = (await task(page, "t").boundingBox())!;
-  await page.evaluate(
-    ({ b64, x, y }) => {
-      const dt = new DataTransfer();
-      dt.items.add(new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], "拖入.png", { type: "image/png" }));
-      const el = document.querySelector(".canvas")!;
-      el.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
-      el.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
-    },
-    { b64: image, x: box.x + 20, y: box.y + 20 },
-  );
+  await dropFile(page, dropPng(image), { x: box.x + 20, y: box.y + 20 });
   await expect(page.locator(".react-flow__node-reference")).toHaveCount(1);
   await expect.poll(() => savedBoard(rig, "拖入编辑").edges.some((e: any) => e.from[0] !== "p" && e.to[0] === "t")).toBe(true);
   await task(page, "t").locator(".task-actions button.primary").click();

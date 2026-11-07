@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { BUILTIN_TABLE, findModel } from "./capabilities";
+import { PNG_1X1, PNG_1X1_BASE64 } from "./testing/png";
 import {
   buildGenerationRequest,
   fetchResultImage,
@@ -130,8 +131,8 @@ const allExchanges = [...FIXTURE_DIRS, SEEDREAM_DIR].flatMap((dir) =>
 );
 
 // 1×1 PNG，用来替换夹具里脱敏掉的图片字节。
-const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-const PNG_BYTES = Uint8Array.from(atob(PNG_BASE64), (c) => c.charCodeAt(0));
+const PNG_BASE64 = PNG_1X1_BASE64;
+const PNG_BYTES = PNG_1X1;
 
 /** 把脱敏占位还原成可解码的内容，便于回放。 */
 function unredact(value: unknown): unknown {

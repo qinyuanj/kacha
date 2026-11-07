@@ -1,10 +1,10 @@
 // Lite 停用：普通打开画板时的历史入口拦截与模型切换。
 import { expect } from "@playwright/test";
 import { board, edge, png, promptNode, taskNode } from "../common/boards";
+import { FLASH } from "../common/layers";
 import { bodies, enterWithKey, OTHER_KEY, test } from "./rig";
 import { openApp, task, taskRecords } from "./kit";
 
-const FLASH = "doubao-seedream-5-0-flash-260915";
 const LITE = "doubao-seedream-5-0-lite-260128";
 const ID = "20260916T091500Z-deadbeef";
 const DIR = `2026-09-16/${ID}`;

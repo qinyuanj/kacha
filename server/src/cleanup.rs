@@ -15,6 +15,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::civil::{civil_from_days, days_from_civil};
 use crate::references::{board_task_dirs, is_date_dir};
 use crate::store::BOARD_EXTENSION;
 
@@ -365,28 +366,6 @@ pub fn execute(data_root: &Path, plan: &Plan, now: SystemTime, purge: bool) -> O
 
 // ---- 时间 ----
 
-fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let mp = (m as i64 + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe - 719468
-}
-
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719468;
-    let era = z.div_euclid(146097);
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    (yoe + era * 400 + i64::from(m <= 2), m, d)
-}
-
 fn parts(t: SystemTime) -> (i64, u32, u32, u64, u64, u64) {
     let secs = t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let (y, m, d) = civil_from_days((secs / DAY) as i64);
@@ -687,5 +666,33 @@ mod tests {
         assert_eq!(parse_stamp("20270115T080000Z"), Some(t));
         assert_eq!(format_utc(UNIX_EPOCH + Duration::from_secs(951_782_400)), "2000-02-29T00:00:00Z");
         assert_eq!(parse_now("2027-13-01T00:00:00Z"), None);
+    }
+
+    #[test]
+    fn format_utc_handles_leap_days_and_month_and_year_ends() {
+        // 期望值由 Python datetime 独立算出。
+        let cases = [
+            (0, "1970-01-01T00:00:00Z"),
+            (946_684_799, "1999-12-31T23:59:59Z"),
+            (951_782_400, "2000-02-29T00:00:00Z"),
+            (951_868_799, "2000-02-29T23:59:59Z"),
+            (1_677_628_799, "2023-02-28T23:59:59Z"),
+            (1_677_628_800, "2023-03-01T00:00:00Z"),
+            (1_704_067_199, "2023-12-31T23:59:59Z"),
+            (1_704_067_200, "2024-01-01T00:00:00Z"),
+            (1_709_210_096, "2024-02-29T12:34:56Z"),
+            (1_709_251_200, "2024-03-01T00:00:00Z"),
+            (4_107_542_399, "2100-02-28T23:59:59Z"),
+            (4_107_542_400, "2100-03-01T00:00:00Z"),
+        ];
+        for (secs, expected) in cases {
+            assert_eq!(format_utc(UNIX_EPOCH + Duration::from_secs(secs)), expected);
+        }
+    }
+
+    #[test]
+    fn format_utc_drops_subseconds_and_clamps_times_before_the_epoch() {
+        assert_eq!(format_utc(UNIX_EPOCH + Duration::from_millis(1_704_067_199_999)), "2023-12-31T23:59:59Z");
+        assert_eq!(format_utc(UNIX_EPOCH - Duration::from_secs(1)), "1970-01-01T00:00:00Z");
     }
 }
