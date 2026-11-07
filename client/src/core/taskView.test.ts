@@ -108,6 +108,8 @@ describe("Flash 图层任务视图", () => {
   it("专用尺寸无效或输入数量不是一张时阻断", () => {
     const b = ready({ model: "doubao-seedream-5-0-flash-260915", layer_decomposition: true, layer_size: "bad" as any }, ["a", "b"]);
     expect(view(b).reasons.map((r) => r.kind)).toEqual(expect.arrayContaining(["layerNeedsOneImage", "sizeUnsupported"]));
+    // 期望文案手写：独立于 LAYER_SIZES 的拼接，固定用户看到的原因（防同义反复）。
+    expect(view(b).reasons.find((r) => r.kind === "sizeUnsupported")?.text).toBe("图层尺寸只支持 1K / 1.5K / 2K / auto");
   });
 });
 
