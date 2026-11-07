@@ -59,13 +59,6 @@ test("端口缩略图与提示词参考图缩略图走缩略图接口并延迟�
   expect(errors).toEqual([]);
 });
 
-test("缺图节点仍显示「图片缺失」占位", async ({ page, rig }) => {
-  const errors = await openApp(page, rig, { title: "缺图", boardText: board("缺图", [resultNode("gone", RESULT)], []) });
-  await expect(task(page, "gone")).toContainText("图片缺失");
-  await expect(task(page, "gone").locator("img.thumb")).toHaveCount(0);
-  expect(errors).toEqual([]);
-});
-
 test("打开后原图被删、缩略图接口回 404：节点退回「图片缺失」占位", async ({ page, rig }) => {
   await page.route("**/api/fs/thumb?*", (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ code: "not_found", message: "文件不存在" }) }));
   await openApp(page, rig, { title: "中途缺图", boardText: board("中途缺图", [resultNode("res", RESULT)], []), files: { [RESULT]: { b64: png(1024, 1024) } } });

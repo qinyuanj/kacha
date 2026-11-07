@@ -1,4 +1,4 @@
-// 画板交互在 Web 版与桌面版一致：多标签页、撤销 / 重做、右键菜单、悬浮动作条、平移、拖线建节点。
+// 画板交互：多标签页、撤销 / 重做、右键菜单、悬浮动作条、平移、拖线建节点。
 // 框选与拖线落点规则的核心逻辑另有 core 单测（selection / dragCreate / contextMenu）。
 import { expect } from "@playwright/test";
 import { board, edge, promptNode, taskNode } from "../common/boards";

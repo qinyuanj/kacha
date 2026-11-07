@@ -1,5 +1,4 @@
-// 图层拆分：生成 → 预览 → 重开按任务目录真源还原 → 下载（迁移自旧假壳 specs/layers.spec.ts）。
-// 桌面版「选目录导出图层」在 Web 版换成整包 zip 下载。
+// 图层拆分：生成 → 预览 → 重开按任务目录真源还原 → 整包 zip 下载。
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { expect } from "@playwright/test";
 import { board, edge, png, referenceNode, taskNode } from "../common/boards";

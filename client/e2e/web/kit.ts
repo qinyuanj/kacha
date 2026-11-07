@@ -1,4 +1,4 @@
-// 新接缝的画板 / 任务场景工具：直接向每测试的临时用户数据根预置文件（等价于旧假壳的场景注入），再真登录进入。
+// 画板 / 任务场景工具：直接向每测试的临时用户数据根预置文件，再真登录进入。
 import { mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
@@ -68,12 +68,6 @@ export function taskRecords(rig: Rig, key = GOOD_KEY): { path: string; json: Rec
     }
   }
   return out.sort((a, b) => a.path.localeCompare(b.path));
-}
-
-export function taskDir(rig: Rig, taskId: string, key = GOOD_KEY): string {
-  const record = taskRecords(rig, key).find((r) => r.json.task_id === taskId);
-  if (!record) throw new Error(`找不到任务目录：${taskId}`);
-  return path.dirname(record.path);
 }
 
 export const readJson = (path: string) => JSON.parse(readFileSync(path, "utf8"));

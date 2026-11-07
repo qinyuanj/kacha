@@ -51,7 +51,7 @@ export interface Stub {
 }
 
 /** 网关：验证密钥（/api/usage/token）、模型列表与文生图；对象存储：/objects/*（无 CORS）。 */
-export async function startStub(): Promise<Stub> {
+async function startStub(): Promise<Stub> {
   const objects = new Map<string, Buffer>([["/objects/result.png", Buffer.from(png(64, 64), "base64")]]);
   const requests: Stub["requests"] = [];
   const stub: Stub = { url: "", requests, objects, objectStatus: null, imageResponse: null, holdImages: null, close: async () => undefined };

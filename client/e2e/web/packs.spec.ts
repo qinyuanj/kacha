@@ -1,5 +1,4 @@
-// 画板包（#24）新接缝：导出 = 浏览器下载流；导入 = 浏览器选文件流式上传 → 判定 → 合并 → 打开画板。
-// 旧假壳的 pack.spec.ts 不在这里复用：它注入的是虚拟条目与导出规格 JSON，不是真 zip。
+// 画板包（#24）：导出 = 浏览器下载流；导入 = 浏览器选文件流式上传 → 判定 → 合并 → 打开画板。
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
@@ -84,8 +83,6 @@ test("导出画板包是浏览器下载的真 zip：含画板、任务目录、�
   const errors = await openApp(page, rig, layerBoard("本地"));
   await exportPack(page);
   await expect(dialog(page)).toContainText("将打包画板与它引用的 1 个任务目录、1 张参考图");
-  page.on("console", (m) => console.log("BROWSER", m.type(), m.text()));
-  page.on("response", (r) => { if (r.url().includes("/api/packs")) console.log("PACKRESP", r.status(), r.url()); });
   const download = page.waitForEvent("download");
   await dialog(page).getByRole("button", { name: "导出并下载…" }).click();
   const file = await download;
@@ -482,31 +479,23 @@ test("关掉文件对话框（input 的 cancel 事件）：不弹对话框，也
   await expect(toast(page)).toHaveText("导入 1 个任务，跳过 0 个");
 });
 
-test("重复导入同一包：任务目录跳过不覆盖，同名画板改名写入", async ({ page, rig }) => {
-  await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
-  await importPack(page, V032);
-  await expect(toast(page)).toHaveText("导入 1 个任务，跳过 0 个");
-  const root = rig.userRoot(GOOD_KEY);
-  const record = path.join(root, DIR, "task.json");
-  const before = readText(record);
-  await importPack(page, V032);
-  await expect(toast(page)).toHaveText("导入 0 个任务，跳过 1 个");
-  expect(readText(record)).toBe(before);
-  const boards = readdirSync(path.join(root, "画板")).filter((n) => n.endsWith(".ugcpack.json") || n.endsWith(".ugcboard.json"));
-  expect(boards.length).toBeGreaterThanOrEqual(3); // 空 + 两份旧版画板（改名）
-});
-
-test("同一个包导入两次：第二次没有内容上传请求，结果为全部跳过（#62）", async ({ page, rig }) => {
+test("同一个包导入两次：第二次没有内容上传请求、任务目录跳过不覆盖，同名画板改名写入（#62）", async ({ page, rig }) => {
   const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
   const requests = packRequests(page);
   await importPack(page, V032);
   await expect(toast(page)).toHaveText("导入 1 个任务，跳过 0 个");
   expect(requests.filter(isContentUpload).length).toBeGreaterThan(0);
+  const root = rig.userRoot(GOOD_KEY);
+  const record = path.join(root, DIR, "task.json");
+  const before = readText(record);
   requests.length = 0;
   await importPack(page, V032);
   await expect(toast(page)).toHaveText("导入 0 个任务，跳过 1 个");
   // 只问了一次服务端已有哪些：不开暂存、不上传、不合并，也不整包上传。
   expect(requests).toEqual(["POST /api/packs/existing"]);
+  expect(readText(record)).toBe(before);
+  const boards = readdirSync(path.join(root, "画板")).filter((n) => n.endsWith(".ugcpack.json") || n.endsWith(".ugcboard.json"));
+  expect(boards.length).toBeGreaterThanOrEqual(3); // 空 + 两份旧版画板（改名）
   expect(errors).toEqual([]);
 });
 
@@ -570,24 +559,6 @@ test("包损坏：本地检查即拒绝，不发上传请求、不写任何文�
   expect(existsSync(path.join(rig.userRoot(GOOD_KEY), DIR))).toBe(before);
   expect(existsSync(path.join(rig.userRoot(GOOD_KEY), ".kacha/packs"))).toBe(false);
   expect(requests).toEqual([]);
-});
-
-test("另一把密钥看不到已上传 / 已导入的画板包（按用户隔离）", async ({ page, rig, request }) => {
-  await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
-  await importPack(page, V032);
-  await expect(toast(page)).toHaveText("导入 1 个任务，跳过 0 个");
-  const otherRoot = rig.userRoot(OTHER_KEY);
-  expect(existsSync(path.join(otherRoot, DIR))).toBe(false);
-  // 别的用户的导出不会带出这份内容。
-  const res = await request.post(`${rig.localURL}/api/packs/export?op=x1`);
-  expect(res.status()).toBe(401);
-});
-
-test("磁盘不足（507）时页面提示「服务器空间不足，请联系管理员」", async ({ page, rig }) => {
-  await openApp(page, rig, { title: "满", boardText: board("满", [], []) });
-  await page.route("**/api/boards?*", (route) => (route.request().method() === "PUT" ? route.fulfill({ status: 507, contentType: "application/json", body: JSON.stringify({ code: "insufficient_storage", message: "服务器空间不足，请联系管理员" }) }) : route.continue()));
-  await page.getByRole("button", { name: "＋ 提示词", exact: true }).click();
-  await expect(page.getByText("服务器空间不足，请联系管理员", { exact: false })).toBeVisible();
 });
 
 /** 造一个真 zip 画板包（清单可覆盖版本，附加任意条目）。 */

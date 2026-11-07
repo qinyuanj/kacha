@@ -1,4 +1,4 @@
-// Lite 停用（迁移自旧假壳 specs/retirement.spec.ts 的普通打开分支；画板包导入分支随 #24 迁移）。
+// Lite 停用：普通打开画板时的历史入口拦截与模型切换。
 import { expect } from "@playwright/test";
 import { board, edge, png, promptNode, taskNode } from "../common/boards";
 import { bodies, enterWithKey, OTHER_KEY, test } from "./rig";

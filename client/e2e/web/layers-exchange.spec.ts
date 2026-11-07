@@ -1,4 +1,4 @@
-// 图层交换与来源图层（迁移自旧假壳 specs/layers-exchange.spec.ts；画板包往返场景归 #24，随包导入迁移）。
+// 图层交换与来源图层（画板包往返场景见 packs.spec.ts）。
 import { readFileSync } from "node:fs";
 import { expect, type Page } from "@playwright/test";
 import { board, edge, png, promptNode, taskNode } from "../common/boards";

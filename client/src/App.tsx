@@ -11,6 +11,7 @@ import { parseUiState, serializeUiState, type UiState } from "./core/uiState";
 import { imageProbe } from "./shell/adapters";
 import { copyTextToClipboard } from "./shell/clipboard";
 import { browser, ipc, transfer, userRoot } from "./shell/ipc";
+import { BACKUP_HINT_TEXT } from "./ui/boardText";
 import { BoardPackDialog } from "./ui/BoardPackDialog";
 import { BoardListDialog } from "./ui/BoardListDialog";
 import { BoardToolbar } from "./ui/BoardToolbar";
@@ -296,7 +297,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   return (
     <div className="app">
       <div className="topbar">
-        <div className="muted small topbar-backup-hint">服务端不备份；60 天未使用的数据可能被清理，请定期导出画板包</div>
+        <div className="muted small topbar-backup-hint">{BACKUP_HINT_TEXT}</div>
         <TabBar
           sessions={sessions}
           activeKey={activeKey}

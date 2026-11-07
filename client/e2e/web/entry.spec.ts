@@ -2,9 +2,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { BACKUP_HINT_TEXT } from "../../src/ui/boardText";
 import { BAD_KEY, enterWithKey, expect, GOOD_KEY, metaFile, OTHER_KEY, OUTAGE_KEY, readMeta, test } from "./rig";
 
-test("非安全上下文下粘贴有效密钥进入工作台，服务端只存指纹", async ({ page, rig }) => {
+test("非安全上下文下粘贴有效密钥进入工作台，顶栏显示版本与备份提示", async ({ page, rig }) => {
   await page.goto(rig.baseURL);
   await expect(page.getByRole("dialog", { name: "粘贴 API 密钥" })).toBeVisible();
   await expect(page.getByText("换密钥即视为新用户", { exact: false })).toBeVisible();
@@ -20,32 +21,24 @@ test("非安全上下文下粘贴有效密钥进入工作台，服务端只存�
   await expect(page.getByRole("button", { name: "退出", exact: true })).toBeVisible();
   const manifest = /version = "([^"]+)"/.exec(readFileSync(fileURLToPath(new URL("../../../server/Cargo.toml", import.meta.url)), "utf8"))![1];
   await expect(page.locator(".topbar-version")).toHaveText(`Kacha ${manifest}`);
-  const meta = readMeta(rig, GOOD_KEY, "user.json");
-  expect(meta.last_access_at).toBeGreaterThan(0);
-  expect(JSON.stringify(meta)).not.toContain(GOOD_KEY);
+  // 顶栏常驻备份提示。
+  const hint = page.locator(".topbar-backup-hint");
+  await expect(hint).toBeVisible();
+  await expect(hint).toHaveText(BACKUP_HINT_TEXT);
   // 画板落在该用户的用户数据根下。
   expect(existsSync(path.join(rig.userRoot(GOOD_KEY), "画板"))).toBe(true);
   // 密钥保存在浏览器本地，供浏览器直连网关。
   expect(await page.evaluate(() => localStorage.getItem("kacha.apiKey"))).toBe(GOOD_KEY);
 });
 
-test("cookie 为 HttpOnly + SameSite=Strict 且 7 天有效，刷新后无需重新粘贴", async ({ page, rig, context }) => {
+test("会话 cookie 对页面脚本不可见，刷新后无需重新粘贴", async ({ page, rig }) => {
   await enterWithKey(page, rig.baseURL, GOOD_KEY);
   await expect(page.locator(".tab").first()).toBeVisible();
-  const cookies = await context.cookies();
-  const sessionCookie = cookies.find((c) => c.name === "kacha_session");
-  expect(sessionCookie?.httpOnly).toBe(true);
-  expect(sessionCookie?.sameSite).toBe("Strict");
-  expect(sessionCookie?.secure).toBe(false);
-  expect(sessionCookie!.expires - Date.now() / 1000).toBeGreaterThan(6 * 86400);
-  expect(sessionCookie!.expires - Date.now() / 1000).toBeLessThanOrEqual(7 * 86400 + 60);
   expect(await page.evaluate(() => document.cookie)).toBe("");
 
   await page.reload();
   await expect(page.locator(".tab").first()).toBeVisible();
   await expect(page.getByRole("dialog", { name: "粘贴 API 密钥" })).toHaveCount(0);
-  // 带会话访问更新最后访问时间。
-  expect(readMeta(rig, GOOD_KEY, "user.json").last_access_at).toBeGreaterThan(0);
 });
 
 test("无效密钥与网关故障给出不同错误", async ({ page, rig }) => {

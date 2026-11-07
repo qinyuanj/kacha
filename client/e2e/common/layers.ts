@@ -1,4 +1,4 @@
-// Flash 图层任务目录夹具：底图 + 两个 alpha 图层 + layers.json 真源（layers.spec / layers-exchange.spec 共用）。
+// Flash 图层任务目录夹具：底图 + 两个 alpha 图层 + layers.json 真源（夹具供 layers-exchange.spec 使用；layers.spec 只用 FLASH 常量）。
 import { board } from "./boards";
 import { png } from "./boards";
 import type { SeedFile } from "../web/kit";

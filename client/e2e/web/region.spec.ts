@@ -1,4 +1,4 @@
-// 图片编辑：参考图 + 区域指示（迁移自旧假壳 specs/region.spec.ts）。
+// 图片编辑：参考图 + 区域指示。
 // 参考图向用户数据根预置；结果默认 url 形式，经服务端中转落任务目录。
 import { expect, type Page } from "@playwright/test";
 import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";

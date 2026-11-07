@@ -1,4 +1,4 @@
-// 两个 e2e project 共用的夹具：PNG 生成与画板 JSON 构造（不涉及假壳或服务端）。
+// e2e 与 core 单测共用的夹具：PNG 生成与画板 JSON 构造（不涉及服务端）。
 import { deflateSync } from "node:zlib";
 import type { Page } from "@playwright/test";
 

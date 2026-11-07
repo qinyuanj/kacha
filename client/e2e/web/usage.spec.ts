@@ -1,4 +1,4 @@
-// 顶栏备份提示、高级设置用量与自助清理（#25）：真服务端 + 每测试临时数据根。
+// 高级设置用量与自助清理（#25）：真服务端 + 每测试临时数据根。
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test, expect, GOOD_KEY } from "./rig";
@@ -27,13 +27,6 @@ function resultNode(dir: string) {
   const task_id = dir.split("/")[1];
   return { id: "r", type: "result", pos: [0, 0], size: [220, 280], task_id, file: "result.png", path: `${dir}/result.png`, layer_count: 0, record: { model: "m", prompt: "", negative_prompt: "", size_spec: { tier: "1K", ratio: "1:1", width: null, height: null }, submitted_at: "2026-10-02T00:00:00Z" } };
 }
-
-test("顶栏常驻备份提示", async ({ page, rig }) => {
-  await openApp(page, rig, { title: "用量", boardText: JSON.stringify(base) });
-  const hint = page.locator(".topbar-backup-hint");
-  await expect(hint).toHaveText("服务端不备份；60 天未使用的数据可能被清理，请定期导出画板包");
-  await expect(hint).toBeVisible();
-});
 
 test("高级设置显示用量，预览未引用任务目录，取消不动磁盘，确认后进回收区", async ({ page, rig }) => {
   const root = rig.userRoot(GOOD_KEY);

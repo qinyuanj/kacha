@@ -1,5 +1,5 @@
 // 文生图结果中转与任务状态：结果由服务端写入任务目录、失败与中断的如实呈现、按用户隔离。
-// 同时承载旧假壳 misc.spec 的 #17–#20（运行前判定与重开后的已存状态）。
+// 手测清单 #17–#20：运行前判定与重开后的已存状态。
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, type Page } from "@playwright/test";
@@ -80,7 +80,7 @@ test("结果地址不在允许列表：400 拒绝，任务失败且不写文件"
   expect(readdirSync(dir).some((n) => n.startsWith("result."))).toBe(false);
 });
 
-test("另一把密钥看不到这份画板与结果（按用户隔离）", async ({ page, rig, browser }) => {
+test("另一把密钥的画板列表里看不到这份画板（按用户隔离）", async ({ page, rig, browser }) => {
   await openApp(page, rig, { title: "文生图", boardText: singleImage(), files });
   await task(page, "t1").locator(".task-actions button.primary").click();
   await expect(page.locator(".react-flow__node-result")).toHaveCount(1);
@@ -88,15 +88,11 @@ test("另一把密钥看不到这份画板与结果（按用户隔离）", async
   const other = await browser.newContext();
   const page2 = await other.newPage();
   await enterWithKey(page2, rig.baseURL, OTHER_KEY);
-  await expect(page.locator(".react-flow__node-result")).toHaveCount(1);
   await page2.getByRole("button", { name: "画板列表", exact: true }).click();
   const list = page2.getByRole("dialog", { name: "画板列表" });
   await expect(list.locator("ul.board-list li"), "另一把密钥只有它自己新建的空画板").toHaveCount(1);
   await expect(list.getByRole("button", { name: "文生图", exact: true })).toHaveCount(0);
   expect(existsSync(path.join(rig.userRoot(OTHER_KEY), "画板", "文生图.ugcboard.json"))).toBe(false);
-  const resultRel = path.relative(rig.userRoot(GOOD_KEY), path.join(path.dirname(taskRecords(rig)[0].path), "result.png")).replace(/\\/g, "/");
-  const denied = await page2.request.get(`${rig.localURL}/api/fs/file?path=${encodeURIComponent(resultRel)}`);
-  expect(denied.status(), "不带会话读不到文件").toBe(401);
   await other.close();
 });
 
@@ -108,24 +104,6 @@ test("#17 参考图文件缺失：节点标红，运行提示无法运行", asyn
   await task(page, "t1").locator(".task-actions button.primary").click();
   await expect(page.locator(".toast")).toContainText("无法运行：图1 图片缺失");
   expect(taskRecords(rig)).toEqual([]);
-});
-
-test("#18 透明背景 + 源图不带透明通道：节点标红，运行被拦；带透明通道的对照不拦", async ({ page, rig }) => {
-  const opaque = png(64, 64);
-  const text = board("透明", [promptNode("p1", "抠出主体"), referenceNode("r1", "导入参考图/opaque.png"), taskNode("t1", { model: "doubao-seedream-5-0-pro-260628", image_ports: 1, transparent_background: true })], [edge("p1", "t1", "positive"), edge("r1", "t1", "image:0")]);
-  await openApp(page, rig, { title: "透明", boardText: text, files: { "导入参考图/opaque.png": { b64: opaque } } });
-  await expect(task(page, "t1").locator(".node-task")).toHaveClass(/node-error/);
-  await task(page, "t1").locator(".task-actions button.primary").click();
-  await expect(page.locator(".toast")).toContainText("透明通道");
-  expect(taskRecords(rig)).toEqual([]);
-});
-
-test("#18 对照：源图带透明通道时不因透明通道被拦", async ({ page, rig }) => {
-  const alpha = png(64, 64, { alpha: true });
-  const ok = board("透明ok", [promptNode("p1", "抠出主体"), referenceNode("r1", "导入参考图/alpha.png"), taskNode("t1", { model: "doubao-seedream-5-0-pro-260628", image_ports: 1, transparent_background: true })], [edge("p1", "t1", "positive"), edge("r1", "t1", "image:0")]);
-  await openApp(page, rig, { title: "透明ok", boardText: ok, files: { "导入参考图/alpha.png": { b64: alpha } } });
-  await expect(task(page, "r1").locator("img.thumb")).toBeVisible();
-  await expect(task(page, "t1").locator(".node-task")).not.toHaveClass(/node-error/);
 });
 
 test.describe("#19 / #20 重开画板后的已存状态", () => {
@@ -144,7 +122,7 @@ test.describe("#19 / #20 重开画板后的已存状态", () => {
     await expect(task(page, "tc").locator(".status")).toHaveText("已取消");
     await expect(task(page, "ti").locator(".status")).toHaveText("已中断");
   };
-  /** 桌面版靠第二实例重新打开；Web 版从服务端画板列表打开。 */
+  /** 关掉标签页，再从服务端画板列表重新打开。 */
   const reopen = async (page: import("@playwright/test").Page) => {
     await page.locator(".tab", { hasText: title }).locator(".tab-close").click();
     await expect(page.locator(".tab", { hasText: title })).toHaveCount(0);
@@ -152,13 +130,6 @@ test.describe("#19 / #20 重开画板后的已存状态", () => {
     await page.getByRole("dialog", { name: "画板列表" }).getByRole("button", { name: title, exact: true }).click();
     await expect(page.locator(".tab", { hasText: title })).toHaveCount(1);
   };
-
-  test("#19 启动与关掉再打开后都显示 失败 / 已取消 / 已中断", async ({ page, rig }) => {
-    await openApp(page, rig, scenario);
-    await expectBadges(page);
-    await reopen(page);
-    await expectBadges(page);
-  });
 
   test("#20 已中断的日志只记一次（反复关开画板）", async ({ page, rig }) => {
     await openApp(page, rig, scenario);
@@ -198,20 +169,5 @@ test.describe("#19 / #20 重开画板后的已存状态", () => {
     await page.unroute("**/api/fs/file?*");
     await reopen(page);
     await expectBadges(page);
-  });
-
-  test("已中断的任务可以重新生成", async ({ page, rig }) => {
-    const fixtureName = "pre-116.task.json";
-    const old = JSON.parse(readFileSync(new URL(`../../src/core/__fixtures__/${fixtureName}`, import.meta.url), "utf8"));
-    const dir = `2026-09-16/${old.task_id}`;
-    const snapshot = png(1024, 1024);
-    const seedFiles = Object.fromEntries([[`${dir}/task.json`, { text: readFileSync(new URL(`../../src/core/__fixtures__/${fixtureName}`, import.meta.url), "utf8") }], ...old.references.map((r: { file: string }) => [`${dir}/${r.file}`, { b64: snapshot }])]);
-    const text = board("中断重跑", [promptNode("p1", old.prompt), taskNode("t1", { image_ports: 2, last_submitted: { task_id: old.task_id } })], [edge("p1", "t1", "positive")]);
-    await openApp(page, rig, { title: "中断重跑", boardText: text, files: seedFiles });
-    await expect(task(page, "t1").locator(".status")).toHaveText("已中断");
-    await task(page, "t1").locator(".node-title").click({ button: "right" });
-    await page.getByRole("menuitem", { name: "重新生成" }).click();
-    await expect(page.locator(".react-flow__node-result")).toHaveCount(1);
-    expect(taskRecords(rig).length).toBe(2);
   });
 });

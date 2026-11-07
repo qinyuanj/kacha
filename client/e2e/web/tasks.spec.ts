@@ -1,4 +1,4 @@
-// 手测清单 #1–#8 与 Issue #1/#15：任务节点相关场景（旧假壳同名单元迁移到真服务端接缝）。
+// 手测清单 #1–#8 与 Issue #1/#15：任务节点相关场景。
 // 网关与对象存储由本机桩扮演：结果默认 url 形式，由服务端中转写进任务目录。
 import { readFileSync } from "node:fs";
 import { expect, type Page } from "@playwright/test";
@@ -363,17 +363,13 @@ test.describe("#6 透明背景开关", () => {
     return { label, box: label.locator("input[type=checkbox]"), node: task(page, "t1").locator(".node-task") };
   }
 
-  test("0 条图片线：置灰并提示", async ({ page, rig }) => {
-    const { label, box } = await open(page, rig, []);
-    await expect(box).toBeDisabled();
-    await expect(label).toHaveClass(/disabled/);
-    await expect(label).toContainText("需要恰好一条图片线");
-  });
-
-  test("2 条图片线：置灰并提示", async ({ page, rig }) => {
-    const { label, box } = await open(page, rig, [ALPHA, ALPHA]);
-    await expect(box).toBeDisabled();
-    await expect(label).toContainText("需要恰好一条图片线");
+  test("0 条或 2 条图片线：置灰并提示", async ({ page, rig }) => {
+    for (const refList of [[], [ALPHA, ALPHA]]) {
+      const { label, box } = await open(page, rig, refList);
+      await expect(box, `${refList.length} 条图片线`).toBeDisabled();
+      await expect(label, `${refList.length} 条图片线`).toHaveClass(/disabled/);
+      await expect(label, `${refList.length} 条图片线`).toContainText("需要恰好一条图片线");
+    }
   });
 
   test("源图无透明通道：置灰并提示", async ({ page, rig }) => {

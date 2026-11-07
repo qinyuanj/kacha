@@ -1,4 +1,4 @@
-// 透明背景编辑生成（迁移自旧假壳 specs/flash-transparent.spec.ts）。
+// 透明背景编辑生成。
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { expect, type Page } from "@playwright/test";
