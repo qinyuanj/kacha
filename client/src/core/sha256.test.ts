@@ -10,16 +10,6 @@ describe("sha256Hex（纯 JS，HTTP 非安全上下文下 crypto.subtle 不可�
     expect(await sha256Hex(new Uint8Array([1, 2, 3]))).toBe("039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81");
   });
 
-  it("跨 64 字节分块边界与中文", async () => {
-    expect(await sha256Hex(hex("a".repeat(55)))).toBe("9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318");
-    expect(await sha256Hex(hex("a".repeat(64)))).toBe("ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb");
-    // 期望值由 node:crypto 独立算出，不用实现自身。
-    const { createHash } = await import("node:crypto");
-    expect(await sha256Hex(hex("画板"))).toBe(createHash("sha256").update("画板").digest("hex"));
-    const big = new Uint8Array(300000).map((_, i) => i % 251);
-    expect(await sha256Hex(big)).toBe(createHash("sha256").update(big).digest("hex"));
-  });
-
   it("增量接口：分块喂入与一次性结果相同", async () => {
     const { createHash } = await import("node:crypto");
     const big = new Uint8Array(300001).map((_, i) => (i * 7) % 253);

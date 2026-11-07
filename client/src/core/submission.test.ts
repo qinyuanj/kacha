@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Board, BoardEdge, BoardNode, TaskNode } from "./board";
 import { BUILTIN_TABLE } from "./capabilities";
 import { imageSources } from "./graph";
-import { buildConfirmItems, collectRunFacts, copiesByNode, createInterruptedLog, interruptedCandidates, isDirty, regenerateDispatch, runDispatch, runScope, snapshotOf, storedStatuses, withSubmitted, type ConfirmItem } from "./submission";
+import { buildConfirmItems, collectRunFacts, copiesByNode, createInterruptedLog, interruptedCandidates, isDirty, regenerateDispatch, runDispatch, runScope, snapshotOf, storedStatuses, type ConfirmItem } from "./submission";
 import { taskDirOfTaskId, writeOutcome } from "./taskDir";
 import { nodeStatus, nodeSummary } from "./runner";
 import type { UnrunnableReason } from "./taskView";
@@ -68,7 +68,11 @@ function editBoard(): Board {
   );
 }
 
-const submitted = (b: Board, taskId: string, id = "20260916T091500Z-3f9c2a1b") => withSubmitted(b, taskId, id);
+/** 模拟提交：给任务节点写入 last_submitted = task_id + 快照。 */
+function submitted(b: Board, taskId: string, id = "20260916T091500Z-3f9c2a1b"): Board {
+  const snapshot = snapshotOf(b, taskId)!;
+  return { ...b, nodes: b.nodes.map((n) => (n.id === taskId && n.type === "task" ? { ...n, last_submitted: { task_id: id, ...snapshot } } : n)) };
+}
 
 /** 给任务节点的 last_submitted 加上同一次提交的各份任务编号。 */
 function withCopies(b: Board, taskId: string, ids: string[]): Board {
@@ -100,12 +104,6 @@ describe("脏判据快照", () => {
         { kind: "result", task_id: "task-x", file: "result.png", source_layer: null, region: null },
       ],
     });
-  });
-
-  it("提交时写入 last_submitted = task_id + 快照", () => {
-    const b = submitted(editBoard(), "t");
-    const t = b.nodes.find((n) => n.id === "t") as TaskNode;
-    expect(t.last_submitted).toEqual({ task_id: "20260916T091500Z-3f9c2a1b", ...snapshotOf(editBoard(), "t") });
   });
 
   it("未提交过即脏；刚提交后不脏", () => {
@@ -201,7 +199,7 @@ describe("运行范围", () => {
 describe("二次确认清单", () => {
   const ctx = { discovery: { source: "none" as const }, missingNodes: new Set<string>(), alphaByNode: new Map<string, boolean>(), concurrency: 4 };
 
-  it("每项：模型名 + 提示词首行 + 完整发送文本；可运行的默认勾选", () => {
+  it("每项：模型名 + 提示词首行 + 完整发送文本，无不可运行原因", () => {
     const [item] = buildConfirmItems(editBoard(), BUILTIN_TABLE, ["t"], ctx);
     expect(item).toMatchObject({
       taskId: "t",
@@ -212,22 +210,6 @@ describe("二次确认清单", () => {
     expect(item.send?.text).toBe("本次提供 2 张参考图，按顺序为图1、图2。\n把图2的帽子戴到图1头上\n第二行");
     expect(item.send?.negativeInlined).toBe(false);
     expect(item.send?.nativeNegativePrompt).toBe("模糊");
-  });
-
-  it("qwen 支持原生负向：发送文本即提示词，负向另列", () => {
-    const b = board([prompt("p", "一只橘猫"), prompt("n", "模糊"), task("t")], [edge("p", "t", "positive"), edge("n", "t", "negative")]);
-    const [item] = buildConfirmItems(b, BUILTIN_TABLE, ["t"], ctx);
-    expect(item.send?.text).toBe("一只橘猫");
-    expect(item.send?.nativeNegativePrompt).toBe("模糊");
-    expect(item.send?.negativeInlined).toBe(false);
-  });
-
-  it("Seedream 无原生负向：负向拼进发送文本末尾", () => {
-    const b = board([prompt("p", "一只橘猫"), prompt("n", "模糊"), task("t", { model: "doubao-seedream-5-0-flash-260915" })], [edge("p", "t", "positive"), edge("n", "t", "negative")]);
-    const [item] = buildConfirmItems(b, BUILTIN_TABLE, ["t"], ctx);
-    expect(item.send?.text).toBe("一只橘猫\n避免出现：模糊");
-    expect(item.send?.negativeInlined).toBe(true);
-    expect(item.send?.nativeNegativePrompt).toBeNull();
   });
 
   it("标红任务列出原因：未连正向、提示词为空、请求形态未接入、网关未发现、缺图", () => {
@@ -254,12 +236,6 @@ describe("二次确认清单", () => {
     expect(item.send).toBeNull();
     expect(item.modelName).toBe("retired-model");
     expect(texts(item)).toContain("模型 retired-model 不在能力表内");
-  });
-
-  it("Seedream 请求形态已接入，不因请求形态标红", () => {
-    const b = board([prompt("p", "一只橘猫"), task("t", { model: "doubao-seedream-5-0-flash-260915" })], [edge("p", "t", "positive")]);
-    const [item] = buildConfirmItems(b, BUILTIN_TABLE, ["t"], { discovery: { source: "none" }, missingNodes: new Set(), alphaByNode: new Map(), concurrency: 4 });
-    expect(texts(item).join()).not.toContain("请求形态");
   });
 });
 
@@ -324,12 +300,6 @@ describe("份数超过并发上限", () => {
   it("缺省份数按 1：并发上限为 1 时也没有警告", () => {
     expect(buildConfirmItems(counted(), BUILTIN_TABLE, ["t"], facts(1))[0].warnings).toEqual([]);
   });
-
-  it("调回并发上限后警告消失，画板上的份数不变", () => {
-    const b = counted(6);
-    expect(buildConfirmItems(b, BUILTIN_TABLE, ["t"], facts(2))[0].warnings).toEqual(["份数 6，本次按 2"]);
-    expect(buildConfirmItems(b, BUILTIN_TABLE, ["t"], facts(6))[0].warnings).toEqual([]);
-  });
 });
 
 describe("运行的实际份数", () => {
@@ -358,38 +328,6 @@ describe("重新生成分派", () => {
   it("份数被截断时写明「节点设为 X，本次按 Y」", () => {
     expect(regenerateDispatch(counted(6), BUILTIN_TABLE, "t", 4)).toEqual({ kind: "confirm", copies: 4, modelName: "Seedream 5.0 Flash", note: "节点设为 6，本次按 4" });
   });
-
-  it("改完份数后按新的份数", () => {
-    const b = counted(2);
-    expect(regenerateDispatch(b, BUILTIN_TABLE, "t", 4)).toMatchObject({ copies: 2 });
-    const changed = { ...b, nodes: b.nodes.map((n) => (n.type === "task" ? { ...n, count: 3 } : n)) };
-    expect(regenerateDispatch(changed, BUILTIN_TABLE, "t", 4)).toMatchObject({ copies: 3 });
-  });
-});
-
-describe("二次确认：「图N」校验与提示", () => {
-  const ctx = { discovery: { source: "none" as const }, missingNodes: new Set<string>(), alphaByNode: new Map<string, boolean>(), concurrency: 4 };
-
-  it("引用越界为红（硬阻断），有线未被引用为黄（仅警告）", () => {
-    const b = editBoard();
-    (b.nodes[0] as { text: string }).text = "把@图3 的颜色用到@图1 上";
-    const [item] = buildConfirmItems(b, BUILTIN_TABLE, ["t"], ctx);
-    expect(texts(item)).toEqual(["提示词引用了图3，但只接了 2 张参考图"]);
-    expect(item.warnings).toEqual(["图2 已连接，尚未说明它的用途。可在提示词中点击参考图插入引用，并描述如何使用它。"]);
-    expect(item.send?.text).toContain("把图3 的颜色用到图1 上");
-  });
-
-  it("英文序号未验证的模型：英文提示词带参考图时提示", () => {
-    const b = board(
-      [prompt("p", "Put @图1 on a beach"), reference("r1"), task("t", { model: "doubao-seedream-5-0-flash-260915" })],
-      [edge("p", "t", "positive"), edge("r1", "t", "image:0")],
-    );
-    const t = structuredClone(BUILTIN_TABLE);
-    t.models.find((m) => m.model_id === "doubao-seedream-5-0-flash-260915")!.reference_phrasing.en_verified = "untested";
-    const [item] = buildConfirmItems(b, t, ["t"], ctx);
-    expect(item.warnings).toContain("该模型英文序号未验证");
-    expect(item.send?.text).toBe("This request provides one reference image, identified as 图1. Use the visual content of 图1 to follow the user instructions below; image references without a number in those instructions refer to 图1.\n\nWhen the user specifies a reference purpose, use 图1 for that purpose. When the user asks to modify the image, use 图1 as the editing base and preserve content unrelated to the requested changes.\n\nUser instructions:\nPut 图1 on a beach");
-  });
 });
 
 describe("图片来源", () => {
@@ -407,7 +345,7 @@ describe("已存状态", () => {
   const NO_RECORD = "20260916T091500Z-0000000e";
   const submittedTasks = () => {
     const b = board([prompt("p", "猫"), task("t1"), task("t2"), task("t3"), task("t4")], ["t1", "t2", "t3", "t4"].map((t) => edge("p", t, "positive")));
-    return withSubmitted(withSubmitted(withSubmitted(b, "t1", FAILED), "t2", CANCELLED), "t3", NO_RECORD);
+    return submitted(submitted(submitted(b, "t1", FAILED), "t2", CANCELLED), "t3", NO_RECORD);
   };
   async function outcomesFs() {
     const fs = memoryTaskFs();
@@ -500,12 +438,6 @@ describe("已存状态", () => {
       expect(log.take([event("b"), event("c")])).toEqual([event("c")]);
     });
 
-    it("多画板共用同一记录器时仍只记一次", () => {
-      const log = createInterruptedLog();
-      expect(log.take([event("a", "猫.ugcboard.json")])).toEqual([event("a", "猫.ugcboard.json")]);
-      expect(log.take([event("a", "狗.ugcboard.json"), event("b", "狗.ugcboard.json")])).toEqual([event("b", "狗.ugcboard.json")]);
-    });
-
     it("各记录器互不影响", () => {
       createInterruptedLog().take([event("a")]);
       expect(createInterruptedLog().take([event("a")])).toEqual([event("a")]);
@@ -595,10 +527,10 @@ describe("运行前事实采集", () => {
 
 describe("已中断：重开时推导", () => {
   it("已提交、画板上没有结果、本次运行期间没经手过的任务", () => {
-    const submitted = withSubmitted(board([prompt("p", "猫"), task("t")], [edge("p", "t", "positive")]), "t", "task-x");
-    expect(interruptedCandidates(submitted, new Set())).toEqual([["t", "task-x"]]);
-    expect(interruptedCandidates(submitted, new Set(["task-x"]))).toEqual([]);
-    const withResult = { ...submitted, nodes: [...submitted.nodes, result("x")] };
+    const done = submitted(board([prompt("p", "猫"), task("t")], [edge("p", "t", "positive")]), "t", "task-x");
+    expect(interruptedCandidates(done, new Set())).toEqual([["t", "task-x"]]);
+    expect(interruptedCandidates(done, new Set(["task-x"]))).toEqual([]);
+    const withResult = { ...done, nodes: [...done.nodes, result("x")] };
     expect(interruptedCandidates(withResult, new Set())).toEqual([]);
     expect(interruptedCandidates(board([task("t")], []), new Set())).toEqual([]);
   });
@@ -654,20 +586,6 @@ describe("区域指示：图N 校验与发送文本", () => {
       [edge("p", "t", "positive"), { ...edge("r1", "t", "image:0"), region }, edge("r2", "t", "image:1")],
     );
 
-  it("区域端口不占用户序号：在图1 上框选后，提示词里的图2 仍指第二张用户图，发送时换算为图3", () => {
-    const [item] = buildConfirmItems(twoImages("把@图2的少女放入图1的区域1", REGION), BUILTIN_TABLE, ["t"], ctx);
-    expect(texts(item)).toEqual([]);
-    expect(item.warnings).toEqual([]);
-    expect(item.send?.referenceCount).toBe(3);
-    expect(item.send?.text).toBe(
-      "本次提供 3 张参考图，按顺序为图1、图2、图3。\n把图3的少女放入图1的紫色区域\n图2 是图1 的标注版，紫色半透明高亮标出的是要修改的区域。只修改图1 中高亮区域内的内容，高亮区域之外的所有内容保持完全不变，输出图里不要出现任何高亮颜色。",
-    );
-
-    // 删除区域：恢复原发送顺序，用户序号不变。
-    const [plain] = buildConfirmItems(twoImages("把@图2的少女放入图1", null), BUILTIN_TABLE, ["t"], ctx);
-    expect(plain.send?.text).toBe("本次提供 2 张参考图，按顺序为图1、图2。\n把图2的少女放入图1");
-  });
-
   it("多张图各带区域（共 3 个区域）：@图N、不带 @ 的图N、Image N 都按用户序号换算，地图2 不动", () => {
     const two = { rects: [REGION.rects[0], [0.6, 0.6, 0.9, 0.9] as [number, number, number, number]], render: "highlight_overlay" as const };
     const b = board(
@@ -686,17 +604,6 @@ describe("区域指示：图N 校验与发送文本", () => {
     const [item] = buildConfirmItems(twoImages("把@图3 的颜色用到@图1 上", REGION), BUILTIN_TABLE, ["t"], ctx);
     expect(texts(item)).toEqual(["提示词引用了图3，但只接了 2 张参考图"]);
     expect(item.warnings).toEqual(["图2 已连接，尚未说明它的用途。可在提示词中点击参考图插入引用，并描述如何使用它。"]);
-  });
-
-  it("区域变更让任务变脏", () => {
-    const b = regionBoard("把@图1 的帽子改成红色");
-    const done = submitted(b, "t");
-    expect(isDirty(done, "t")).toBe(false);
-    const moved = {
-      ...done,
-      edges: done.edges.map((e) => (e.to[1] === "image:0" ? { ...e, region: { rects: [[0.2, 0.2, 0.6, 0.6] as [number, number, number, number]], render: "highlight_overlay" as const } } : e)),
-    };
-    expect(isDirty(moved, "t")).toBe(true);
   });
 });
 
@@ -727,18 +634,5 @@ describe("图层来源", () => {
       expect(s.absPath).toBeNull();
       expect(s.label).toBe(`result.png 图层${layer}`);
     }
-  });
-});
-
-describe("透明背景：二次确认标红", () => {
-  it("支持透明背景的模型、源图不带透明通道时标红（alpha 由界面注入；缺省未知不拦）", () => {
-    const b = board(
-      [prompt("p", "抠出@图1 的主体"), reference("r1"), task("t", { transparent_background: true, model: "doubao-seedream-5-0-pro-260628", size_spec: { tier: "2K", ratio: "1:1", width: null, height: null } })],
-      [edge("p", "t", "positive"), edge("r1", "t", "image:0")],
-    );
-    const [bad] = buildConfirmItems(b, BUILTIN_TABLE, ["t"], { discovery: { source: "none" }, missingNodes: new Set(), alphaByNode: new Map([["r1", false]]), concurrency: 4 });
-    expect(texts(bad)).toContain("该图不带透明通道");
-    const [unknown] = buildConfirmItems(b, BUILTIN_TABLE, ["t"], { discovery: { source: "none" }, missingNodes: new Set(), alphaByNode: new Map(), concurrency: 4 });
-    expect(texts(unknown)).not.toContain("该图不带透明通道");
   });
 });

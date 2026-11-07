@@ -376,10 +376,6 @@ function fileStem(title: string): string {
   return stem;
 }
 
-export function boardFileName(title: string): string {
-  return `${fileStem(title)}${BOARD_EXTENSION}`;
-}
-
 /** 重名加 ` (2)`、` (3)`…；比较不区分大小写（Windows / macOS 默认文件系统），`self` 为当前文件名时不算重名。 */
 export function uniqueBoardFileName(title: string, existing: string[], self?: string): string {
   const taken = new Set(existing.filter((n) => n !== self).map((n) => n.toLowerCase()));

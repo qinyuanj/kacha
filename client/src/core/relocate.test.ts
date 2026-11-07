@@ -77,7 +77,7 @@ describe("重新定位：参考图按 sha256 找", () => {
     expect(listed.some((d) => d.includes(".ugcpack-import"))).toBe(false);
   });
 
-  it("找不到为 null；读不了的目录与文件跳过", async () => {
+  it("哈希都不匹配时为 null", async () => {
     const { fs } = memoryFs({ "/out/a.png": "nope" });
     expect(await findReferenceFile(fs, ROOT, { sha256: "want", display_name: "cat.png" })).toBeNull();
   });

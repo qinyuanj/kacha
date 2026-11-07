@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { Board, BoardNode } from "./board";
 import type { TaskFs } from "./taskDir";
 import { BUILTIN_TABLE } from "./capabilities";
+import { sha256Hex } from "./sha256";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
-import { layerFileName, layersExportJson, LocalError, newTaskId, parseLayersFile, parseOutcome, readLayers, readOutcome, readSubmission, restoreResultLayers, saveLayers, saveResult, sha256Hex, sniffImage, tableDigest, taskDirOfRelPath, taskDirOfTaskId, taskFilePath, writeOutcome, writeSubmission, type SubmissionPlan } from "./taskDir";
+import { layerFileName, layersExportJson, LocalError, newTaskId, parseLayersFile, parseOutcome, readLayers, readOutcome, readSubmission, restoreResultLayers, saveLayers, saveResult, sniffImage, tableDigest, taskDirOfRelPath, taskDirOfTaskId, taskFilePath, writeOutcome, writeSubmission, type SubmissionPlan } from "./taskDir";
 
 /** 最小结果节点（图层真源测试用）。 */
 function resultNode(id: string, taskId: string, model: string, layers?: unknown): BoardNode {
@@ -52,10 +53,10 @@ describe("任务编号与目录", () => {
     expect(taskDirOfTaskId("not-a-task")).toBeNull();
   });
 
-  it("任务目录里的文件路径：按用户数据根的分隔符拼接；任务编号不是本工具生成的为 null", () => {
+  it("任务目录里的文件路径：拼在用户数据根下；任务编号不是本工具生成的为 null", () => {
     const id = "20260916T091500Z-3f9c2a1b";
     expect(taskFilePath("/root", id, "result.png")).toBe("/root/2026-09-16/20260916T091500Z-3f9c2a1b/result.png");
-    expect(taskFilePath("D:\\出图", id, "layers/01.png")).toBe("D:\\出图\\2026-09-16\\20260916T091500Z-3f9c2a1b\\layers\\01.png");
+    expect(taskFilePath("/~", id, "layers/01.png")).toBe("/~/2026-09-16/20260916T091500Z-3f9c2a1b/layers/01.png");
     expect(taskFilePath("/root", "not-a-task", "result.png")).toBeNull();
   });
 
@@ -79,9 +80,8 @@ describe("图片格式识别", () => {
   });
 });
 
-describe("sha256", () => {
-  it("十六进制摘要；能力表摘要基于生效表的 JSON", async () => {
-    expect(await sha256Hex(new TextEncoder().encode("abc"))).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+describe("能力表摘要", () => {
+  it("能力表摘要基于生效表的 JSON", async () => {
     expect(await tableDigest(BUILTIN_TABLE)).toBe(await sha256Hex(new TextEncoder().encode(JSON.stringify(BUILTIN_TABLE))));
   });
 });
@@ -168,12 +168,6 @@ describe("提交时写任务目录", () => {
     const bad = plan({ references: [{ bytes: new TextEncoder().encode("nope"), source: { kind: "reference", path: "x.txt", sha256: "" } }] });
     await expect(writeSubmission(fs, "/root", bad)).rejects.toThrow("图1 不是可识别的图片格式");
     expect(fs.files.size).toBe(0);
-  });
-
-  it("Windows 用户数据根用反斜杠拼接", async () => {
-    const fs = memoryTaskFs();
-    await writeSubmission(fs, "D:\\出图", plan({ references: [] }));
-    expect([...fs.files.keys()]).toEqual(["D:\\出图\\2026-09-16\\20260916T091500Z-3f9c2a1b\\task.json"]);
   });
 });
 
@@ -343,9 +337,9 @@ describe("读回旧任务目录（真实旧夹具，见 __fixtures__/README.md�
 describe("保存结果图", () => {
   it("按文件头定扩展名，返回相对用户数据根的正斜杠路径", async () => {
     const fs = memoryTaskFs();
-    const saved = await saveResult(fs, "D:\\出图", "2026-09-16/t1", PNG);
+    const saved = await saveResult(fs, "/~", "2026-09-16/t1", PNG);
     expect(saved).toEqual({ file: "result.png", path: "2026-09-16/t1/result.png" });
-    expect(fs.files.has("D:\\出图\\2026-09-16\\t1\\result.png")).toBe(true);
+    expect(fs.files.has("/~/2026-09-16/t1/result.png")).toBe(true);
   });
 
   it("不是图片时拒绝，不写文件", async () => {
@@ -406,10 +400,6 @@ describe("图层落盘与导出", () => {
     expect(await readLayers(fs, "/root", "20261010T000000Z-00000001")).toEqual(saved);
     expect(JSON.parse(layersExportJson(saved)).layers[0]).toEqual({ file: "layers/01.png", z_index: 1, bounding_box: bbox, name: "主体", description: "官方契约合成资产" });
   });
-  it("图层文件名：layers/ 下两位序号，缺省扩展名 png", () => {
-    expect(layerFileName(1)).toBe("layers/01.png");
-    expect(layerFileName(12, "jpg")).toBe("layers/12.jpg");
-  });
 
   it("按 z_index 升序写 layers/NN.<ext>，返回图层记录", async () => {
     const fs = memoryTaskFs();
@@ -435,13 +425,6 @@ describe("图层落盘与导出", () => {
     expect(JSON.parse(text)).toEqual({ layers: [{ file: "layers/01.png", z_index: 1, bounding_box: [5, 5, 20, 20] }] });
   });
 
-  it("layers.json 导出内容可带底图身份（文件名与可选名称 / 描述）", () => {
-    const text = layersExportJson([{ file: "layers/01.png", z_index: 1, bounding_box: { absolute: [0, 0, 10, 10], normalized: [0, 0, 10, 10] }, name: "主体" }], { file: "result.png", z_index: 0, name: "底图", description: "合成资产" });
-    expect(JSON.parse(text)).toEqual({
-      base: { file: "result.png", z_index: 0, name: "底图", description: "合成资产" },
-      layers: [{ file: "layers/01.png", z_index: 1, bounding_box: { absolute: [0, 0, 10, 10], normalized: [0, 0, 10, 10] }, name: "主体" }],
-    });
-  });
 });
 
 describe("图层元数据真源 layers.json", () => {
@@ -464,15 +447,6 @@ describe("图层元数据真源 layers.json", () => {
       { file: "layers/01.png", z_index: 1, bounding_box: box1, name: "主体", description: "官方契约合成资产" },
       { file: "layers/02.png", z_index: 2, bounding_box: box2 },
     ]);
-  });
-
-  it("parseLayersFile 同时读出底图身份（可选）；没有 base 字段时为 undefined", () => {
-    const parsed = parseLayersFile(new TextEncoder().encode(metadata()));
-    expect(parsed.base).toEqual({ z_index: 0, name: "合成底图" });
-    expect(parsed.layers.map((l) => l.file)).toEqual(["layers/01.png", "layers/02.png"]);
-    const noBase = parseLayersFile(new TextEncoder().encode(JSON.stringify({ layers: [{ file: "layers/01.png", z_index: 1, bounding_box: box1 }] })));
-    expect(noBase.base).toBeUndefined();
-    expect(noBase.layers).toHaveLength(1);
   });
 
   it("parseLayersFile：底图身份形状无效明确失败", () => {

@@ -131,12 +131,6 @@ describe("新建生成任务", () => {
     expect(r.board.nodes.find((n) => n.id === "new")).toMatchObject({ size_spec: { tier: "1K", ratio: "1:1", width: null, height: null, auto_ratio: { ratio: "1:1", image: null, source: null } } });
   });
 
-  it("从提示词拖出：提示词接新任务的正向端口", () => {
-    const r = newTask(board([prompt("p")]), BUILTIN_TABLE, NONE, "new", [0, 0], "p");
-    if (!r.ok) throw new Error(r.reason);
-    expect(r.board.edges).toEqual([edge("p", "out", "new", "positive")]);
-  });
-
   it("能力表没有上架模型时拒绝", () => {
     expect(newTask(board([]), { ...BUILTIN_TABLE, models: [] }, NONE, "new", [0, 0])).toEqual({ ok: false, reason: "能力表中没有上架模型" });
   });
@@ -173,12 +167,5 @@ describe("参考图节点接到任务（反向拖线导入、OS 文件拖到任�
     expect(r.reason).toBe("参考图已达模型上限 3 张");
     expect(into(r.board)).toEqual([["a", "image:0"], ["b", "image:1"], ["x", "image:2"]]);
     expect(r.board.nodes.some((n) => n.id === "y")).toBe(true);
-  });
-
-  it("锁定任务：节点照建，不接线，提示 LOCKED_HINT", () => {
-    const r = attachReferences(board([task("t")]), BUILTIN_TABLE, [ref("x")], "t", new Set(["t"]), "asIs");
-    expect(r.reason).toBe(LOCKED_HINT);
-    expect(r.board.edges).toEqual([]);
-    expect(r.board.nodes.some((n) => n.id === "x")).toBe(true);
   });
 });

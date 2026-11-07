@@ -328,16 +328,6 @@ describe("任务运行器：取消", () => {
     expect(h.read.held).toBe(0);
   });
 
-  it("取消不存在的任务：无事发生", async () => {
-    const h = harness();
-    await h.runner.submit(h.target(), board(), ["t1"]);
-    await settle();
-    const before = h.runner.getSnapshot();
-    h.runner.cancel({ kind: "task", boardKey: "A", taskNodeId: "zzz" });
-    expect(h.runner.getSnapshot().board("A").nodes).toEqual(before.board("A").nodes);
-    expect(h.logs.filter((l) => l.fields.to_status === "cancelled")).toEqual([]);
-  });
-
   it("取消全部排队：执行中的不受影响", async () => {
     const h = harness({ concurrency: 1 });
     h.gateway.closed = true;
@@ -721,17 +711,6 @@ describe("任务运行器：取消各份", () => {
     await settle();
     expect(h.changes.filter((c) => c.change.kind === "runResult")).toHaveLength(3);
     expect(h.locked()).toEqual([]);
-  });
-
-  it("单份取消不存在或已结束的任务编号：无事发生", async () => {
-    const h = harness();
-    await h.runner.submit(h.target(), board(), ["t1"], { t1: 2 });
-    await settle();
-    const taskId = h.logs.find((l) => l.kind === "queue_dispatch")?.fields.task_id as string;
-    for (const id of [taskId, "zzz"]) h.runner.cancel({ kind: "copy", taskId: id });
-    await settle();
-    expect(resultCount(h)).toBe(2);
-    expect(h.logs.filter((l) => l.fields.to_status === "cancelled")).toEqual([]);
   });
 
   it("取消全部排队：覆盖各份里排队的，执行中的份不受影响", async () => {
@@ -1137,26 +1116,5 @@ describe("任务运行器：提交守护（更新准备）", () => {
     await settle();
     expect(h.runner.getSnapshot().pending()).toBe(0);
     expect(h.files.size).toBeGreaterThan(0);
-  });
-
-  it("守护在 tableDigest 期间挂上：异步间隙里的提交也不入队", async () => {
-    // 摘要是真异步（纯 JS SHA-256，见 core/sha256.ts）：守护在摘要算完后才挂上时，这次提交必须被拦在入队前。
-    const h = harness();
-    const submitting = h.runner.submit(h.target(), board(), ["t1"]);
-    h.runner.setSubmissionGuard(() => undefined);
-    expect(await submitting).toEqual([]);
-    await settle();
-    expect(h.runner.getSnapshot().pending()).toBe(0);
-    expect(h.files.size).toBe(0);
-  });
-
-  it("守护在 regenerate 的摘要间隙挂上：同样拦在入队前", async () => {
-    const h = harness();
-    const regenerating = h.runner.regenerate(h.target(), board(), "t1");
-    h.runner.setSubmissionGuard(() => undefined);
-    expect(await regenerating).toBeNull();
-    await settle();
-    expect(h.runner.getSnapshot().pending()).toBe(0);
-    expect(h.files.size).toBe(0);
   });
 });

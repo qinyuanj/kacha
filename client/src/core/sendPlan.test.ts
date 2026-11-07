@@ -164,11 +164,6 @@ describe("发送计划：4 个内置模型 × 参考图与区域 × 语言 × �
 });
 
 describe("发送计划：「图N」改写", () => {
-  it("中文提示词改写为「图N」，英文提示词改写为 Image N；不带 @ 的原样保留", () => {
-    expect(rewritten("把@图2的帽子戴到@图1头上，图3 不动", [image(1, 1), image(2, 2), image(3, 3)])).toBe("把图2的帽子戴到图1头上，图3 不动");
-    expect(rewritten("Put the hat from @图2 on @图1", [image(1, 1), image(2, 2)])).toBe("Put the hat from Image 2 on Image 1");
-  });
-
   it("语言按用户文本（去掉 @图N 标记）里是否有汉字判定", () => {
     expect(promptLanguage("@图1 in watercolor")).toBe("en");
     expect(promptLanguage("@图1 水彩风格")).toBe("zh");

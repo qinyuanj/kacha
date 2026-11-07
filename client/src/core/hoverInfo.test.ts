@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BoardEdge, ReferenceNode, ResultNode } from "./board";
-import { actionHoverInfo, CANCELLED_HINT, edgeHoverInfo, PROMPT_CLAMP_LINES, referenceHoverInfo, resultHoverInfo, taskHoverInfo, taskSizeText } from "./hoverInfo";
+import { actionHoverInfo, CANCELLED_HINT, edgeHoverInfo, INTERRUPTED_HINT, PROMPT_CLAMP_LINES, referenceHoverInfo, resultHoverInfo, taskHoverInfo, taskSizeText } from "./hoverInfo";
 
 const time = (d: Date) => d.toISOString();
 
@@ -31,7 +31,6 @@ describe("结果节点悬浮信息", () => {
       { label: "时间", text: "2026-09-17T05:00:00.000Z" },
       { label: "任务", text: "20260917-0001", mono: true },
     ]);
-    expect(PROMPT_CLAMP_LINES).toBe(6);
   });
 
   it("带透明通道、有图层时列出；自定义尺寸与实际像素", () => {
@@ -115,7 +114,7 @@ describe("任务节点悬浮信息", () => {
     expect(statusLine({ kind: "failed", label: "网关超时" })).toEqual({ label: "状态", text: "失败：网关超时", tone: "error" });
     expect(statusLine({ kind: "cancelled", gatewayMayContinue: true })).toEqual({ label: "状态", text: `已取消：${CANCELLED_HINT}` });
     expect(statusLine({ kind: "cancelled", gatewayMayContinue: false })).toEqual({ label: "状态", text: "已取消" });
-    expect(statusLine({ kind: "interrupted" })).toEqual({ label: "状态", text: "已中断：上次程序异常退出时仍在执行，可重新生成" });
+    expect(statusLine({ kind: "interrupted" })).toEqual({ label: "状态", text: `已中断：${INTERRUPTED_HINT}` });
     expect(statusLine({ kind: "queued" })).toEqual({ label: "状态", text: "排队中" });
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Board, BoardNode } from "./board";
-import { applySelection, duplicateNodes, isTrackpadPan, nudgeDelta, nudgeNodes, settleAltDrag } from "./selection";
+import { applySelection, duplicateNodes, isTrackpadPan, nudgeDelta, nudgeNodes } from "./selection";
 
 const prompt = (id: string, pos: [number, number]): BoardNode => ({ type: "prompt", id, pos, size: [100, 100], text: id, extra: {} });
 const board = (nodes: BoardNode[]): Board => ({ format_version: 1, title: "t", viewport: { zoom: 1, x: 0, y: 0 }, nodes, edges: [], extra: {} });
@@ -59,15 +59,6 @@ describe("原地复制", () => {
     expect(r.pairs).toEqual([["a", "new1"]]);
     expect(r.board.nodes.find((x) => x.id === "new1")).toMatchObject({ pos: [50, 60], text: "a" });
     expect(r.board.nodes).toHaveLength(3);
-  });
-
-  it("Alt + 拖松手：原节点回到起点，副本落在松手处（被拖走的是副本）", () => {
-    const dragged = board([prompt("a", [300, 200]), prompt("copy", [0, 0])]);
-    const b = settleAltDrag(dragged, [["a", "copy"]], new Map([["a", [0, 0] as [number, number]]]));
-    expect(b.nodes.map((x) => [x.id, x.type === "unknown" ? null : x.pos])).toEqual([
-      ["a", [0, 0]],
-      ["copy", [300, 200]],
-    ]);
   });
 });
 

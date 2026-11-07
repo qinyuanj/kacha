@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newBoard, type Board, type BoardEdge, type BoardNode, type PromptNode, type ReferenceNode, type ResultNode, type TaskNode, taskCount } from "./board";
 import { BUILTIN_TABLE } from "./capabilities";
-import { changeClass, continueEditingChange, editBoard, type BoardChange, type EditEnv } from "./edit";
+import { continueEditingChange, editBoard, type BoardChange, type EditEnv } from "./edit";
 import { cardDropConnection } from "./dragCreate";
 import { MERGE_PAUSE_MS } from "./history";
 import { copySelection, LOCKED_HINT, PASTE_OFFSET } from "./iterate";
@@ -62,17 +62,6 @@ function env(patch: Partial<EditEnv> = {}): EditEnv {
 const node = <T extends BoardNode>(b: Board, id: string) => b.nodes.find((n) => n.id === id) as T;
 const taskOf = (b: Board, id = "t") => node<TaskNode>(b, id);
 const locked = (...ids: string[]) => env({ locked: new Set(ids) });
-
-describe("变更类别由种类决定", () => {
-  it("视图 / 系统 / 用户", () => {
-    expect(changeClass({ kind: "viewport", viewport: { x: 0, y: 0, zoom: 1 } })).toBe("view");
-    expect(changeClass({ kind: "lastModel", model: PRO })).toBe("view");
-    expect(changeClass({ kind: "title", title: "x" })).toBe("view");
-    expect(changeClass({ kind: "submitted", taskId: "t", lastSubmitted: {} })).toBe("system");
-    expect(changeClass({ kind: "syncAutoRatios" })).toBe("system");
-    expect(changeClass({ kind: "move", moves: [], drag: null })).toBe("user");
-  });
-});
 
 describe("用户变更：结果画板、撤销步、建议选中", () => {
   it("移动：取整；拖动中按拖动编号归并，Alt + 拖显示复制", () => {
@@ -438,15 +427,9 @@ describe("系统变更", () => {
 });
 
 describe("不同入口发出同一变更、得到同一结果", () => {
-  const b = board([task("t"), result("r", "t"), result("s", "t")], [systemEdge("t", "r"), systemEdge("t", "s")]);
-
-  it("以此继续编辑：菜单与悬浮动作条（选区内）沿用多选；拖线建节点只接拖出的一张", () => {
+  it("以此继续编辑：从选区内发起时沿用多选；拖线建节点只接拖出的一张", () => {
     const selected = new Set(["r", "s"]);
-    const menu = continueEditingChange(selected, "r");
-    const bar = continueEditingChange(selected, "r");
-    expect(menu).toEqual(bar);
-    expect(menu).toMatchObject({ sources: ["r", "s"] });
-    expect(editBoard(b, menu, env())).toEqual(editBoard(b, bar, env()));
+    expect(continueEditingChange(selected, "r")).toMatchObject({ sources: ["r", "s"] });
     expect(continueEditingChange(selected, "r", null, [900, 0])).toMatchObject({ sources: ["r"], at: [900, 0] });
     expect(continueEditingChange(new Set(["s"]), "r")).toMatchObject({ sources: ["r"] });
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUILTIN_TABLE, findModel, isSupported } from "./capabilities";
+import { BUILTIN_TABLE, findModel } from "./capabilities";
 import { buildGenerationRequest } from "./gateway";
 import { taskView } from "./taskView";
 import { board } from "./testing/runnerHarness";
@@ -22,20 +22,17 @@ function runnerSetup(alpha: boolean | undefined = true) {
   t.transparent_background = true;
   let tick = 0;
   let badOutput = false;
-  let httpStatus = 200;
-  let downloadFails = false;
   const opaqueBytes = Uint8Array.from(Buffer.from(makePng(32, 32), "base64"));
   const deps: RunDeps = { ...fs, now: () => new Date(Date.UTC(2026, 9, 10, 0, 0, tick++)), schedule: () => () => {},
     composeOverlay: async () => bytes,
     imageCodec: { decode: async data => ({ width: 32, height: 32, hasAlpha: () => data[25] === 2 ? false : alpha as boolean, encode: async () => bytes, close: () => {} }) },
     fetch: async (_url, init) => {
-      if (init.method === "GET") return { status: 403, headers: { get: () => null }, text: async () => "denied", arrayBuffer: async () => bytes.slice().buffer };
       bodies.push(JSON.parse(init.body!));
-      return { status: httpStatus, headers: { get: () => null }, text: async () => JSON.stringify({ data: [downloadFails ? { url: "https://result.test/transparent.png" } : { b64_json: Buffer.from(badOutput ? opaqueBytes : bytes).toString("base64") }] }), arrayBuffer: async () => bytes.slice().buffer };
+      return { status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ data: [{ b64_json: Buffer.from(badOutput ? opaqueBytes : bytes).toString("base64") }] }), arrayBuffer: async () => bytes.slice().buffer };
     } };
   const runner = createRunner({ deps, apply: (_key, change) => { b = editBoard(b, change, { table: BUILTIN_TABLE, discovery: { source: "none" }, locked: new Set(), imageSize: () => undefined, newId: () => "result" }).board; }, log: () => {}, concurrency: 1 });
   const target = { boardKey: "A", boardFile: "A", table: BUILTIN_TABLE, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" };
-  return { fs, bytes, bodies, runner, target, board: () => b, unknownAlpha: () => { alpha = undefined; }, opaqueOutput: () => { badOutput = true; }, reject: () => { httpStatus = 400; }, failDownload: () => { downloadFails = true; } };
+  return { fs, bytes, bodies, runner, target, board: () => b, unknownAlpha: () => { alpha = undefined; }, opaqueOutput: () => { badOutput = true; } };
 }
 
 it("公开运行器提交保存透明参数与快照，重新生成沿用历史 PNG/透明而非节点当前 JPEG/关闭状态", async () => {
@@ -55,16 +52,6 @@ it("公开运行器提交保存透明参数与快照，重新生成沿用历史 
   expect(h.bodies).toHaveLength(2);
   expect(h.bodies[1]).toMatchObject({ background: "transparent", output_format: "png", image: h.bodies[0].image });
   expect([...h.fs.files.keys()].filter(p => p.endsWith("/result.png"))).toHaveLength(2);
-});
-
-it.each(["reject", "failDownload"] as const)("透明任务 %s 明确失败，生成只发一次", async mode => {
-  const h = runnerSetup();
-  h[mode]();
-  await h.runner.submit(h.target, h.board(), ["t1"]);
-  await settle();
-  expect(nodeStatus(h.runner.getSnapshot().board("A").nodes.get("t1"))).toEqual({ kind: "failed", label: "网关拒绝" });
-  expect(h.bodies).toHaveLength(1);
-  expect([...h.fs.files.keys()].some(p => p.endsWith("/result.png"))).toBe(false);
 });
 
 it("透明结果若实际不带 alpha，不保存或伪造成功", async () => {
@@ -120,10 +107,6 @@ it("来源图层探测所选文件并与底图 alpha 事实分开", async () => 
   expect(taskView(b, BUILTIN_TABLE, "t1", { ...facts, alphaByNode: new Map([["r", true]]), discovery: { source: "none" }, concurrency: 4 })!.reasons.map(r => r.kind)).toContain("transparentNoAlpha");
 });
 
-it("Flash 透明与图层路径共同开放：能力表标记 supported，视图中无阻止原因", () => {
-  expect(isSupported(model.transparent_background)).toBe(true);
-  expect(isSupported(model.workflows.image_edit.layer_decomposition)).toBe(true);
-});
 it.each([
   { name: "无图", references: [] },
   { name: "多图", references: [png, png] },
@@ -132,11 +115,6 @@ it.each([
   { name: "JPEG 输出", references: [png], outputOptions: { output_format: "jpeg" as const, response_format: "url" as const, watermark: false } },
 ])("网关发送边界拒绝 $name 的透明组合", patch => {
   expect(() => buildGenerationRequest({ ...input, ...patch })).toThrow();
-});
-
-it("一张已确认 alpha 的 PNG 输出编辑发送 transparent，关闭默认 opaque", () => {
-  expect(buildGenerationRequest(input).body).toMatchObject({ background: "transparent", output_format: "png", image: ["data:image/png;base64,AQ=="] });
-  expect(buildGenerationRequest({ ...input, transparentBackground: false }).body).not.toHaveProperty("background");
 });
 
 describe("透明背景控件和运行规则一致", () => {

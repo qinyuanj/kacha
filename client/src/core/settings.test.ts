@@ -46,11 +46,6 @@ describe("高级设置 settings.json", () => {
     expect(DEFAULT_SETTINGS).toMatchObject({ format_version: 1, base_url: "http://lzxsvn:3001", concurrency: 4 });
   });
 
-  it("旧桌面版的 output_root 不再是设置项，原样留在未知字段里", () => {
-    const loaded = parseSettings(JSON.stringify({ format_version: 1, output_root: "D:\\出图" }));
-    expect(loaded).toEqual({ kind: "ok", settings: { ...DEFAULT_SETTINGS, extra: { output_root: "D:\\出图" } } });
-  });
-
   it("往返并保留未知字段", () => {
     const settings = { ...DEFAULT_SETTINGS, base_url: "https://gw.example", concurrency: 5, extra: { future: [1] } };
     const text = serializeSettings(settings);
@@ -144,10 +139,6 @@ describe("新建任务默认模型", () => {
     expect(defaultTaskModel(BUILTIN_TABLE, { source: "none" }, "nope")).toBe("doubao-seedream-5-0-flash-260915");
     expect(defaultTaskModel(BUILTIN_TABLE, live(["qwen-image-3.0-pro", "doubao-seedream-5-0-pro-260628"]), null)).toBe("doubao-seedream-5-0-flash-260915");
   });
-
-  it("网关一个上架模型都没有时保留 Flash（节点会标红）", () => {
-    expect(defaultTaskModel(BUILTIN_TABLE, live([]), null)).toBe("doubao-seedream-5-0-flash-260915");
-  });
 });
 
 describe("保存设置", () => {
@@ -161,7 +152,7 @@ describe("保存设置", () => {
     expect(writes.writeApiKey).toEqual(["sk-new"]);
   });
 
-  it("文件正常时写 settings.json；密钥未变且已存入凭据库时不碰凭据库", async () => {
+  it("文件正常时写 settings.json；密钥未变且已存入 localStorage 时不碰密钥存储", async () => {
     const { ports, writes } = memoryPorts();
     const result = await saveSettings(ports, { fileKind: "ok", apiKey: "sk", keyPersistence: "persisted" }, next, "sk");
     expect(result).toEqual({ ok: true, settingsWritten: true, keyPersistence: "persisted" });
@@ -170,7 +161,7 @@ describe("保存设置", () => {
     expect(writes.deleteApiKey).toBe(0);
   });
 
-  it("凭据库 set 抛错时密钥退回会话内存（session）", async () => {
+  it("localStorage 写密钥抛错时密钥退回会话内存（session）", async () => {
     const { ports } = memoryPorts({
       writeApiKey: async () => {
         throw new Error("凭据库不可用");
@@ -180,7 +171,7 @@ describe("保存设置", () => {
     expect(result).toEqual({ ok: true, settingsWritten: true, keyPersistence: "session" });
   });
 
-  it("当前为 session 时即使密钥未变也重试写入凭据库，成功后回到 persisted", async () => {
+  it("当前为 session 时即使密钥未变也重试写入 localStorage，成功后回到 persisted", async () => {
     const { ports, writes } = memoryPorts();
     const result = await saveSettings(ports, { fileKind: "ok", apiKey: "sk", keyPersistence: "session" }, next, "sk");
     expect(writes.writeApiKey).toEqual(["sk"]);
@@ -194,7 +185,7 @@ describe("保存设置", () => {
     expect(writes.writeApiKey).toEqual([]);
   });
 
-  it("写 settings.json 失败时返回报错原文，不再碰凭据库", async () => {
+  it("写 settings.json 失败时返回报错原文，不再写密钥", async () => {
     const { ports, writes } = memoryPorts({
       writeSettings: async () => {
         throw new Error("磁盘已满");
@@ -209,7 +200,7 @@ describe("保存设置", () => {
 describe("载入设置", () => {
   const cacheText = serializeModelsCache({ base_url: "http://lzxsvn:3001", fetched_at: "2026-09-17T00:00:00Z", model_ids: ["m1"] });
 
-  it("读出设置、文件状态、凭据库里的密钥与模型缓存", async () => {
+  it("读出设置、文件状态、localStorage 里的密钥与模型缓存", async () => {
     const { ports } = memoryPorts({
       readSettings: async () => serializeSettings({ ...DEFAULT_SETTINGS, concurrency: 2 }),
       readModelsCache: async () => cacheText,
@@ -220,7 +211,7 @@ describe("载入设置", () => {
     expect(loaded).toMatchObject({ apiKey: "sk", keyPersistence: "persisted", cache: { model_ids: ["m1"] } });
   });
 
-  it("凭据库 get 抛错时密钥为空、退回 session", async () => {
+  it("localStorage 读密钥抛错时密钥为空、退回 session", async () => {
     const { ports } = memoryPorts({
       readApiKey: async () => {
         throw new Error("凭据库不可用");

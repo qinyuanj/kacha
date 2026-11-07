@@ -80,8 +80,6 @@ export function sniffImage(bytes: Uint8Array): { ext: string; mediaType: string 
 
 import { sha256Hex } from "./sha256";
 
-export { sha256Hex };
-
 /** 生效能力表（内置 + 覆盖合并后）的摘要，记入 task.json 便于追溯当时的能力判断。 */
 export function tableDigest(table: CapabilityTable): Promise<string> {
   return sha256Hex(new TextEncoder().encode(JSON.stringify(table)));

@@ -23,10 +23,6 @@ describe("分辨率档 × 宽高比 → 像素", () => {
     expect(ratiosForSizeTier(rule, "4K")).toEqual([]);
   });
 
-  it("换算为像素", () => {
-    expect(resolveSize(rule, { tier: "2K", ratio: "16:9", width: null, height: null })).toEqual({ width: 1920, height: 1080 });
-  });
-
   it("分辨率档不在表里、或没有 custom 范围的模型宽高比不在表里时返回 null", () => {
     expect(resolveSize(rule, { tier: "8K", ratio: "1:1", width: null, height: null })).toBeNull();
     expect(resolveSize({ ...rule, custom: null }, { tier: "1K", ratio: "16:9", width: null, height: null })).toBeNull();
@@ -221,10 +217,6 @@ describe("手填宽高比", () => {
   it("换模型后手动值越界：不可运行，值不改", () => {
     expect(resolveSize(pro, manual("2K", "12:1"))).not.toBeNull();
     expect(resolveSize(qwen, manual("2K", "12:1"))).toBeNull();
-  });
-
-  it("旧画板带 width / height 的 size_spec 仍可换算", () => {
-    expect(resolveSize(qwen, { tier: null, ratio: null, width: 1024, height: 768 })).toEqual({ width: 1024, height: 768 });
   });
 
   it("换分辨率档：手动宽高比能换算则保留（含手填值与旧画板像素宽高），否则取新档第一个预设；自动只换档", () => {

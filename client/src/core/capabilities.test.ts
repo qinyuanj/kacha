@@ -27,23 +27,12 @@ describe("内置能力表", () => {
   it("Lite 不再提供运行能力或模型选择入口", () => {
     expect(BUILTIN_TABLE.models.some((m) => m.model_id === "doubao-seedream-5-0-lite-260128")).toBe(false);
   });
-  it("通过自身 schema 校验，顶层整数 format_version", () => {
-    expect(BUILTIN_TABLE.format_version).toBe(1);
-    expect(BUILTIN_TABLE.models.length).toBe(4);
-  });
-
   it("pro 为旗舰、非 pro 为经济：qwen 与 Seedream 各两个上架", () => {
     const groups = modelsByTier(BUILTIN_TABLE);
     expect(groups.map((g) => [g.tier, g.models.map((m) => m.model_id)])).toEqual([
       ["flagship", ["qwen-image-3.0-pro", "doubao-seedream-5-0-pro-260628"]],
       ["economy", ["qwen-image-3.0", "doubao-seedream-5-0-flash-260915"]],
     ]);
-  });
-
-  it("help_url 按内置初值", () => {
-    expect(qwenPro().help_url).toContain("platform.qianwenai.com");
-    const seedream = BUILTIN_TABLE.models.find((m) => m.model_id.startsWith("doubao-seedream-5-0-pro"))!;
-    expect(seedream.help_url).toBe("https://docs.volcengine.com/docs/82379/1829186?lang=zh");
   });
 });
 

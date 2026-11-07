@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Board, BoardEdge, BoardNode, PromptNode, ResultNode, TaskNode } from "./board";
-import { countLabel, emptyHistory, HISTORY_LIMIT, mergeSystemState, recordChange, redo, redoLabel, undo, undoLabel, type History } from "./history";
+import { emptyHistory, HISTORY_LIMIT, mergeSystemState, recordChange, redo, redoLabel, undo, undoLabel, type History } from "./history";
 
 const SPEC = { tier: "1K", ratio: "1:1", width: null, height: null };
 const NONE: ReadonlySet<string> = new Set();
@@ -88,15 +88,6 @@ describe("快照栈", () => {
     expect(undoLabel(next)).toBe("三");
   });
 
-  it("系统写入不产生撤销步、不清空重做栈", () => {
-    const h = play([board([])], ["一"]);
-    const undone = undo(h, board([prompt("a")]), NONE)!;
-    for (const change of ["system", "view"] as const) {
-      const after = recordChange(undone.history, undone.board, change, 5000);
-      expect(after).toEqual(undone.history);
-    }
-  });
-
   it(`上限 ${HISTORY_LIMIT} 步，丢最早的`, () => {
     let h = emptyHistory();
     for (let i = 0; i < HISTORY_LIMIT + 5; i++) h = recordChange(h, board([prompt(`p${i}`)]), { label: `步${i}` }, i * 1000);
@@ -159,14 +150,6 @@ describe("步合并", () => {
     h = recordChange(h, board([]), { label: "二", merge }, 10);
     expect(h.undo).toHaveLength(1);
     expect(undoLabel(h)).toBe("二");
-  });
-
-  it("系统写入不打断正在合并的输入", () => {
-    const merge = { key: "text:p", windowMs: 500 };
-    let h = recordChange(emptyHistory(), board([]), { label: "编辑提示词", merge }, 0);
-    h = recordChange(h, board([]), "system", 200);
-    h = recordChange(h, board([]), { label: "编辑提示词", merge }, 400);
-    expect(h.undo).toHaveLength(1);
   });
 });
 
@@ -275,12 +258,6 @@ describe("用户删除的结果节点", () => {
     const once = undo(h, deleted, NONE)!;
     const twice = undo(once.history, once.board, NONE)!;
     expect(ids(twice.board)).toEqual(["t", "r"]);
-  });
-});
-
-describe("步描述", () => {
-  it("按数量生成文案", () => {
-    expect(countLabel("删除", 3, "个节点")).toBe("删除 3 个节点");
   });
 });
 

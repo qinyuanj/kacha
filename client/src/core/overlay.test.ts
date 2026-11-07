@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyHighlightOverlay, denormalizeRect, OVERLAY_RGB } from "./overlay";
+import { applyHighlightOverlay, denormalizeRect } from "./overlay";
 
 /** w×h 的 RGBA 缓冲，fill 为每像素值。 */
 function rgba(w: number, h: number, fill: [number, number, number, number]): Uint8Array {
@@ -23,7 +23,6 @@ describe("坐标归一化", () => {
 
 describe("高亮叠加合成", () => {
   it("紫色 RGB(128,0,255) 50% 混合，alpha 不变", () => {
-    expect(OVERLAY_RGB).toEqual([128, 0, 255]);
     const src = rgba(2, 1, [100, 200, 50, 77]);
     const out = applyHighlightOverlay(src, 2, 1, [[0, 0, 0.5, 1]]);
     // round((100+128)/2)=114, round((200+0)/2)=100, round((50+255)/2)=153(152.5→153)

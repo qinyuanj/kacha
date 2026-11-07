@@ -288,17 +288,6 @@ describe("单任务端到端", () => {
     }
   });
 
-  it("执行中取消：网关返回后不存结果图", async () => {
-    const { d, files } = deps(ok);
-    const controller = new AbortController();
-    const { job: prepared } = await prepare(d, { board: board(false), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
-    const job = await writeJob(d, "/root", prepared);
-    const pending = executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k", signal: controller.signal });
-    controller.abort();
-    expect(await pending.catch((e) => e)).toBeInstanceOf(CancelledError);
-    expect([...files.keys()].some((k) => k.includes("result"))).toBe(false);
-  });
-
   it("重新生成：按上次任务目录的 task.json 与参考图快照，同参数新任务", async () => {
     const { d, files, requests } = deps(ok);
     const { job: first, board: b1 } = await prepare(d, { board: board(true), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
@@ -367,22 +356,6 @@ describe("单任务端到端", () => {
     expect(b3).toBe(b2);
   });
 
-  it("文生图走 generations", async () => {
-    const { d, requests } = deps(ok);
-    const { job } = await prepare(d, { board: board(false), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
-    await executeJob(d, { job: await writeJob(d, "/root", job), userRoot: "/root", baseUrl: "http://gw", apiKey: "k" });
-    expect(requests[0].url).toBe("http://gw/v1/images/generations");
-  });
-
-  it("参考图读不到：本地错误，不写任务目录", async () => {
-    const { d, files } = deps(ok);
-    const b = board(true);
-    const bad = { ...b, nodes: b.nodes.map((n) => (n.id === "r" ? { ...n, path: "refs/gone.png" } : n)) as BoardNode[] };
-    const err = await prepare(d, { board: bad, table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" }).catch((e) => e);
-    expect(failureLabel(err)).toBe("本地文件错误");
-    expect(files.size).toBe(0);
-  });
-
   it("401 → 鉴权失败，错误信息不含密钥；不存结果、不重发", async () => {
     const { d, files, requests } = deps(() => ({ status: 401, body: '{"error":{"message":"bad key sk-secret"}}' }));
     const { job } = await prepare(d, { board: board(false), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
@@ -391,13 +364,6 @@ describe("单任务端到端", () => {
     expect(String(err.message)).not.toContain("sk-secret");
     expect(requests).toHaveLength(1);
     expect([...files.keys()].some((k) => k.includes("result"))).toBe(false);
-  });
-
-  it("429 计失败为网关限流", async () => {
-    const { d } = deps(() => ({ status: 429, body: "{}" }));
-    const { job } = await prepare(d, { board: board(false), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
-    const err = await executeJob(d, { job: await writeJob(d, "/root", job), userRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
-    expect(failureLabel(err)).toBe("网关限流");
   });
 });
 

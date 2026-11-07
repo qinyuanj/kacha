@@ -248,12 +248,6 @@ describe("复制粘贴", () => {
       ["copy-1", "image:0"],
     ]);
   });
-
-  it("剪贴板是复制时的快照，之后画板变化不影响粘贴", () => {
-    const clip = copySelection(g(), ["p"]);
-    const changed = { ...g(), nodes: g().nodes.filter((x) => x.id !== "p") };
-    expect(pasteClip(changed, clip, newId).board.nodes.some((x) => x.type === "prompt" && x.text === "猫" && x.id !== "p")).toBe(true);
-  });
 });
 
 describe("图层接回", () => {

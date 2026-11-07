@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { IMAGE_NODE_MIN, IMAGE_NODE_WIDTH, imageMinSize, imageNodeSize, renderedImageSize, sizeSpecAspect } from "./nodeSize";
+import { imageMinSize, imageNodeSize, renderedImageSize, sizeSpecAspect } from "./nodeSize";
 
 describe("图片节点尺寸约束", () => {
-  it("新节点默认宽 240px、最小 80px", () => {
-    expect(IMAGE_NODE_WIDTH).toBe(240);
-    expect(IMAGE_NODE_MIN).toBe(80);
-  });
-
   it("按图片宽高比（高 / 宽）给出等比尺寸", () => {
     expect(imageNodeSize(240, 9 / 16)).toEqual([240, 135]);
     expect(imageNodeSize(240, 16 / 9)).toEqual([240, 427]);

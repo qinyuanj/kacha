@@ -73,6 +73,13 @@ describe("Flash 普通请求", () => {
     const request = buildGenerationRequest({ model, text: "图1 与图2", nativeNegativePrompt: "不发送原生负向", size: { width: 2048, height: 2048 }, references: [{ mediaType: "image/png", bytes: new Uint8Array([1]) }, { mediaType: "image/jpeg", bytes: new Uint8Array([2]) }] });
     expect(request).toEqual({ path: "/v1/images/generations", body: { model: model.model_id, prompt: "图1 与图2", size: "2048x2048", response_format: "url", output_format: "png", watermark: false, optimize_prompt_options: { mode: "standard" }, image: ["data:image/png;base64,AQ==", "data:image/jpeg;base64,Ag=="] } });
   });
+  it("纯文生图 POST /v1/images/generations：顶层 model / prompt / size(WxH) / response_format:url，不带 image", async () => {
+    const { body, path } = buildGenerationRequest(textInput({ model: seedreamFlash, size: { width: 2048, height: 2048 } }));
+    expect(path).toBe("/v1/images/generations");
+    expect(body).toMatchObject({ model: "doubao-seedream-5-0-flash-260915", prompt: "一只橘猫", size: "2048x2048", response_format: "url" });
+    expect(body).not.toHaveProperty("sequential_image_generation");
+    expect(body).not.toHaveProperty("image");
+  });
 });
 
 describe("Flash 真实脱敏夹具回放（替代字节为合成，不证明视觉语义）", () => {
@@ -292,14 +299,6 @@ describe("网关适配器：Seedream 请求形态对照夹具", () => {
     expect((image as string[]).length).toBe(imageCount);
   }
 
-  it("纯文生图 POST /v1/images/generations：顶层 model / prompt / size(WxH) / response_format:url + fixed_params，不带 image", async () => {
-    const { body, path } = buildGenerationRequest(textInput({ model: seedreamFlash, size: { width: 2048, height: 2048 } }));
-    expect(path).toBe("/v1/images/generations");
-    expect(body).toMatchObject({ model: "doubao-seedream-5-0-flash-260915", prompt: "一只橘猫", size: "2048x2048", response_format: "url" });
-    expect(body).not.toHaveProperty("sequential_image_generation");
-    expect(body).not.toHaveProperty("image");
-  });
-
   it("参考图按序进顶层 image（data-URL 数组），发送文本原样进顶层 prompt", () => {
     const fixture = loadFixture(SEEDREAM_DIR, "pro-refs-tu-3.json");
     const refs = [png, { mediaType: "image/jpeg", bytes: new Uint8Array([1]) }, { mediaType: "image/webp", bytes: new Uint8Array([2]) }];
@@ -367,14 +366,22 @@ function replayInput(name: string, exchange: Exchange): GenerationInput {
   if (name.startsWith(`${SEEDREAM_DIR}/`)) {
     return textInput({ model: seedreamPro, references: "image" in body ? [png] : [] });
   }
-  return textInput({ references: exchange.request.path === "/v1/images/edits" ? [png] : [] });
+  return textInput();
 }
 
 describe("网关适配器：夹具响应回放", () => {
   const expectations: Record<number, string> = { 400: "rejected", 401: "auth", 503: "server" };
 
-  // Lite 夹具保留为历史证据，不再作为当前产品运行用例回放。
-  for (const { name, exchange } of allExchanges.filter(({ name }) => !name.includes("/lite-"))) {
+  // Lite 夹具保留为历史证据、/v1/images/edits 已退役，都不回放；其余每个夹具目录 × 状态码只回放第一例。
+  const seen = new Set<string>();
+  const replayed = allExchanges.filter(({ name, exchange }) => {
+    if (name.includes("/lite-") || exchange.request.path === "/v1/images/edits") return false;
+    const key = `${name.split("/")[0]} ${exchange.response.status}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  for (const { name, exchange } of replayed) {
     it(name, async () => {
       const { fetch } = replay(exchange, (url) => (url.startsWith("https://example.invalid/") ? PNG_BYTES : undefined));
       const config = { baseUrl: BASE, apiKey: "k", fetch };

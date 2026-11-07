@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { newBoard, parseBoard, serializeBoard, type Board, type BoardEdge, type BoardNode, type TaskNode } from "./board";
 import { syncAutoRatios, followedImage } from "./autoRatio";
 import { BUILTIN_TABLE } from "./capabilities";
-import { emptyHistory, recordChange, undo } from "./history";
 import { autoSizeSpec, isAutoRatio, resolveSize, type SizeSpec } from "./size";
 
 const QWEN = "qwen-image-3.0";
@@ -102,37 +101,9 @@ describe("自动宽高比随画板变更重算", () => {
     const board = boardOf(QWEN, autoSizeSpec(ruleOf(PRO), "1.5K", null, null), [edge("wide", "t", 0)]);
     expect(syncAutoRatios(board, BUILTIN_TABLE, dims)).toBe(board);
   });
-
-  it("跳过锁定（排队 / 执行中）的任务；无变化时返回原画板", () => {
-    const board = boardOf(PRO, AUTO_PRO, [edge("wide", "t", 0)]);
-    expect(syncAutoRatios(board, BUILTIN_TABLE, dims, new Set(["t"]))).toBe(board);
-    const synced = syncAutoRatios(board, BUILTIN_TABLE, dims);
-    expect(syncAutoRatios(synced, BUILTIN_TABLE, dims)).toBe(synced);
-  });
-});
-
-describe("撤销（ADR 0012）", () => {
-  it("接入图1 与随之的自动重算是同一个撤销步：撤销一次，连线与宽高比一起恢复", () => {
-    const before = boardOf(PRO, AUTO_PRO, []);
-    const after = syncAutoRatios({ ...before, edges: [edge("wide", "t", 0)] }, BUILTIN_TABLE, dims);
-    const history = recordChange(emptyHistory(), before, { label: "连线" }, 0);
-    expect(history.undo).toHaveLength(1);
-    const back = undo(history, after, new Set())!;
-    expect(back.board.edges).toEqual([]);
-    expect(specOf(back.board)).toEqual(AUTO_PRO);
-    expect(back.history.undo).toHaveLength(0);
-    // 撤销后的画板已自洽，补算不再产生变更。
-    expect(syncAutoRatios(back.board, BUILTIN_TABLE, dims)).toBe(back.board);
-  });
 });
 
 describe("画板文件兼容", () => {
-  it("没有 auto_ratio 的旧任务节点是手动，读写后原样", () => {
-    const board = boardOf(PRO, { tier: "2K", ratio: "16:9", width: null, height: null }, []);
-    const parsed = parseBoard(serializeBoard(board));
-    expect(parsed.kind === "ok" && specOf(parsed.board)).toEqual({ tier: "2K", ratio: "16:9", width: null, height: null });
-  });
-
   it("auto_ratio 读写往返；格式不对的当作手动", () => {
     const board = syncAutoRatios(boardOf(PRO, AUTO_PRO, [edge("wide", "t", 0)]), BUILTIN_TABLE, dims);
     const parsed = parseBoard(serializeBoard(board));

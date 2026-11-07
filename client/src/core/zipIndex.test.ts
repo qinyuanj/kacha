@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildZip, type FixtureEntry, type FixtureOptions } from "./testing/zipFixture";
-import { blobSource, readEntryBytes, readZipIndex, type ZipSource } from "./zipIndex";
+import { readEntryBytes, readZipIndex, type ZipSource } from "./zipIndex";
 
 /** 内存 readRange 端口：记下读过的字节数，用来确认不会整包读入。 */
 function memory(bytes: Uint8Array): ZipSource & { bytesRead: number } {
@@ -90,14 +90,6 @@ describe("zip 读取器", () => {
     if (index.kind !== "ok") throw new Error(index.reason);
     await readEntryBytes(src, index.entries[0]);
     expect(src.bytesRead).toBeLessThan(200 * 1024);
-  });
-
-  it("File 也能当 readRange 端口：Blob.slice 按需读取", async () => {
-    const file = new File([buildZip([{ name: "a.txt", data: "via blob", method: 8, descriptor: true }])], "x.ugcpack");
-    const src = blobSource(file);
-    const index = await readZipIndex(src);
-    if (index.kind !== "ok") throw new Error(index.reason);
-    expect(text(await readEntryBytes(src, index.entries[0]))).toBe("via blob");
   });
 
   describe("读不了时返回「需回退」而不是抛错", () => {

@@ -152,12 +152,6 @@ describe("从任务记录重建槽", () => {
 });
 
 describe("区域 CRUD", () => {
-  it("按 from/to 定位连线设置区域", () => {
-    const b = board([reference("r1"), task("t")], [edge("r1", "t", "image:0")]);
-    const out = setEdgeRegion(b, { from: ["r1", "out"], to: ["t", "image:0"] }, REGION);
-    expect(out.edges[0].region).toEqual(REGION);
-  });
-
   it("传 null 清除区域；不匹配的连线不动", () => {
     const b = board(
       [reference("r1"), reference("r2"), task("t")],

@@ -12,9 +12,6 @@ export interface UserChange {
   merge?: { key: string; windowMs?: number };
 }
 
-/** system = 队列 / 提交写入；view = 视口平移缩放。两者都不进历史。 */
-export type Change = UserChange | "system" | "view";
-
 export interface Snapshot {
   board: Board;
   label: string;
@@ -51,8 +48,7 @@ export const countLabel = (verb: string, count: number, unit = "个节点") => `
 const capped = (stack: Snapshot[]) => (stack.length > HISTORY_LIMIT ? stack.slice(stack.length - HISTORY_LIMIT) : stack);
 
 /** 记录一次画板变更；before = 变更前的画板。 */
-export function recordChange(h: History, before: Board, change: Change, now: number): History {
-  if (change === "system" || change === "view") return h;
+export function recordChange(h: History, before: Board, change: UserChange, now: number): History {
   const { merge, label } = change;
   const seenResults = seeing(h.seenResults, before);
   const last = h.mergeable;

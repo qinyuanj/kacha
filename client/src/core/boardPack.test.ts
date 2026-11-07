@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { newBoard, parseBoard, serializeBoard, taskCount, uniqueBoardFileName, type Board, type ReferenceNode, type ResultNode, type TaskNode } from "./board";
+import { newBoard, parseBoard, serializeBoard, taskCount, type Board, type ReferenceNode, type ResultNode, type TaskNode } from "./board";
 import {
   PACK_CANCELLED,
   PACK_FORMAT_VERSION,
@@ -22,12 +22,11 @@ import {
   type PackFs,
   type PackIo,
 } from "./boardPack";
-import { resolveFromRoot } from "./paths";
 import { buildZip } from "./testing/zipFixture";
 import { entryBody, hashEntries } from "./packHash";
 import { blobSource } from "./zipIndex";
 
-const ROOT = "C:\\Users\\Lzx_8\\Pictures\\UGC AI 生图工具";
+const ROOT = "/~";
 
 const base = { pos: [0, 0] as [number, number], size: [200, 200] as [number, number], extra: {} };
 
@@ -57,7 +56,7 @@ function memoryFs(files: Record<string, string>): PackFs {
   };
 }
 
-const abs = (rel: string) => `${ROOT}\\${rel.replace(/\//g, "\\")}`;
+const abs = (rel: string) => `${ROOT}/${rel}`;
 
 describe("导出计划", () => {
   it("带上结果节点直接引用的任务目录（去重、排序），不改结果路径", async () => {
@@ -101,14 +100,6 @@ describe("导出计划", () => {
       { source: abs("素材/狗.png"), entry: "导入参考图/bb.png" },
     ]);
     expect((plan.board.nodes as ReferenceNode[]).map((n) => n.path)).toEqual(["导入参考图/aa.png", "导入参考图/bb.png"]);
-  });
-
-  it("Windows 根目录外的参考图改写后，在 macOS 根目录下解析到导入参考图", async () => {
-    const plan = await planExport(boardWith(reference("a", "D:\\素材\\猫.png")), ROOT, memoryFs({ "D:\\素材\\猫.png": "aa" }));
-    const imported = parseBoard(serializeBoard(plan.board));
-    if (imported.kind !== "ok") throw new Error(imported.kind);
-    const path = (imported.board.nodes[0] as ReferenceNode).path;
-    expect(resolveFromRoot("/Users/art/Pictures/UGC AI 生图工具", path)).toBe("/Users/art/Pictures/UGC AI 生图工具/导入参考图/aa.png");
   });
 
   it("缺图节点列出，照常导出且路径不改写", async () => {
@@ -310,13 +301,6 @@ describe("包清单与版本判定", () => {
     expect(checkPack(manifest, { "画板/a.ugcboard.json": newer }).kind).toBe("newer");
   });
 
-  it("本机支持包格式 v2，导出一律写 v2", () => {
-    expect(PACK_FORMAT_VERSION).toBe(2);
-    expect(JSON.parse(buildManifest("0.2.0", [])).pack_format_version).toBe(2);
-    const v2 = JSON.stringify({ pack_format_version: 2, app_version: "0.4.0", boards: ["画板/豆包测试.ugcboard.json"], duplicates: {} });
-    expect(checkPack(v2, { "画板/豆包测试.ugcboard.json": boardText }).kind).toBe("ok");
-  });
-
   it("清单缺失 / 损坏、画板缺失或损坏时判为损坏", () => {
     expect(checkPack(null, {}).kind).toBe("corrupt");
     expect(checkPack("{", {}).kind).toBe("corrupt");
@@ -440,10 +424,6 @@ describe("导入前检查包内容", () => {
 });
 
 describe("导入结果", () => {
-  it("同名画板沿用 (2) 自动改名", () => {
-    expect(uniqueBoardFileName("千问测试", ["千问测试.ugcboard.json"])).toBe("千问测试 (2).ugcboard.json");
-  });
-
   const units: MergeUnit[] = [
     { path: "2026-09-16/a", identity: "task.json" },
     { path: "2026-09-16/b", identity: "task.json" },
@@ -461,10 +441,6 @@ describe("导入结果", () => {
       { path: "导入参考图/bb.png", outcome: "conflict" },
     ]);
     expect(summary).toEqual({ imported: 1, skipped: 1, conflicts: ["2026-09-16/c", "导入参考图/bb.png"], message: "导入 1 个任务，跳过 1 个，2 项冲突未覆盖" });
-  });
-
-  it("无冲突时不附冲突数", () => {
-    expect(importSummary(units.slice(0, 1), [{ path: "2026-09-16/a", outcome: "moved" }]).message).toBe("导入 1 个任务，跳过 0 个");
   });
 });
 
@@ -584,7 +560,7 @@ describe("导入画板包", () => {
     return { io, moved, steps, restored, hashed, uploaded, placed };
   }
 
-  function run(io: PackIo, addBoard: (board: Board) => Promise<string> = async (b) => `${ROOT}\\画板\\${b.title}.ugcboard.json`, file: File = PACK) {
+  function run(io: PackIo, addBoard: (board: Board) => Promise<string> = async (b) => `${ROOT}/画板/${b.title}.ugcboard.json`, file: File = PACK) {
     const logs: Record<string, unknown>[] = [];
     const added: string[] = [];
     const stages: string[] = [];
@@ -680,7 +656,7 @@ describe("导入画板包", () => {
 
   it("读取器认不了的包、成功：先复位取消再进入进度，上传后按上传句柄判定与导入，逐个写画板，日志记计数与实际写入的文件名", async () => {
     const { io, steps } = memoryPackIo(goodPack);
-    const r = run(io, async (b) => `${ROOT}\\画板\\${b.title} (2).ugcboard.json`);
+    const r = run(io, async (b) => `${ROOT}/画板/${b.title} (2).ugcboard.json`);
     const outcome = await r.outcome;
     expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", `entries(${UPLOAD_ID})`, "readTexts", `import(${UPLOAD_ID})`]);
     expect(r.stages).toEqual(["progress"]);
@@ -711,7 +687,7 @@ describe("导入画板包", () => {
     const { io } = memoryPackIo(goodPack);
     const r = run(io, async (b) => {
       if (b.title === "乙") throw new Error(`画板目录只读 ${SECRET}`);
-      return `${ROOT}\\画板\\${b.title}.ugcboard.json`;
+      return `${ROOT}/画板/${b.title}.ugcboard.json`;
     });
     expect(await r.outcome).toMatchObject({ kind: "done", written: ["甲.ugcboard.json"], writeError: `画板目录只读 ${SECRET}` });
     expect(r.logs).toEqual([

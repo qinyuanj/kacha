@@ -84,16 +84,6 @@ export function isDirty(board: Board, taskId: string): boolean {
   return canonical(pick(current as unknown as Record<string, unknown>)) !== canonical(pick(last));
 }
 
-/** 提交时写入 last_submitted 快照。 */
-export function withSubmitted(board: Board, taskId: string, submittedTaskId: string): Board {
-  const snapshot = snapshotOf(board, taskId);
-  if (!snapshot) return board;
-  return {
-    ...board,
-    nodes: board.nodes.map((n) => (n.id === taskId && n.type === "task" ? { ...n, last_submitted: { task_id: submittedTaskId, ...snapshot } } : n)),
-  };
-}
-
 /**
  * 最近一次提交的各份任务编号：last_submitted.task_id 加上同一次提交已派发的各份（copy_task_ids，份数 > 1 时才有）。
  * 不参与脏判据；没有新字段的旧画板只有 task_id。

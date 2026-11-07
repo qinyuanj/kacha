@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Board, BoardEdge, BoardNode, TaskNode } from "./board";
 import { BUILTIN_TABLE } from "./capabilities";
-import { LOCKED_HINT } from "./iterate";
+import { LOCKED_HINT, TASK_BUSY } from "./iterate";
 import { clampMenuPosition, menuItems, selectionForMenu, actionBarItems, type MenuFacts } from "./contextMenu";
 
 const SPEC_2K = { tier: "2K", ratio: "16:9", width: null, height: null };
@@ -116,7 +116,7 @@ describe("图片节点菜单", () => {
 describe("任务 / 提示词节点菜单", () => {
   const submitted = { task_id: "20260917-0001" };
 
-  it("空闲任务：展开在首；运行可用，取消置灰；没提交过时重新生成置灰", () => {
+  it("空闲任务：运行在首且可用，取消置灰；没提交过时重新生成置灰", () => {
     const b = board([task("t")]);
     expect(summary(menuItems({ kind: "node", nodeId: "t" }, facts({ board: b, selected: new Set(["t"]) })))).toEqual([
       ["run", "运行", null],
@@ -133,22 +133,15 @@ describe("任务 / 提示词节点菜单", () => {
   it("排队 / 执行中的任务：只有取消可用（删除走删除规则）", () => {
     const b = board([task("t", { last_submitted: submitted })]);
     expect(summary(menuItems({ kind: "node", nodeId: "t" }, facts({ board: b, selected: new Set(["t"]), locked: new Set(["t"]) })))).toEqual([
-      ["run", "运行", "任务正在排队 / 执行"],
-      ["regenerate", "重新生成", "任务正在排队 / 执行"],
+      ["run", "运行", TASK_BUSY],
+      ["regenerate", "重新生成", TASK_BUSY],
       ["cancel", "取消", null],
       "---",
       ["toggleSettings", "展开", null],
-      ["viewSendText", "查看发送文本", "任务正在排队 / 执行"],
+      ["viewSendText", "查看发送文本", TASK_BUSY],
       "---",
       ["delete", "删除", null],
     ]);
-  });
-
-  it("标红任务仍可查看发送文本", () => {
-    // 没接正向提示词 = 标红。
-    const b = board([task("t")]);
-    const items = menuItems({ kind: "node", nodeId: "t" }, facts({ board: b, selected: new Set(["t"]) }));
-    expect(items.find((i) => i.action === "viewSendText")?.disabledReason).toBeNull();
   });
 
   it("已展开的任务：该项为收起", () => {

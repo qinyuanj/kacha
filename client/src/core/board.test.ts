@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   BOARD_FORMAT_VERSION,
   DEFAULT_BOARD_TITLE,
-  boardFileName,
-  newBoard,
   openBoard,
   parseBoard,
   serializeBoard,
@@ -237,13 +235,13 @@ describe("主文件损坏回退 .bak", () => {
 
 describe("文件名由标题派生", () => {
   it("去掉非法字符与首尾空白、结尾点", () => {
-    expect(boardFileName('角色/设定:<v2>?*"|\\ ')).toBe("角色设定v2.ugcboard.json");
-    expect(boardFileName("草稿..")).toBe("草稿.ugcboard.json");
+    expect(uniqueBoardFileName('角色/设定:<v2>?*"|\\ ', [])).toBe("角色设定v2.ugcboard.json");
+    expect(uniqueBoardFileName("草稿..", [])).toBe("草稿.ugcboard.json");
   });
 
   it("去完为空时用默认标题；Windows 保留名加下划线", () => {
-    expect(boardFileName("///")).toBe(`${DEFAULT_BOARD_TITLE}.ugcboard.json`);
-    expect(boardFileName("con")).toBe("con_.ugcboard.json");
+    expect(uniqueBoardFileName("///", [])).toBe(`${DEFAULT_BOARD_TITLE}.ugcboard.json`);
+    expect(uniqueBoardFileName("con", [])).toBe("con_.ugcboard.json");
   });
 
   it("重名加 (2)、(3)，大小写不敏感，排除自身", () => {
@@ -251,10 +249,5 @@ describe("文件名由标题派生", () => {
     expect(uniqueBoardFileName("未命名画板", ["未命名画板.ugcboard.json"])).toBe("未命名画板 (2).ugcboard.json");
     expect(uniqueBoardFileName("Cat", ["cat.ugcboard.json", "Cat (2).ugcboard.json"])).toBe("Cat (3).ugcboard.json");
     expect(uniqueBoardFileName("Cat", ["Cat.ugcboard.json"], "Cat.ugcboard.json")).toBe("Cat.ugcboard.json");
-  });
-
-  it("新建画板默认标题「未命名画板」", () => {
-    expect(newBoard().title).toBe("未命名画板");
-    expect(newBoard().nodes).toEqual([]);
   });
 });

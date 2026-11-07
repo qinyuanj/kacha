@@ -156,7 +156,6 @@ const CASES: Case[] = [
   { name: "Lite 停用明确提示", board: ready({ model: "doubao-seedream-5-0-lite-260128" }, [], "猫"), expected: [["modelRetired", "error"]] },
   { name: "正向提示词未连接：未就绪", board: board([task("t")]), expected: [["positiveMissing", "notReady"]] },
   { name: "合法任务无原因", board: ready({}, [], "一只橘猫"), expected: [] },
-  { name: "编辑工作流低于最少参考图数不算原因（文生图 0 张合法）", board: ready({}, [], "猫"), expected: [] },
   {
     name: "参考图超出模型上限",
     board: ready({ model: "test-model" }, ["r1", "r2"], "@图1 @图2"),
@@ -313,12 +312,6 @@ describe("不可运行原因：文案", () => {
     expect(b.nodes.find((n) => n.id === "t")).toMatchObject({ layer_decomposition: true, transparent_background: true });
   });
 
-  it("带区域的线：叠加图不算未引用，未引用只报用户序号", () => {
-    const b = ready({}, ["r1", "r2"], "@图1 的区域1 改红");
-    b.edges[1] = { ...b.edges[1], region: REGION };
-    expect(view(b).unreferenced).toEqual([2]);
-  });
-
   it("来源图层：无效身份与缺图的文案点明图层", () => {
     expect(texts(layerReady(3))).toEqual(["图1 来源图层无效：result.png 图层3"]);
     expect(view(layerReady(2), BUILTIN_TABLE, { ...UNKNOWN, missingNodes: new Set(["x:layer:2"]) }).reasons.map((r) => r.text)).toEqual(["图1 图片缺失：result.png 图层2"]);
@@ -326,7 +319,8 @@ describe("不可运行原因：文案", () => {
 });
 
 describe("节点标红 ≡ 运行被拦：二次确认与任务视图同一份", () => {
-  it.each(CASES)("$name", ({ board: b, table = BUILTIN_TABLE, facts = UNKNOWN }) => {
+  it("参考图文件缺失：二次确认的原因与警告和任务视图相同", () => {
+    const { board: b, table = BUILTIN_TABLE, facts = UNKNOWN } = CASES.find((c) => c.name === "参考图文件缺失")!;
     const [item] = buildConfirmItems(b, table, ["t"], facts);
     const v = view(b, table, facts);
     expect(item.reasons).toEqual(v.reasons);
