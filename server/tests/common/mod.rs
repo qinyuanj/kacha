@@ -182,6 +182,24 @@ pub fn q(path: &str) -> String {
         .collect()
 }
 
+/// 在 `link` 建指向目录 `target` 的符号链接，供逃逸防护测试用。Windows 没有开发者模式或管理员权限时建不了：
+/// 打印原因并返回 false，调用方跳过符号链接断言；其它失败直接 panic，不悄悄漏测。
+pub fn symlink_dir(target: &Path, link: &Path) -> bool {
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(target, link);
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_dir(target, link);
+    match made {
+        Ok(()) => true,
+        // ERROR_PRIVILEGE_NOT_HELD：当前账户无权创建符号链接。
+        Err(e) if cfg!(windows) && e.raw_os_error() == Some(1314) => {
+            eprintln!("跳过符号链接断言：无权创建符号链接（需开发者模式或管理员权限）：{e}");
+            false
+        }
+        Err(e) => panic!("创建符号链接 {} 失败：{e}", link.display()),
+    }
+}
+
 /// 用户元数据文件位置。
 pub fn meta_path(root: &Path) -> PathBuf {
     root.join(".kacha").join("user.json")

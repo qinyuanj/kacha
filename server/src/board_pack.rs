@@ -629,6 +629,7 @@ fn check_reference_snapshots(temp: &Path, units: &[MergeUnit], actual: impl Fn(&
 #[cfg(test)]
 mod tests {
     use super::*;
+    use same_file::is_same_file;
 
     const TASK_A: &str = "2026-09-16/20260916T010000Z-0000000a";
     const TASK_B: &str = "2026-09-16/20260916T020000Z-0000000b";
@@ -881,12 +882,13 @@ mod tests {
         assert!(!target.exists());
     }
 
-    #[cfg(unix)]
     #[test]
     fn export_rejects_symlink_escaping_root() {
         let f = fixture();
         let target = f.tmp.path().join("x.ugcpack");
-        std::os::unix::fs::symlink(f.tmp.path(), f.root.join("link")).unwrap();
+        if !crate::paths::symlink_dir_for_test(f.tmp.path(), &f.root.join("link")) {
+            return;
+        }
         let mut s = spec(&f);
         s.files = vec![PackFile { source: "link/root/别处/猫.png".into(), entry: "导入参考图/x.png".into() }];
         // link 指向用户数据根之外（root 的父目录的父目录），解析后越界。
@@ -972,13 +974,6 @@ mod tests {
         (tmp, pack, units(), duplicates)
     }
 
-    #[cfg(unix)]
-    fn inode(path: &Path) -> (u64, u64) {
-        use std::os::unix::fs::MetadataExt;
-        let m = fs::metadata(path).unwrap();
-        (m.dev(), m.ino())
-    }
-
     #[test]
     fn v2_omitted_paths_are_hard_linked_and_count_toward_layout() {
         let (tmp, pack, units, duplicates) = v2_fixture();
@@ -989,8 +984,7 @@ mod tests {
         assert_eq!(fs::read(root.join(TASK_B).join("task.json")).unwrap(), b"{\"same\":1}");
         for omitted in [root.join(TASK_B).join("result.png"), root.join(REF)] {
             assert_eq!(fs::read(&omitted).unwrap(), b"png");
-            #[cfg(unix)]
-            assert_eq!(inode(&omitted), inode(&root.join(TASK_A).join("result.png")), "应是硬链接：{}", omitted.display());
+            assert!(is_same_file(&omitted, root.join(TASK_A).join("result.png")).unwrap(), "应是硬链接：{}", omitted.display());
         }
         // 再导一次：还原后的单元与用户数据根里的一致，全部跳过。
         let again = import(&pack, &root, &units, &duplicates, &no_progress, &AtomicBool::new(false)).unwrap();
@@ -1023,8 +1017,7 @@ mod tests {
         let report = import_staged(&staging, &root, &units, &files, &no_progress, &AtomicBool::new(false)).unwrap();
         assert!(report.outcomes.iter().all(|o| o.outcome == MergeOutcome::Moved));
         assert_eq!(report.bytes, 3 + 10, "每份内容只计一次");
-        #[cfg(unix)]
-        assert_eq!(inode(&root.join(TASK_A).join("result.png")), inode(&root.join(TASK_B).join("result.png")));
+        assert!(is_same_file(root.join(TASK_A).join("result.png"), root.join(TASK_B).join("result.png")).unwrap(), "相同内容应是硬链接");
 
         let (tmp, staging, units, files) = staged_fixture();
         let root = tmp.path().join("输出");
@@ -1038,8 +1031,7 @@ mod tests {
         assert!(report.outcomes.iter().all(|o| o.outcome == MergeOutcome::Moved));
         for file in ["task.json", "result.png"] {
             assert_eq!(fs::read(root.join(TASK_B).join(file)).unwrap(), fs::read(root.join(TASK_A).join(file)).unwrap());
-            #[cfg(unix)]
-            assert_ne!(inode(&root.join(TASK_A).join(file)), inode(&root.join(TASK_B).join(file)), "回退后应是独立副本");
+            assert!(!is_same_file(root.join(TASK_A).join(file), root.join(TASK_B).join(file)).unwrap(), "回退后应是独立副本");
         }
     }
 
@@ -1057,8 +1049,7 @@ mod tests {
         assert!(report.outcomes.iter().all(|o| o.outcome == MergeOutcome::Moved));
         for omitted in [root.join(TASK_B).join("result.png"), root.join(REF)] {
             assert_eq!(fs::read(&omitted).unwrap(), b"png");
-            #[cfg(unix)]
-            assert_ne!(inode(&omitted), inode(&root.join(TASK_A).join("result.png")), "回退后应是独立副本");
+            assert!(!is_same_file(&omitted, root.join(TASK_A).join("result.png")).unwrap(), "回退后应是独立副本");
         }
     }
 }
