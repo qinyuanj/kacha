@@ -18,7 +18,7 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { type Board, type BoardEdge } from "../core/board";
-import { findModel, modelsByTier, type CapabilityTable, type InputImageRule } from "../core/capabilities";
+import { findModel, type CapabilityTable, type InputImageRule } from "../core/capabilities";
 import type { TaskStatus } from "../core/run";
 import { nodeCopyDetail, nodeStatus, nodeSummary, summaryTone, type NodeRunState } from "../core/runner";
 import { availableModels, defaultTaskModel, type Discovery } from "../core/settings";
@@ -29,6 +29,7 @@ import {
   imageEdges,
   imagePortIndex,
   imagePortSlots,
+  inputRuleModels,
   taskPorts,
   workflowOf,
   type Connection,
@@ -109,10 +110,6 @@ const edgeId = (e: BoardEdge) => `${e.from.join(":")}->${e.to.join(":")}`;
 const dims = (w: number | undefined, h: number | undefined) => ({ width: w, height: h });
 /** 尚未回传测量结果的节点：非空即可让 React Flow 保留内部已测得的 handleBounds（见 nodes 的 measured）。 */
 const NOT_MEASURED: { width?: number; height?: number } = {};
-
-function defaultModel(table: CapabilityTable): string | null {
-  return modelsByTier(table)[0]?.models[0]?.model_id ?? null;
-}
 
 export function BoardCanvas({
   board,
@@ -430,16 +427,11 @@ export function BoardCanvas({
   const drag = useMemo<DragState | null>(() => (dragFrom ? { from: dragFrom, ports: connectablePorts(board, dragFrom, isValidConnection) } : null), [dragFrom, board, isValidConnection]);
 
   const nodes = useMemo<Node[]>(() => {
-    const fallback = defaultModel(table);
     const labelOf = (id: string): ImagePortInfo => {
       const src = board.nodes.find((n) => n.id === id);
       if (src?.type === "reference") return { label: src.display_name, absPath: resolveFromRoot(userRoot, src.path) };
       if (src?.type === "result") return { label: src.file, absPath: resolveFromRoot(userRoot, src.path) };
       return { label: "?", absPath: null };
-    };
-    const downstreamModels = (id: string) => {
-      const tasks = board.edges.filter((e) => e.from[0] === id).map((e) => board.nodes.find((t) => t.id === e.to[0]));
-      return [...new Set(tasks.flatMap((t) => (t?.type === "task" ? [t.model] : [])))];
     };
     const promptGuidesOf = (promptId: string): PromptReferenceGuideTask[] => {
       const groups: PromptReferenceGuideTask[] = [];
@@ -458,7 +450,7 @@ export function BoardCanvas({
       }
       return groups;
     };
-    const rulesOf = (modelIds: string[]): InputImageRule[] => modelIds.flatMap((id) => findModel(table, id)?.input_image_rule ?? []);
+    const rulesOf = (id: string): InputImageRule[] => inputRuleModels(board, table, discovery, id).flatMap((m) => findModel(table, m)?.input_image_rule ?? []);
     return board.nodes.flatMap((n): Node[] => {
       if (n.type === "unknown") return [];
       const base = {
@@ -481,12 +473,10 @@ export function BoardCanvas({
           return [{ ...base, type: "prompt", data: { node: n, recorded: hasDownstreamRecords(board, n.id), autoFocus: focusPrompt === n.id, draft: promptDrafts.get(n.id) ?? null, portKind: promptPortKind(board, n.id), guides: promptGuidesOf(n.id) } }];
         case "result":
           // 结果回灌到任务上才按下游模型规则提示；没接任务不提示。
-          return [{ ...base, ...imageBox(n.path), type: "result", data: { node: n, rules: rulesOf(downstreamModels(n.id)), missing: missing.has(n.id) } }];
-        case "reference": {
-          const modelIds = downstreamModels(n.id);
-          const rules = rulesOf(modelIds.length ? modelIds : fallback ? [fallback] : []);
-          return [{ ...base, ...imageBox(n.path), type: "reference", data: { node: n, rules, missing: missing.has(n.id) } }];
-        }
+          return [{ ...base, ...imageBox(n.path), type: "result", data: { node: n, rules: rulesOf(n.id), missing: missing.has(n.id) } }];
+        case "reference":
+          // 没接任务时按新建任务会用的默认模型提示。
+          return [{ ...base, ...imageBox(n.path), type: "reference", data: { node: n, rules: rulesOf(n.id), missing: missing.has(n.id) } }];
         case "task": {
           // 节点用缓存事实；运行前 App 逐张重新探测，同样的事实得出同样的原因。
           const view = taskView(board, table, n.id, { missingNodes: missing, alphaByNode, discovery, concurrency })!;
