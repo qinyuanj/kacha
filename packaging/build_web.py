@@ -10,8 +10,16 @@ import shutil
 import subprocess
 
 
+SERVER_BINARY = "kacha-server.exe" if os.name == "nt" else "kacha-server"
+"""服务端可执行文件名：构建产物与部署目录里都用它；压测脚本导入同一定义。"""
+
+
 def run(command: list[str], cwd: Path) -> None:
-    subprocess.run(command, cwd=cwd, check=True)
+    # 按 PATH 与 PATHEXT 解析命令：Windows 直接启动进程只会补 .exe，找不到 npm.cmd 这类脚本。
+    executable = shutil.which(command[0])
+    if executable is None:
+        raise SystemExit(f"找不到命令：{command[0]}")
+    subprocess.run([executable, *command[1:]], cwd=cwd, check=True)
 
 
 def main() -> int:
@@ -21,19 +29,17 @@ def main() -> int:
     root = Path(__file__).resolve().parent.parent
     client = root / "client"
     server = root / "server"
-    npm = "npm.cmd" if os.name == "nt" else "npm"
 
     if not args.skip_npm_ci:
-        run([npm, "ci"], client)
-    run([npm, "run", "build"], client)
+        run(["npm", "ci"], client)
+    run(["npm", "run", "build"], client)
     run(["cargo", "build", "--release"], server)
 
     output = root / "release" / "kacha-web"
     if output.exists():
         shutil.rmtree(output)
     output.mkdir(parents=True)
-    binary = "kacha-server.exe" if os.name == "nt" else "kacha-server"
-    shutil.copy2(server / "target" / "release" / binary, output / binary)
+    shutil.copy2(server / "target" / "release" / SERVER_BINARY, output / SERVER_BINARY)
     shutil.copytree(client / "dist", output / "static")
 
     index = (output / "static" / "index.html").read_text(encoding="utf-8")

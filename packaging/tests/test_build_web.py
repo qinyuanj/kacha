@@ -8,9 +8,24 @@ import tempfile
 import unittest
 
 
+def write_stub(tools: Path, name: str, body: str) -> None:
+    """在 tools 下放一个名为 name 的命令桩，用当前 Python 执行 body。
+
+    Windows 上命令解析只认 PATHEXT 里的扩展名，配一个 .cmd 包装；其它平台写带 shebang 的可执行脚本。
+    """
+    script = tools / f"{name}.py"
+    script.write_text(body, encoding="utf-8")
+    if os.name == "nt":
+        (tools / f"{name}.cmd").write_text(f'@"{sys.executable}" "%~dp0{name}.py" %*\r\n', encoding="utf-8")
+    else:
+        launcher = tools / name
+        launcher.write_text(f"#!{sys.executable}\n" + body, encoding="utf-8")
+        launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
+
+
 class BuildWebCliTest(unittest.TestCase):
-    @unittest.skipIf(os.name == "nt", "npm/cargo 桩是 POSIX sh 脚本，Windows 上脚本会调用 npm.cmd 与 cargo.exe")
     def test_collects_server_and_relative_static_assets_without_toolchain_at_runtime(self):
+        binary = "kacha-server.exe" if os.name == "nt" else "kacha-server"
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "packaging").mkdir()
@@ -20,23 +35,21 @@ class BuildWebCliTest(unittest.TestCase):
             (root / "server").mkdir()
             tools = root / "tools"
             tools.mkdir()
-            npm = tools / "npm"
-            npm.write_text(
-                "#!/bin/sh\n"
-                "mkdir -p dist/assets\n"
-                "printf '%s' '<html><script src=\"./assets/index.js\"></script></html>' > dist/index.html\n"
-                "printf 'js' > dist/assets/index.js\n",
-                encoding="utf-8",
+            write_stub(
+                tools,
+                "npm",
+                "from pathlib import Path\n"
+                "Path('dist/assets').mkdir(parents=True, exist_ok=True)\n"
+                "Path('dist/index.html').write_text('<html><script src=\"./assets/index.js\"></script></html>')\n"
+                "Path('dist/assets/index.js').write_text('js')\n",
             )
-            cargo = tools / "cargo"
-            cargo.write_text(
-                "#!/bin/sh\n"
-                "mkdir -p target/release\n"
-                "printf 'server' > target/release/kacha-server\n",
-                encoding="utf-8",
+            write_stub(
+                tools,
+                "cargo",
+                "from pathlib import Path\n"
+                "Path('target/release').mkdir(parents=True, exist_ok=True)\n"
+                f"Path('target/release/{binary}').write_bytes(b'server')\n",
             )
-            for tool in (npm, cargo):
-                tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
 
             env = dict(os.environ, PATH=f"{tools}{os.pathsep}{os.environ['PATH']}")
             result = subprocess.run(
@@ -48,11 +61,11 @@ class BuildWebCliTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             output = root / "release" / "kacha-web"
-            self.assertEqual((output / "kacha-server").read_bytes(), b"server")
+            self.assertEqual((output / binary).read_bytes(), b"server")
             self.assertEqual((output / "static" / "assets" / "index.js").read_text(), "js")
             self.assertIn('src="./assets/index.js"', (output / "static" / "index.html").read_text())
             checksums = (output / "SHA256SUMS").read_text()
-            self.assertIn("kacha-server", checksums)
+            self.assertIn(binary, checksums)
             self.assertIn("static/index.html", checksums)
 
 
