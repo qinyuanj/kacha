@@ -236,6 +236,9 @@ export const ipc: Ipc = {
     if (version) params.set("version", version);
     await api(`/api/boards?${params}`, { method: "DELETE" });
   },
+  archiveBoard: async (from, to, version) =>
+    void (await api("/api/boards/archive", jsonPost({ from: stripRoot(from), to: stripRoot(to), ...(version ? { version } : {}) }))),
+  unarchiveBoard: async (from, to) => void (await api("/api/boards/unarchive", jsonPost({ from: stripRoot(from), to: stripRoot(to) }))),
   listBoardNames: (dir) => api(`/api/boards/names?dir=${encodeURIComponent(stripRoot(dir))}`),
   listBoards: async () => {
     const listing = await api<BoardListing>("/api/boards/list");

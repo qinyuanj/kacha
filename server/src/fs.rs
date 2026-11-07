@@ -159,6 +159,9 @@ pub async fn write_board(State(state): State<AppState>, user: User, Query(q): Qu
     // 读、比较、写之间不能插进另一个写：同进程内画板写与改名串行。
     let _lock = state.board_lock().lock().await;
     let root = state.user_root(&user.fingerprint);
+    if crate::board_list::in_archive(&root, &path) {
+        return crate::board_list::archived_read_only();
+    }
     let total = state.board_slots();
     match off_thread(move || -> Result<(), Response> {
         // 有版本的保存仍按原 409 约定处理；已有主文件或 .bak 的编辑不新增画板位。
@@ -193,12 +196,16 @@ pub async fn rename_board(State(state): State<AppState>, user: User, body: axum:
         (Ok(f), Ok(t)) => (f, t),
         (Err(r), _) | (_, Err(r)) => return r,
     };
+    let root = state.user_root(&user.fingerprint);
+    if crate::board_list::in_archive(&root, &from) || crate::board_list::in_archive(&root, &to) {
+        return crate::board_list::archived_read_only();
+    }
     let _lock = state.board_lock().lock().await;
     board_guarded_result(off_thread(move || store::rename_board_guarded(&from, &to, req.version.as_deref())).await)
 }
 
 /// 改名 / 删除的结果映射：主文件与 `.bak` 都不存在 404，版本已变 409 board_conflict。
-fn board_guarded_result(r: Result<std::io::Result<()>, Response>) -> Response {
+pub(crate) fn board_guarded_result(r: Result<std::io::Result<()>, Response>) -> Response {
     match r {
         Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
         Ok(Err(e)) if e.kind() == ErrorKind::NotFound => error(StatusCode::NOT_FOUND, "not_found", "画板不存在，可能已在别处改名或删除；请重新载入画板列表"),

@@ -46,6 +46,10 @@ export interface Ipc {
   /** 删除画板：主文件与 .bak 移入回收区（只有管理员能恢复）；带版本时内容已变 409。 */
   deleteBoard(path: string, version?: string): Promise<void>;
   listBoardNames(dir: string): Promise<string[]>;
+  /** 归档（#90）：画板连同 .bak 搬进归档子目录，to 由调用方按同名加 (2) 挑好；带版本时内容已变 409。 */
+  archiveBoard(from: string, to: string, version?: string): Promise<void>;
+  /** 取消归档：搬回画板目录；画板位满 409 board_slots_full。 */
+  unarchiveBoard(from: string, to: string): Promise<void>;
   /** 画板列表（含体量与画板位），由服务端拼好。 */
   listBoards(): Promise<BoardListing>;
   readUiState(): Promise<string | null>;

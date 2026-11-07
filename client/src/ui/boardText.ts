@@ -52,6 +52,19 @@ export const slotsRefusal = (slots: Slots, adding: number): string | null =>
 /** 画板列表里的画板位用量。 */
 export const slotsUsageText = ({ used, total }: Slots) => `画板位 ${used}/${total}`;
 
+/** 归档画板（#90）：确认框、只读横条与按钮。 */
+export const ARCHIVE_TEXT = {
+  action: "归档",
+  confirm: "归档后只读，不占画板位，随时可以取消。归档不是备份。",
+  banner: "已归档，只读",
+  unarchive: "取消归档",
+  copy: "复制为新画板",
+  /** 画板列表里归档画板一组的标题。 */
+  group: "已归档",
+  /** 在归档画板上试图编辑时的提示。 */
+  readOnly: "归档画板只读：取消归档或复制为新画板后再编辑。",
+} as const;
+
 /** 已超出画板位的老用户：现有画板照常编辑，列表顶部提示。 */
 export const OVER_SLOTS_TEXT = "归档几块后才能新建。";
 

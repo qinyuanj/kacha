@@ -55,6 +55,11 @@ textarea {
   background: #fff8c5;
   border-bottom: 1px solid var(--yellow);
 }
+/* 归档画板的只读横条（#90）。 */
+.bar-info {
+  background: #eef2f7;
+  border-bottom: 1px solid var(--border);
+}
 
 .tabs {
   display: flex;
