@@ -29,7 +29,8 @@ export const stripRoot = (path: string): string =>
 
 const query = (path: string) => `path=${encodeURIComponent(stripRoot(path))}`;
 
-async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
+/** 所有同源请求的唯一出口：连不上服务端统一报网络失败（status 0），401 统一通知会话失效。 */
+async function send(url: string, init: RequestInit = {}): Promise<Response> {
   let res: Response;
   try {
     res = await fetch(url, { credentials: "same-origin", ...init });
@@ -37,6 +38,11 @@ async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(0, "network", `无法连接服务端：${e instanceof Error ? e.message : String(e)}`);
   }
   if (res.status === 401) sessionListeners.forEach((l) => l());
+  return res;
+}
+
+async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const res = await send(url, init);
   if (!res.ok) {
     let code = "http_error";
     let message = `服务端返回 HTTP ${res.status}`;
@@ -58,13 +64,7 @@ async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
 /** 元数据接口（settings / ui-state / models-cache / capability-override）回的是 JSON 原文，不是 JSON 字符串：
  *  必须按文本读，否则 res.json() 会把内容解析成对象，前端当成损坏而静默重置。 */
 async function apiText(url: string): Promise<string | null> {
-  let res: Response;
-  try {
-    res = await fetch(url, { credentials: "same-origin" });
-  } catch (e) {
-    throw new ApiError(0, "network", `无法连接服务端：${e instanceof Error ? e.message : String(e)}`);
-  }
-  if (res.status === 401) sessionListeners.forEach((l) => l());
+  const res = await send(url);
   if (!res.ok) throw new ApiError(res.status, "read_failed", `读取失败（HTTP ${res.status}）：${url}`);
   const text = await res.text();
   return text.trim() === "null" || text === "" ? null : text;
@@ -73,15 +73,13 @@ async function apiText(url: string): Promise<string | null> {
 const textBody = (text: string): RequestInit => ({ method: "PUT", headers: { "Content-Type": "application/json" }, body: text });
 
 async function readBytes(path: string): Promise<Uint8Array> {
-  const res = await fetch(`/api/fs/file?${query(path)}`, { credentials: "same-origin" });
-  if (res.status === 401) sessionListeners.forEach((l) => l());
+  const res = await send(`/api/fs/file?${query(path)}`);
   if (!res.ok) throw new ApiError(res.status, "read_failed", `读取文件失败（HTTP ${res.status}）：${path}`);
   return new Uint8Array(await res.arrayBuffer());
 }
 
 async function writeNewFile(path: string, bytes: Uint8Array): Promise<void> {
-  const res = await fetch(`/api/fs/file?${query(path)}`, { method: "PUT", credentials: "same-origin", body: bytes.slice().buffer as ArrayBuffer });
-  if (res.status === 401) sessionListeners.forEach((l) => l());
+  const res = await send(`/api/fs/file?${query(path)}`, { method: "PUT", body: bytes.slice().buffer as ArrayBuffer });
   if (res.status === 409) throw new ApiError(409, "already_exists", "目标已存在，只新建不覆盖");
   if (!res.ok) throw new ApiError(res.status, "write_failed", `写入文件失败（HTTP ${res.status}）：${path}`);
 }
@@ -142,13 +140,7 @@ const uploadFailure = (e: unknown) => (e instanceof ApiError && UPLOAD_FAILURES[
 const asCancelled = (op: string, e: unknown) => (cancelledOps.has(op) || (e instanceof ApiError && e.message === PACK_CANCELLED) ? new Error(PACK_CANCELLED) : e);
 
 async function apiResponse(url: string, init: RequestInit): Promise<Response> {
-  let res: Response;
-  try {
-    res = await fetch(url, { credentials: "same-origin", ...init });
-  } catch (e) {
-    throw new ApiError(0, "network", `无法连接服务端：${e instanceof Error ? e.message : String(e)}`);
-  }
-  if (res.status === 401) sessionListeners.forEach((l) => l());
+  const res = await send(url, init);
   if (!res.ok) {
     let code = "http_error";
     let message = `服务端返回 HTTP ${res.status}`;

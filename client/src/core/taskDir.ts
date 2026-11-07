@@ -365,15 +365,13 @@ export async function writeOutcome(fs: Pick<TaskFs, "writeNewFile">, userRoot: s
   await fs.writeNewFile(taskPath(userRoot, relDir, OUTCOME_FILE), new TextEncoder().encode(`${JSON.stringify(record, null, 2)}\n`));
 }
 
-/** 按任务编号读结局记录；没有记录（本地读不到、HTTP 404）或读不懂为 null。
- *  HTTP 的其他失败（401、5xx、断网）必须抛出：它们不是「没有结局记录」，否则会把故障显示成已中断。 */
+/** 按任务编号读结局记录；没有记录（HTTP 404）或读不懂为 null。
+ *  其他读失败（401、5xx、断网）必须抛出：它们不是「没有结局记录」，否则会把故障显示成已中断。 */
 export async function readOutcome(fs: Pick<TaskFs, "readFile">, userRoot: string, taskId: string): Promise<TaskOutcome | null> {
   const path = taskFilePath(userRoot, taskId, OUTCOME_FILE);
   if (!path) return null;
   return fs.readFile(path).then(parseOutcome, (e) => {
-    const status = (e as { status?: unknown } | null)?.status;
-    // 桌面本地文件系统的错误不带 HTTP 状态码，沿用「读不到 = 没有记录」。
-    if (typeof status !== "number" || status === 404) return null;
+    if ((e as { status?: unknown } | null)?.status === 404) return null;
     throw e;
   });
 }

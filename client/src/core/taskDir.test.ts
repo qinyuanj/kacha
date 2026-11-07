@@ -383,6 +383,11 @@ describe("结局记录 outcome.json", () => {
     }
   });
 
+  it("不带状态码的读失败同样抛出，不当成没有记录", async () => {
+    const broken: Pick<TaskFs, "readFile"> = { readFile: async () => { throw new TypeError("Failed to fetch"); } };
+    await expect(readOutcome(broken, "/root", "20260916T091500Z-00000001")).rejects.toThrow("Failed to fetch");
+  });
+
   it("读不懂的内容当作没有记录", () => {
     const bytes = (text: string) => new TextEncoder().encode(text);
     expect(parseOutcome(bytes("{"))).toBeNull();
