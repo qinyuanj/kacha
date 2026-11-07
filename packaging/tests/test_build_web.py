@@ -7,6 +7,10 @@ import sys
 import tempfile
 import unittest
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from build_web import SERVER_BINARY  # noqa: E402
+
 
 def write_stub(tools: Path, name: str, body: str) -> None:
     """在 tools 下放一个名为 name 的命令桩，用当前 Python 执行 body。
@@ -25,7 +29,7 @@ def write_stub(tools: Path, name: str, body: str) -> None:
 
 class BuildWebCliTest(unittest.TestCase):
     def test_collects_server_and_relative_static_assets_without_toolchain_at_runtime(self):
-        binary = "kacha-server.exe" if os.name == "nt" else "kacha-server"
+        binary = SERVER_BINARY
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "packaging").mkdir()
