@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sizeNotice, sizeTier } from "./boardSize";
+import { bySizeDescending, sizeNotice, sizeTier } from "./boardSize";
 
 // 期望值按票面规则手写：黄线 500、红线 1000（测试用小数），超过才算越线。
 const lines = { warn: 500, alert: 1000 };
@@ -44,5 +44,20 @@ describe("当前画板越线提示", () => {
   it("从红回落到黄：红档清除、黄档仍算已提醒，再升红时重新提醒", () => {
     expect(sizeNotice("warn", "alert")).toEqual({ show: null, notified: "warn" });
     expect(sizeNotice("alert", "warn").show).toBe("alert");
+  });
+});
+
+describe("管理画板的排序", () => {
+  it("按体量从大到小，体量未知的排在最后，同体量按名称", () => {
+    const boards = [
+      { name: "b", bytes: 300 },
+      { name: "坏", bytes: null },
+      { name: "a", bytes: 300 },
+      { name: "大", bytes: 5000 },
+      { name: "空", bytes: 0 },
+    ];
+    expect(bySizeDescending(boards).map((b) => b.name)).toEqual(["大", "a", "b", "空", "坏"]);
+    // 不改动传入的列表。
+    expect(boards[0].name).toBe("b");
   });
 });

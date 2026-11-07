@@ -27,5 +27,14 @@ export function formatBytes(bytes: number): string {
 /** 画板体量一律写「约 X」：服务端按任务目录累加、不去重，可能略大于导出画板包时的预估（#87）。 */
 export const approxSizeText = (bytes: number) => `约 ${formatBytes(bytes)}`;
 
+/** 用量提醒（#88）里的入口与「管理画板」对话框标题。 */
+export const MANAGE_BOARDS_TEXT = "管理画板";
+
+/** 用量接近（warn）/ 达到（alert）用量上限时的提醒；只提醒，生成照常。 */
+export const usageLimitText = (level: "warn" | "alert", total: number, limit: number) =>
+  level === "alert"
+    ? `用量已满（${formatBytes(total)} / 上限 ${formatBytes(limit)}），生成不受影响，请整理画板释放空间。`
+    : `用量接近上限（${formatBytes(total)} / 上限 ${formatBytes(limit)}），整理一下画板？`;
+
 /** 当前画板越过体量提醒线时画布顶部的提示。 */
 export const sizeNoticeText = (bytes: number) => `这块画板已经${approxSizeText(bytes)} 了，整理一下？`;

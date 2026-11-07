@@ -46,7 +46,14 @@ export function UsageSection() {
     <div className="usage-section">
       <div className="form-row">
         <span>用量</span>
-        {usage ? <span data-testid="usage-total" className="mono">{formatBytes(usage.total_bytes)}</span> : <span className="muted small">正在统计…</span>}
+        {usage ? (
+          <span data-testid="usage-total" className="mono">
+            {formatBytes(usage.total_bytes)}
+            {usage.limit_bytes !== null && ` / 上限 ${formatBytes(usage.limit_bytes)}`}
+          </span>
+        ) : (
+          <span className="muted small">正在统计…</span>
+        )}
       </div>
       {usage && (
         <>

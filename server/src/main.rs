@@ -15,8 +15,8 @@ fn main() {
     }
     if wants_help(&args) {
         println!("kacha-server {}", kacha_server::VERSION);
-        println!("用法：kacha-server [--listen 0.0.0.0:3004] [--data-root <目录>] [--gateway-url <new-api 地址>] [--static-dir <前端构建目录>] [--result-hosts <逗号分隔主机>] [--min-free-gb 20] [--board-slots 10] [--board-warn-mb 500] [--board-alert-mb 1024]");
-        println!("环境变量：KACHA_LISTEN、KACHA_DATA_ROOT、KACHA_GATEWAY_URL、KACHA_STATIC_DIR、KACHA_RESULT_HOSTS、KACHA_MIN_FREE_GB、KACHA_BOARD_SLOTS、KACHA_BOARD_WARN_MB、KACHA_BOARD_ALERT_MB");
+        println!("用法：kacha-server [--listen 0.0.0.0:3004] [--data-root <目录>] [--gateway-url <new-api 地址>] [--static-dir <前端构建目录>] [--result-hosts <逗号分隔主机>] [--min-free-gb 20] [--board-slots 10] [--board-warn-mb 500] [--board-alert-mb 1024] [--usage-limit-gb <留空不提醒>] [--usage-warn-percent 80]");
+        println!("环境变量：KACHA_LISTEN、KACHA_DATA_ROOT、KACHA_GATEWAY_URL、KACHA_STATIC_DIR、KACHA_RESULT_HOSTS、KACHA_MIN_FREE_GB、KACHA_BOARD_SLOTS、KACHA_BOARD_WARN_MB、KACHA_BOARD_ALERT_MB、KACHA_USAGE_LIMIT_GB、KACHA_USAGE_WARN_PERCENT");
         println!("清理与恢复：kacha-server cleanup --help；kacha-server cleanup restore --help");
         println!("Windows 服务：kacha-server service <与上面相同的参数>，只供服务控制管理器启动（见部署说明）；生命周期日志写入 <数据根>/server.log");
         return;

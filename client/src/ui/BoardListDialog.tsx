@@ -1,12 +1,13 @@
 // 画板列表：画板在服务端，关掉的标签页与另一个浏览器都从这里重新打开（桌面版靠启动参数 / 拖入文件）；也在这里删除画板。
 // 列表由服务端拼好（#87）：每行带画板体量「约 X」，越过服务端配置的提醒线标黄 / 标红，只提醒。
+// 同一对话框也是用量提醒里的「管理画板」（#88），那时按体量从大到小排。
 import { useCallback, useEffect, useState } from "react";
 import { BOARD_EXTENSION } from "../core/board";
-import { sizeTier } from "../core/boardSize";
+import { bySizeDescending, sizeTier } from "../core/boardSize";
 import { ipc } from "../shell/ipc";
 import type { BoardListEntry, BoardListing } from "../shell/types";
 import { errorText } from "../core/errors";
-import { approxSizeText } from "./boardText";
+import { approxSizeText, MANAGE_BOARDS_TEXT } from "./boardText";
 
 interface Props {
   /** 本页已打开的画板路径：列表里标注，不重复开。 */
@@ -17,11 +18,13 @@ interface Props {
   /** 删除前先导出画板包：沿用现有导出流程。 */
   onExport(path: string): void;
   onClose(): void;
+  /** 「管理画板」（#88，从用量提醒进入）：标题换成管理画板，各组按体量从大到小排，帮用户决定先整理哪块。 */
+  manage?: boolean;
 }
 
 const titleOf = (name: string) => name.slice(0, -BOARD_EXTENSION.length);
 
-export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose }: Props) {
+export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose, manage = false }: Props) {
   const [listing, setListing] = useState<BoardListing | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<{ entry: BoardListEntry; busy: boolean; error: string | null } | null>(null);
@@ -71,13 +74,15 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
     );
   };
 
-  const editable = listing?.boards.filter((b) => !b.archived) ?? [];
-  const archived = listing?.boards.filter((b) => b.archived) ?? [];
+  const boards = manage ? bySizeDescending(listing?.boards ?? []) : (listing?.boards ?? []);
+  const editable = boards.filter((b) => !b.archived);
+  const archived = boards.filter((b) => b.archived);
+  const title = manage ? MANAGE_BOARDS_TEXT : "画板列表";
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" role="dialog" aria-label="画板列表" onClick={(e) => e.stopPropagation()}>
-        <h2>画板列表</h2>
-        <p className="muted">画板保存在服务端；换浏览器后用同一把密钥也能看到同一份。</p>
+      <div className="modal" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}>
+        <h2>{title}</h2>
+        <p className="muted">{manage ? "按画板体量从大到小排列：先整理最大的几块。删除画板、整理掉不要的结果后，图片按清理规则释放空间。" : "画板保存在服务端；换浏览器后用同一把密钥也能看到同一份。"}</p>
         {error && <div className="bar bar-error">读取画板列表失败：{error}</div>}
         {listing === null ? (
           <div>正在加载…</div>
