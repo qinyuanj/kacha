@@ -1,0 +1,3 @@
+#!/bin/sh
+# 推送前跑全套验证（见 packaging/README.md「验证」）。由 git config core.hooksPath .githooks 启用。
+exec python packaging/verify.py
