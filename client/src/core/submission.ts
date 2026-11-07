@@ -1,6 +1,6 @@
 // 提交前的纯函数：脏判据快照、运行范围、二次确认清单。
 import type { OutputOptions } from "./gateway";
-import { outputOptions } from "./gateway";
+import { isFlashShape, outputOptions } from "./gateway";
 import { copyTaskIds, runCopies, type Board, type Region, type TaskNode } from "./board";
 import { findModel, type CapabilityTable } from "./capabilities";
 import { imageEdges, imageKey, imageSources, promptText } from "./graph";
@@ -36,7 +36,7 @@ function findTask(board: Board, id: string): TaskNode | undefined {
 export function snapshotOf(board: Board, table: CapabilityTable, taskId: string): Snapshot | null {
   const task = findTask(board, taskId);
   if (!task) return null;
-  const flash = findModel(table, task.model)?.request_shape === "seedream_flash_images_generations";
+  const flash = isFlashShape(findModel(table, task.model));
   const images = imageEdges(board, taskId).flatMap((e): SnapshotImage[] => {
     const src = board.nodes.find((n) => n.id === e.from[0]);
     if (src?.type === "reference") return [{ kind: "reference", path: src.path, sha256: src.sha256, region: e.region }];

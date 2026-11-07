@@ -4,7 +4,7 @@
 import type { Board, TaskNode } from "./board";
 import type { CapabilityTable } from "./capabilities";
 import type { BoardChange } from "./edit";
-import { GatewayError } from "./gateway";
+import { GatewayError, isFlashShape } from "./gateway";
 import { CancelledError, executeJob, failureLabel, prepareJob, prepareRegenerate, writeJob, type Prepared, type PreparedJob, type RunDeps, type TaskStatus, type WrittenJob } from "./run";
 import { groupCopies, type NodeCopyEntry } from "./nodeCopies";
 import { tableDigest, writeOutcome, type TaskOutcome } from "./taskDir";
@@ -369,7 +369,7 @@ export function createRunner(ports: RunnerPorts): Runner {
       ports.apply(target.boardKey, { kind: "runResult", result });
     } catch (e) {
       if (aborted() || e instanceof CancelledError) return;
-      if (e instanceof GatewayError && e.category === "rate_limited" && job.prepared?.input.model.request_shape !== "seedream_flash_images_generations") rateLimited(job, e);
+      if (e instanceof GatewayError && e.category === "rate_limited" && !isFlashShape(job.prepared?.input.model)) rateLimited(job, e);
       else fail(job, e);
     } finally {
       if (!aborted()) pump();

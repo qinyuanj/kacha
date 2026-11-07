@@ -3,7 +3,7 @@
 // 换模型绝不自动删线或改设置，只报告原因。
 import { runCopies, type Board, type TaskNode } from "./board";
 import { findModel, isRetiredModel, isSupported, LITE_RETIRED_HINT, type CapabilityTable, type ModelCapability } from "./capabilities";
-import { isLayerSize, isRequestShapeImplemented, LAYER_SIZES_TEXT } from "./gateway";
+import { isFlashShape, isLayerSize, isRequestShapeImplemented, LAYER_SIZES_TEXT } from "./gateway";
 import { imageEdges, imageKey, imagePortSlots, imageSources, promptText, workflowOf } from "./graph";
 import { MAX_REGIONS } from "./overlay";
 import { effectiveRegionRender, expandImageEdges } from "./region";
@@ -96,7 +96,7 @@ export function taskView(board: Board, table: CapabilityTable, taskId: string, f
   const refs = imageRefProblems(board, table, taskId);
   const transparent = transparentBlock(board, model, taskId, facts);
   const layer = model && !isSupported(model.workflows[workflowOf(board, taskId)].layer_decomposition) ? "模型不支持拆分图层" : null;
-  const flashLayers = model?.request_shape === "seedream_flash_images_generations" && task.layer_decomposition;
+  const flashLayers = isFlashShape(model) && task.layer_decomposition;
   const reasons = [
     ...(flashLayers ? [] : promptReasons(board, taskId)),
     ...(flashLayers && imagePortSlots(board, table, taskId).length !== 1 ? [reason("layerNeedsOneImage", "图层拆分需要恰好一张 PNG/JPEG 参考图，不支持区域派生图")] : []),
@@ -149,11 +149,11 @@ function transparentBlock(board: Board, model: ModelCapability | undefined, task
   if (!isSupported(model.transparent_background)) return { kind: "transparentUnsupported", text: "模型不支持透明背景", hint: "模型不支持透明背景" };
   const edges = imageEdges(board, taskId);
   if (expandImageEdges(edges, model).length !== 1) {
-    const text = model.request_shape === "seedream_flash_images_generations" ? "需要恰好一张实际参考图" : "需要恰好一条图片线";
+    const text = isFlashShape(model) ? "需要恰好一张实际参考图" : "需要恰好一条图片线";
     return { kind: "transparentNeedsOneImage", text: `透明背景${text}`, hint: text };
   }
   const task = findTask(board, taskId)!;
-  if (model.request_shape === "seedream_flash_images_generations" && task.output_options?.output_format === "jpeg") return { kind: "transparentNeedsPng", text: "透明背景输出必须为 PNG", hint: "输出必须为 PNG" };
+  if (isFlashShape(model) && task.output_options?.output_format === "jpeg") return { kind: "transparentNeedsPng", text: "透明背景输出必须为 PNG", hint: "输出必须为 PNG" };
   const edge = edges[0];
   const alpha = facts.alphaByNode.get(imageKey(edge.from[0], edge.source_layer));
   return alpha === true ? null : { kind: "transparentNoAlpha", text: alpha === false ? "该图不带透明通道" : "参考图透明通道尚未确认", hint: alpha === false ? "该图不带透明通道" : "透明通道尚未确认" };
@@ -165,7 +165,7 @@ export function sendPlanOf(board: Board, table: CapabilityTable, taskId: string)
   const model = task && findModel(table, task.model);
   if (!model) return null;
   const plan = planSend(model, imagePortSlots(board, table, taskId), promptText(board, taskId, "positive"), promptText(board, taskId, "negative"));
-  return model.request_shape === "seedream_flash_images_generations" && task.layer_decomposition && !promptText(board, taskId, "positive").trim() && !promptText(board, taskId, "negative").trim() ? { ...plan, text: "" } : plan;
+  return isFlashShape(model) && task.layer_decomposition && !promptText(board, taskId, "positive").trim() && !promptText(board, taskId, "negative").trim() ? { ...plan, text: "" } : plan;
 }
 
 /** 「图N」「区域N」的引用越界与未引用，取自发送计划；没有发送计划（模型缺失）时按无固定句算。 */
@@ -218,7 +218,7 @@ function modelReasons(board: Board, model: ModelCapability, task: TaskNode): Unr
   if (render === null && regions > 0) out.push(reason("regionUnsupported", "模型不支持框选修改区域"));
   if (render !== null && regions > MAX_REGIONS) out.push(reason("tooManyRegions", `框选了 ${regions} 个区域，最多 ${MAX_REGIONS} 个`));
   if (hasEdge(board, task.id, "negative") && !isSupported(wf.supports_negative_prompt)) out.push(reason("negativeUnsupported", "模型不支持负向提示词"));
-  if (!(model.request_shape === "seedream_flash_images_generations" && task.layer_decomposition) && resolveSize(wf.size_rule, task.size_spec) === null) {
+  if (!(isFlashShape(model) && task.layer_decomposition) && resolveSize(wf.size_rule, task.size_spec) === null) {
     const s = task.size_spec;
     const value = ratioValue(s.ratio);
     // 只有宽高比本身越界才报范围；分辨率档不认识、或没有 custom 范围的模型仍按「不在尺寸表内」。

@@ -7,6 +7,7 @@ import {
   fetchResultImage,
   generate,
   GatewayError,
+  isFlashShape,
   isLayerSize,
   LAYER_SIZES,
   listModels,
@@ -14,6 +15,12 @@ import {
   type FetchLike,
   type GenerationInput,
 } from "./gateway";
+
+describe("isFlashShape", () => {
+  it("只有 Flash 请求形态的模型为真，缺模型为假", () => {
+    expect(["doubao-seedream-5-0-flash-260915", "doubao-seedream-5-0-pro-260628", "qwen-image-3.0", "不存在"].map((id) => isFlashShape(findModel(BUILTIN_TABLE, id)))).toEqual([true, false, false, false]);
+  });
+});
 
 describe("Flash 图层官方契约合成回放，非网关实测", () => {
   const model = findModel(BUILTIN_TABLE, "doubao-seedream-5-0-flash-260915")!;

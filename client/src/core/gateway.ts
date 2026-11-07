@@ -188,9 +188,16 @@ const buildFlashImagesGenerations: RequestShape["build"] = (input) => {
   } };
 };
 
+const FLASH_SHAPE = "seedream_flash_images_generations";
+
+/** 模型是否走 Flash 请求形态（参考图、透明背景、图层拆分等 Flash 专有规则都以此为准）。 */
+export function isFlashShape(model: ModelCapability | null | undefined): model is ModelCapability {
+  return model?.request_shape === FLASH_SHAPE;
+}
+
 /** 按能力表 request_shape 选择请求形态。 */
 const REQUEST_SHAPES: Record<string, RequestShape> = {
-  seedream_flash_images_generations: { build: buildFlashImagesGenerations, parse: parseFlashImage },
+  [FLASH_SHAPE]: { build: buildFlashImagesGenerations, parse: parseFlashImage },
   qwen_images_edits: { build: buildQwenImagesGenerations, parse: parseGeneratedImages },
   seedream_images_generations: { build: buildSeedreamImagesGenerations, parse: parseImageUrls },
 };
@@ -332,7 +339,7 @@ export async function generate(config: GatewayConfig, input: GenerationInput): P
   const shape = requestShapeOf(input.model);
   const { path, body } = buildGenerationRequest(input);
   const response = await send(config, "POST", path, body);
-  const images = input.layerDecomposition && input.model.request_shape === "seedream_flash_images_generations" ? parseFlashLayers(response.body) : shape.parse(response.body);
+  const images = input.layerDecomposition && isFlashShape(input.model) ? parseFlashLayers(response.body) : shape.parse(response.body);
   if (!images.length) throw new GatewayError("invalid_response", "网关没有返回图片", 200, response.requestId);
   return { images, requestId: response.requestId };
 }
