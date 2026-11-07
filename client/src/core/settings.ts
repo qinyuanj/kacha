@@ -79,6 +79,13 @@ export function parseSettings(text: string | null): LoadedSettings {
   };
 }
 
+/** 并发上限输入框的草稿 → 最终值：四舍五入并钳到 MIN～MAX；空或无法解析时用 fallback（打开面板时的原值）。 */
+export function parseConcurrency(draft: string, fallback: number): number {
+  const value = draft.trim() === "" ? NaN : Number(draft);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(MAX_CONCURRENCY, Math.max(MIN_CONCURRENCY, Math.round(value)));
+}
+
 export function serializeSettings(settings: Settings): string {
   const { extra, ...known } = settings;
   return `${JSON.stringify({ ...known, format_version: SETTINGS_FORMAT_VERSION, ...extra }, null, 2)}\n`;

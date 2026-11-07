@@ -8,6 +8,7 @@ import {
   isPlainHttp,
   loadSettings,
   modelAvailabilityIssue,
+  parseConcurrency,
   parseModelsCache,
   parseSettings,
   refreshModels,
@@ -75,6 +76,17 @@ describe("高级设置 settings.json", () => {
     expect(parseSettings('{"format_version":1,"concurrency":11}').kind).toBe("corrupt");
     expect(parseSettings('{"format_version":1,"concurrency":2.5}').kind).toBe("corrupt");
     expect(parseSettings('{"format_version":1,"concurrency":0}').kind).toBe("corrupt");
+  });
+});
+
+describe("并发上限输入框草稿", () => {
+  it("解析成整数并钳到 1～10；空或无法解析时回退到原值", () => {
+    expect(parseConcurrency("", 3)).toBe(3);
+    expect(parseConcurrency("7", 3)).toBe(7);
+    expect(parseConcurrency("17", 3)).toBe(10);
+    expect(parseConcurrency("0", 3)).toBe(1);
+    expect(parseConcurrency("3.6", 3)).toBe(4);
+    expect(parseConcurrency("abc", 3)).toBe(3);
   });
 });
 
