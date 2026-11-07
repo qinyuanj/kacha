@@ -86,6 +86,16 @@ export function sourceLayerRecord(record: ResultRecord, sourceLayer: number): La
   return entry && typeof entry.file === "string" && entry.file !== "" ? entry : null;
 }
 
+/** 结果图层文件相对用户数据根的路径：图层记录的 file 相对任务目录，任务目录即结果文件所在目录。 */
+export function layerRelPath(node: { path: string; file: string }, file: string): string {
+  return `${node.path.slice(0, node.path.length - node.file.length)}${file}`;
+}
+
+/** 缺图集合与透明通道集合共用的图片键：底图（layer 为 null）就是节点 id，图层按序号（1 起）另起一键，与底图互不株连。 */
+export function imageKey(nodeId: string, layer: number | null): string {
+  return layer === null ? nodeId : `${nodeId}:layer:${layer}`;
+}
+
 /** 任务的参考图来源，按端口顺序；结果节点回灌的是文件本身，不带会话参数。 */
 export function imageSources(board: Board, taskId: string, userRoot: string): ImageSource[] {
   return imageEdges(board, taskId).flatMap((e): ImageSource[] => {
@@ -95,8 +105,7 @@ export function imageSources(board: Board, taskId: string, userRoot: string): Im
       // 接了某一图层：路径以结果记录里的图层记录为准（记录无效 = 身份无效，不给路径），标签点明图层序号。
       if (e.source_layer !== null) {
         const layer = sourceLayerRecord(src.record, e.source_layer);
-        const dir = src.path.slice(0, src.path.length - src.file.length);
-        return [{ nodeId: src.id, label: `${src.file} 图层${e.source_layer}`, absPath: layer ? resolveFromRoot(userRoot, `${dir}${layer.file}`) : null, sourceLayer: e.source_layer }];
+        return [{ nodeId: src.id, label: `${src.file} 图层${e.source_layer}`, absPath: layer ? resolveFromRoot(userRoot, layerRelPath(src, layer.file)) : null, sourceLayer: e.source_layer }];
       }
       return [{ nodeId: src.id, label: src.file, absPath: resolveFromRoot(userRoot, src.path), sourceLayer: null }];
     }

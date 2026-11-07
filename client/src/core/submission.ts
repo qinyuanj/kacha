@@ -3,7 +3,7 @@ import type { OutputOptions } from "./gateway";
 import { outputOptions } from "./gateway";
 import { copyTaskIds, runCopies, type Board, type Region, type TaskNode } from "./board";
 import { findModel, type CapabilityTable } from "./capabilities";
-import { imageEdges, imageSources, promptText } from "./graph";
+import { imageEdges, imageKey, imageSources, promptText } from "./graph";
 import type { SendPlan } from "./sendPlan";
 import type { SizeSpec } from "./size";
 import { readOutcome, type TaskFs, type TaskOutcome } from "./taskDir";
@@ -212,7 +212,7 @@ export async function collectRunFacts(
   const alphaByNode = new Map<string, boolean>();
   await Promise.all(
     taskIds
-      .flatMap((id) => imageSources(board, id, userRoot).map((src) => ({ ...src, key: src.sourceLayer === null ? src.nodeId : `${src.nodeId}:layer:${src.sourceLayer}` })))
+      .flatMap((id) => imageSources(board, id, userRoot).map((src) => ({ ...src, key: imageKey(src.nodeId, src.sourceLayer) })))
       .map((src) =>
         // 无效来源图层身份（absPath 为 null）不探测也不算缺图：任务视图给出「来源图层无效」的明确原因。
         src.absPath === null
