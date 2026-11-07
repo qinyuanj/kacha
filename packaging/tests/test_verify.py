@@ -9,9 +9,22 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from verify import integrity_problems, preflight  # noqa: E402
+from verify import integrity_problems, preflight, runs_e2e  # noqa: E402
 
 VERIFY = Path(__file__).resolve().parents[1] / "verify.py"
+
+
+class E2eOnlyOnIntegrationBranchesTest(unittest.TestCase):
+    def test_integration_branches_run_e2e(self):
+        for branch in ("main", "integration/open-tickets"):
+            self.assertTrue(runs_e2e(branch, []), branch)
+
+    def test_other_branches_detached_head_and_unknown_skip_e2e(self):
+        for branch in ("impl/79-default-model", "spec/54-big-board-pack", "ticket/62", "research/x", "integration", "mainline", "HEAD", ""):
+            self.assertFalse(runs_e2e(branch, []), branch)
+
+    def test_e2e_flag_forces_e2e_on_any_branch(self):
+        self.assertTrue(runs_e2e("impl/79-default-model", ["--e2e"]))
 
 
 class PreflightOnlyTest(unittest.TestCase):
