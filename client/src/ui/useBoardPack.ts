@@ -8,6 +8,7 @@ import { packFs, packIo } from "../shell/adapters";
 import { logEvent } from "../shell/log";
 import type { PackDialogState } from "./BoardPackDialog";
 import { errorText } from "../core/errors";
+import { isSlotsFullText, slotsRefusal } from "./boardText";
 
 interface PackBoards {
   flushAll: () => Promise<void>;
@@ -83,6 +84,11 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
       const result = await importPackIn(packIo, {
         file,
         addBoard: (board) => boards.addImportedBoard(board),
+        // 画板位预检（#89）：读不到列表时不拦，服务端合并前仍会检查。
+        slotsRefusal: async (adding) => {
+          const slots = await ipc.listBoards().then((l) => l.slots, () => null);
+          return slots && slotsRefusal(slots, adding);
+        },
         onStage: progress(`正在导入画板包：${file.name}`),
         onPhase: (phase) => setDialog((d) => (d?.stage === "progress" ? { ...d, detail: IMPORT_PHASES[phase] } : d)),
         log: logEvent,
@@ -98,9 +104,13 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
         case "cancelled":
           setDialog(null);
           return toast("已取消导入；已移入的任务目录保留");
+        case "slotsFull":
+          setDialog(null);
+          return toast(result.message);
         case "failed":
           setDialog(null);
-          return toast(`导入画板包失败：${result.error}`);
+          // 服务端合并前按画板位拒绝（两页抢最后的位）：它的报错就是统一文案，不加前缀。
+          return toast(isSlotsFullText(result.error) ? result.error : `导入画板包失败：${result.error}`);
         case "done": {
           const { summary, writeError } = result;
           if (writeError || summary.conflicts.length) setDialog({ stage: "importDone", message: summary.message, conflicts: summary.conflicts, error: writeError });

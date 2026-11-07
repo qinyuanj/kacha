@@ -9,7 +9,7 @@ use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
-use kacha_server::{router, AppState, BoardSizeLines, Config, KeyCheck, KeyVerifier};
+use kacha_server::{router, AppState, BoardSizeLines, Config, KeyCheck, KeyVerifier, UsageLimit};
 use tower::ServiceExt;
 
 pub const GOOD_KEY: &str = "sk-good-key";
@@ -41,6 +41,7 @@ pub struct Harness {
     free_space: Option<u64>,
     board_slots: u32,
     board_size_lines: BoardSizeLines,
+    usage_limit: UsageLimit,
 }
 
 pub struct Reply {
@@ -86,15 +87,23 @@ impl Harness {
         h
     }
 
+    /// 用量上限与提醒比例取给定值（服务端配置，#88）。
+    pub fn with_usage_limit(usage_limit: UsageLimit) -> Self {
+        let mut h = Self::build(Vec::new(), None);
+        h.usage_limit = usage_limit;
+        h.restart();
+        h
+    }
+
     fn build(result_hosts: Vec<String>, free_space: Option<u64>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let now = Arc::new(Mutex::new(UNIX_EPOCH + Duration::from_secs(1_800_000_000)));
         let (board_slots, board_size_lines) = (kacha_server::board_list::DEFAULT_BOARD_SLOTS, BoardSizeLines::default());
-        let state = Self::state(dir.path(), &now, &result_hosts, free_space, board_slots, board_size_lines);
-        Harness { dir, app: router(state.clone()), state, now, result_hosts, free_space, board_slots, board_size_lines }
+        let state = Self::state(dir.path(), &now, &result_hosts, free_space, board_slots, board_size_lines, UsageLimit::default());
+        Harness { dir, app: router(state.clone()), state, now, result_hosts, free_space, board_slots, board_size_lines, usage_limit: UsageLimit::default() }
     }
 
-    fn state(data_root: &Path, now: &Arc<Mutex<SystemTime>>, result_hosts: &[String], free_space: Option<u64>, board_slots: u32, board_size_lines: BoardSizeLines) -> AppState {
+    fn state(data_root: &Path, now: &Arc<Mutex<SystemTime>>, result_hosts: &[String], free_space: Option<u64>, board_slots: u32, board_size_lines: BoardSizeLines, usage_limit: UsageLimit) -> AppState {
         let clock_now = now.clone();
         let config = Config {
             data_root: data_root.to_path_buf(),
@@ -104,6 +113,7 @@ impl Harness {
             min_free_bytes: kacha_server::limits::DEFAULT_MIN_FREE_BYTES,
             board_slots,
             board_size_lines,
+            usage_limit,
         };
         let clock: kacha_server::Clock = Arc::new(move || *clock_now.lock().unwrap());
         match free_space {
@@ -114,7 +124,7 @@ impl Harness {
 
     /// 模拟服务端重启：丢弃全部进程内状态，只留下数据根。
     pub fn restart(&mut self) {
-        self.state = Self::state(self.dir.path(), &self.now, &self.result_hosts, self.free_space, self.board_slots, self.board_size_lines);
+        self.state = Self::state(self.dir.path(), &self.now, &self.result_hosts, self.free_space, self.board_slots, self.board_size_lines, self.usage_limit);
         self.app = router(self.state.clone());
     }
 

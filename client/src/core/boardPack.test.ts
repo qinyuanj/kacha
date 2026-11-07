@@ -499,6 +499,8 @@ describe("导入画板包", () => {
     const hashed: string[] = [];
     const uploaded: { sha256: string; size: number; progress: { done: number; total: number } }[] = [];
     const placed: { path: string; sha256: string }[] = [];
+    /** 每次合并请求声明的将新增画板数（#89：服务端据此在合并前检查画板位）。 */
+    const boardCounts: number[] = [];
     const io: PackIo = {
       existing: async (units) => {
         steps.push("existing");
@@ -523,8 +525,9 @@ describe("导入画板包", () => {
         const body = await entryBody(content.file, content.entry);
         uploaded.push({ sha256, size: body.size, progress });
       },
-      importContent: async (staging, units, files) => {
+      importContent: async (staging, units, files, boards) => {
         steps.push(`importContent(${staging})`);
+        boardCounts.push(boards);
         placed.push(...files);
         for (const unit of units) {
           moved.push(unit.path);
@@ -548,8 +551,9 @@ describe("导入画板包", () => {
         return Object.fromEntries(names.filter((n) => n in pack).map((n) => [n, pack[n]]));
       },
       discard: async (id) => void steps.push(`discard(${id})`),
-      importUnits: async (id, units, duplicates) => {
+      importUnits: async (id, units, duplicates, boards) => {
         steps.push(`import(${id})`);
+        boardCounts.push(boards);
         if (Object.keys(duplicates).length > 0) restored.push(duplicates);
         for (const unit of units) {
           moved.push(unit.path);
@@ -558,16 +562,22 @@ describe("导入画板包", () => {
         return { outcomes: units.map((u) => ({ path: u.path, outcome: "moved" as const })), bytes: 1234 };
       },
     };
-    return { io, moved, steps, restored, hashed, uploaded, placed };
+    return { io, moved, steps, restored, hashed, uploaded, placed, boardCounts };
   }
 
-  function run(io: PackIo, addBoard: (board: Board) => Promise<string> = async (b) => `${ROOT}/画板/${b.title}.ugcboard.json`, file: File = PACK) {
+  function run(
+    io: PackIo,
+    addBoard: (board: Board) => Promise<string> = async (b) => `${ROOT}/画板/${b.title}.ugcboard.json`,
+    file: File = PACK,
+    slotsRefusal?: (boards: number) => Promise<string | null>,
+  ) {
     const logs: Record<string, unknown>[] = [];
     const added: string[] = [];
     const stages: string[] = [];
     const phases: string[] = [];
     const outcome = importPack(io, {
       file,
+      ...(slotsRefusal ? { slotsRefusal } : {}),
       addBoard: async (board) => {
         added.push(board.title);
         return addBoard(board);
@@ -694,6 +704,41 @@ describe("导入画板包", () => {
     expect(r.logs).toEqual([
       { kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", task_dirs: 1, skipped: 0, conflicts: 0, bytes: 1234, board_file: "甲.ugcboard.json, 乙.ugcboard.json", result: "board_write_failed" },
     ]);
+  });
+
+  describe("画板位（#89）", () => {
+    const FULL = "画板位满了（9/10），归档或删掉一块再新建。";
+    /** 按将新增的画板数判定：只剩 1 个空位。 */
+    const oneFree = async (boards: number) => (boards > 1 ? FULL : null);
+
+    it("本地检查通过但画板位不够：不问服务端、不上传、不合并、不写画板，返回统一文案", async () => {
+      const asked: number[] = [];
+      const { io, steps, moved } = memoryPackIo(goodPack);
+      const r = run(io, undefined, zipFile(goodPack), async (n) => (asked.push(n), oneFree(n)));
+      expect(await r.outcome).toEqual({ kind: "slotsFull", message: FULL });
+      expect(asked).toEqual([2]);
+      expect(steps).toEqual(["cancel(false)"]);
+      expect(moved).toEqual([]);
+      expect(r.added).toEqual([]);
+      expect(r.logs).toEqual([{ kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", board_file: "甲.ugcboard.json, 乙.ugcboard.json", result: "board_slots_full" }]);
+    });
+
+    it("读取器认不了的包：服务端判定后、合并之前检查画板位，不够就放弃上传、不合并", async () => {
+      const { io, steps, moved } = memoryPackIo(goodPack);
+      const r = run(io, undefined, PACK, oneFree);
+      expect(await r.outcome).toEqual({ kind: "slotsFull", message: FULL });
+      expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", `entries(${UPLOAD_ID})`, "readTexts", `discard(${UPLOAD_ID})`]);
+      expect(moved).toEqual([]);
+    });
+
+    it("合并请求带上将新增的画板数，服务端据此在写文件前再检查一次", async () => {
+      const staged = memoryPackIo(goodPack);
+      await run(staged.io, undefined, zipFile(goodPack), async () => null).outcome;
+      expect(staged.boardCounts).toEqual([2]);
+      const whole = memoryPackIo(goodPack);
+      await run(whole.io).outcome;
+      expect(whole.boardCounts).toEqual([2]);
+    });
   });
 
   describe("浏览器本地检查（#61）", () => {

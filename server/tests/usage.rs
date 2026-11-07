@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use axum::http::{Method, StatusCode};
 use common::{Harness, GOOD_KEY, OTHER_KEY};
+use kacha_server::UsageLimit;
 
 const DAY: u64 = 86400;
 const OLD: &str = "2026-10-01/20261001T000000Z-0000000a";
@@ -138,6 +139,49 @@ async fn cleanup_refuses_while_any_board_is_unreadable() {
     assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text());
     assert_eq!(r.json()["code"], "board_unreadable");
     assert!(h.user_root(GOOD_KEY).join(OLD).exists());
+}
+
+#[tokio::test]
+async fn usage_limit_left_empty_gives_no_reminder() {
+    let h = Harness::new();
+    let cookie = setup(&h).await;
+    let v = h.get("/api/usage", Some(&cookie)).await.json();
+    assert!(v["limit_bytes"].is_null(), "{v}");
+    assert!(v["limit_level"].is_null(), "{v}");
+}
+
+/// 用量上限与提醒比例来自服务端配置：未到提醒比例不提醒，到提醒比例黄，达到上限红（#88）。
+#[tokio::test]
+async fn usage_reports_limit_and_reminder_level_from_server_config() {
+    // 期望值按票面规则手写：上限 10000 字节、提醒比例 80% → 8000 起黄、10000 起红。
+    let level_at = |total: u64| async move {
+        let h = Harness::with_usage_limit(UsageLimit { bytes: Some(10_000), warn_percent: 80 });
+        let cookie = h.session(GOOD_KEY).await;
+        let root = h.user_root(GOOD_KEY);
+        let used = walk_bytes(&root);
+        std::fs::write(root.join("填充.bin"), vec![0u8; (total - used) as usize]).unwrap();
+        let v = h.get("/api/usage", Some(&cookie)).await.json();
+        assert_eq!(v["total_bytes"], total, "{v}");
+        assert_eq!(v["limit_bytes"], 10_000, "{v}");
+        v["limit_level"].clone()
+    };
+    assert!(level_at(7_999).await.is_null());
+    assert_eq!(level_at(8_000).await, "warn");
+    assert_eq!(level_at(9_999).await, "warn");
+    assert_eq!(level_at(10_000).await, "alert");
+    assert_eq!(level_at(25_000).await, "alert");
+}
+
+/// 用量满了也不拦生成：任务目录照常写入（#88，ADR 0019 只提醒）。
+#[tokio::test]
+async fn full_usage_does_not_block_writing_task_files() {
+    let h = Harness::with_usage_limit(UsageLimit { bytes: Some(1), warn_percent: 80 });
+    let cookie = setup(&h).await;
+    assert_eq!(h.get("/api/usage", Some(&cookie)).await.json()["limit_level"], "alert");
+    let rel = "2026-11-07/20261107T000000Z-0000000e/result.png";
+    let r = h.put(&format!("/api/fs/file?path={}", common::q(rel)), &cookie, vec![1u8; 64]).await;
+    assert!(r.status.is_success(), "{} {}", r.status, r.text());
+    assert!(h.user_root(GOOD_KEY).join(rel).exists());
 }
 
 fn walk_bytes(path: &std::path::Path) -> u64 {

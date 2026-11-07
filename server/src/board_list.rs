@@ -54,6 +54,37 @@ struct Slots {
     total: u32,
 }
 
+/// 可编辑画板计数与列表使用同一规则：只剩 .bak 的也占位，归档子目录不占位。
+pub fn used_board_slots(user_root: &Path) -> std::io::Result<usize> {
+    Ok(list_board_names(&user_root.join(BOARDS_DIR))?.len())
+}
+
+/// 所有新增可编辑画板的服务端路径共用的预检（#89）：新建画板、导入画板包，以及之后的取消归档、复制为新画板、移出为新画板。
+/// 位满时 409 `board_slots_full`，message 是统一文案；client/src/ui/boardText.ts 的 `boardSlotsFullText` 是它的跨语言副本。
+/// 调用方必须持有 AppState::board_lock，并一直持有到新增画板完成；additional 是本次新增总数。
+/// 不为已有超额用户阻止编辑；additional = 0 时无论已用多少都允许。
+pub fn ensure_board_slots(user_root: &Path, total: u32, additional: usize) -> Result<(), Response> {
+    if additional == 0 {
+        return Ok(());
+    }
+    let used = used_board_slots(user_root).map_err(crate::fs::io_error)?;
+    if used.saturating_add(additional) <= total as usize {
+        Ok(())
+    } else {
+        Err(crate::session::error(
+            axum::http::StatusCode::CONFLICT,
+            "board_slots_full",
+            &format!("画板位满了（{used}/{total}），归档或删掉一块再新建。"),
+        ))
+    }
+}
+
+/// 画板列表中占位的路径：画板目录直属文件，归档目录（ARCHIVE_DIR）及其他子目录不计。
+pub fn occupies_board_slot(user_root: &Path, path: &Path) -> bool {
+    path.parent() == Some(user_root.join(BOARDS_DIR).as_path())
+        && path.file_name().is_some_and(|n| n.to_string_lossy().ends_with(crate::store::BOARD_EXTENSION))
+}
+
 #[derive(Serialize)]
 struct BoardList {
     boards: Vec<BoardRow>,

@@ -13,7 +13,7 @@ import { newId } from "../core/ids";
 import { emptyHistory, recordChange, redo, undo, type History } from "../core/history";
 import { basename, boardsDir, dirname, joinPath, resolveFromRoot } from "../core/paths";
 import { restoreResultLayers } from "../core/taskDir";
-import { BOARD_MISSING_TEXT } from "./boardText";
+import { BOARD_MISSING_TEXT, BOARD_SLOTS_FULL, slotsRefusal } from "./boardText";
 import { sha256Hex } from "../core/sha256";
 import { ipc } from "../shell/ipc";
 import { ApiError } from "../shell/apiError";
@@ -88,6 +88,8 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
   const isConflict = (e: unknown) => e instanceof ApiError && e.status === 409;
   /** 画板已不存在（另一页面删除或改名）：带版本保存回 board_missing，服务端不会重建它；删除回 404。 */
   const isMissing = (e: unknown) => e instanceof ApiError && (e.code === "board_missing" || (e.status === 404 && e.code === "not_found"));
+  /** 画板位满（#89）：服务端的 message 即统一文案。 */
+  const isSlotsFull = (e: unknown) => e instanceof ApiError && e.code === BOARD_SLOTS_FULL;
 
   /** 唯一写入实现：带内容版本（新建则只新建不覆盖），成功后用同一算法回写新版本。 */
   const writeSession = async (key: string, s: OkSession) => {
@@ -252,17 +254,35 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
     [setSessions],
   );
 
-  const createBoard = useCallback(async () => {
-    if (!userRoot) return;
+  /**
+   * 新建画板并立即落盘占住文件名。画板位满时不建标签页，返回统一文案交给调用方提示（#89）：
+   * 先按列表里的画板位判定；两页同时新建抢最后一个位时由服务端拒绝（409 board_slots_full），同样不留标签页。
+   */
+  const createBoard = useCallback(async (): Promise<string | null> => {
+    if (!userRoot) return null;
+    // 读不到列表时不拦：服务端仍会检查。
+    const slots = await ipc.listBoards().then((l) => l.slots, () => null);
+    const refusal = slots && slotsRefusal(slots, 1);
+    if (refusal) return refusal;
     const dir = boardsDir(userRoot);
     const onDisk = await ipc.listBoardNames(dir).catch(() => [] as string[]);
     const openHere = sessionsRef.current.filter((s) => samePath(dirname(s.path), dir)).map((s) => basename(s.path));
     const path = joinPath(dir, uniqueBoardFileName(DEFAULT_BOARD_TITLE, [...onDisk, ...openHere]));
+    const board = newBoard();
+    const text = serializeBoard(board);
+    let version: string | null = null;
+    try {
+      await ipc.writeBoard(path, text, { createOnly: true });
+      version = await sha256Hex(new TextEncoder().encode(text));
+    } catch (e) {
+      if (isSlotsFull(e)) return errorText(e);
+      // 其余失败照旧：标签页留着，由保存流程报错并重试。
+    }
     const key = newId();
-    setSessions([...sessionsRef.current, { key, path, status: "ok", board: newBoard(), history: emptyHistory(), notice: null, saveError: null, version: null, conflicted: false, missing: false }]);
+    setSessions([...sessionsRef.current, { key, path, status: "ok", board, history: emptyHistory(), notice: null, saveError: null, version, conflicted: false, missing: false }]);
     setActiveKey(key);
-    // 立即落盘占住文件名。
-    await flush(key);
+    if (version === null) await flush(key);
+    return null;
   }, [userRoot, flush, setSessions]);
 
   /** 导入的画板写进用户数据根画板目录：同名沿用 (2) 自动改名、永不覆盖；写好后在新标签页打开。 */

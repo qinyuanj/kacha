@@ -15,7 +15,8 @@ import { ChangelogDialog } from "./ui/ChangelogDialog";
 import { imageProbe } from "./shell/adapters";
 import { copyTextToClipboard } from "./shell/clipboard";
 import { browser, ipc, transfer, userRoot } from "./shell/ipc";
-import { BACKUP_HINT_TEXT, sizeNoticeText, TIDY_TEXT } from "./ui/boardText";
+import { BACKUP_HINT_TEXT, MANAGE_BOARDS_TEXT, sizeNoticeText, TIDY_TEXT, usageLimitText } from "./ui/boardText";
+import { useUsageLimit } from "./ui/useUsageLimit";
 import { BoardPackDialog } from "./ui/BoardPackDialog";
 import { BoardListDialog } from "./ui/BoardListDialog";
 import { BoardToolbar } from "./ui/BoardToolbar";
@@ -41,6 +42,10 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const [boardListOpen, setBoardListOpen] = useState(false);
   /** 处在整理模式的画板（会话 key）；整理模式是画布的界面状态，不落盘。 */
   const [tidyKey, setTidyKey] = useState<string | null>(null);
+  /** 画板列表以「管理画板」方式打开（#88，用量提醒入口）：按体量从大到小。 */
+  const [manageBoards, setManageBoards] = useState(false);
+  /** 本页关掉的用量提醒档位：同档不再出现，升到红再提醒（不跨页面记，重开页面仍提醒）。 */
+  const [usageDismissed, setUsageDismissed] = useState<SizeTier | null>(null);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
   const [packMenu, setPackMenu] = useState<{ x: number; y: number } | null>(null);
   const [confirm, setConfirm] = useState<{ boardKey: string; board: Board; items: ConfirmItem[]; scope: "selection" | "board" } | null>(null);
@@ -84,6 +89,11 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const redoActive = useCallback(() => activeKey && redoBoard(activeKey), [activeKey, redoBoard]);
   const toast = useCallback((message: string) => setToastText(message), []);
   const pack = useBoardPack(userRoot, boards, toast);
+  /** 新建画板；画板位满时提示统一文案（#89）。 */
+  const createBoardOrExplain = useCallback(async () => {
+    const refusal = await createBoard();
+    if (refusal) toast(refusal);
+  }, [createBoard, toast]);
   useEffect(() => {
     if (!toastText) return;
     const timer = setTimeout(() => setToastText(null), 4000);
@@ -281,10 +291,10 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       let activated = false;
       if (ui.active_board && opened.includes(ui.active_board)) activated = await openPath(ui.active_board, true);
       if (!activated && opened.length) await openPath(opened[0], true);
-      else if (!activated) await createBoard();
+      else if (!activated) await createBoardOrExplain();
       setReady(true);
     })();
-  }, [metadataReady, settings.loaded, openPath, createBoard, toast]);
+  }, [metadataReady, settings.loaded, openPath, createBoardOrExplain, toast]);
 
   useEffect(() => {
     // 没有记录代表首次使用，不提示更新，直接随界面状态记下当前版本。
@@ -320,6 +330,9 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const okActive = active?.status === "ok" ? active : null;
   const activeSize = useActiveBoardSize(okActive?.path ?? null, okActive?.version ?? null);
   const notice = activeSize ? sizeNotice(activeSize.tier, sizeNotices[activeSize.path]) : null;
+  // 用量上限提醒（#88）：只提醒，生成照常。
+  const usageLimit = useUsageLimit(metadataReady && !!userRoot);
+  const usageNotice = usageLimit.notice && !(usageDismissed === "alert" || usageDismissed === usageLimit.notice.level) ? usageLimit.notice : null;
   useEffect(() => {
     if (!activeSize || !notice || notice.notified === sizeNotices[activeSize.path]) return;
     const { path } = activeSize;
@@ -344,7 +357,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           }}
           onClose={(key) => void closeBoard(key)}
           onRename={(key, title) => void boards.renameBoard(key, title)}
-          onCreate={() => void createBoard()}
+          onCreate={() => void createBoardOrExplain()}
           onOpenList={() => void boards.flushAll().then(() => setBoardListOpen(true))}
           onExportPack={(key) => void pack.prepareExport(key)}
         />
@@ -366,7 +379,12 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           }}
           onDelete={deleteBoardAt}
           onExport={(path) => void exportBoardAt(path).catch((e) => toast(errorText(e)))}
-          onClose={() => setBoardListOpen(false)}
+          onClose={() => {
+            setBoardListOpen(false);
+            setManageBoards(false);
+            usageLimit.refresh();
+          }}
+          manage={manageBoards}
         />
       )}
       <div className="board-toolbar">
@@ -457,6 +475,24 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           <button onClick={() => setSettingsOpen(true)}>打开高级设置</button>
         </div>
       )}
+      {usageNotice && (
+        <div className={`bar ${usageNotice.level === "alert" ? "bar-alert" : "bar-warn"} usage-limit-notice`} role="status" data-usage-level={usageNotice.level}>
+          <span>{usageLimitText(usageNotice.level, usageNotice.total, usageNotice.limit)}</span>
+          <button
+            onClick={() =>
+              void boards.flushAll().then(() => {
+                setManageBoards(true);
+                setBoardListOpen(true);
+              })
+            }
+          >
+            {MANAGE_BOARDS_TEXT}
+          </button>
+          <button className="link" aria-label="关闭用量提醒" onClick={() => setUsageDismissed(usageNotice.level)}>
+            关闭
+          </button>
+        </div>
+      )}
       {activeSize && notice?.show && (
         <div className={`bar ${notice.show === "alert" ? "bar-alert" : "bar-warn"} size-notice`} role="status" data-size-tier={notice.show}>
           <span>{sizeNoticeText(activeSize.bytes)}</span>
@@ -497,7 +533,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               <>
                 <div>没有打开的画板</div>
                 <div className="empty-actions">
-                  <button className="primary" onClick={() => void createBoard()} disabled={!userRoot}>
+                  <button className="primary" onClick={() => void createBoardOrExplain()} disabled={!userRoot}>
                     新建画板
                   </button>
                   <button onClick={() => void pack.importPack()} disabled={!userRoot}>

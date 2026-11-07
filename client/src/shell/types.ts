@@ -1,6 +1,6 @@
 // Web 壳层端口：UI 只认这些接口，同源 HTTP 与浏览器能力都在 ipc.ts 中实现。
 import type { MergeReport, MergeUnit, PackDuplicates, PackEntryFact, PackExportSpec, PackIo } from "../core/boardPack";
-import type { SizeLines } from "../core/boardSize";
+import type { SizeLines, SizeTier } from "../core/boardSize";
 import type { BoardMeasure } from "../core/tidy";
 import type { DirEntry } from "../core/relocate";
 
@@ -65,7 +65,8 @@ export interface Ipc {
   boardPackExport(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number }>;
   boardPackEntries(pack: string): Promise<string[]>;
   boardPackReadTexts(pack: string, names: string[]): Promise<Record<string, string>>;
-  boardPackImport(pack: string, units: MergeUnit[], duplicates: PackDuplicates): Promise<MergeReport>;
+  /** boards = 导入后将新增的画板数，服务端据此在写文件前检查画板位（#89，409 board_slots_full）。 */
+  boardPackImport(pack: string, units: MergeUnit[], duplicates: PackDuplicates, boards: number): Promise<MergeReport>;
   boardPackCancel(cancelled: boolean): Promise<void>;
   listDir(path: string): Promise<DirEntry[]>;
   fileSha256(path: string): Promise<string>;
@@ -103,6 +104,10 @@ export interface Usage {
   by_date: { date: string; bytes: number }[];
   unreferenced: UsageCandidate[] | null;
   unreadable_board: string | null;
+  /** 用量上限（服务端配置，#88）；留空为 null，此时不提醒。 */
+  limit_bytes: number | null;
+  /** 提醒档位：达到提醒比例 warn（黄）、达到上限 alert（红）；只提醒、不阻止生成。 */
+  limit_level: SizeTier | null;
 }
 
 export interface UsagePort {
