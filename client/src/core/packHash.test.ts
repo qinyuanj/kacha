@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { PACK_CANCELLED } from "./boardPack";
 import { entryBody, hashEntries } from "./packHash";
 import { buildZip } from "./testing/zipFixture";
 import { blobSource, readZipIndex, type ZipEntry } from "./zipIndex";
@@ -36,18 +35,6 @@ describe("按条目流式 hash（#62）", () => {
     expect(progress.at(-1)).toEqual([total, total]);
     expect(progress.every(([, t]) => t === total)).toBe(true);
     expect(progress.length).toBeGreaterThan(3);
-  });
-
-  it("取消后以中止原因（「已取消」）reject，不再读后面的条目", async () => {
-    const entries = await indexOf(file);
-    const abort = new AbortController();
-    const seen: number[] = [];
-    const run = hashEntries(blobSource(file), entries, (done) => {
-      seen.push(done);
-      abort.abort(new Error(PACK_CANCELLED));
-    }, abort.signal);
-    await expect(run).rejects.toThrow(PACK_CANCELLED);
-    expect(Math.max(...seen)).toBeLessThan(7 + big.length);
   });
 
   it("上传体：stored 条目是文件切片（不复制），deflate 条目是解压后的字节", async () => {

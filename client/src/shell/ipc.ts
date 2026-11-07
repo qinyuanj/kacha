@@ -1,30 +1,31 @@
 // 壳层（唯一实现）：业务调用走同源 HTTP，密钥存 localStorage，网关由浏览器直连（ADR 0018）。
 // UI 与 core 不直接调业务 HTTP，都经这里的端口。
 import type { FetchLike } from "../core/gateway";
-import { PACK_CANCELLED, type PackContent, type PackEntryFact } from "../core/boardPack";
+import { PACK_CANCELLED, type PackContent, type PackEntryFact, type PackExportSpec } from "../core/boardPack";
 import type { ZipEntry } from "../core/zipIndex";
 import { entryBody } from "../core/packHash";
 import type { WorkerMessage, WorkerRequest } from "./packHash.worker";
 import { ApiError } from "./apiError";
+import { API_KEY_STORAGE } from "./apiKeyStorage";
+import { UPLOAD_FAILURES } from "./uploadText";
 import { DEFAULT_SETTINGS, serializeSettings } from "../core/settings";
 import type { BrowserPort, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
 
-export type { BrowserPort, ImageInfo, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
+export type { ImageInfo } from "./types";
 
 /** core/ 按「用户数据根 + 相对路径」拼路径；用户数据根在浏览器里是固定的虚拟根，壳层在边界剥掉，服务端只收相对路径。 */
 const VIRTUAL_ROOT = "/~";
 export const userRoot = VIRTUAL_ROOT;
-export const API_KEY_STORAGE = "kacha.apiKey";
 
 /** 会话失效事件：HTTP 层统一识别 401，页面据此回到粘贴密钥界面（不能当成「没有数据」）。 */
 type SessionListener = () => void;
 const sessionListeners = new Set<SessionListener>();
-export function onSessionExpired(listener: SessionListener): () => void {
+function onSessionExpired(listener: SessionListener): () => void {
   sessionListeners.add(listener);
   return () => sessionListeners.delete(listener);
 }
 
-export const stripRoot = (path: string): string =>
+const stripRoot = (path: string): string =>
   path === VIRTUAL_ROOT ? "" : path.startsWith(`${VIRTUAL_ROOT}/`) ? path.slice(VIRTUAL_ROOT.length + 1) : path;
 
 const query = (path: string) => `path=${encodeURIComponent(stripRoot(path))}`;
@@ -41,22 +42,26 @@ async function send(url: string, init: RequestInit = {}): Promise<Response> {
   return res;
 }
 
-async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
+/** 非 2xx 一律抛 ApiError；响应体（下载流、上传句柄）留给调用方读。 */
+async function apiResponse(url: string, init: RequestInit = {}): Promise<Response> {
   const res = await send(url, init);
-  if (!res.ok) {
-    let code = "http_error";
-    let message = `服务端返回 HTTP ${res.status}`;
-    let upstreamStatus: number | undefined;
-    try {
-      const body = await res.json();
-      if (typeof body?.code === "string") code = body.code;
-      if (typeof body?.message === "string") message = body.message;
-      if (typeof body?.upstream_status === "number") upstreamStatus = body.upstream_status;
-    } catch {
-      // 非 JSON 错误体（如网关代理的 HTML）保留状态码文案。
-    }
-    throw new ApiError(res.status, code, message, upstreamStatus);
+  if (res.ok) return res;
+  let code = "http_error";
+  let message = `服务端返回 HTTP ${res.status}`;
+  let upstreamStatus: number | undefined;
+  try {
+    const body = await res.json();
+    if (typeof body?.code === "string") code = body.code;
+    if (typeof body?.message === "string") message = body.message;
+    if (typeof body?.upstream_status === "number") upstreamStatus = body.upstream_status;
+  } catch {
+    // 非 JSON 错误体（如网关代理的 HTML）保留状态码文案。
   }
+  throw new ApiError(res.status, code, message, upstreamStatus);
+}
+
+async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const res = await apiResponse(url, init);
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
@@ -71,6 +76,7 @@ async function apiText(url: string): Promise<string | null> {
 }
 
 const textBody = (text: string): RequestInit => ({ method: "PUT", headers: { "Content-Type": "application/json" }, body: text });
+const jsonPost = (body: unknown, signal?: AbortSignal): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: signal ?? null });
 
 async function readBytes(path: string): Promise<Uint8Array> {
   const res = await send(`/api/fs/file?${query(path)}`);
@@ -84,14 +90,7 @@ async function writeNewFile(path: string, bytes: Uint8Array): Promise<void> {
   if (!res.ok) throw new ApiError(res.status, "write_failed", `写入文件失败（HTTP ${res.status}）：${path}`);
 }
 
-export const sessionApi = {
-  /** 服务端向网关验证密钥；invalid_key 与 gateway_unavailable 由 ApiError.code 区分。 */
-  login: (key: string) => api<{ fingerprint: string }>("/api/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) }),
-  current: () => api<{ fingerprint: string }>("/api/session"),
-  logout: () => api<void>("/api/session", { method: "DELETE" }),
-};
-
-export const webConfig = () => api<{ version: string; gateway_url: string }>("/api/config");
+const webConfig = () => api<{ version: string; gateway_url: string }>("/api/config");
 
 // ---- 画板包（#24）----
 // 导出 = 服务端边打包边发送的下载流；导入 = 流式上传到服务端临时文件，再判定与合并。
@@ -129,57 +128,39 @@ async function tracked<T>(op: string, run: () => Promise<T>): Promise<T> {
   }
 }
 
-/** 上传类请求按状态码给可读的失败文案（#60）：反向代理回的非 JSON 错误体也能看懂。 */
-const UPLOAD_FAILURES: Record<number, string> = {
-  408: "上传中断：超过 60 秒没有收到数据，请检查网络后重试",
-  507: "服务器空间不足，请联系管理员",
-};
 const uploadFailure = (e: unknown) => (e instanceof ApiError && UPLOAD_FAILURES[e.status] ? new ApiError(e.status, e.code, UPLOAD_FAILURES[e.status]) : e);
 
-/** 本操作已被取消，或服务端以 409 cancelled / 文案「已取消」回取消：统一成与桌面一致的取消文案。 */
-const asCancelled = (op: string, e: unknown) => (cancelledOps.has(op) || (e instanceof ApiError && e.message === PACK_CANCELLED) ? new Error(PACK_CANCELLED) : e);
+/** 本操作已被取消，或服务端回 code cancelled：统一成取消文案。 */
+const asCancelled = (op: string, e: unknown) => (cancelledOps.has(op) || (e instanceof ApiError && e.code === "cancelled") ? new Error(PACK_CANCELLED) : e);
 
-async function apiResponse(url: string, init: RequestInit): Promise<Response> {
-  const res = await send(url, init);
-  if (!res.ok) {
-    let code = "http_error";
-    let message = `服务端返回 HTTP ${res.status}`;
-    try {
-      const body = await res.json();
-      if (typeof body?.code === "string") code = body.code;
-      if (typeof body?.message === "string") message = body.message;
-    } catch {
-      // 非 JSON 错误体保留状态码文案。
-    }
-    throw new ApiError(res.status, code, message);
-  }
-  return res;
-}
-
-/** 触发浏览器下载；文件名由前端给定（不依赖 Content-Disposition 的中文编码）。 */
-function downloadBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
+/** 用隐藏 <a> 触发浏览器下载。fileName 为空时由响应的 Content-Disposition 定文件名，download 属性只兜底。 */
+function triggerDownload(url: string, fileName = "") {
   const a = document.createElement("a");
   a.href = url;
   a.download = fileName;
-  document.body.appendChild(a);
+  document.body.append(a);
   a.click();
   a.remove();
-  // 延迟回收：让下载先拿到对象 URL。
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+/** spec.files[].source 是 core 拼出的虚拟根绝对路径：在边界剥成相对用户数据根，服务端只收相对路径。 */
+const relativeSources = <S extends Pick<PackExportSpec, "files">>(spec: S): S => ({ ...spec, files: spec.files.map((f) => ({ ...f, source: stripRoot(f.source) })) });
+
 /** 导出下载：响应体即 zip 流。中途取消 / 失败会中止流，blob() 随之 reject。 */
-async function boardPackExport(spec: unknown, target: string): Promise<{ task_dirs: number; bytes: number }> {
+async function boardPackExport(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number }> {
   const op = requireOp();
   try {
     return await tracked(op, async () => {
-      const res = await apiResponse(`/api/packs/export?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(spec) });
+      const res = await apiResponse(`/api/packs/export?op=${encodeURIComponent(op)}`, jsonPost(relativeSources(spec)));
       const blob = await res.blob();
       // 取消请求晚于打包完成到达时，服务端照常发完；以前端的取消为准，不再触发下载。
       if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
-      downloadBlob(blob, target);
-      return { task_dirs: (spec as { task_dirs: string[] }).task_dirs.length, bytes: blob.size };
+      // 文件名由前端给定，不依赖 Content-Disposition 的中文编码。
+      const url = URL.createObjectURL(blob);
+      triggerDownload(url, target);
+      // 延迟回收：让下载先拿到对象 URL。
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      return { task_dirs: spec.task_dirs.length, bytes: blob.size };
     });
   } catch (e) {
     if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
@@ -188,11 +169,11 @@ async function boardPackExport(spec: unknown, target: string): Promise<{ task_di
 }
 
 /** 导出的 hash 阶段：服务端按操作 id 报进度、可取消（409 已取消）。 */
-async function boardPackFacts(spec: unknown): Promise<PackEntryFact[]> {
+async function boardPackFacts(spec: Pick<PackExportSpec, "task_dirs" | "files">): Promise<PackEntryFact[]> {
   const op = requireOp();
   try {
     return await tracked(op, async () => {
-      const facts = await api<PackEntryFact[]>(`/api/packs/export/facts?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(spec) });
+      const facts = await api<PackEntryFact[]>(`/api/packs/export/facts?op=${encodeURIComponent(op)}`, jsonPost(relativeSources(spec)));
       // 取消请求晚于服务端算完到达：以前端的取消为准。
       if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
       return facts;
@@ -226,7 +207,7 @@ function onPackProgress(handler: (progress: { done: number; total: number }) => 
     if (!stopped && local) return handler(local);
     if (stopped || !currentOp || !inFlight.has(currentOp)) return;
     try {
-      const res = await fetch(`/api/packs/ops/${encodeURIComponent(currentOp)}`, { credentials: "same-origin" });
+      const res = await send(`/api/packs/ops/${encodeURIComponent(currentOp)}`);
       if (res.ok) handler((await res.json()) as { done: number; total: number });
     } catch {
       // 网络抖动不当作进度。
@@ -249,7 +230,7 @@ export const ipc: Ipc = {
     await api(`/api/boards?${params}`, textBody(text));
   },
   renameBoard: async (from, to, version) =>
-    void (await api("/api/boards/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: stripRoot(from), to: stripRoot(to), ...(version ? { version } : {}) }) })),
+    void (await api("/api/boards/rename", jsonPost({ from: stripRoot(from), to: stripRoot(to), ...(version ? { version } : {}) }))),
   deleteBoard: async (path, version) => {
     const params = new URLSearchParams({ path: stripRoot(path) });
     if (version) params.set("version", version);
@@ -271,18 +252,17 @@ export const ipc: Ipc = {
   readModelsCache: () => apiText("/api/models-cache"),
   writeModelsCache: async (text) => void (await api("/api/models-cache", textBody(text))),
   logEvent: async (kind, fields) =>
-    void (await api("/api/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, fields }) })),
-  // spec.files[].source 是 core 拼出的虚拟根绝对路径：在边界剥成相对用户数据根，服务端只收相对路径。
-  boardPackFacts: async (spec) => boardPackFacts({ ...spec, files: spec.files.map((f) => ({ ...f, source: stripRoot(f.source) })) }),
-  boardPackExport: async (target, spec) => boardPackExport({ ...spec, files: spec.files.map((f) => ({ ...f, source: stripRoot(f.source) })) }, target),
+    void (await api("/api/log", jsonPost({ kind, fields }))),
+  boardPackFacts,
+  boardPackExport,
   boardPackEntries: (pack) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/entries`),
-  boardPackReadTexts: (pack, names) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/texts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(names) }),
+  boardPackReadTexts: (pack, names) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/texts`, jsonPost(names)),
   boardPackImport: async (pack, units, duplicates) => {
     const op = requireOp();
     // 上传之后、合并之前被取消：服务端还没有这个操作，取消标记只在这里，不再发起合并。
     if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
     try {
-      return await tracked(op, () => api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ units, duplicates: Object.entries(duplicates).map(([path, source]) => ({ path, source })) }) }));
+      return await tracked(op, () => api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, jsonPost({ units, duplicates: Object.entries(duplicates).map(([path, source]) => ({ path, source })) })));
     } catch (e) {
       throw asCancelled(op, e);
     }
@@ -326,9 +306,10 @@ export const browser: BrowserPort = {
 };
 
 export const session: SessionPort = {
-  login: sessionApi.login,
-  current: sessionApi.current,
-  logout: sessionApi.logout,
+  /** 服务端向网关验证密钥；invalid_key 与 gateway_unavailable 由 ApiError.code 区分。 */
+  login: (key) => api("/api/session", jsonPost({ key })),
+  current: () => api("/api/session"),
+  logout: () => api("/api/session", { method: "DELETE" }),
   config: webConfig,
   onExpired: onSessionExpired,
   readStoredKey: () => localStorage.getItem(API_KEY_STORAGE),
@@ -339,9 +320,9 @@ export const session: SessionPort = {
 /** 结果中转：地址交给服务端，取消经 AbortSignal 传到服务端（断开即中止下载）。 */
 export const relay: RelayPort = {
   relayResult: ({ url, relDir, stem, signal }) =>
-    api("/api/fs/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, dir: stripRoot(relDir), stem }), signal: signal ?? null }),
+    api("/api/fs/relay", jsonPost({ url, dir: stripRoot(relDir), stem }, signal)),
   commitRelayed: (relDir, from, stem) =>
-    api("/api/fs/relay/commit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dir: stripRoot(relDir), from, stem }) }),
+    api("/api/fs/relay/commit", jsonPost({ dir: stripRoot(relDir), from, stem })),
   discardRelayed: async (relDir) => void (await api(`/api/fs/relay?dir=${encodeURIComponent(stripRoot(relDir))}`, { method: "DELETE", keepalive: true })),
 };
 
@@ -375,26 +356,14 @@ export const transfer: TransferPort = {
   downloadBoardResults: (boardPath) => triggerDownload(`/api/download/board-results?path=${encodeURIComponent(stripRoot(boardPath))}`),
 };
 
-function triggerDownload(url: string) {
-  const a = document.createElement("a");
-  a.href = url;
-  // 真正的保存对话框由 Content-Disposition 触发；download 属性只兜底。
-  a.download = "";
-  document.body.append(a);
-  a.click();
-  a.remove();
-}
-
 export const usage: UsagePort = {
   usage: () => api("/api/usage"),
-  cleanupUnreferenced: (dirs) => api("/api/cleanup/unreferenced", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dirs }) }),
+  cleanupUnreferenced: (dirs) => api("/api/cleanup/unreferenced", jsonPost({ dirs })),
 };
 
 export const packUpload: PackUploadPort = { upload: uploadPack, discard: discardUpload };
 
 // ---- 去重上传（#62）----
-
-const jsonPost = (body: unknown, signal?: AbortSignal): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: signal ?? null });
 
 /** 在当前操作下跑一个可取消的请求：已取消就不发；被中止或服务端回取消都统一成取消文案，上传类状态码给可读文案。 */
 async function inOp<T>(run: (op: string, signal: AbortSignal) => Promise<T>): Promise<T> {

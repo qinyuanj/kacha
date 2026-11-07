@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { board, png, promptNode, referenceNode } from "../common/boards";
 import { FLASH } from "../common/layers";
+import { UPLOAD_FAILURES } from "../../src/shell/uploadText";
 import { unzip, zipBytes, zipNames, zipText } from "../common/zip";
 import { expect, GOOD_KEY, OTHER_KEY, test, type Rig } from "./rig";
 import { openApp, readJson, readText, taskRecords, type WebScenario } from "./kit";
@@ -345,10 +346,8 @@ test("选中文件后窗口重新获得焦点、上传超过 1 秒：仍正常�
   expect(errors).toEqual([]);
 });
 
-for (const [status, reason] of [
-  [408, "上传中断：超过 60 秒没有收到数据，请检查网络后重试"],
-  [507, "服务器空间不足，请联系管理员"],
-] as const) {
+for (const status of [408, 507]) {
+  const reason = UPLOAD_FAILURES[status];
   test(`上传回 ${status}（反向代理给的非 JSON 响应体）：提示「${reason}」，不出现新画板（#60）`, async ({ page, rig }) => {
     const errors = await openApp(page, rig, { title: "空", boardText: board("空", [], []) });
     await page.route(CONTENT_UPLOAD, (route) => route.fulfill({ status, contentType: "text/html", body: "<html>error</html>" }));

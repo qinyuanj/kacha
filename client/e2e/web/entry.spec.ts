@@ -2,6 +2,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { API_KEY_STORAGE } from "../../src/shell/apiKeyStorage";
 import { BACKUP_HINT_TEXT } from "../../src/ui/boardText";
 import { BAD_KEY, enterWithKey, expect, GOOD_KEY, metaFile, OTHER_KEY, OUTAGE_KEY, readMeta, test } from "./rig";
 
@@ -28,7 +29,7 @@ test("非安全上下文下粘贴有效密钥进入工作台，顶栏显示版�
   // 画板落在该用户的用户数据根下。
   expect(existsSync(path.join(rig.userRoot(GOOD_KEY), "画板"))).toBe(true);
   // 密钥保存在浏览器本地，供浏览器直连网关。
-  expect(await page.evaluate(() => localStorage.getItem("kacha.apiKey"))).toBe(GOOD_KEY);
+  expect(await page.evaluate((k) => localStorage.getItem(k), API_KEY_STORAGE)).toBe(GOOD_KEY);
 });
 
 test("会话 cookie 对页面脚本不可见，刷新后无需重新粘贴", async ({ page, rig }) => {
@@ -73,7 +74,7 @@ test("退出后会话作废并回到粘贴界面", async ({ page, rig }) => {
   await expect(page.locator(".tab").first()).toBeVisible();
   await page.getByRole("button", { name: "退出", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "粘贴 API 密钥" })).toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem("kacha.apiKey"))).toBeNull();
+  expect(await page.evaluate((k) => localStorage.getItem(k), API_KEY_STORAGE)).toBeNull();
   const res = await page.request.get(`${rig.localURL}/api/session`);
   expect(res.status()).toBe(401);
 });

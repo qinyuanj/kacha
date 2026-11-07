@@ -12,8 +12,6 @@ import { blobSource, readEntryBytes, readZipIndex, type ZipEntry, type ZipSource
 /** 本机能导入、也是导出写的包格式版本。v2 = 导出时按内容去重，被省略的路径记在清单的 duplicates 里（ADR 0013 补记）。 */
 export const PACK_FORMAT_VERSION = 2;
 export const PACK_EXTENSION = ".ugcpack";
-/** 系统对话框的扩展名过滤器。 */
-export const PACK_FILE_FILTER = { name: "画板包", extensions: [PACK_EXTENSION.slice(1)] };
 export const PACK_MANIFEST = "manifest.json";
 /** 不在任务目录里的参考图在包内（及导入后根目录内）的位置：导入参考图/<sha256>.<ext>。 */
 export const IMPORTED_REFERENCES_DIR = "导入参考图";
@@ -351,7 +349,7 @@ export function importSummary(units: MergeUnit[], outcomes: { path: string; outc
 
 // ---- 可取消的包命令 ----
 
-/** 与 server/src/board_pack.rs 的 CANCELLED 一致：取消时请求以此失败。 */
+/** 取消时包命令以此失败（壳层把服务端的 code cancelled 也统一成它）。 */
 export const PACK_CANCELLED = "已取消";
 
 /** 单份内容上传的上限，与服务端单文件请求体上限一致（ADR 0018）；包里有更大的条目时回退为整包上传。 */

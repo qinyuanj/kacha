@@ -1,5 +1,5 @@
 // 画板包入口：浏览器选择画板包文件。只选文件，不上传；上传由导入流程负责。
-import { PACK_FILE_FILTER } from "../core/boardPack";
+import { PACK_EXTENSION } from "../core/boardPack";
 
 /**
  * 弹浏览器文件选择：`change` 到达即返回选中的文件；`<input>` 原生 `cancel` 事件（关掉对话框未选文件）返回 null。
@@ -9,7 +9,7 @@ export function pickPackFile(): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = PACK_FILE_FILTER.extensions.map((e) => `.${e}`).join(",");
+    input.accept = PACK_EXTENSION;
     input.style.display = "none";
     document.body.appendChild(input);
     const done = (file: File | null) => {
