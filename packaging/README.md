@@ -4,15 +4,15 @@ Kacha 由一个 `kacha-server` 进程同时托管前端静态文件和 API，默
 
 ## 构建与复制
 
-在开发机安装 Rust、Node 与 Python 3.11+，在仓库根目录执行：
+在开发机（原生 Windows）安装 Rust、Node 与 Python 3.11+，在仓库根目录的 PowerShell 中执行：
 
-```sh
-python3 packaging/build_web.py
+```powershell
+python packaging\build_web.py
 # 已按锁文件安装依赖时可跳过 npm ci：
-python3 packaging/build_web.py --skip-npm-ci
+python packaging\build_web.py --skip-npm-ci
 ```
 
-Windows 开发机可执行 `python packaging\build_web.py`。脚本运行前端 release 构建和 `cargo build --release`，输出：
+脚本运行前端 release 构建和 `cargo build --release`，输出：
 
 ```text
 release/kacha-web/
@@ -25,7 +25,9 @@ release/kacha-web/
 
 把整个 `kacha-web` 目录复制到部署机，例如 `C:\kacha`。运行环境不需要 Rust、Node 或 Python；只需服务端程序和 `static/`。`index.html` 使用相对资源路径。SHA256SUMS 可用于复制后核对文件。
 
-本次已在 WSL Linux 实际完成 release 构建并检查 Linux 产物；未在 Windows 编译或运行 `.exe`。
+Linux 上命令相同，只需把 `python` 换成 `python3`、路径分隔符换成 `/`；Linux 不再实测。
+
+2026-11-07 在 Windows 开发机实测：`python packaging\build_web.py` 完成 release 构建并产出 `kacha-server.exe` 与 `static/`；前台启动后 `GET /` 返回首页、`GET /api/config` 返回版本，登录后经符号链接越界读文件返回 403；`cleanup --dry-run` 正常执行并退出 0。尚未实测：在 lzxsvn 上以 Windows 服务运行（见下文「待人工实测」与 [#70](https://github.com/qinyuanj/kacha/issues/70)）。
 
 ## 配置
 
@@ -145,22 +147,24 @@ C:\kacha\kacha-server.exe cleanup restore --data-root D:\kacha-data "<批次>/us
 
 服务端没有备份，搬移失败时只能靠用户导出的画板包与已下载结果恢复。
 
-## 30 人并发内存实测
+## 设计规模内存实测
 
-脚本用真实 release 服务端和本地网关桩，30 个线程分别执行写结果、读图、上传并导入 v0.3.2 画板包、导出画板包；每 20 ms 从 Linux `/proc/<pid>/status` 采样 `VmRSS`：
+设计规模是 12 人（见 `CONTEXT.md`）：它是容量与内存预算依据的规模假设，不是强制上限。压测脚本用真实 release 服务端和本地网关桩，按 `--users` 开同样多的线程，分别执行写结果、读图、上传并导入 v0.3.2 画板包、导出画板包；结束后、服务端退出前读一次操作系统记录的进程峰值内存（Windows：峰值工作集 `PeakWorkingSetSize`；Linux：`/proc/<pid>/status` 的 `VmHWM`），不受采样间隔影响。读不到峰值或超过预算（`--budget-mib`，默认 512）时以非 0 退出。
 
-```sh
-python3 packaging/load_30_users.py --output release/memory-30-users.json
+```powershell
+python packaging\load_users.py --users 12 --output release\memory-12-users.json
 ```
 
-2026-11-05 本机 WSL Linux 实测：30 人全部操作成功，1.62 秒完成，58 次采样，**服务端峰值 RSS 22.15 MiB**，低于约 **512 MiB** 预算。该结果使用仓库的小型画板包夹具，不是 Windows 实测，也未计入 lzxsvn 上 Gitea、new-api、学习站等进程的内存。
+2026-11-07 Windows 开发机实测（release 构建）：12 人全部操作成功，0.67 秒完成，**服务端峰值工作集 13.95 MiB**，低于 **512 MiB** 预算。该结果使用仓库的小型画板包夹具，未计入 lzxsvn 上 Gitea、new-api、学习站等进程的内存。
 
 ## 验证
 
-```sh
-python3 -m unittest discover -s packaging/tests
+```powershell
+python -m unittest discover -s packaging/tests
 npm --prefix client test
 npm --prefix client run typecheck
 npm --prefix client run test:e2e -- --workers=4
 cargo test --manifest-path server/Cargo.toml
 ```
+
+符号链接逃逸测试在当前账户无权创建符号链接（未开开发者模式、也不是管理员）时打印原因并跳过，其余断言照常运行。

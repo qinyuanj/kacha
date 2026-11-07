@@ -33,6 +33,8 @@ tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 filetime = "0.2"
+# 跨平台判断两个路径是否同一文件（硬链接去重断言，Unix 与 Windows 都跑）。
+same-file = "1"
 zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [target.'cfg(unix)'.dependencies]

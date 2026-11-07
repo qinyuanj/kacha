@@ -57,6 +57,8 @@ v1 适配器 `src/ugc_image_tool/team_gateway.py`（已归档于 `archive/v1` �
 
 ## 探测流程
 
+> 历史命令，已退役：下面的 `ugc_image_tool.contracts.cli` 属于 v1，已随 `archive/v1` 分支归档，当前仓库中无法运行，仅作记录。
+
 临时密钥只能通过环境变量或权限受限的临时文件提供：
 
 ```bash

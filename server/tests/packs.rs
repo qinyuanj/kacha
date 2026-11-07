@@ -69,11 +69,9 @@ async fn export_rejects_absolute_source_and_symlink_escape() {
     assert_eq!(reply.status, 422, "任意文件读必须被拒：{}", reply.text());
     assert!(reply.text().contains("越界"));
 
-    #[cfg(unix)]
-    {
-        let outside = tempfile::tempdir().unwrap();
-        std::fs::write(outside.path().join("secret.png"), png()).unwrap();
-        std::os::unix::fs::symlink(outside.path(), h.user_root(GOOD_KEY).join("link")).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret.png"), png()).unwrap();
+    if symlink_dir(outside.path(), &h.user_root(GOOD_KEY).join("link")) {
         let mut spec = export_spec();
         spec["files"] = serde_json::json!([{ "source": "link/secret.png", "entry": "导入参考图/x.png" }]);
         let reply = h.send(Method::POST, "/api/packs/export?op=e3", Some(&cookie), spec.to_string()).await;
@@ -430,12 +428,7 @@ async fn importing_a_v2_pack_restores_omitted_paths_as_hard_links() {
         (REF_B.to_string(), REF_A.to_string()),
     ] {
         assert_eq!(std::fs::read(root.join(&omitted)).unwrap(), std::fs::read(root.join(&representative)).unwrap(), "{omitted}");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            let (a, b) = (std::fs::metadata(root.join(&omitted)).unwrap(), std::fs::metadata(root.join(&representative)).unwrap());
-            assert_eq!((a.dev(), a.ino()), (b.dev(), b.ino()), "能硬链接时 {omitted} 应是 {representative} 的硬链接");
-        }
+        assert!(same_file::is_same_file(root.join(&omitted), root.join(&representative)).unwrap(), "能硬链接时 {omitted} 应是 {representative} 的硬链接");
     }
     assert!(!root.join(".kacha/packs").join(format!("{id}.ugcpack.tmp")).exists());
 }

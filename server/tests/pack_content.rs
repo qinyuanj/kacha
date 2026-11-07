@@ -79,13 +79,6 @@ async fn import_two_tasks(h: &Harness, cookie: &str, b_record: &[u8]) -> Reply {
     h.send(Method::POST, &format!("/api/packs/staging/{staging}/import?op=m1"), Some(cookie), body).await
 }
 
-#[cfg(unix)]
-fn inode(path: &std::path::Path) -> (u64, u64) {
-    use std::os::unix::fs::MetadataExt;
-    let m = std::fs::metadata(path).unwrap();
-    (m.dev(), m.ino())
-}
-
 #[tokio::test]
 async fn same_content_within_one_import_is_written_once_and_hard_linked() {
     let h = Harness::new();
@@ -99,8 +92,7 @@ async fn same_content_within_one_import_is_written_once_and_hard_linked() {
     let (result, snapshot) = (root.join(TASK_A).join("result.png"), root.join(TASK_B).join("reference-1.png"));
     assert_eq!(std::fs::read(&result).unwrap(), RED);
     assert_eq!(std::fs::read(&snapshot).unwrap(), RED);
-    #[cfg(unix)]
-    assert_eq!(inode(&result), inode(&snapshot), "同次导入内相同内容应是硬链接");
+    assert!(same_file::is_same_file(&result, &snapshot).unwrap(), "同次导入内相同内容应是硬链接");
     assert_eq!(std::fs::read(root.join(TASK_B).join("result.png")).unwrap(), BLUE);
     assert!(staging_dirs(&h, GOOD_KEY).is_empty(), "合并结束删除暂存");
     assert!(!std::fs::read_dir(&root).unwrap().flatten().any(|e| e.file_name().to_string_lossy().ends_with(".tmp")), "不留导入临时目录");

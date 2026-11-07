@@ -138,11 +138,9 @@ async fn path_traversal_absolute_and_symlink_are_403() {
         let create = h.put(&format!("/api/fs/file?path={}", q(bad)), &cookie, Body::from(vec![1u8])).await;
         assert_eq!(create.status, 403, "新建 {bad}");
     }
-    #[cfg(unix)]
-    {
-        let outside = tempfile::tempdir().unwrap();
-        std::fs::write(outside.path().join("secret.txt"), "外面").unwrap();
-        std::os::unix::fs::symlink(outside.path(), h.user_root(GOOD_KEY).join("link")).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret.txt"), "外面").unwrap();
+    if symlink_dir(outside.path(), &h.user_root(GOOD_KEY).join("link")) {
         let got = h.get("/api/fs/file?path=link/secret.txt", Some(&cookie)).await;
         assert_eq!(got.status, 403, "符号链接越界：{}", got.text());
     }

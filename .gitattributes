@@ -1,0 +1,17 @@
+# 行尾规则随仓库走，不依赖各机器的 core.autocrlf：文本在仓库里统一存 LF，检出时按平台转换。
+* text=auto
+
+# shell 脚本在任何平台检出都保持 LF，否则 sh 会把 \r 当作命令的一部分。
+*.sh text eol=lf
+
+# 二进制：画板包、图片、压缩包与可执行文件不做行尾转换，也不做文本 diff。
+*.ugcpack binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.bmp binary
+*.ico binary
+*.zip binary
+*.exe binary
