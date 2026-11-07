@@ -496,41 +496,16 @@ pub async fn discard_upload(State(state): State<AppState>, user: User, AxPath(id
 // 另外每份内容遵守单文件 64 MB 上限（413），并边写边算 sha256 与声明核对（不一致按损坏 422）。
 // 问已有（要读身份文件算 sha256）与合并落盘仍拿大请求名额。
 
-/// 用户数据根里已有的合并单元，每个单元一种状态：
-/// - `absent`：没有；
-/// - `present`：有，带 sha256（任务目录给身份文件 task.json 的，参考图给整文件的）；
-/// - `unreadable`：在但身份文件（或参考图本身）读不出——前端按冲突处理，与合并时「读不了视为不同」的比对一致。
+/// 用户数据根里已有的合并单元，每个单元一种状态（见 board_pack::ExistingUnit）；路径越界回 403。
 pub async fn existing(State(state): State<AppState>, user: User, body: axum::body::Bytes) -> Response {
     let Ok(units) = serde_json::from_slice::<Vec<MergeUnit>>(&body) else {
         return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表");
     };
     let root = state.user_root(&user.fingerprint);
     let _permit = state.heavy().acquire().await;
-    let result = tokio::task::spawn_blocking(move || -> Result<Vec<serde_json::Value>, String> {
-        let resolve = |rel: &str| crate::paths::resolve(&root, rel).map_err(|e| e.message().to_string());
-        let mut out = Vec::with_capacity(units.len());
-        for unit in &units {
-            let path = resolve(&unit.path)?;
-            let identity = match &unit.identity {
-                Some(identity) => resolve(&format!("{}/{identity}", unit.path))?,
-                None => path.clone(),
-            };
-            let state = if !path.exists() {
-                serde_json::json!({ "path": unit.path, "state": "absent" })
-            } else {
-                match board_pack::sha256_file(&identity) {
-                    Ok(sha256) => serde_json::json!({ "path": unit.path, "state": "present", "sha256": sha256 }),
-                    Err(_) => serde_json::json!({ "path": unit.path, "state": "unreadable" }),
-                }
-            };
-            out.push(state);
-        }
-        Ok(out)
-    })
-    .await;
-    match result {
+    match tokio::task::spawn_blocking(move || board_pack::existing_units(&root, &units)).await {
         Ok(Ok(out)) => Json(out).into_response(),
-        Ok(Err(message)) => error(StatusCode::FORBIDDEN, "forbidden", &message),
+        Ok(Err(e)) => error(StatusCode::FORBIDDEN, "forbidden", &e.to_string()),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
     }
 }

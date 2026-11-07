@@ -449,16 +449,67 @@ pub(crate) fn import_with(pack: &Path, root: &Path, units: &[MergeUnit], duplica
     Ok(ImportReport { outcomes, bytes: done })
 }
 
+/// 单元判定「同一份」所比的文件（相对根）：目录单元是其中的身份文件，文件单元是它本身。
+/// 合并时的比对与问已有（existing_units）都按它；读不了的一律视为不同。
+fn identity_rel(unit: &MergeUnit) -> String {
+    match &unit.identity {
+        Some(identity) => format!("{}/{identity}", unit.path),
+        None => unit.path.clone(),
+    }
+}
+
+/// 用户数据根里已有的一个合并单元（问已有接口的一项）。序列化为 `{"path","sha256"?,"state"}`，
+/// 字段顺序固定（前端 core/boardPack.ts 的 ExistingUnit 读这个形状）。
+#[derive(Debug, PartialEq)]
+pub enum ExistingUnit {
+    Absent { path: String },
+    /// 有：sha256 是身份文件（或整文件）的。
+    Present { path: String, sha256: String },
+    /// 在但身份文件（或整文件）读不出：与合并时「读不了视为不同」一致，前端按冲突处理。
+    Unreadable { path: String },
+}
+
+impl Serialize for ExistingUnit {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let (path, sha256, state) = match self {
+            ExistingUnit::Absent { path } => (path, None, "absent"),
+            ExistingUnit::Present { path, sha256 } => (path, Some(sha256), "present"),
+            ExistingUnit::Unreadable { path } => (path, None, "unreadable"),
+        };
+        let mut s = serializer.serialize_struct("ExistingUnit", if sha256.is_some() { 3 } else { 2 })?;
+        s.serialize_field("path", path)?;
+        if let Some(sha256) = sha256 {
+            s.serialize_field("sha256", sha256)?;
+        }
+        s.serialize_field("state", state)?;
+        s.end()
+    }
+}
+
+/// 各合并单元在用户数据根里的状态，供前端在上传前判定。路径越界（含符号链接）时报 InvalidData。
+pub fn existing_units(root: &Path, units: &[MergeUnit]) -> io::Result<Vec<ExistingUnit>> {
+    let mut out = Vec::with_capacity(units.len());
+    for unit in units {
+        let (dir, identity) = (resolve_in(root, &unit.path)?, resolve_in(root, &identity_rel(unit))?);
+        let path = unit.path.clone();
+        out.push(if !dir.exists() {
+            ExistingUnit::Absent { path }
+        } else {
+            match sha256_file(&identity) {
+                Ok(sha256) => ExistingUnit::Present { path, sha256 },
+                Err(_) => ExistingUnit::Unreadable { path },
+            }
+        });
+    }
+    Ok(out)
+}
+
 /// 两条导入路径共用的收尾：临时目录里已备好各单元（含还原的省略路径），先校验每个单元都在（目录单元还要有身份文件），
 /// 不合格时一个都不移入；再逐个单元移入——目标已存在时按身份文件（或整文件）比对，一致为跳过、不一致为冲突，均不覆盖。
 fn merge_units(temp: &Path, root: &Path, units: &[MergeUnit], cancel: &AtomicBool) -> io::Result<Vec<UnitOutcome>> {
     for unit in units {
-        let from = safe_join(temp, &unit.path)?;
-        let present = match &unit.identity {
-            Some(identity) => safe_join(&from, identity)?.is_file(),
-            None => from.is_file(),
-        };
-        if !present {
+        if !safe_join(temp, &identity_rel(unit))?.is_file() {
             return Err(invalid(format!("包内缺少 {}", unit.path)));
         }
     }
@@ -469,11 +520,8 @@ fn merge_units(temp: &Path, root: &Path, units: &[MergeUnit], cancel: &AtomicBoo
         let from = safe_join(temp, &unit.path)?;
         let to = resolve_in(root, &unit.path)?;
         let outcome = if to.exists() {
-            let same = match &unit.identity {
-                Some(identity) => same_file(&safe_join(&from, identity)?, &safe_join(&to, identity)?),
-                None => same_file(&from, &to),
-            };
-            if same {
+            let identity = identity_rel(unit);
+            if same_file(&safe_join(temp, &identity)?, &safe_join(root, &identity)?) {
                 MergeOutcome::Identical
             } else {
                 MergeOutcome::Conflict
