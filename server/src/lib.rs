@@ -11,6 +11,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 
 pub mod board_list;
+pub mod board_measure;
 pub mod board_pack;
 pub mod cache;
 mod civil;
@@ -234,6 +235,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/boards/rename", axum::routing::post(fs::rename_board))
         .route("/api/boards/names", get(fs::list_board_names))
         .route("/api/boards/list", get(board_list::list_boards))
+        .route("/api/boards/measure", axum::routing::post(board_measure::measure_board))
         .route("/api/fs/file", get(fs::read_file).put(fs::write_new_file))
         .route("/api/fs/thumb", get(thumbs::read_thumb))
         .route("/api/fs/dir", get(fs::list_dir))

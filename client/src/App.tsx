@@ -15,7 +15,7 @@ import { ChangelogDialog } from "./ui/ChangelogDialog";
 import { imageProbe } from "./shell/adapters";
 import { copyTextToClipboard } from "./shell/clipboard";
 import { browser, ipc, transfer, userRoot } from "./shell/ipc";
-import { BACKUP_HINT_TEXT, sizeNoticeText } from "./ui/boardText";
+import { BACKUP_HINT_TEXT, sizeNoticeText, TIDY_TEXT } from "./ui/boardText";
 import { BoardPackDialog } from "./ui/BoardPackDialog";
 import { BoardListDialog } from "./ui/BoardListDialog";
 import { BoardToolbar } from "./ui/BoardToolbar";
@@ -39,6 +39,8 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   /** 各画板越线提示已提醒到的档位，随界面状态保存（跨浏览器生效）。 */
   const [sizeNotices, setSizeNotices] = useState<Record<string, SizeTier>>({});
   const [boardListOpen, setBoardListOpen] = useState(false);
+  /** 处在整理模式的画板（会话 key）；整理模式是画布的界面状态，不落盘。 */
+  const [tidyKey, setTidyKey] = useState<string | null>(null);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
   const [packMenu, setPackMenu] = useState<{ x: number; y: number } | null>(null);
   const [confirm, setConfirm] = useState<{ boardKey: string; board: Board; items: ConfirmItem[]; scope: "selection" | "board" } | null>(null);
@@ -458,7 +460,17 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       {activeSize && notice?.show && (
         <div className={`bar ${notice.show === "alert" ? "bar-alert" : "bar-warn"} size-notice`} role="status" data-size-tier={notice.show}>
           <span>{sizeNoticeText(activeSize.bytes)}</span>
-          {/* 「整理」按钮由 #92 整理模式接上。 */}
+          <button
+            onClick={() => {
+              // 进入整理模式即算用户已看到这条提醒。
+              const { path } = activeSize;
+              const tier = notice.show!;
+              setSizeNotices((m) => ({ ...m, [path]: tier }));
+              if (active) setTidyKey(active.key);
+            }}
+          >
+            {TIDY_TEXT.enter}
+          </button>
           <button
             className="link"
             aria-label="关闭体量提示"
@@ -532,6 +544,8 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               onViewSendText={(id) => void viewSendText(id)}
               toolbarSlot={toolbarSlot}
               focus={focus?.boardKey === active.key ? focus : null}
+              tidying={tidyKey === active.key}
+              onTidyChange={(on) => setTidyKey(on ? active.key : null)}
             />
           </ReactFlowProvider>
         )}

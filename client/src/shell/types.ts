@@ -1,6 +1,7 @@
 // Web 壳层端口：UI 只认这些接口，同源 HTTP 与浏览器能力都在 ipc.ts 中实现。
 import type { MergeReport, MergeUnit, PackDuplicates, PackEntryFact, PackExportSpec, PackIo } from "../core/boardPack";
 import type { SizeLines } from "../core/boardSize";
+import type { BoardMeasure } from "../core/tidy";
 import type { DirEntry } from "../core/relocate";
 
 export interface BoardTexts {
@@ -48,6 +49,8 @@ export interface Ipc {
   listBoardNames(dir: string): Promise<string[]>;
   /** 画板列表（含体量与画板位），由服务端拼好。 */
   listBoards(): Promise<BoardListing>;
+  /** 按任务目录量一块画板（画板原文，可未保存），口径与画板体量一致（#92）；读不懂 400。 */
+  measureBoard(text: string): Promise<BoardMeasure>;
   readUiState(): Promise<string | null>;
   writeUiState(text: string): Promise<void>;
   readCapabilityOverride(): Promise<string | null>;

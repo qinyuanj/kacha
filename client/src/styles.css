@@ -435,6 +435,38 @@ textarea {
   padding: 0 6px;
   font-size: 12px;
 }
+/* 整理模式（#92）：阶段框加深、标出体量；未定稿结果半透明；顶部浮着整理前后对比。 */
+.stage-frame.tidying {
+  border: 2px solid #0969da;
+  background: rgb(9 105 218 / 5%);
+}
+.stage-size {
+  color: #0969da;
+  font-weight: 600;
+}
+.canvas.tidying .react-flow__node-result .node-image:not(.node-final) {
+  opacity: 0.4;
+}
+.tidy-bar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border: 1px solid #0969da;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+  white-space: nowrap;
+}
+.board-toolbar button.toolbar-tidy.active {
+  background: #ddf4ff;
+  border-color: #0969da;
+}
 .thumb {
   display: block;
   width: 100%;
