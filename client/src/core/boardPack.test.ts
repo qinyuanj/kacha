@@ -12,9 +12,9 @@ import {
   importPack,
   importSummary,
   inspectPack,
-  inspectPackLocally,
   planExport,
   planPackContents,
+  readPackLocally,
   runCancellable,
   type ExistingUnit,
   type PackEntryFact,
@@ -756,7 +756,7 @@ describe("导入画板包", () => {
     });
 
     it("仓库里的 0.2.0 / 0.3.2 桌面包与 v2 包：本地检查通过，合并单元与还原清单齐全", async () => {
-      const local = async (path: string) => inspectPackLocally(blobSource(new File([readFileSync(path)], "x.ugcpack")));
+      const local = async (path: string) => (await readPackLocally(blobSource(new File([readFileSync(path)], "x.ugcpack"))))?.check;
       expect(await local("../contracts/smoke/board-pack/千问测试.ugcpack")).toMatchObject({ kind: "ok", boards: [{ entry: "画板/千问测试.ugcboard.json" }] });
       expect(await local("fixtures/packs/v0.3.2-flash-layers.ugcpack")).toMatchObject({ kind: "ok", units: expect.arrayContaining([{ path: TASK, identity: "task.json" }]) });
       expect(await local("fixtures/packs/v2-duplicates.ugcpack")).toMatchObject({

@@ -96,7 +96,6 @@ export interface UnknownNode {
 }
 
 export type BoardNode = PromptNode | ReferenceNode | TaskNode | ResultNode | UnknownNode;
-export type KnownNode = Exclude<BoardNode, UnknownNode>;
 
 export type PortRef = [string, string];
 

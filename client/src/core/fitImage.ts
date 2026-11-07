@@ -21,7 +21,6 @@ export interface FitPlan {
 
 /** JPEG 质量阶梯；降到最低仍超体积再等比缩小。 */
 export const JPEG_QUALITIES = [0.92, 0.85, 0.78, 0.7];
-export const JPEG_MIN_QUALITY = JPEG_QUALITIES[JPEG_QUALITIES.length - 1];
 const MAX_ENCODE_STEPS = 24;
 
 const ENCODABLE: readonly string[] = ["png", "jpeg"] satisfies EncodableFormat[];

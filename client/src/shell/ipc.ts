@@ -9,10 +9,10 @@ import { ApiError } from "./apiError";
 import { DEFAULT_SETTINGS, serializeSettings } from "../core/settings";
 import type { BrowserPort, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
 
-export type { BoardTexts, BrowserPort, ImageInfo, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, Usage, UsageCandidate, UsagePort } from "./types";
+export type { BrowserPort, ImageInfo, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
 
 /** core/ 按「用户数据根 + 相对路径」拼路径；用户数据根在浏览器里是固定的虚拟根，壳层在边界剥掉，服务端只收相对路径。 */
-export const VIRTUAL_ROOT = "/~";
+const VIRTUAL_ROOT = "/~";
 export const userRoot = VIRTUAL_ROOT;
 export const API_KEY_STORAGE = "kacha.apiKey";
 

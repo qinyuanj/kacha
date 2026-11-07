@@ -296,7 +296,12 @@ const utf8 = new TextDecoder("utf-8", { fatal: true });
 /** 本地读出的包：判定结果与文件条目（不含目录条目）。 */
 type LocalPack = { check: PackCheck; entries: ZipEntry[] };
 
-async function readPackLocally(src: ZipSource): Promise<LocalPack | null> {
+/**
+ * 在浏览器本地检查包（#61）：读中央目录与清单、画板文本，交给 inspectPack 判版本与布局。
+ * 返回 null 表示 zip 读取器读不了（其他压缩方法、结构异常、条目数据读不出），调用方回退为整包上传、交服务端判定。
+ * 目录条目不计入布局，与服务端列条目一致。
+ */
+export async function readPackLocally(src: ZipSource): Promise<LocalPack | null> {
   const index = await readZipIndex(src);
   if (index.kind !== "ok") return null;
   const files = index.entries.filter((e) => !e.name.endsWith("/"));
@@ -317,15 +322,6 @@ async function readPackLocally(src: ZipSource): Promise<LocalPack | null> {
   } catch {
     return null;
   }
-}
-
-/**
- * 在浏览器本地检查包（#61）：读中央目录与清单、画板文本，交给 inspectPack 判版本与布局。
- * 返回 null 表示 zip 读取器读不了（其他压缩方法、结构异常、条目数据读不出），调用方回退为整包上传、交服务端判定。
- * 目录条目不计入布局，与服务端列条目一致。
- */
-export async function inspectPackLocally(src: ZipSource): Promise<PackCheck | null> {
-  return (await readPackLocally(src))?.check ?? null;
 }
 
 // ---- 导入结果 ----

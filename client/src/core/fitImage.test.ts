@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BUILTIN_TABLE, type InputImageRule } from "./capabilities";
-import { encodeWithin, fitImage, inputImageAdvice, JPEG_MIN_QUALITY, planFit, type DecodedImage, type EncodableFormat } from "./fitImage";
+import { encodeWithin, fitImage, inputImageAdvice, JPEG_QUALITIES, planFit, type DecodedImage, type EncodableFormat } from "./fitImage";
 
 const QWEN = BUILTIN_TABLE.models[0].input_image_rule;
 const SEEDREAM = BUILTIN_TABLE.models[2].input_image_rule;
@@ -91,7 +91,7 @@ describe("encodeWithin：体积循环", () => {
     expect(out.bytes.length).toBeLessThanOrEqual(3000);
     expect(out.width).toBeLessThan(100);
     expect(out.width).toBe(out.height);
-    expect(Math.min(...calls.map((c) => c.quality!))).toBe(JPEG_MIN_QUALITY);
+    expect(Math.min(...calls.map((c) => c.quality!))).toBe(JPEG_QUALITIES.at(-1));
   });
 
   it("带透明 PNG 超限：不改 JPEG，直接缩小", async () => {

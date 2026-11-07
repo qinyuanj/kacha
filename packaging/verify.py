@@ -20,6 +20,7 @@ COMMANDS = (
     [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"],
     ["npm", "--prefix", "client", "test"],
     ["npm", "--prefix", "client", "run", "typecheck"],
+    ["npm", "--prefix", "client", "run", "lint:dead"],
     ["npm", "--prefix", "client", "run", "test:e2e", "--", "--workers=4"],
     ["cargo", "test", "--manifest-path", "server/Cargo.toml", "--no-fail-fast"],
 )

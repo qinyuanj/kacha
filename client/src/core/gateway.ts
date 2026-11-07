@@ -321,7 +321,7 @@ function parseFlashLayers(body: unknown): GeneratedImage[] {
 /** 提交一个生成任务；图层拆分仍是一项生成结果。 */
 export async function generate(config: GatewayConfig, input: GenerationInput): Promise<{ images: GeneratedImage[]; requestId: string | null }> {
   const shape = requestShapeOf(input.model);
-  const { path, body } = shape.build(input);
+  const { path, body } = buildGenerationRequest(input);
   const response = await send(config, "POST", path, body);
   const images = input.layerDecomposition && input.model.request_shape === "seedream_flash_images_generations" ? parseFlashLayers(response.body) : shape.parse(response.body);
   if (!images.length) throw new GatewayError("invalid_response", "网关没有返回图片", 200, response.requestId);
