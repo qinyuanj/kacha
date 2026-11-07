@@ -2,7 +2,7 @@
 // 参考图向用户数据根预置；结果默认 url 形式，经服务端中转落任务目录。
 import { expect, type Page } from "@playwright/test";
 import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
-import { test, type Rig } from "./rig";
+import { bodies, test } from "./rig";
 import { openApp, task, taskRecords } from "./kit";
 
 const FLASH = "doubao-seedream-5-0-flash-260915";
@@ -10,7 +10,6 @@ const REGION = { rects: [[0, 0, 1, 1]], render: "highlight_overlay" };
 const A = "导入参考图/a.png";
 const B = "导入参考图/b.png";
 const files = { [A]: { b64: png(1024, 1024, { rgb: [180, 20, 30] }) }, [B]: { b64: png(1024, 1024, { rgb: [20, 30, 180] }) } };
-const bodies = (rig: Rig) => rig.stub.requests.map((r) => r.body);
 
 async function runTask(page: Page) {
   await task(page, "t").locator(".task-actions button.primary").click();
@@ -58,7 +57,7 @@ test("Flash 两张图各带叠加区域，发送四图按原图/叠加图顺序�
   await runTask(page);
   await expect.poll(() => bodies(rig).length).toBe(1);
   const body = bodies(rig)[0];
-  const images = body.image as string[];
+  const images = body.image ?? [];
   expect(images).toHaveLength(4);
   expect(images[0]).toBe(`data:image/png;base64,${files[A].b64}`);
   expect(images[2]).toBe(`data:image/png;base64,${files[B].b64}`);

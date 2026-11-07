@@ -260,7 +260,7 @@ test("导入桌面 v0.3.2 画板包：图层与 layers.json 落盘、画板打�
   // 继续迭代：任务 t1 引用导入结果的图层2，提交发出该图层的真实字节。
   await page.locator(`.react-flow__node[data-id="t1"]`).locator(".task-actions button.primary").click();
   await expect.poll(() => rig.stub.requests.length).toBe(1);
-  const sent = rig.stub.requests[0].body.image as string[];
+  const sent = rig.stub.requests[0].body.image ?? [];
   expect(sent[0].startsWith("data:image/png;base64,")).toBe(true);
   expect(sent[0]).toBe(`data:image/png;base64,${readFileSync(path.join(root, DIR, "layers/02.png")).toString("base64")}`);
   // 新任务落盘（含结局 / 结果中转提交），导入的画板可继续工作。

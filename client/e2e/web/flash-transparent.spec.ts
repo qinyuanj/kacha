@@ -3,12 +3,11 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { expect, type Page } from "@playwright/test";
 import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
-import { test, type Rig } from "./rig";
+import { bodies, test, type Rig } from "./rig";
 import { openApp, task, taskRecords } from "./kit";
 
 const FLASH = "doubao-seedream-5-0-flash-260915";
 const REF = "导入参考图/alpha.png";
-const bodies = (rig: Rig) => rig.stub.requests.map((r) => r.body);
 
 async function setup(page: Page, rig: Rig, alpha = true, region = false) {
   const text = board("透明", [promptNode("p", "把图1 改成红色"), referenceNode("r", REF), taskNode("t", { model: FLASH, image_ports: 1 })], [edge("p", "t", "positive"), edge("r", "t", "image:0", region ? { region: { rects: [[0, 0, 0.5, 0.5]], render: "highlight_overlay" } } : {})]);

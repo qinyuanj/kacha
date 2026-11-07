@@ -1,7 +1,7 @@
 // Lite 停用（迁移自旧假壳 specs/retirement.spec.ts 的普通打开分支；画板包导入分支随 #24 迁移）。
 import { expect } from "@playwright/test";
 import { board, edge, png, promptNode, taskNode } from "../common/boards";
-import { enterWithKey, OTHER_KEY, test, type Rig } from "./rig";
+import { bodies, enterWithKey, OTHER_KEY, test } from "./rig";
 import { openApp, task, taskRecords } from "./kit";
 
 const FLASH = "doubao-seedream-5-0-flash-260915";
@@ -22,7 +22,6 @@ const oldBoard = () =>
     [edge("p", "t", "positive"), edge("t", "r", "in", { system: true, from: ["t", "result"] })],
   );
 const files = { [`${DIR}/task.json`]: { text: JSON.stringify(record) }, [`${DIR}/result.png`]: { b64: png(1024, 1024) } };
-const bodies = (rig: Rig) => rig.stub.requests.map((r) => r.body);
 
 test("Lite 普通打开：阻止所有历史入口，手动切换只创建新 Flash 任务", async ({ page, rig }) => {
   const errors = await openApp(page, rig, { title: "旧Lite", boardText: oldBoard(), files });

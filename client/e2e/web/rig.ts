@@ -21,16 +21,30 @@ export const OTHER_KEY = "sk-e2e-other";
 export const BAD_KEY = "sk-e2e-bad";
 export const OUTAGE_KEY = "sk-e2e-outage";
 
+/** 桩收到的生成请求体：image 在入口解析成字符串数组，其余字段原样保留。 */
+export type ImageRequestBody = Record<string, unknown> & { image?: string[] };
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function parseImageRequest(raw: string): ImageRequestBody {
+  const { image, ...rest }: Record<string, unknown> = raw ? JSON.parse(raw) : {};
+  if (image === undefined) return rest;
+  if (!isStringArray(image)) throw new Error(`生成请求的 image 不是字符串数组：${raw.slice(0, 200)}`);
+  return { ...rest, image };
+}
+
 export interface Stub {
   url: string;
   /** 生成请求记录（path + 解析后的 JSON body），供断言请求形状。 */
-  requests: { path: string; body: Record<string, unknown> }[];
+  requests: { path: string; body: ImageRequestBody }[];
   /** 对象存储内容（不带 CORS，只能由服务端中转）；默认 /objects/result.png 是真 PNG。 */
   objects: Map<string, Buffer>;
   /** 对象存储对全部 /objects/* 返回的失败状态；null 时正常返回。 */
   objectStatus: number | null;
   /** 自定义生成响应；返回 null 走默认：结果图指向本桩的对象存储（url 形式，走中转）。 */
-  imageResponse: ((path: string, body: Record<string, unknown>) => { status?: number; json?: unknown } | null) | null;
+  imageResponse: ((path: string, body: ImageRequestBody) => { status?: number; json?: unknown } | null) | null;
   /** 非 null 时生成请求挂到它兑现后才应答，用来让任务停在执行中。 */
   holdImages: Promise<void> | null;
   close(): Promise<void>;
@@ -39,7 +53,7 @@ export interface Stub {
 /** 网关：验证密钥（/api/usage/token）、模型列表与文生图；对象存储：/objects/*（无 CORS）。 */
 export async function startStub(): Promise<Stub> {
   const objects = new Map<string, Buffer>([["/objects/result.png", Buffer.from(png(64, 64), "base64")]]);
-  const requests: { path: string; body: Record<string, unknown> }[] = [];
+  const requests: Stub["requests"] = [];
   const stub: Stub = { url: "", requests, objects, objectStatus: null, imageResponse: null, holdImages: null, close: async () => undefined };
   const server = http.createServer((req, res) => {
     const url = req.url ?? "/";
@@ -68,7 +82,7 @@ export async function startStub(): Promise<Stub> {
       let raw = "";
       req.on("data", (d) => (raw += String(d)));
       req.on("end", async () => {
-        const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+        const body = parseImageRequest(raw);
         requests.push({ path: url, body });
         await stub.holdImages;
         const custom = stub.imageResponse?.(url, body);
@@ -104,6 +118,9 @@ export interface Rig {
   stub: Stub;
   userRoot(key: string): string;
 }
+
+/** 桩按到达顺序收到的生成请求体。 */
+export const bodies = (rig: Rig) => rig.stub.requests.map((r) => r.body);
 
 export const test = base.extend<{ rig: Rig }>({
   rig: async ({}, use) => {

@@ -3,9 +3,8 @@
 import { readFileSync } from "node:fs";
 import { expect, type Page } from "@playwright/test";
 import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
-import { test, type Rig } from "./rig";
+import { bodies, GOOD_KEY, test, type Rig } from "./rig";
 import path from "node:path";
-import { GOOD_KEY } from "./rig";
 import { boardRelPath, openApp, readJson, savedNodes, task, taskRecords } from "./kit";
 
 const builtin = JSON.parse(readFileSync(new URL("../../src/core/capabilities.builtin.json", import.meta.url), "utf8"));
@@ -19,7 +18,6 @@ function override(modelId: string, patch: (m: Record<string, any>) => void) {
 }
 
 const RESULT_PNG = png(64, 64);
-const bodies = (rig: Rig) => rig.stub.requests.map((r) => r.body);
 const recordTexts = (rig: Rig) => taskRecords(rig).map((r) => r.json);
 
 async function openMenu(page: Page, nodeId: string, label: string) {
@@ -143,7 +141,7 @@ test.describe("Issue #1 单图默认引用与多图点击插入引导", () => {
     expect(record.send_text).toContain("用户指令：\n把衣服改成红色");
     expect(record.prompt).toBe("把衣服改成红色");
     expect(body.prompt).toBe(record.send_text);
-    expect(body.image as string[]).toHaveLength(1);
+    expect(body.image).toHaveLength(1);
     expect(errors).toEqual([]);
   });
 
@@ -261,7 +259,7 @@ test("#1 带区域的图片编辑：查看发送文本、task.json 的 send_text
   await expect.poll(() => taskRecords(rig).length).toBe(1);
   const record = recordTexts(rig)[0];
   const body = bodies(rig)[0];
-  const images = body.image as string[];
+  const images = body.image ?? [];
 
   expect(record.send_text).toBe(shown);
   expect(body.prompt).toBe(shown);
@@ -431,7 +429,7 @@ test.describe("#8 旧任务「重新生成」", () => {
       expect(body.prompt).toBe(record.send_text);
       expect(body.input).toBeUndefined();
       // 快照原样重发：顶层 image 3 张（含叠加图）。
-      expect(body.image as string[]).toHaveLength(3);
+      expect(body.image).toHaveLength(3);
       expect(record.prompt).toBe(old.prompt);
       if (name === "pre-116.task.json") expect(record.send_text).toBe(old.send_text);
       await expect(page.locator(".react-flow__node-result")).toHaveCount(1);
