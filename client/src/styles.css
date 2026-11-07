@@ -383,6 +383,58 @@ textarea {
   margin: 0;
   background: rgb(221 244 255 / 90%);
 }
+/* 定稿：金色描边，角标排在最前。 */
+.node.node-image.node-final {
+  outline: 3px solid #d4a017;
+  outline-offset: 1px;
+}
+.node-final .image-badges .badge:first-child {
+  background: #d4a017;
+  color: #fff;
+  font-weight: 600;
+}
+/* 阶段框：画在节点之下，框不挡指针，只有标题栏可点。 */
+.stage-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  border: 2px dashed #8c959f;
+  border-radius: 8px;
+  background: rgb(140 149 159 / 6%);
+  pointer-events: none;
+}
+.stage-frame.collapsed {
+  border-style: solid;
+  background: #f6f8fa;
+}
+.stage-header {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 4px;
+  white-space: nowrap;
+  font-size: 13px;
+  pointer-events: auto;
+}
+.stage-frame.collapsed .stage-header {
+  position: static;
+  padding: 4px 8px;
+}
+.stage-name {
+  font-weight: 600;
+  cursor: text;
+}
+.stage-count {
+  color: #57606a;
+}
+.stage-header button {
+  padding: 0 6px;
+  font-size: 12px;
+}
 .thumb {
   display: block;
   width: 100%;

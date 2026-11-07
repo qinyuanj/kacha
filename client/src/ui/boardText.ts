@@ -6,6 +6,19 @@ export const BOARD_MISSING_TEXT = "该画板已不存在，可能已在别处改
 /** 工具栏「新建任务模型」：默认模型 Flash 不在可用列表时的占位项。 */
 export const FLASH_UNAVAILABLE_TEXT = "Flash 不可用，请刷新模型列表";
 
+/** 定稿结果节点上的角标。 */
+export const FINAL_BADGE_TEXT = "定稿";
+
+/** 阶段框标题栏上的按钮。 */
+export const STAGE_TEXT = {
+  collapse: "收起",
+  expand: "展开",
+  addSelected: "加入所选",
+  delete: "删除阶段",
+  /** 收起时显示的成员数。 */
+  count: (n: number) => `${n} 个节点`,
+} as const;
+
 /** 顶栏常驻的备份提示。 */
 export const BACKUP_HINT_TEXT = "服务端不备份，重要画板请导出。";
 

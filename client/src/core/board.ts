@@ -3,7 +3,8 @@
 import { isLayerSize, LAYER_SIZES_TEXT, type LayerSize, type OutputOptions } from "./gateway";
 import type { AutoRatio, SizeSpec } from "./size";
 
-export const BOARD_FORMAT_VERSION = 1;
+/** 2：加入阶段（顶层 stages）与定稿（结果节点 final）。旧版本照常读入，写回一律写本版本。 */
+export const BOARD_FORMAT_VERSION = 2;
 export const BOARD_EXTENSION = ".ugcboard.json";
 export const DEFAULT_BOARD_TITLE = "未命名画板";
 
@@ -86,6 +87,8 @@ export interface ResultNode extends NodeBase {
   path: string;
   layer_count: number;
   record: ResultRecord;
+  /** 定稿：用户标记要保留的结果；只在为 true 时存在。 */
+  final?: true;
 }
 
 /** 本版本不认识的节点类型：整条原样保留，不渲染。 */
@@ -108,7 +111,19 @@ export interface BoardEdge {
   extra: Json;
 }
 
+/** 阶段：画板上由用户框定并命名的一组节点（一块区域，不是节点）。一个节点至多属于一个阶段。 */
+export interface Stage {
+  id: string;
+  name: string;
+  /** 成员节点 id，按加入顺序。 */
+  nodes: string[];
+  collapsed: boolean;
+  /** 本版本不认识的字段，写回时原样保留。 */
+  extra: Json;
+}
+
 export interface Board {
+  /** 读入时的版本；写回一律写 BOARD_FORMAT_VERSION。 */
   format_version: number;
   title: string;
   viewport: { zoom: number; x: number; y: number };
@@ -116,8 +131,15 @@ export interface Board {
   edges: BoardEdge[];
   /** 画板级最近选择的模型，新建任务节点默认用它；缺省 = 从未选过。 */
   last_model?: string | null;
+  /** 阶段；缺省（旧画板、没建过）= 没有阶段。读写一律经 stagesOf。 */
+  stages?: Stage[];
   extra: Json;
 }
+
+export const stagesOf = (board: Board): Stage[] => board.stages ?? [];
+
+/** 是否定稿：只有结果节点能定稿。 */
+export const isFinal = (node: BoardNode): boolean => node.type === "result" && node.final === true;
 
 /** 任务节点的份数：缺省（旧画板、新建节点）为 1。 */
 export function taskCount(task: TaskNode): number {
@@ -204,7 +226,7 @@ const NODE_KEYS = {
   prompt: ["id", "type", "pos", "size", "text"],
   reference: ["id", "type", "pos", "size", "path", "sha256", "display_name"],
   task: ["id", "type", "pos", "size", "model", "size_spec", "image_ports", "layer_decomposition", "transparent_background", "output_options", "layer_size", "count", "last_submitted"],
-  result: ["id", "type", "pos", "size", "task_id", "file", "path", "layer_count", "record"],
+  result: ["id", "type", "pos", "size", "task_id", "file", "path", "layer_count", "record", "final"],
 } as const;
 
 /** 图层尺寸的封闭取值；画板里出现别的值视为损坏，不静默断言。 */
@@ -247,7 +269,9 @@ function parseNode(raw: unknown): BoardNode {
       };
     default: {
       const record = obj(o, "record");
+      const final = o.final === undefined ? false : need<boolean>(typeof o.final === "boolean", o.final, "final 必须是布尔值");
       return {
+        ...(final ? { final: true as const } : {}),
         ...base,
         type: "result",
         task_id: str(o, "task_id"),
@@ -288,7 +312,15 @@ function parseEdge(raw: unknown): BoardEdge {
   };
 }
 
-const BOARD_KEYS = ["format_version", "title", "viewport", "nodes", "edges", "last_model"];
+const STAGE_KEYS = ["id", "name", "nodes", "collapsed"];
+
+function parseStage(raw: unknown): Stage {
+  const o = need<Json>(isObject(raw), raw, "阶段必须是对象");
+  const nodes = need<string[]>(Array.isArray(o.nodes) && o.nodes.every((id) => typeof id === "string"), o.nodes, "阶段 nodes 必须是字符串数组");
+  return { id: str(o, "id"), name: str(o, "name"), nodes: [...nodes], collapsed: bool(o, "collapsed"), extra: extraOf(o, STAGE_KEYS) };
+}
+
+const BOARD_KEYS = ["format_version", "title", "viewport", "nodes", "edges", "last_model", "stages"];
 
 export function parseBoard(text: string): ParsedBoard {
   let raw: unknown;
@@ -312,6 +344,10 @@ export function parseBoard(text: string): ParsedBoard {
       extra: extraOf(o, BOARD_KEYS),
     };
     if (o.last_model !== undefined && o.last_model !== null) board.last_model = str(o, "last_model");
+    if (o.stages !== undefined) {
+      const stages = need<unknown[]>(Array.isArray(o.stages), o.stages, "stages 必须是数组").map(parseStage);
+      if (stages.length) board.stages = stages;
+    }
     return { kind: "ok", board };
   } catch (error) {
     if (error instanceof Corrupt) return { kind: "corrupt", reason: error.message };
@@ -350,13 +386,16 @@ function serializeEdge(edge: BoardEdge): Json {
 
 /** UTF-8 缩进 JSON。不写选中状态、运行状态、撤销栈——它们根本不在 Board 里。 */
 export function serializeBoard(board: Board): string {
+  const stages = stagesOf(board);
   const out = {
-    format_version: board.format_version,
+    // 读入旧版本的画板写回即升级。
+    format_version: BOARD_FORMAT_VERSION,
     title: board.title,
     viewport: board.viewport,
     nodes: board.nodes.map(serializeNode),
     edges: board.edges.map(serializeEdge),
     ...(board.last_model ? { last_model: board.last_model } : {}),
+    ...(stages.length ? { stages: stages.map(({ extra, ...known }) => ({ ...known, ...extra })) } : {}),
     ...board.extra,
   };
   return `${JSON.stringify(out, null, 2)}\n`;
