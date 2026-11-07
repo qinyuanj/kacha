@@ -13,6 +13,7 @@ import { newId } from "../core/ids";
 import { emptyHistory, recordChange, redo, undo, type History } from "../core/history";
 import { basename, boardsDir, dirname, joinPath, resolveFromRoot } from "../core/paths";
 import { restoreResultLayers } from "../core/taskDir";
+import { BOARD_MISSING_TEXT } from "./boardText";
 import { sha256Hex } from "../core/sha256";
 import { ipc } from "../shell/ipc";
 import { ApiError } from "../shell/apiError";
@@ -87,7 +88,6 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
   const isConflict = (e: unknown) => e instanceof ApiError && e.status === 409;
   /** 画板已不存在（另一页面删除或改名）：带版本保存回 board_missing，服务端不会重建它；删除回 404。 */
   const isMissing = (e: unknown) => e instanceof ApiError && (e.code === "board_missing" || (e.status === 404 && e.code === "not_found"));
-  const MISSING_TEXT = "该画板已不存在，可能已在别处改名或删除";
 
   /** 唯一写入实现：带内容版本（新建则只新建不覆盖），成功后用同一算法回写新版本。 */
   const writeSession = async (key: string, s: OkSession) => {
@@ -110,7 +110,7 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
           await writeSession(key, s);
         } catch (e) {
           logEvent("board_save_failed", { board_file: basename(s.path), reason: "autosave", message: errorText(e) });
-          const saveError = isMissing(e) ? `未能保存：${MISSING_TEXT}。本页内容仍在，可先导出画板包再关闭` : `未能保存到 ${s.path}：${errorText(e)}`;
+          const saveError = isMissing(e) ? `未能保存：${BOARD_MISSING_TEXT}。本页内容仍在，可先导出画板包再关闭` : `未能保存到 ${s.path}：${errorText(e)}`;
           patch(key, (x) => ({ ...x, saveError, ...(isConflict(e) ? { conflicted: true } : {}), ...(isMissing(e) ? { missing: true } : {}) }));
         }
       });
@@ -315,12 +315,12 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
       await flush(key);
       const s = sessionsRef.current.find((x) => x.key === key);
       if (!s) return;
-      if (s.status === "ok" && s.saveError) throw new Error(`未删除：${s.missing ? MISSING_TEXT : s.conflicted ? "画板已在别处修改，请先重新载入" : `未保存的改动没能保存（${s.saveError}）`}`);
+      if (s.status === "ok" && s.saveError) throw new Error(`未删除：${s.missing ? BOARD_MISSING_TEXT : s.conflicted ? "画板已在别处修改，请先重新载入" : `未保存的改动没能保存（${s.saveError}）`}`);
       try {
         await ipc.deleteBoard(s.path, s.status === "ok" ? (s.version ?? undefined) : undefined);
       } catch (e) {
         // 已不存在：与保存时同样处理（导出画板包或关闭）；内容已变：等用户重新载入。标签页都不关。
-        if (isMissing(e)) patch(key, (x) => ({ ...x, saveError: `${MISSING_TEXT}。本页内容仍在，可先导出画板包再关闭`, conflicted: true, missing: true }));
+        if (isMissing(e)) patch(key, (x) => ({ ...x, saveError: `${BOARD_MISSING_TEXT}。本页内容仍在，可先导出画板包再关闭`, conflicted: true, missing: true }));
         else if (isConflict(e)) patch(key, (x) => ({ ...x, saveError: `删除失败：${errorText(e)}`, conflicted: true }));
         throw e;
       }

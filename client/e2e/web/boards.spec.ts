@@ -1,6 +1,7 @@
 // 画板存服务端：新建 / 列出 / 打开 / 重命名 / 删除、跨浏览器同密钥可见、两页面版本冲突、旧名保存报错。
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { BOARD_MISSING_TEXT } from "../../src/ui/boardText";
 import { zipText } from "../common/zip";
 import { enterWithKey, expect, GOOD_KEY, metaFile, readMeta, test, type Rig } from "./rig";
 
@@ -84,7 +85,7 @@ test("另一页面已重命名时，旧名保存明确报错且不多出旧名�
   await renameActiveTab(page, "新名");
   await expect.poll(() => boardFiles(rig.userRoot(GOOD_KEY))).toEqual(["新名.ugcboard.json"]);
   await page2.getByRole("button", { name: "＋ 提示词", exact: true }).click();
-  await expect(page2.getByText("该画板已不存在，可能已在别处改名或删除", { exact: false })).toBeVisible();
+  await expect(page2.getByText(BOARD_MISSING_TEXT, { exact: false })).toBeVisible();
   expect(boardFiles(rig.userRoot(GOOD_KEY))).toEqual(["新名.ugcboard.json"]);
   // 改动保留在页面上，可重试。
   await expect(page2.locator(".react-flow__node")).toHaveCount(1);
@@ -213,7 +214,7 @@ test("另一页面删除画板后，本页保存提示画板已不存在，可�
 
   await page2.getByRole("button", { name: "＋ 提示词", exact: true }).click();
   const bar = page2.locator(".bar-error");
-  await expect(bar).toContainText("该画板已不存在，可能已在别处改名或删除");
+  await expect(bar).toContainText(BOARD_MISSING_TEXT);
   await expect(bar.getByRole("button", { name: "重新载入", exact: true })).toHaveCount(0);
   expect(boardFiles(rig.userRoot(GOOD_KEY))).toEqual([]);
 
