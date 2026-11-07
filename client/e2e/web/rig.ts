@@ -11,6 +11,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MODELS, png } from "../common/boards";
+import { startOnSafePort, type Started } from "../common/ports";
 
 const clientDir = fileURLToPath(new URL("../..", import.meta.url));
 const serverBin = path.join(clientDir, "../server/target/debug/kacha-server");
@@ -97,16 +98,52 @@ async function startStub(): Promise<Stub> {
     }
     res.writeHead(404).end("not mocked");
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  stub.url = `http://127.0.0.1:${port}`;
   // 浏览器直连本桩；Chrome 预开、尚未发请求的连接不算空闲，server.close() 不会关它，拆除会一直等到超时。
-  stub.close = () =>
-    new Promise((resolve) => {
+  const close = () =>
+    new Promise<void>((resolve) => {
       server.close(() => resolve());
       server.closeAllConnections();
     });
+  const { port } = await startOnSafePort("本地桩", async () => {
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return { port: (server.address() as AddressInfo).port, value: server, release: close };
+  });
+  stub.url = `http://127.0.0.1:${port}`;
+  stub.close = close;
   return stub;
+}
+
+/** 起一个服务端进程，等它在 stdout 报出监听端口；release 杀掉进程并等它真正退出。 */
+async function spawnServer(dataRoot: string, gatewayURL: string): Promise<Started<ChildProcess>> {
+  const child: ChildProcess = spawn(
+    serverBin,
+    ["--listen", "127.0.0.1:0", "--data-root", dataRoot, "--gateway-url", gatewayURL, "--static-dir", staticDir, "--result-hosts", "127.0.0.1"],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stderr = "";
+  child.stderr?.on("data", (d) => (stderr += String(d)));
+  const port = await new Promise<number>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`服务端未在 10 秒内就绪：${stderr}`)), 10_000);
+    child.stdout?.on("data", (d) => {
+      const m = /监听 http:\/\/127\.0\.0\.1:(\d+)/.exec(String(d));
+      if (m) {
+        clearTimeout(timer);
+        resolve(Number(m[1]));
+      }
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      reject(new Error(`服务端提前退出（${code}）：${stderr}`));
+    });
+  });
+  return { port, value: child, release: () => stopServer(child) };
+}
+
+/** 先等服务端真正退出再返回：kill 只是发信号，进程退出前仍可能在写数据根。 */
+async function stopServer(child: ChildProcess) {
+  const exited = child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  child.kill();
+  await exited;
 }
 
 export interface Rig {
@@ -126,27 +163,7 @@ export const test = base.extend<{ rig: Rig }>({
   rig: async ({}, use) => {
     const stub = await startStub();
     const dataRoot = mkdtempSync(path.join(tmpdir(), "kacha-e2e-"));
-    const child: ChildProcess = spawn(
-      serverBin,
-      ["--listen", "127.0.0.1:0", "--data-root", dataRoot, "--gateway-url", stub.url, "--static-dir", staticDir, "--result-hosts", "127.0.0.1"],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
-    let stderr = "";
-    child.stderr?.on("data", (d) => (stderr += String(d)));
-    const port = await new Promise<number>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`服务端未在 10 秒内就绪：${stderr}`)), 10_000);
-      child.stdout?.on("data", (d) => {
-        const m = /监听 http:\/\/127\.0\.0\.1:(\d+)/.exec(String(d));
-        if (m) {
-          clearTimeout(timer);
-          resolve(Number(m[1]));
-        }
-      });
-      child.on("exit", (code) => {
-        clearTimeout(timer);
-        reject(new Error(`服务端提前退出（${code}）：${stderr}`));
-      });
-    });
+    const { port, value: child } = await startOnSafePort("服务端", () => spawnServer(dataRoot, stub.url));
     await use({
       baseURL: `http://kacha.test:${port}`,
       localURL: `http://127.0.0.1:${port}`,
@@ -156,11 +173,9 @@ export const test = base.extend<{ rig: Rig }>({
         return path.join(dataRoot, "users", createHash("sha256").update(key).digest("hex"));
       },
     });
-    // 先等服务端真正退出再删数据根：页面此时还开着，kill 只是发信号，进程退出前仍可能在写缩略图缓存、
+    // 先等服务端真正退出再删数据根：页面此时还开着，进程退出前仍可能在写缩略图缓存、
     // 画板或任务文件，与递归删除赛跑会报 ENOTEMPTY。
-    const exited = child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise<void>((resolve) => child.once("exit", () => resolve()));
-    child.kill();
-    await exited;
+    await stopServer(child);
     await stub.close();
     rmSync(dataRoot, { recursive: true, force: true });
   },
