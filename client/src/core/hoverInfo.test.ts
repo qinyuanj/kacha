@@ -77,6 +77,14 @@ describe("参考图节点悬浮信息", () => {
     expect(referenceHoverInfo({ node: reference, image: undefined, missing: false, warnings: [], notes: ["发送时将转为 JPEG"] })).toContainEqual({ label: null, text: "发送时将转为 JPEG" });
   });
 
+  it("移出为新画板时由上游图片转成的参考图：标注来源画板", () => {
+    expect(referenceHoverInfo({ node: { ...reference, source_board: "大画板" }, image: undefined, missing: false, warnings: [] })).toEqual([
+      { label: "文件", text: "cat.png" },
+      { label: "来源", text: "画板「大画板」" },
+      { label: "路径", text: "参考/cat.png", mono: true },
+    ]);
+  });
+
   it("图片信息未读到时不列像素与透明；缺图给原因", () => {
     expect(referenceHoverInfo({ node: reference, image: null, missing: true, warnings: [] })).toEqual([
       { label: null, text: "图片缺失：参考/cat.png，可重新定位或选文件", tone: "error" },

@@ -22,6 +22,9 @@ pub struct Options {
     pub static_dir: Option<PathBuf>,
     pub result_hosts: Vec<String>,
     pub min_free_gb: u64,
+    pub board_slots: u32,
+    pub board_size_lines: crate::BoardSizeLines,
+    pub usage_limit: crate::UsageLimit,
 }
 
 impl Options {
@@ -51,6 +54,21 @@ impl Options {
                 .collect(),
             // 磁盘余量门槛（GB），低于它写入类接口返回 507。
             min_free_gb: opt("--min-free-gb", "KACHA_MIN_FREE_GB", "20").parse().unwrap_or(20),
+            // 画板位数量与画板体量提醒线（MiB）：初值，按每日用量日志调整，改参数重启服务即可，不用发版（ADR 0019）。
+            board_slots: opt("--board-slots", "KACHA_BOARD_SLOTS", "").parse().unwrap_or(crate::board_list::DEFAULT_BOARD_SLOTS),
+            board_size_lines: {
+                let default = crate::BoardSizeLines::default();
+                let mib = |flag: &str, env: &str, fallback: u64| opt(flag, env, "").parse::<u64>().map_or(fallback, |m| m.saturating_mul(1024 * 1024));
+                crate::BoardSizeLines {
+                    warn: mib("--board-warn-mb", "KACHA_BOARD_WARN_MB", default.warn),
+                    alert: mib("--board-alert-mb", "KACHA_BOARD_ALERT_MB", default.alert),
+                }
+            },
+            // 用量上限（GiB）留空即不提醒；数值待按数据盘可用空间定，改参数重启服务即可（#88）。
+            usage_limit: crate::UsageLimit {
+                bytes: opt("--usage-limit-gb", "KACHA_USAGE_LIMIT_GB", "").parse::<u64>().ok().map(|g| g.saturating_mul(1024 * 1024 * 1024)),
+                warn_percent: opt("--usage-warn-percent", "KACHA_USAGE_WARN_PERCENT", "").parse().unwrap_or(crate::UsageLimit::default().warn_percent),
+            },
         }
     }
 }
@@ -122,6 +140,9 @@ pub async fn start(
             static_dir: options.static_dir,
             result_hosts: options.result_hosts,
             min_free_bytes: options.min_free_gb.saturating_mul(1024 * 1024 * 1024),
+            board_slots: options.board_slots,
+            board_size_lines: options.board_size_lines,
+            usage_limit: options.usage_limit,
         },
         Arc::new(crate::verify::HttpKeyVerifier::new(options.gateway_url)),
         Arc::new(SystemTime::now),

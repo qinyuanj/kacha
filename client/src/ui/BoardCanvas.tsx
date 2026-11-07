@@ -17,7 +17,7 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { type Board, type BoardEdge } from "../core/board";
+import { stagesOf, type Board, type BoardEdge } from "../core/board";
 import { findModel, type CapabilityTable, type InputImageRule } from "../core/capabilities";
 import type { TaskStatus } from "../core/run";
 import { nodeCopyDetail, nodeStatus, nodeSummary, summaryTone, type NodeRunState } from "../core/runner";
@@ -40,7 +40,8 @@ import { createPortal } from "react-dom";
 import { expandedTasks, forgetOnSelectionChange, toggleExpanded, type ExpandOverrides } from "../core/expand";
 import { cardDropConnection, dragCreateItems } from "../core/dragCreate";
 import { BoardToolbar } from "./BoardToolbar";
-import { FLASH_UNAVAILABLE_TEXT } from "./boardText";
+import { ARCHIVE_TEXT, FLASH_UNAVAILABLE_TEXT } from "./boardText";
+import { isReadOnlyAction, readOnlyMenu } from "../core/archive";
 import { edgeHoverInfo, type HoverInfo } from "../core/hoverInfo";
 import { connectablePorts, dragKind, edgeClassName, nodeClassName, promptPortKind, type DragFrom, type DragState } from "../core/ports";
 import { continueEditingChange, type BoardChange, type EdgeRef, type EditResult, type ImportedImage } from "../core/edit";
@@ -65,6 +66,11 @@ import { DragContext } from "./ports";
 import { PreviewDialog, type PreviewRequest, type RegionTarget } from "./PreviewDialog";
 import { isTyping, useCanvasInteraction, type Selection } from "./useCanvasInteraction";
 import { errorText } from "../core/errors";
+import { collapsedMembers, finalToggle, nextStageName, prunableResults, stageBoxes } from "../core/stages";
+import { nodesBytes, pruneSavings } from "../core/tidy";
+import { StageLayer, type StageTidy } from "./stages";
+import { TidyBar, useTidyMeasure } from "./tidy";
+import { TIDY_TEXT } from "./boardText";
 
 /** 复制粘贴的剪贴板：应用内共享，可粘到另一个画板（只带节点之间的连线，不跨画板连线）。 */
 let clipboard: Clip | null = null;
@@ -106,6 +112,13 @@ interface Props {
   toolbarSlot: HTMLElement | null;
   /** 运行指示跳转：居中并选中该节点；nonce 变化即再跳一次。 */
   focus: { nodeId: string; nonce: number } | null;
+  /** 整理模式（#92）：画布的一种界面状态，其它编辑照常可用。 */
+  tidying: boolean;
+  onTidyChange: (tidying: boolean) => void;
+  /** 把阶段移出为新画板（#93）；返回要提示的话（成功、画板位满或其它拒绝原因）。 */
+  onMoveOutStage: (stageId: string) => Promise<string>;
+  /** 归档画板（#90）：能看、放大、下载结果，不能编辑（不拖动、不连线、不删、菜单只剩查看与下载）。 */
+  readOnly?: boolean;
 }
 
 const edgeId = (e: BoardEdge) => `${e.from.join(":")}->${e.to.join(":")}`;
@@ -136,6 +149,10 @@ export function BoardCanvas({
   onViewSendText,
   toolbarSlot,
   focus,
+  tidying,
+  onTidyChange,
+  onMoveOutStage,
+  readOnly = false,
 }: Props) {
   const flow = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
@@ -149,6 +166,11 @@ export function BoardCanvas({
   /** 应用一次画板变更：有话要说（被拒原因、删除后的撤销提示）就提示，有建议选中就照选。 */
   const apply = useCallback(
     (change: BoardChange) => {
+      // 归档画板：视口移动不提示，其余编辑说明只读。画板会话层同样拒绝写入。
+      if (readOnly) {
+        if (change.kind !== "viewport") toast(ARCHIVE_TEXT.readOnly);
+        return null;
+      }
       const r = applyChange(change);
       if (r?.hint) toast(r.hint);
       if (r?.selection) {
@@ -157,7 +179,7 @@ export function BoardCanvas({
       }
       return r;
     },
-    [applyChange, toast],
+    [applyChange, toast, readOnly],
   );
 
   const boardRef = useRef(board);
@@ -399,6 +421,44 @@ export function BoardCanvas({
     [table, boardFile, userRoot, discovery, concurrency, apply, onRegenerate, toast, openNodePreview, regionTargetsOf],
   );
 
+  // 阶段：收起的成员不显示；框按成员的显示尺寸画。刚建的阶段标题直接进入改名。
+  const hidden = useMemo(() => collapsedMembers(board, readOnly), [board, readOnly]);
+  const boxes = useMemo(() => stageBoxes(board, (id) => measured[id], readOnly), [board, measured, readOnly]);
+  const [editingStage, setEditingStage] = useState<string | null>(null);
+  // 整理模式：各阶段体量、「收掉未定稿」的张数与预计减少的体量（按任务目录，服务端量）。
+  const tidyMeasure = useTidyMeasure(board, tidying);
+  const [movingOut, setMovingOut] = useState(false);
+  const stageTidy = useMemo((): StageTidy | null => {
+    if (!tidying) return null;
+    const { measure } = tidyMeasure;
+    const stageNodes = (id: string) => stagesOf(board).find((s) => s.id === id)?.nodes ?? [];
+    return {
+      bytes: (id) => (measure ? nodesBytes(measure, stageNodes(id)) : null),
+      prunable: (id) => prunableResults(board, [id]).length,
+      onPrune: (id) => {
+        const ids = prunableResults(boardRef.current, [id]);
+        if (!ids.length) return toast(TIDY_TEXT.nothingToPrune);
+        const saved = measure ? pruneSavings(measure, ids) : null;
+        void browser.ask(TIDY_TEXT.pruneConfirm(ids.length, saved), { title: TIDY_TEXT.pruneTitle, okLabel: TIDY_TEXT.pruneOk, cancelLabel: "取消" }).then((ok) => {
+          if (ok) apply({ kind: "pruneUnfinal", stageIds: [id] });
+        });
+      },
+      movingOut,
+      onMoveOut: (id) => {
+        setMovingOut(true);
+        void onMoveOutStage(id)
+          .then(toast, (e) => toast(TIDY_TEXT.moveOutFailed(errorText(e))))
+          .finally(() => setMovingOut(false));
+      },
+    };
+  }, [tidying, tidyMeasure, board, toast, apply, movingOut, onMoveOutStage]);
+  const newStage = (ids: string[]) => {
+    const before = new Set(stagesOf(boardRef.current).map((s) => s.id));
+    const r = apply({ kind: "newStage", name: nextStageName(boardRef.current), nodes: ids });
+    const created = r?.step && stagesOf(r.board).find((s) => !before.has(s.id));
+    if (created) setEditingStage(created.id);
+  };
+
   // 选中任一节点即高亮其谱系。
   const highlighted = useMemo(() => lineage(board, [...selectedNodes]), [board, selectedNodes]);
 
@@ -456,6 +516,8 @@ export function BoardCanvas({
         id: n.id,
         position: { x: n.pos[0], y: n.pos[1] },
         selected: selectedNodes.has(n.id),
+        // 收起的阶段里的节点：React Flow 连同其连线一起隐藏。
+        hidden: hidden.has(n.id),
         // 承重逻辑（xyflow#3816）：开启 onlyRenderVisibleElements 后，React Flow 只强制渲染还没有 handleBounds（未测量）的节点。
         // 重建的节点不带 measured 时，adoptUserNodes 会清空已测得的 handleBounds，节点（含视口外的）被重新强制渲染、连线闪断；
         // 还没回传到这里的（刚测完、setMeasured 未提交）也要带一个空对象，否则这次重建清空后不会再测，节点永远留在 DOM 中。
@@ -521,7 +583,7 @@ export function BoardCanvas({
         }
       }
     });
-  }, [board, table, userRoot, selectedNodes, measured, statusOf, runStateOf, locked, discovery, concurrency, highlighted, missing, focusPrompt, promptDrafts, alphaByNode, imageInfos, expanded, menuFacts, drag]);
+  }, [board, table, userRoot, selectedNodes, measured, statusOf, runStateOf, locked, discovery, concurrency, highlighted, missing, focusPrompt, promptDrafts, alphaByNode, imageInfos, expanded, menuFacts, drag, hidden]);
 
   const dragging = drag !== null;
   const edges = useMemo<Edge[]>(
@@ -793,6 +855,7 @@ export function BoardCanvas({
   };
 
   const performAction = (action: BoardAction, target: MenuTarget, at?: { x: number; y: number }) => {
+    if (readOnly && !isReadOnlyAction(action)) return toast(ARCHIVE_TEXT.readOnly);
     if (action === "newPrompt") addPrompt(at);
     else if (action === "newTask") addTask(at);
     else if (action === "addReferences") void pickReferences(at);
@@ -811,6 +874,12 @@ export function BoardCanvas({
       else if (action === "viewSendText") onViewSendText(id);
       else if (action === "toggleSettings") setExpandOverrides((o) => toggleExpanded(o, selectedRef.current, id));
       else if (action === "delete") void flow.deleteElements({ nodes: [...selectionForMenu(selectedRef.current, id)].map((n) => ({ id: n })) });
+      else if (action === "newStage") newStage([...selectionForMenu(selectedRef.current, id)]);
+      else if (action === "removeFromStage") apply({ kind: "removeFromStage", nodes: [...selectionForMenu(selectedRef.current, id)] });
+      else if (action === "toggleFinal") {
+        const toggle = finalToggle(boardRef.current, selectionForMenu(selectedRef.current, id));
+        if (toggle) apply({ kind: "setFinal", ...toggle });
+      }
     } else if (target.kind === "edge") {
       const { edge } = target;
       if (action === "disconnect") void flow.deleteElements({ edges: [{ id: edgeId(edge) }] });
@@ -830,7 +899,8 @@ export function BoardCanvas({
     }
   };
 
-  const menuEntries = menu ? menuItems(menu.target, menuFacts(menu.target.kind === "node" ? selectionForMenu(selectedNodes, menu.target.nodeId) : selectedNodes)) : [];
+  const menuView = readOnly ? readOnlyMenu : (items: ReturnType<typeof menuItems>) => items;
+  const menuEntries = menu ? menuView(menuItems(menu.target, menuFacts(menu.target.kind === "node" ? selectionForMenu(selectedNodes, menu.target.nodeId) : selectedNodes))) : [];
 
   const hideActionBarSoon = () => {
     showActionBar(null);
@@ -838,7 +908,7 @@ export function BoardCanvas({
   };
   useEffect(() => () => showActionBar(null), []);
   const hoveredPresent = hovered !== null && board.nodes.some((n) => n.id === hovered);
-  const barItems = hoveredPresent && !menu ? actionBarItems(hovered, menuFacts(selectedNodes)) : [];
+  const barItems = hoveredPresent && !menu ? menuView(actionBarItems(hovered, menuFacts(selectedNodes))) : [];
   // 悬浮在多选内的节点上：选区上方只出一条。
   const barNodes = hoveredPresent ? (selectedNodes.size > 1 && selectedNodes.has(hovered) ? [...selectedNodes] : [hovered]) : [];
 
@@ -853,6 +923,7 @@ export function BoardCanvas({
       if (!e.dataTransfer?.files.length) return;
       e.preventDefault();
       e.stopPropagation();
+      if (readOnly) return toast(ARCHIVE_TEXT.readOnly);
       const at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
       const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/") || IMAGE_EXTENSIONS.some((ext) => f.name.toLowerCase().endsWith(`.${ext}`)));
       if (!files.length) return toast("只支持拖入图片文件");
@@ -866,7 +937,7 @@ export function BoardCanvas({
       el.removeEventListener("dragover", over);
       el.removeEventListener("drop", drop);
     };
-  }, [flow, importLocalFiles, toast]);
+  }, [flow, importLocalFiles, toast, readOnly]);
 
   const toolbarModel = defaultTaskModel(table, discovery, board.last_model);
   return (
@@ -875,7 +946,7 @@ export function BoardCanvas({
       <DragContext.Provider value={drag}>
       {/* 画布内屏蔽 WebView 默认右键菜单；可编辑元素保留原生菜单（复制粘贴）。 */}
       <div
-        className={["canvas", drag ? "connecting" : ""].join(" ").trim()}
+        className={["canvas", drag ? "connecting" : "", tidying ? "tidying" : ""].join(" ").trim()}
         ref={wrapper}
         onContextMenu={(e) => !isTyping(e.target) && e.preventDefault()}
         onPointerDownCapture={nav.onPointerDownCapture}
@@ -883,7 +954,7 @@ export function BoardCanvas({
       >
         {toolbarSlot &&
           createPortal(
-            <BoardToolbar
+            readOnly ? <BoardToolbar disabled /> : <BoardToolbar
               modelSelect={
                 // 新建生成任务用的模型（board.last_model）：是偏好不是画板编辑，不进撤销。
                 <select
@@ -905,6 +976,8 @@ export function BoardCanvas({
               redoLabel={redoLabel}
               selectedCount={selectedNodes.size}
               onRun={() => onRun([...selectedNodes])}
+              tidying={tidying}
+              onTidy={() => onTidyChange(!tidying)}
             />,
             toolbarSlot,
           )}
@@ -917,7 +990,9 @@ export function BoardCanvas({
           onlyRenderVisibleElements
           edgeTypes={edgeTypes}
           {...nav.flowProps}
-          deleteKeyCode={dialogOpen ? null : nav.flowProps.deleteKeyCode}
+          deleteKeyCode={dialogOpen || readOnly ? null : nav.flowProps.deleteKeyCode}
+          nodesDraggable={!readOnly}
+          nodesConnectable={!readOnly}
           defaultViewport={board.viewport}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
@@ -949,6 +1024,7 @@ export function BoardCanvas({
           minZoom={0.1}
         >
           <Background />
+          <StageLayer readOnly={readOnly} boxes={boxes} selected={selectedNodes} apply={(c) => void apply(c)} editing={editingStage} onEditingDone={() => setEditingStage(null)} tidy={stageTidy} />
           <Controls />
           <MiniMap pannable zoomable />
           {barItems.length > 0 && (
@@ -962,6 +1038,7 @@ export function BoardCanvas({
             </NodeToolbar>
           )}
         </ReactFlow>
+        {tidying && <TidyBar {...tidyMeasure} onDone={() => onTidyChange(false)} />}
         {menu && menuEntries.length > 0 && (
           <ContextMenu at={menu.client} items={menuEntries} onPick={(action) => performAction(action, menu.target, menu.at)} onClose={closeMenu} />
         )}

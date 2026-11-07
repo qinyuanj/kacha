@@ -18,6 +18,25 @@ fn server_log(data_root: &std::path::Path) -> String {
     std::fs::read_to_string(data_root.join("server-log").join("server.log")).unwrap_or_default()
 }
 
+#[test]
+fn board_slots_and_size_lines_are_command_line_options_with_defaults() {
+    let defaults = Options::parse(&[]);
+    assert_eq!(defaults.board_slots, 10);
+    assert_eq!(defaults.board_size_lines, kacha_server::BoardSizeLines { warn: 500 * 1024 * 1024, alert: 1024 * 1024 * 1024 });
+    let args: Vec<String> = ["--board-slots", "12", "--board-warn-mb", "300", "--board-alert-mb", "800"].iter().map(|s| s.to_string()).collect();
+    let set = Options::parse(&args);
+    assert_eq!(set.board_slots, 12);
+    assert_eq!(set.board_size_lines, kacha_server::BoardSizeLines { warn: 300 * 1024 * 1024, alert: 800 * 1024 * 1024 });
+}
+
+#[test]
+fn usage_limit_is_empty_by_default_and_reminder_percent_defaults_to_80() {
+    let defaults = Options::parse(&[]);
+    assert_eq!(defaults.usage_limit, kacha_server::UsageLimit { bytes: None, warn_percent: 80 });
+    let args: Vec<String> = ["--usage-limit-gb", "150", "--usage-warn-percent", "90"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(Options::parse(&args).usage_limit, kacha_server::UsageLimit { bytes: Some(150 * 1024 * 1024 * 1024), warn_percent: 90 });
+}
+
 #[tokio::test]
 async fn unwritable_server_log_is_a_start_failure() {
     let dir = tempfile::tempdir().unwrap();

@@ -1,6 +1,8 @@
 // 多画板标签页：打开 / 新建 / 关闭 / 重命名 / 删除 / 去抖自动保存 / 另存到。
 import { useCallback, useRef, useState } from "react";
+import { archiveDir, isArchivedPath } from "../core/archive";
 import {
+  BOARD_EXTENSION,
   DEFAULT_BOARD_TITLE,
   newBoard,
   openBoard,
@@ -13,7 +15,8 @@ import { newId } from "../core/ids";
 import { emptyHistory, recordChange, redo, undo, type History } from "../core/history";
 import { basename, boardsDir, dirname, joinPath, resolveFromRoot } from "../core/paths";
 import { restoreResultLayers } from "../core/taskDir";
-import { BOARD_MISSING_TEXT } from "./boardText";
+import { prepareStageSplit } from "../core/moveOut";
+import { ARCHIVE_TEXT, BOARD_MISSING_TEXT, BOARD_SLOTS_FULL, slotsRefusal, TIDY_TEXT } from "./boardText";
 import { sha256Hex } from "../core/sha256";
 import { ipc } from "../shell/ipc";
 import { ApiError } from "../shell/apiError";
@@ -53,7 +56,10 @@ const samePath = (a: string, b: string) => a.replace(/\\/g, "/").toLowerCase() =
 /** 编辑环境里随应用状态变化的部分：能力表、网关发现、该画板的锁定集（排队 / 执行 / 限流退避中的任务节点）。 */
 export type EnvSource = (key: string) => Pick<EditEnv, "table" | "discovery" | "locked">;
 
-export function useBoardSessions(userRoot: string | null, envSource: EnvSource) {
+export function useBoardSessions(userRoot: string | null, envSource: EnvSource, onMoved: (from: string, to: string) => void = () => undefined) {
+  const movingSessions = useRef(new Set<string>());
+  const onMovedRef = useRef(onMoved);
+  onMovedRef.current = onMoved;
   const [sessions, setSessionsState] = useState<Session[]>([]);
   const [activeKey, setActiveKeyState] = useState<string | null>(null);
   const activeKeyRef = useRef<string | null>(null);
@@ -88,6 +94,10 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
   const isConflict = (e: unknown) => e instanceof ApiError && e.status === 409;
   /** 画板已不存在（另一页面删除或改名）：带版本保存回 board_missing，服务端不会重建它；删除回 404。 */
   const isMissing = (e: unknown) => e instanceof ApiError && (e.code === "board_missing" || (e.status === 404 && e.code === "not_found"));
+  /** 画板位满（#89）：服务端的 message 即统一文案。 */
+  const isSlotsFull = (e: unknown) => e instanceof ApiError && e.code === BOARD_SLOTS_FULL;
+  /** 归档画板（#90）只读：不进画板变更、不撤销、不保存。 */
+  const isReadOnly = (path: string) => !!userRootRef.current && isArchivedPath(userRootRef.current, path);
 
   /** 唯一写入实现：带内容版本（新建则只新建不覆盖），成功后用同一算法回写新版本。 */
   const writeSession = async (key: string, s: OkSession) => {
@@ -105,7 +115,8 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
       saver.chain = saver.chain.then(async () => {
         // 写入时再取最新会话：路径可能刚被重命名或另存。
         const s = sessionsRef.current.find((x) => x.key === key);
-        if (!s || s.status !== "ok" || s.conflicted) return;
+        // 归档画板只读（#90）：从不写回，服务端也会拒绝。
+        if (!s || s.status !== "ok" || s.conflicted || isReadOnly(s.path)) return;
         try {
           await writeSession(key, s);
         } catch (e) {
@@ -159,7 +170,7 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
   const apply = useCallback(
     (key: string, change: BoardChange): EditResult | null => {
       const s = sessionsRef.current.find((x) => x.key === key);
-      if (!s || s.status !== "ok") return null;
+      if (!s || s.status !== "ok" || isReadOnly(s.path) || movingSessions.current.has(key)) return null;
       const r = editBoard(s.board, change, envOf(key));
       if (r.board === s.board) return r;
       patch(key, (x) => ({ ...x, board: r.board, history: r.step ? recordChange(x.history, s.board, r.step, Date.now()) : x.history }));
@@ -173,7 +184,7 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
   const travel = useCallback(
     (key: string, direction: typeof undo) => {
       const s = sessionsRef.current.find((x) => x.key === key);
-      if (!s || s.status !== "ok") return;
+      if (!s || s.status !== "ok" || isReadOnly(s.path) || movingSessions.current.has(key)) return;
       const r = direction(s.history, s.board, envSourceRef.current(key).locked);
       if (!r) return;
       patch(key, (x) => ({ ...x, board: r.board, history: r.history }));
@@ -252,33 +263,95 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
     [setSessions],
   );
 
-  const createBoard = useCallback(async () => {
-    if (!userRoot) return;
+  /**
+   * 新建画板并立即落盘占住文件名。画板位满时不建标签页，返回统一文案交给调用方提示（#89）：
+   * 先按列表里的画板位判定；两页同时新建抢最后一个位时由服务端拒绝（409 board_slots_full），同样不留标签页。
+   */
+  const createBoard = useCallback(async (): Promise<string | null> => {
+    if (!userRoot) return null;
+    // 读不到列表时不拦：服务端仍会检查。
+    const slots = await ipc.listBoards().then((l) => l.slots, () => null);
+    const refusal = slots && slotsRefusal(slots, 1);
+    if (refusal) return refusal;
     const dir = boardsDir(userRoot);
     const onDisk = await ipc.listBoardNames(dir).catch(() => [] as string[]);
     const openHere = sessionsRef.current.filter((s) => samePath(dirname(s.path), dir)).map((s) => basename(s.path));
     const path = joinPath(dir, uniqueBoardFileName(DEFAULT_BOARD_TITLE, [...onDisk, ...openHere]));
+    const board = newBoard();
+    const text = serializeBoard(board);
+    let version: string | null = null;
+    try {
+      await ipc.writeBoard(path, text, { createOnly: true });
+      version = await sha256Hex(new TextEncoder().encode(text));
+    } catch (e) {
+      if (isSlotsFull(e)) return errorText(e);
+      // 其余失败照旧：标签页留着，由保存流程报错并重试。
+    }
     const key = newId();
-    setSessions([...sessionsRef.current, { key, path, status: "ok", board: newBoard(), history: emptyHistory(), notice: null, saveError: null, version: null, conflicted: false, missing: false }]);
+    setSessions([...sessionsRef.current, { key, path, status: "ok", board, history: emptyHistory(), notice: null, saveError: null, version, conflicted: false, missing: false }]);
     setActiveKey(key);
-    // 立即落盘占住文件名。
-    await flush(key);
+    if (version === null) await flush(key);
+    return null;
   }, [userRoot, flush, setSessions]);
 
-  /** 导入的画板写进用户数据根画板目录：同名沿用 (2) 自动改名、永不覆盖；写好后在新标签页打开。 */
-  const addImportedBoard = useCallback(
-    async (board: Board): Promise<string> => {
-      if (!userRoot) throw new Error("用户数据根未就绪");
-      const dir = boardsDir(userRoot);
-      const onDisk = await ipc.listBoardNames(dir);
-      const openHere = sessionsRef.current.filter((s) => samePath(dirname(s.path), dir)).map((s) => basename(s.path));
-      const path = joinPath(dir, uniqueBoardFileName(board.title, [...onDisk, ...openHere]));
-      await ipc.writeBoard(path, serializeBoard(board));
-      await openPath(path, true);
-      return path;
+  const movingOut = useRef(false);
+  /**
+   * 移出为新画板（#93）：先试算（运行中的任务锁定时拒绝）、查画板位，读阶段外上游结果图的 sha256，
+   * 按最新画板拆出新画板只新建不覆盖地写好，最后才在原画板删去这些节点（一次用户变更，撤销不删新画板）。
+   * 任何一步被拒都不改原画板、不写文件。返回要提示的话。
+   */
+  const moveOutStage = useCallback(
+    async (key: string, stageId: string): Promise<string> => {
+      const root = userRootRef.current;
+      const boardOf = () => {
+        const s = sessionsRef.current.find((x) => x.key === key);
+        return s?.status === "ok" ? s.board : null;
+      };
+      const tryRemove = () => {
+        const b = boardOf();
+        return b ? editBoard(b, { kind: "moveOutStage", stageId }, envOf(key)) : null;
+      };
+      const s0 = sessionsRef.current.find((x) => x.key === key);
+      if (s0 && (isReadOnly(s0.path) || movingSessions.current.has(key))) return ARCHIVE_TEXT.readOnly;
+      const dry = tryRemove();
+      if (!root || !dry) return TIDY_TEXT.moveOutFailed("画板不可编辑");
+      if (!dry.step) return dry.hint ?? TIDY_TEXT.moveOutFailed("阶段已不存在");
+      if (movingOut.current) return TIDY_TEXT.moveOutBusy;
+      movingOut.current = true;
+      try {
+        // 读不到列表时不拦：服务端新建时仍会检查。
+        const slots = await ipc.listBoards().then((l) => l.slots, () => null);
+        const refusal = slots && slotsRefusal(slots, 1);
+        if (refusal) return refusal;
+        const prepared = await prepareStageSplit(boardOf, stageId, (path) => ipc.fileSha256(resolveFromRoot(root, path)), newId);
+        const check = tryRemove();
+        if (!prepared || !check?.step) return check?.hint ?? TIDY_TEXT.moveOutFailed("阶段已不存在");
+        const { source: latest, board: fresh } = prepared;
+        const path = await freePathIn(boardsDir(root), "", fresh.title);
+        if (boardOf() !== latest) return TIDY_TEXT.moveOutFailed("移出期间本画板有了新的改动，请重试");
+        try {
+          await ipc.writeBoard(path, serializeBoard(fresh), { createOnly: true });
+        } catch (e) {
+          return isSlotsFull(e) ? errorText(e) : TIDY_TEXT.moveOutFailed(errorText(e));
+        }
+        if (boardOf() !== latest) return TIDY_TEXT.movedOutKept(fresh.title, "移出期间本画板有了新的改动");
+        const r = apply(key, { kind: "moveOutStage", stageId });
+        // 写好之后才被拒（期间有任务开始运行）：新画板已在列表里，原画板不动。
+        return r?.step ? TIDY_TEXT.movedOut(fresh.title) : TIDY_TEXT.movedOutKept(fresh.title, r?.hint ?? null);
+      } catch (e) {
+        return TIDY_TEXT.moveOutFailed(errorText(e));
+      } finally {
+        movingOut.current = false;
+      }
     },
-    [userRoot, openPath],
+    [envOf, apply],
   );
+
+  /** 导入画板由服务端在锁内写好；本页只打开返回路径。 */
+  const openImportedBoard = useCallback(async (path: string): Promise<void> => {
+    if (!userRoot) throw new Error("用户数据根未就绪");
+    if (!await openPath(resolveFromRoot(userRoot, path), true)) throw new Error("导入画板已写入但无法打开，请重新载入画板列表");
+  }, [openPath, userRoot]);
 
   const closeBoard = useCallback(
     async (key: string) => {
@@ -329,6 +402,93 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
     [flush, patch, dropSession],
   );
 
+  /** 目标目录里不与磁盘上、本页已开的画板重名的路径：文件名沿用原名，重名加 (2)。 */
+  const freePathIn = async (dir: string, path: string, title = basename(path).slice(0, -BOARD_EXTENSION.length)) => {
+    const onDisk = await ipc.listBoardNames(dir);
+    const openHere = sessionsRef.current.filter((x) => samePath(dirname(x.path), dir)).map((x) => basename(x.path));
+    return joinPath(dir, uniqueBoardFileName(title, [...onDisk, ...openHere]));
+  };
+
+  /** 本页打开的会话换到新位置（归档 / 取消归档后），内容与撤销历史照旧。 */
+  const movedTo = (from: string, to: string) => {
+    const s = sessionsRef.current.find((x) => samePath(x.path, from));
+    if (s) setSessions(sessionsRef.current.map((x) => (x.key === s.key ? { ...x, path: to } : x)));
+    onMovedRef.current(from, to);
+  };
+
+  /**
+   * 归档（#90）：本页开着的先保存再带版本搬，标签页留着、变为只读；失败以错误抛给调用方。
+   * 调用方负责先停掉该画板上的任务（结果写不进只读画板）。
+   */
+  const archiveBoard = useCallback(
+    async (path: string) => {
+      if (!userRoot) return;
+      const key = sessionsRef.current.find((x) => samePath(x.path, path))?.key;
+      if (key && movingSessions.current.has(key)) return;
+      if (key) movingSessions.current.add(key);
+      try {
+        if (key) await flush(key);
+        const s = key ? sessionsRef.current.find((x) => x.key === key) : undefined;
+        if (s?.status === "ok" && s.saveError) throw new Error(`未归档：${s.missing ? BOARD_MISSING_TEXT : s.conflicted ? "画板已在别处修改，请先重新载入" : `未保存的改动没能保存（${s.saveError}）`}`);
+        const to = await freePathIn(archiveDir(userRoot), path);
+        await ipc.archiveBoard(path, to, s?.status === "ok" ? (s.version ?? undefined) : undefined);
+        movedTo(path, to);
+      } finally {
+        if (key) movingSessions.current.delete(key);
+      }
+    },
+    [userRoot, flush],
+  );
+
+  /** 取消归档：画板位满时返回统一文案（先按列表判定，抢位时由服务端 409 拒绝）；成功为 null。 */
+  const unarchiveBoard = useCallback(
+    async (path: string): Promise<string | null> => {
+      if (!userRoot) return null;
+      const slots = await ipc.listBoards().then((l) => l.slots, () => null);
+      const refusal = slots && slotsRefusal(slots, 1);
+      if (refusal) return refusal;
+      const to = await freePathIn(boardsDir(userRoot), path);
+      try {
+        await ipc.unarchiveBoard(path, to);
+      } catch (e) {
+        if (isSlotsFull(e)) return errorText(e);
+        throw e;
+      }
+      movedTo(path, to);
+      return null;
+    },
+    [userRoot],
+  );
+
+  /** 复制为新画板：归档画板内容只新建写进画板目录并打开，原画板不动；画板位满时返回统一文案，成功为 null。 */
+  const copyAsNewBoard = useCallback(
+    async (path: string): Promise<string | null> => {
+      if (!userRoot) return null;
+      const open = sessionsRef.current.find((x) => samePath(x.path, path));
+      let board: Board;
+      if (open?.status === "ok") board = open.board;
+      else {
+        const texts = await ipc.readBoard(path);
+        const opened = openBoard(texts.main, texts.bak);
+        if (opened.kind !== "ok") throw new Error(opened.kind === "newer" ? `画板格式版本 ${opened.version} 高于本应用` : opened.reason);
+        board = opened.board;
+      }
+      const slots = await ipc.listBoards().then((l) => l.slots, () => null);
+      const refusal = slots && slotsRefusal(slots, 1);
+      if (refusal) return refusal;
+      const to = await freePathIn(boardsDir(userRoot), path, board.title);
+      try {
+        await ipc.writeBoard(to, serializeBoard(board), { createOnly: true });
+      } catch (e) {
+        if (isSlotsFull(e)) return errorText(e);
+        throw e;
+      }
+      await openPath(to, true);
+      return null;
+    },
+    [userRoot, openPath],
+  );
+
   closeBoardRef.current = closeBoard;
 
   /** 本页打开该路径画板的标签页 key；没打开为 null。 */
@@ -338,9 +498,10 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
   const renameBoard = useCallback(
     async (key: string, rawTitle: string) => {
       const s = sessionsRef.current.find((x) => x.key === key);
-      if (!s || s.status !== "ok") return;
+      if (!s || s.status !== "ok" || movingSessions.current.has(key)) return;
       const title = rawTitle.trim() || DEFAULT_BOARD_TITLE;
       if (title === s.board.title) return;
+      if (isReadOnly(s.path)) return patch(key, (x) => ({ ...x, notice: ARCHIVE_TEXT.readOnly }));
       // 先落盘挂起的修改，避免去抖写入在改名途中把旧文件重新写出来。
       await flush(key);
       const dir = dirname(s.path);
@@ -354,7 +515,7 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
         patch(key, (x) => ({ ...x, notice: `重命名失败：${errorText(e)}` }));
         return;
       }
-      patch(key, (x) => ({ ...x, path: nextPath }));
+      movedTo(s.path, nextPath);
       apply(key, { kind: "title", title });
       await flush(key);
     },
@@ -380,6 +541,7 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
         return;
       }
       if (userRootRef.current) opened.board = await restoreResultLayers({ readFile: ipc.readFileBytes }, userRootRef.current, opened.board);
+      if (movingSessions.current.has(key)) return;
       patch(key, (x) => ({ ...x, board: opened.board, history: emptyHistory(), version: texts.version ?? null, saveError: null, conflicted: false, missing: false, notice: null }));
     } catch (e) {
       patch(key, (x) => ({ ...x, notice: `重新载入失败：${errorText(e)}` }));
@@ -392,9 +554,13 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource) 
     setActiveKey,
     openPath,
     createBoard,
-    addImportedBoard,
+    moveOutStage,
+    openImportedBoard,
     closeBoard,
     deleteBoard,
+    archiveBoard,
+    unarchiveBoard,
+    copyAsNewBoard,
     dropSession,
     keyOf,
     renameBoard,

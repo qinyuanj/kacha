@@ -438,10 +438,82 @@ pub async fn upload_texts(State(state): State<AppState>, user: User, AxPath(id):
 
 /// 导入请求体：合并单元与 v2 包被省略路径的还原清单（v1 包为空）。
 #[derive(Deserialize)]
+struct NewBoard {
+    title: String,
+    text: String,
+}
+
+/// 导入请求同时携带已准备好的画板内容；服务端在画板锁内预留容量并写画板，返回实际路径。
+#[derive(Deserialize)]
 struct ImportRequest {
     units: Vec<MergeUnit>,
     #[serde(default)]
     duplicates: Vec<PackDuplicate>,
+    #[serde(default)]
+    new_boards: Vec<NewBoard>,
+}
+
+#[derive(serde::Serialize)]
+struct ImportOutcome {
+    #[serde(flatten)]
+    report: board_pack::ImportReport,
+    boards: Vec<String>,
+}
+
+/// 按前端 uniqueBoardFileName 的同一规则取名（跨平台不区分大小写）。
+fn import_board_name(title: &str, taken: &mut Vec<String>) -> String {
+    let mut stem: String = title.chars().filter(|c| !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') && !c.is_control()).collect::<String>().trim().to_owned();
+    while stem.ends_with(['.', ' ']) { stem.pop(); }
+    if stem.is_empty() { stem = crate::board_list::default_board_title().into(); }
+    if ["con", "prn", "aux", "nul"].iter().any(|v| stem.eq_ignore_ascii_case(v)) || (stem.len() == 4 && stem.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("com") || p.eq_ignore_ascii_case("lpt")) && matches!(stem.as_bytes()[3], b'1'..=b'9')) { stem.push('_'); }
+    for i in 1.. {
+        let name = format!("{stem}{}{}", if i == 1 { "".into() } else { format!(" ({i})") }, crate::store::BOARD_EXTENSION);
+        if !taken.iter().any(|n| n.eq_ignore_ascii_case(&name)) {
+            taken.push(name.clone());
+            return name;
+        }
+    }
+    unreachable!()
+}
+
+/// 持有 board_lock：先在合并前拒绝容量不足，再于合并返回前提交画板，前端不再 PUT。
+async fn commit_import<F>(state: &AppState, user: &User, boards: Vec<NewBoard>, cancel: Arc<Op>, import: F) -> Response
+where F: FnOnce(&Path) -> std::io::Result<board_pack::ImportReport> + Send + 'static {
+    let _permit = state.heavy().acquire().await;
+    let _lock = state.board_lock().lock().await;
+    let root = state.user_root(&user.fingerprint);
+    let total = state.board_slots();
+    let report = crate::fs::off_thread(move || -> Result<ImportOutcome, Response> {
+        crate::board_list::ensure_board_slots(&root, total, boards.len())?;
+        let mut taken = crate::store::list_board_names(&root.join(crate::cleanup::BOARDS_DIR)).map_err(crate::fs::io_error)?;
+        let planned: Vec<_> = boards.iter().map(|b| {
+            let rel = format!("{}/{}", crate::cleanup::BOARDS_DIR, import_board_name(&b.title, &mut taken));
+            crate::paths::resolve(&root, &rel).map(|path| (path, b))
+                .map_err(|e| error(StatusCode::FORBIDDEN, "forbidden", e.message()))
+        }).collect::<Result<Vec<_>, Response>>()?;
+        for (path, _) in &planned {
+            crate::board_list::ensure_new_board_path(&root, total, path)?;
+            if path.exists() || crate::store::bak_path(path).exists() {
+                return Err(error(StatusCode::CONFLICT, "already_exists", "同名画板已存在，请换一个名字"));
+            }
+        }
+        let report = import(&root).map_err(|e| match e.kind() {
+            std::io::ErrorKind::Interrupted => error(StatusCode::CONFLICT, "cancelled", CANCELLED),
+            std::io::ErrorKind::InvalidData => error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_pack", &e.to_string()),
+            _ => crate::fs::io_error(e),
+        })?;
+        if cancel.cancel.load(Ordering::Relaxed) { return Err(error(StatusCode::CONFLICT, "cancelled", CANCELLED)); }
+        let paths = planned.into_iter().map(|(path, board)| {
+            crate::store::write_board_guarded(&path, &board.text, crate::store::BoardWriteGuard::CreateOnly)
+                .map_err(crate::fs::board_save_error)?;
+            Ok(format!("{}/{}", crate::cleanup::BOARDS_DIR, path.file_name().unwrap().to_string_lossy()))
+        }).collect::<Result<Vec<_>, Response>>()?;
+        Ok(ImportOutcome { report, boards: paths })
+    }).await;
+    match report {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(r)) | Err(r) => r,
+    }
 }
 
 /// 执行导入：结束后无论结局都删除上传临时文件（已移入的单元保留）。
@@ -449,26 +521,24 @@ pub async fn import(State(state): State<AppState>, user: User, AxPath(id): AxPat
     if let Err(r) = crate::fs::ensure_space(&state) {
         return r;
     }
-    let Ok(ImportRequest { units, duplicates }) = serde_json::from_slice::<ImportRequest>(&body) else {
+    let Ok(ImportRequest { units, duplicates, new_boards }) = serde_json::from_slice::<ImportRequest>(&body) else {
         return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表");
     };
     let file = match resolve_upload(&state, &user, &id) {
         Ok(f) => f,
         Err(r) => return r,
     };
-    // 导入结束即删除上传的包。
+    // 导入结束即删除上传的包（被画板位拒绝也算结束）。
     let cleanup = UploadGuard { file: file.clone(), keep: false };
     let (op, _guard) = match begin_op(&state, &user, &q.op) {
         Ok(v) => v,
         Err(r) => return r,
     };
-    let root = state.user_root(&user.fingerprint);
-    let _permit = state.heavy().acquire().await;
     let progress = progress_fn(&op);
     let cancel = op.clone();
-    let result = tokio::task::spawn_blocking(move || board_pack::import(&file, &root, &units, &duplicates, &progress, &cancel.cancel)).await;
+    let reply = commit_import(&state, &user, new_boards, op.clone(), move |root| board_pack::import(&file, root, &units, &duplicates, &progress, &cancel.cancel)).await;
     drop(cleanup);
-    pack_reply(result, "invalid_pack")
+    reply
 }
 
 /// 放弃上传（用户在判定后取消）：删除临时文件。
@@ -595,6 +665,8 @@ pub async fn put_content(
 struct StagedImport {
     units: Vec<MergeUnit>,
     files: Vec<board_pack::PlacedFile>,
+    #[serde(default)]
+    new_boards: Vec<NewBoard>,
 }
 
 /// 按落盘清单合并：结束后无论结局都删除暂存（已移入的单元保留）。
@@ -602,7 +674,7 @@ pub async fn import_staging(State(state): State<AppState>, user: User, AxPath(id
     if let Err(r) = crate::fs::ensure_space(&state) {
         return r;
     }
-    let Ok(StagedImport { units, files }) = serde_json::from_slice::<StagedImport>(&body) else {
+    let Ok(StagedImport { units, files, new_boards }) = serde_json::from_slice::<StagedImport>(&body) else {
         return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元与落盘清单");
     };
     let dir = match resolve_staging(&state, &user, &id) {
@@ -614,13 +686,11 @@ pub async fn import_staging(State(state): State<AppState>, user: User, AxPath(id
         Ok(v) => v,
         Err(r) => return r,
     };
-    let root = state.user_root(&user.fingerprint);
-    let _permit = state.heavy().acquire().await;
     let progress = progress_fn(&op);
     let cancel = op.clone();
-    let result = tokio::task::spawn_blocking(move || board_pack::import_staged(&dir, &root, &units, &files, &progress, &cancel.cancel)).await;
+    let reply = commit_import(&state, &user, new_boards, op.clone(), move |root| board_pack::import_staged(&dir, root, &units, &files, &progress, &cancel.cancel)).await;
     drop(cleanup);
-    pack_reply(result, "invalid_pack")
+    reply
 }
 
 /// 写了一半的内容文件守卫：只删这个文件，不动暂存目录（同一暂存里还有别的内容）。

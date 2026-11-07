@@ -10,6 +10,9 @@ use axum::http::HeaderMap;
 use axum::routing::get;
 use axum::{Json, Router};
 
+mod board_archive;
+pub mod board_list;
+pub mod board_measure;
 pub mod board_pack;
 pub mod cache;
 mod civil;
@@ -65,7 +68,16 @@ pub struct Config {
     pub result_hosts: Vec<String>,
     /// 剩余磁盘低于该值时写入类接口返回 507（默认 20 GB）。
     pub min_free_bytes: u64,
+    /// 画板位数量（ADR 0019，默认 10）：每人可同时持有的可编辑画板数。
+    pub board_slots: u32,
+    /// 画板体量提醒线（默认 500 MiB 黄、1 GiB 红）：只提醒、不阻止生成。
+    pub board_size_lines: BoardSizeLines,
+    /// 用量上限与提醒比例（默认上限留空即不提醒、80% 黄）：只提醒、不阻止生成（#88）。
+    pub usage_limit: UsageLimit,
 }
+
+pub use board_list::BoardSizeLines;
+pub use usage::UsageLimit;
 
 /// 网关对一把密钥的结论。Unavailable 是服务故障，不能当成密钥无效。
 #[derive(Debug, Clone, PartialEq)]
@@ -169,6 +181,18 @@ impl AppState {
     pub fn result_hosts(&self) -> &[String] {
         &self.inner.config.result_hosts
     }
+
+    pub fn board_slots(&self) -> u32 {
+        self.inner.config.board_slots
+    }
+
+    pub fn board_size_lines(&self) -> BoardSizeLines {
+        self.inner.config.board_size_lines
+    }
+
+    pub fn usage_limit(&self) -> UsageLimit {
+        self.inner.config.usage_limit
+    }
 }
 
 async fn config(axum::extract::State(state): axum::extract::State<AppState>) -> Json<serde_json::Value> {
@@ -218,6 +242,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/boards", get(fs::read_board).put(fs::write_board).delete(fs::delete_board))
         .route("/api/boards/rename", axum::routing::post(fs::rename_board))
         .route("/api/boards/names", get(fs::list_board_names))
+        .route("/api/boards/list", get(board_list::list_boards))
+        .route("/api/boards/archive", axum::routing::post(board_archive::archive))
+        .route("/api/boards/unarchive", axum::routing::post(board_archive::unarchive))
+        .route("/api/boards/measure", axum::routing::post(board_measure::measure_board))
         .route("/api/fs/file", get(fs::read_file).put(fs::write_new_file))
         .route("/api/fs/thumb", get(thumbs::read_thumb))
         .route("/api/fs/dir", get(fs::list_dir))

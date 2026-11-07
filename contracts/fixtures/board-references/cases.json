@@ -121,8 +121,22 @@
       "expected": { "readable": true, "task_dirs": ["2026-09-01/20260901T000000Z-0000000a", "2026-10-01/20261001T000000Z-0000000b"] }
     },
     {
+      "name": "format_version 2：阶段只列节点 id、定稿只是结果节点上的布尔值，都不带来新的引用（阶段名像路径也不算）",
+      "board": {
+        "format_version": 2, "title": "a", "viewport": { "zoom": 1, "x": 0, "y": 0 }, "edges": [],
+        "nodes": [
+          { "id": "r1", "type": "result", "pos": [0, 0], "size": [1, 1], "task_id": "20261107T010101Z-0000000d", "file": "result.png",
+            "path": "2026-11-07/20261107T010101Z-0000000d/result.png", "layer_count": 0, "record": {}, "final": true }
+        ],
+        "stages": [
+          { "id": "s1", "name": "2026-01-02/20260102T000000Z-0000000e/result.png", "nodes": ["r1", "20260103T000000Z-0000000f"], "collapsed": true }
+        ]
+      },
+      "expected": { "readable": true, "task_dirs": ["2026-11-07/20261107T010101Z-0000000d"] }
+    },
+    {
       "name": "版本更高的画板读不懂",
-      "board": { "format_version": 2, "title": "a", "nodes": [] },
+      "board": { "format_version": 3, "title": "a", "nodes": [] },
       "expected": { "readable": false }
     },
     {

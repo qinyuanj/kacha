@@ -378,8 +378,16 @@ fn belongs_to_unit(units: &[MergeUnit], name: &str) -> bool {
 /// 在创建任何临时目录之前做，不合格时不写导入内容。
 fn prepare_root(root: &Path, units: &[MergeUnit]) -> io::Result<()> {
     fs::create_dir_all(root)?;
+    let boards = root.join(crate::cleanup::BOARDS_DIR);
     for unit in units {
-        resolve_in(root, &unit.path)?;
+        let path = resolve_in(root, &unit.path)?;
+        // 合并只管理任务目录与导入参考图，不能冒充画板写入入口（含归档目录）。
+        let parts: Vec<_> = unit.path.split('/').collect();
+        let task = parts.len() == 2 && crate::references::is_date_dir(parts[0]) && unit.identity.as_deref() == Some("task.json");
+        let reference = parts.len() == 2 && parts[0] == crate::transfer::IMPORTED_REFERENCES_DIR && unit.identity.is_none();
+        if path.starts_with(&boards) || !(task || reference) {
+            return Err(invalid("合并单元只能是任务目录或导入参考图，画板必须通过受控的新画板提交导入"));
+        }
         if let Some(identity) = &unit.identity {
             safe_join(Path::new(""), identity)?;
         }

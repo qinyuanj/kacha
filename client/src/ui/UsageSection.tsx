@@ -3,19 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { usage as usagePort } from "../shell/ipc";
 import type { Usage } from "../shell/types";
 import { errorText } from "../core/errors";
-import { IDLE_USER_RULE_TEXT } from "./boardText";
-
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KiB", "MiB", "GiB", "TiB"];
-  let v = bytes;
-  let u = -1;
-  do {
-    v /= 1024;
-    u += 1;
-  } while (v >= 1024 && u < units.length - 1);
-  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[u]}`;
-}
+import { formatBytes, IDLE_USER_RULE_TEXT } from "./boardText";
 
 export function UsageSection() {
   const [usage, setUsage] = useState<Usage | null>(null);
@@ -58,7 +46,14 @@ export function UsageSection() {
     <div className="usage-section">
       <div className="form-row">
         <span>用量</span>
-        {usage ? <span data-testid="usage-total" className="mono">{formatBytes(usage.total_bytes)}</span> : <span className="muted small">正在统计…</span>}
+        {usage ? (
+          <span data-testid="usage-total" className="mono">
+            {formatBytes(usage.total_bytes)}
+            {usage.limit_bytes !== null && ` / 上限 ${formatBytes(usage.limit_bytes)}`}
+          </span>
+        ) : (
+          <span className="muted small">正在统计…</span>
+        )}
       </div>
       {usage && (
         <>

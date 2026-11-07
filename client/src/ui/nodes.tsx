@@ -11,6 +11,7 @@ import type {
   TaskNode as TaskModel,
 } from "../core/board";
 import { taskCount } from "../core/board";
+import { FINAL_BADGE_TEXT } from "./boardText";
 import {
   findModel,
   modelsByTier,
@@ -368,7 +369,7 @@ export const ResultNodeView = memo(function ResultNodeView({ data, selected, wid
   const modelName = findModel(table, node.record.model)?.display_name ?? node.record.model;
   const { warnings, notes } = inputImageAdviceAll(info, rules);
   const hover = useHover(resultHoverInfo({ node, modelName, image: info, missing, warnings, notes }));
-  const badges = [...(info?.has_alpha ? ["透明"] : []), ...(node.layer_count > 0 ? [`${node.layer_count} 图层`] : [])];
+  const badges = [...(node.final ? [FINAL_BADGE_TEXT] : []), ...(info?.has_alpha ? ["透明"] : []), ...(node.layer_count > 0 ? [`${node.layer_count} 图层`] : [])];
   return (
     <ImageNode
       id={node.id}
@@ -378,7 +379,7 @@ export const ResultNodeView = memo(function ResultNodeView({ data, selected, wid
       selected={selected}
       width={width}
       height={height}
-      className={warnings.length ? "node-warn" : ""}
+      className={[warnings.length ? "node-warn" : "", node.final ? "node-final" : ""].join(" ").trim()}
       badges={badges}
       hover={hover}
     >

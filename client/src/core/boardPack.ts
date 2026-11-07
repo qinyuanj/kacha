@@ -392,8 +392,11 @@ export interface PackIo {
    * deflate 条目在 Web Worker 解压，不进主线程内存）。progress 是本份之前已传的字节与全部要传的字节。取消时以 PACK_CANCELLED reject。
    */
   uploadContent(staging: string, sha256: string, content: PackContent, progress: { done: number; total: number }): Promise<void>;
-  /** 按落盘清单把暂存的内容放进合并单元并合并（同一份内容第一份落盘、其余硬链接）；结束后服务端删暂存。 */
-  importContent(staging: string, units: MergeUnit[], files: PlacedFile[]): Promise<MergeReport>;
+  /**
+   * 按落盘清单把暂存的内容放进合并单元并合并（同一份内容第一份落盘、其余硬链接）；结束后服务端删暂存。
+   * boards = 已准备好的画板标题与内容：服务端在同一把锁内检查实际数量、合并任务并提交画板（#89）。
+   */
+  importContent(staging: string, units: MergeUnit[], files: PlacedFile[], boards: { title: string; text: string }[]): Promise<MergeReport & { boards: string[] }>;
   /** 不再合并就放弃暂存（幂等）。 */
   discardStaging?(staging: string): Promise<void>;
   /** 把选中的包上传到服务端临时位置，返回上传句柄；带进度，取消时中止请求并以 PACK_CANCELLED reject。 */
@@ -404,9 +407,9 @@ export interface PackIo {
   readTexts(pack: string, names: string[]): Promise<Record<string, string>>;
   /**
    * 按合并单元解压合并进用户数据根，先把 duplicates 里被省略的路径还原为与代表条目内容相同的文件（v1 包为空）；
-   * 取消时以 PACK_CANCELLED reject，已移入的单元保留。
+   * 取消时以 PACK_CANCELLED reject，已移入的单元保留。boards 同 importContent。
    */
-  importUnits(pack: string, units: MergeUnit[], duplicates: PackDuplicates): Promise<MergeReport>;
+  importUnits(pack: string, units: MergeUnit[], duplicates: PackDuplicates, boards: { title: string; text: string }[]): Promise<MergeReport & { boards: string[] }>;
   /** 不再合并就放弃：删掉服务端的临时上传文件（幂等）。 */
   discard?(pack: string): Promise<void>;
 }
@@ -432,14 +435,21 @@ export type ImportResult =
   | { kind: "corrupt"; reason: string }
   | { kind: "cancelled" }
   | { kind: "failed"; error: string }
-  /** 任务目录已合并；written = 实际写入的画板文件名，writeError = 写画板第一个失败的报错（其后的不再写）。 */
+  /** 画板位不够放下包里的画板（#89）：什么都没上传或合并；message 是统一文案。 */
+  | { kind: "slotsFull"; message: string }
+  /** 任务目录与画板已由服务端提交；written = 已打开的实际画板文件名，writeError = 打开画板失败的报错。 */
   | { kind: "done"; summary: ImportSummary; written: string[]; writeError: string | null };
 
 export interface ImportOptions {
   /** 用户选中的画板包文件；上传是导入流程的第一个阶段。 */
   file: File;
-  /** 按同名改名规则写入画板目录（并打开），返回实际写入的路径；会话状态归调用方。 */
-  addBoard(board: Board): Promise<string>;
+  /** 服务端已写好的导入画板，仅打开返回的实际路径。 */
+  openBoard(path: string): Promise<void>;
+  /**
+   * 画板位预检（#89）：导入将新增 boards 块画板，放不下时返回给用户看的统一文案，放得下为 null。
+   * 在上传与合并之前调用，免得传完几个 GB 才被拒；服务端合并时仍会再检查一次。不给则不预检。
+   */
+  slotsRefusal?(boards: number): Promise<string | null>;
   /** 复位取消标记之后进入进度阶段。 */
   onStage(stage: "progress"): void;
   /** 进度阶段内的各步（进度对话框据此显示正在做什么）；整包上传回退时 upload 即整包上传。 */
@@ -453,6 +463,8 @@ export type ImportPhase = "check" | "existing" | "hash" | "upload" | "merge";
 
 type OkCheck = Extract<PackCheck, { kind: "ok" }>;
 type Merged = { check: OkCheck; report: MergeReport };
+const preparedBoards = (check: OkCheck) => check.boards.map(({ board }) => ({ title: board.title, text: serializeBoard(board) }));
+type SlotsFull = Extract<ImportResult, { kind: "slotsFull" }>;
 
 const isTextEntry = (name: string) => name === PACK_MANIFEST || name.startsWith(`${BOARDS_DIR_NAME}/`);
 
@@ -461,7 +473,7 @@ const isTextEntry = (name: string) => name === PACK_MANIFEST || name.startsWith(
  * 连 hash 都不算；剩下的条目算 sha256，相同内容只上传一份（v1 包在这里按 sha256 合并；v2 包被省略的路径直接用代表条目的内容，
  * 只为代表条目算 hash），再按「路径 → sha256」的落盘清单让服务端落盘合并。导入参考图要整文件比对，已有的也要算 hash（只读本地）。
  */
-async function importByContent(io: PackIo, file: File, check: OkCheck, entries: ZipEntry[], phase: (p: ImportPhase) => void): Promise<MergeReport> {
+async function importByContent(io: PackIo, file: File, check: OkCheck, entries: ZipEntry[], phase: (p: ImportPhase) => void): Promise<MergeReport & { boards: string[] }> {
   const src = blobSource(file);
   const byName = new Map(entries.map((e) => [e.name, e]));
   const omitted = new Map(Object.entries(check.duplicates));
@@ -494,7 +506,7 @@ async function importByContent(io: PackIo, file: File, check: OkCheck, entries: 
     for (const fact of await io.hash(file, toHash)) shaOf.set(fact.entry, fact.sha256);
   }
   for (const c of compareAfterHash) settled.push({ path: c.path, outcome: shaOf.get(contentOf(c.path).name) === c.sha256 ? "identical" : "conflict" });
-  if (needed.length === 0) return { outcomes: settled, bytes: 0 };
+  // 即便内容全已存在，也要提交画板；此时上传清单为空。
 
   const files: PlacedFile[] = neededPaths.map((path) => ({ path, sha256: shaOf.get(contentOf(path).name)! }));
   const contents = new Map<string, ZipEntry>();
@@ -511,8 +523,8 @@ async function importByContent(io: PackIo, file: File, check: OkCheck, entries: 
         done += entry.size;
       }
       phase("merge");
-      const report = await io.importContent(staging, needed, files);
-      return { outcomes: [...settled, ...report.outcomes], bytes: report.bytes };
+      const merged = await io.importContent(staging, needed, files, preparedBoards(check));
+      return { boards: merged.boards, outcomes: [...settled, ...merged.outcomes], bytes: merged.bytes };
     },
     () => io.discardStaging?.(staging),
   );
@@ -531,11 +543,11 @@ async function discardOnError<T>(run: () => Promise<T>, discard: () => Promise<v
 }
 
 /**
- * 导入画板包（#128）：在同一个可取消的进度阶段里依次本地检查（#61）→ 上传 → 合并任务目录，之后逐个写画板。
+ * 导入画板包（#128）：同一个可取消的进度阶段里依次本地检查（#61）→ 上传 → 服务端合并并提交画板，之后逐个打开返回路径。
  * 本地检查判为版本过新或损坏时直接返回，一个字节都不上传；检查通过就按内容去重上传（#62），只传服务端缺少的内容。
  * zip 读取器读不了的包，或有条目超过单份上限的包，整包上传（#59）；读不了的由服务端读条目与文本判定（不合格不合并）。
  * 从「已拿到用户选的包文件」开始；选包、进度、结果弹窗与文案都留在 ui（弹窗不是端口，见 #128），这里只返回结局。
- * 任何一步被取消或失败都不进入后续各步，并放弃已上传的内容。取消或失败时已移入的任务目录保留；写画板第一个失败即停，已写的保留。
+ * 任何一步被取消或失败都不进入后续各步，并放弃已上传的内容。取消或失败时已移入的任务目录保留；打开画板失败不回滚服务端已提交内容。
  */
 export async function importPack(io: PackIo, opts: ImportOptions): Promise<ImportResult> {
   const { file } = opts;
@@ -543,19 +555,31 @@ export async function importPack(io: PackIo, opts: ImportOptions): Promise<Impor
   const fields = { action: "import", pack_file: file.name };
   /** 通过检查的包（日志里的画板文件名由它给出）。 */
   let checked: OkCheck | undefined;
-  const outcome = await runCancellable(io, opts.onStage, async (): Promise<Rejected | Merged> => {
+  let importedPaths: string[] = [];
+  /** 画板位预检：放不下时给出结局，放得下为 null。 */
+  const slotsFull = async (check: OkCheck): Promise<SlotsFull | null> => {
+    const message = (await opts.slotsRefusal?.(check.boards.length)) ?? null;
+    return message === null ? null : { kind: "slotsFull", message };
+  };
+  const outcome = await runCancellable(io, opts.onStage, async (): Promise<Rejected | SlotsFull | Merged> => {
     phase("check");
     const read = await readPackLocally(blobSource(file));
     const local = read?.check ?? null;
     if (local && local.kind !== "ok") return local;
-    if (read && local && read.entries.every((e) => e.size <= MAX_CONTENT_BYTES)) {
+    if (local) {
       checked = local;
-      return { check: local, report: await importByContent(io, file, local, read.entries, phase) };
+      const full = await slotsFull(local);
+      if (full) return full;
+    }
+    if (read && local && read.entries.every((e) => e.size <= MAX_CONTENT_BYTES)) {
+      const merged = await importByContent(io, file, local, read.entries, phase);
+      importedPaths = merged.boards;
+      return { check: local, report: merged };
     }
     phase("upload");
     const pack = await io.upload(file);
     const discard = () => io.discard?.(pack);
-    return discardOnError(async (): Promise<Rejected | Merged> => {
+    return discardOnError(async (): Promise<Rejected | SlotsFull | Merged> => {
       const check =
         local ??
         (await io
@@ -569,9 +593,18 @@ export async function importPack(io: PackIo, opts: ImportOptions): Promise<Impor
         await discard()?.catch(() => undefined);
         return check;
       }
-      checked = check;
+      if (!local) {
+        checked = check;
+        const full = await slotsFull(check);
+        if (full) {
+          await discard()?.catch(() => undefined);
+          return full;
+        }
+      }
       phase("merge");
-      return { check, report: await io.importUnits(pack, check.units, check.duplicates) };
+      const merged = await io.importUnits(pack, check.units, check.duplicates, preparedBoards(check));
+      importedPaths = merged.boards;
+      return { check, report: merged };
     }, discard);
   });
   const packBoards = checked?.boards.map((b) => basename(b.entry)).join(", ");
@@ -579,6 +612,10 @@ export async function importPack(io: PackIo, opts: ImportOptions): Promise<Impor
   if (!outcome.ok) {
     opts.log("board_pack", { ...fields, ...boardField, result: outcome.result });
     return outcome.result === "cancelled" ? { kind: "cancelled" } : { kind: "failed", error: outcome.error };
+  }
+  if ("kind" in outcome.value && outcome.value.kind === "slotsFull") {
+    opts.log("board_pack", { ...fields, ...boardField, result: "board_slots_full" });
+    return outcome.value;
   }
   if (!("report" in outcome.value)) {
     opts.log("board_pack", { ...fields, result: outcome.value.kind });
@@ -589,7 +626,10 @@ export async function importPack(io: PackIo, opts: ImportOptions): Promise<Impor
   const written: string[] = [];
   let writeError: string | null = null;
   try {
-    for (const { board } of check.boards) written.push(basename(await opts.addBoard(board)));
+    for (const path of importedPaths) {
+      await opts.openBoard(path);
+      written.push(basename(path));
+    }
   } catch (e) {
     writeError = errorText(e);
   }

@@ -15,6 +15,34 @@ use crate::cleanup::{self, TaskDirCandidate, UnreadableBoard};
 use crate::session::error;
 use crate::{AppState, User};
 
+/// 用量上限（#88，CONTEXT「用量上限」）：总用量达到 `warn_percent`% 提醒（黄），达到上限提醒（红）。
+/// 只提醒、不阻止生成；上限留空（None）即不提醒，等管理员按数据盘可用空间定出数值。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UsageLimit {
+    pub bytes: Option<u64>,
+    pub warn_percent: u32,
+}
+
+impl Default for UsageLimit {
+    fn default() -> Self {
+        UsageLimit { bytes: None, warn_percent: 80 }
+    }
+}
+
+impl UsageLimit {
+    /// 提醒档位：与画板体量同名（`warn` 黄、`alert` 红），未到提醒比例或上限留空为 None。
+    fn level(&self, total: u64) -> Option<&'static str> {
+        let limit = self.bytes?;
+        if total >= limit {
+            Some("alert")
+        } else if u128::from(total) * 100 >= u128::from(limit) * u128::from(self.warn_percent) {
+            Some("warn")
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct CleanupRequest {
     dirs: Vec<String>,
@@ -28,10 +56,11 @@ fn candidate_json(d: &TaskDirCandidate) -> Value {
     })
 }
 
-/// GET /api/usage：总量、按日期目录汇总、画板与元数据量、最后访问时间，以及未引用任务目录清单。
+/// GET /api/usage：总量、按日期目录汇总、画板与元数据量、最后访问时间、未引用任务目录清单，以及用量上限与提醒档位。
 pub async fn usage(State(state): State<AppState>, user: User) -> Response {
     let root = state.user_root(&user.fingerprint);
     let now = state.now();
+    let limit = state.usage_limit();
     match crate::fs::off_thread(move || {
         let total = cleanup::tree_bytes(&root);
         let mut by_date: Vec<(String, u64)> = Vec::new();
@@ -57,6 +86,8 @@ pub async fn usage(State(state): State<AppState>, user: User) -> Response {
             "by_date": by_date.iter().map(|(date, bytes)| json!({ "date": date, "bytes": bytes })).collect::<Vec<_>>(),
             "unreferenced": unreferenced,
             "unreadable_board": unreadable,
+            "limit_bytes": limit.bytes,
+            "limit_level": limit.level(total),
         }))
         .into_response())
     })

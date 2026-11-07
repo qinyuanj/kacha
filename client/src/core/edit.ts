@@ -13,9 +13,11 @@ import { addAsReference, addAsReferenceTarget, continueEditing, LOCKED_HINT, pas
 import { addResultNode, PROMPT_NODE_SIZE, type RunResult } from "./layout";
 import { IMAGE_NODE_WIDTH, imageNodeSize } from "./nodeSize";
 import { setEdgeRegion } from "./region";
+import { removeMovedStage } from "./moveOut";
 import { duplicateNodes, nudgeNodes, settleAltDrag } from "./selection";
 import type { Discovery } from "./settings";
 import { autoSizeSpec, manualSizeSpec, withSizeTier } from "./size";
+import { addToStage, createStage, deleteStage, prunableResults, pruneStages, removeFromStage, renameStage, setFinal, setStageCollapsed } from "./stages";
 
 type Pos = [number, number];
 
@@ -97,6 +99,22 @@ export type BoardChange =
   | { kind: "addAsReference"; resultId: string; selected: string[]; sourceLayer: number | null }
   /** 缺图节点重新定位：picked = 用户手选的文件（参考图随之改显示名）；fileName 为新文件名。 */
   | { kind: "relocate"; nodeId: string; path: string; sha256: string; fileName: string; picked: boolean }
+  /** 把框选的节点建为一个阶段（成员从原阶段带走）。 */
+  | { kind: "newStage"; name: string; nodes: string[] }
+  | { kind: "renameStage"; stageId: string; name: string }
+  /** 把节点加入某个阶段（从原阶段带走）。 */
+  | { kind: "addToStage"; stageId: string; nodes: string[] }
+  /** 把节点从所在阶段移出；节点留在画板上。 */
+  | { kind: "removeFromStage"; nodes: string[] }
+  | { kind: "setStageCollapsed"; stageId: string; collapsed: boolean }
+  /** 删阶段：只删区域，成员节点留在画板上。 */
+  | { kind: "deleteStage"; stageId: string }
+  /** 标记 / 取消定稿：nodes 里只有结果节点生效。 */
+  | { kind: "setFinal"; nodes: string[]; final: boolean }
+  /** 收掉未定稿：删去选中阶段里未定稿且没有下游连线的结果（判定见 prunableResults）；任务目录不删，按清理规则释放。 */
+  | { kind: "pruneUnfinal"; stageIds: string[] }
+  /** 移出为新画板之后，原画板删去移出的节点（见 moveOut.movedIds）；新画板已由界面写好，撤销只恢复本画板。 */
+  | { kind: "moveOutStage"; stageId: string }
   // ---- 视图变更 ----
   | { kind: "viewport"; viewport: Board["viewport"] }
   /** 工具栏的新建任务模型：偏好不是编辑。 */
@@ -325,6 +343,28 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
         }),
         step: { label: "重新定位图片" },
       };
+    case "newStage":
+      return { board: createStage(board, env.newId(), change.name, change.nodes), step: { label: "新建阶段" } };
+    case "renameStage":
+      return { board: renameStage(board, change.stageId, change.name), step: { label: "重命名阶段" } };
+    case "addToStage":
+      return { board: addToStage(board, change.stageId, change.nodes), step: { label: "加入阶段" } };
+    case "removeFromStage":
+      return { board: removeFromStage(board, change.nodes), step: { label: "移出阶段" } };
+    case "setStageCollapsed":
+      return { board: setStageCollapsed(board, change.stageId, change.collapsed), step: { label: change.collapsed ? "收起阶段" : "展开阶段" } };
+    case "deleteStage":
+      return { board: deleteStage(board, change.stageId), step: { label: "删除阶段" } };
+    case "setFinal":
+      return { board: setFinal(board, change.nodes, change.final), step: { label: change.final ? "标记定稿" : "取消定稿" } };
+    case "pruneUnfinal": {
+      const ids = prunableResults(board, change.stageIds);
+      if (!ids.length) return { board };
+      return { board: removeNodes(board, ids).board, step: { label: countLabel("收掉", ids.length, "张未定稿") } };
+    }
+    case "moveOutStage": {
+      return { board: removeMovedStage(board, change.stageId), step: { label: "移出为新画板" }, selection: [] };
+    }
     case "viewport": {
       const { x, y, zoom } = change.viewport;
       const v = board.viewport;
@@ -343,9 +383,9 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
   }
 }
 
-/** 后置管线：图片端口同步 → 自动宽高比重算（锁定任务不动）。无变化时返回原画板。 */
+/** 后置管线：阶段成员同步 → 图片端口同步 → 自动宽高比重算（锁定任务不动）。无变化时返回原画板。 */
 function settle(board: Board, env: EditEnv): Board {
-  const synced = syncImagePorts(board);
+  const synced = syncImagePorts(pruneStages(board));
   const dims = (nodeId: string) => {
     const node = synced.nodes.find((n) => n.id === nodeId);
     return node?.type === "reference" || node?.type === "result" ? env.imageSize(node.path) : undefined;

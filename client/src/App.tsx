@@ -4,16 +4,20 @@ import { type Board } from "./core/board";
 import { BUILTIN_TABLE, effectiveTable, type CapabilityTable } from "./core/capabilities";
 import type { BoardChange } from "./core/edit";
 import { redoLabel, undoLabel } from "./core/history";
-import { basename, boardsDir } from "./core/paths";
+import { basename } from "./core/paths";
 import type { RegenerateRequest, Runner, RunTarget } from "./core/runner";
 import { copiesByNode, regenerateDispatch, runDispatch, runScope, buildConfirmItems, collectRunFacts, type ConfirmItem } from "./core/submission";
-import { parseUiState, serializeUiState, type UiState } from "./core/uiState";
+import { moveSizeNotice, parseUiState, serializeUiState, type UiState } from "./core/uiState";
+import { sizeNotice, type SizeTier } from "./core/boardSize";
+import { useActiveBoardSize } from "./ui/useBoardSize";
 import { shouldShowUpdateNotice } from "./core/changelog";
 import { ChangelogDialog } from "./ui/ChangelogDialog";
 import { imageProbe } from "./shell/adapters";
 import { copyTextToClipboard } from "./shell/clipboard";
 import { browser, ipc, transfer, userRoot } from "./shell/ipc";
-import { BACKUP_HINT_TEXT } from "./ui/boardText";
+import { isArchivedPath } from "./core/archive";
+import { ARCHIVE_TEXT, BACKUP_HINT_TEXT, MANAGE_BOARDS_TEXT, sizeNoticeText, TIDY_TEXT, usageLimitText } from "./ui/boardText";
+import { useUsageLimit } from "./ui/useUsageLimit";
 import { BoardPackDialog } from "./ui/BoardPackDialog";
 import { BoardListDialog } from "./ui/BoardListDialog";
 import { BoardToolbar } from "./ui/BoardToolbar";
@@ -34,7 +38,15 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [lastSeenVersion, setLastSeenVersion] = useState<string | undefined>();
+  /** 各画板越线提示已提醒到的档位，随界面状态保存（跨浏览器生效）。 */
+  const [sizeNotices, setSizeNotices] = useState<Record<string, SizeTier>>({});
   const [boardListOpen, setBoardListOpen] = useState(false);
+  /** 处在整理模式的画板（会话 key）；整理模式是画布的界面状态，不落盘。 */
+  const [tidyKey, setTidyKey] = useState<string | null>(null);
+  /** 画板列表以「管理画板」方式打开（#88，用量提醒入口）：按体量从大到小。 */
+  const [manageBoards, setManageBoards] = useState(false);
+  /** 本页关掉的用量提醒档位：同档不再出现，升到红再提醒（不跨页面记，重开页面仍提醒）。 */
+  const [usageDismissed, setUsageDismissed] = useState<SizeTier | null>(null);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
   const [packMenu, setPackMenu] = useState<{ x: number; y: number } | null>(null);
   const [confirm, setConfirm] = useState<{ boardKey: string; board: Board; items: ConfirmItem[]; scope: "selection" | "board" } | null>(null);
@@ -56,6 +68,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const boards = useBoardSessions(
     userRoot,
     useCallback((key: string) => ({ ...envRef.current, locked: runnerRef.current!.getSnapshot().board(key).locked }), []),
+    useCallback((from: string, to: string) => setSizeNotices((s) => moveSizeNotice(s, from, to)), []),
   );
   const { sessions, activeKey, openPath, createBoard } = boards;
 
@@ -78,6 +91,11 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const redoActive = useCallback(() => activeKey && redoBoard(activeKey), [activeKey, redoBoard]);
   const toast = useCallback((message: string) => setToastText(message), []);
   const pack = useBoardPack(userRoot, boards, toast);
+  /** 新建画板；画板位满时提示统一文案（#89）。 */
+  const createBoardOrExplain = useCallback(async () => {
+    const refusal = await createBoard();
+    if (refusal) toast(refusal);
+  }, [createBoard, toast]);
   useEffect(() => {
     if (!toastText) return;
     const timer = setTimeout(() => setToastText(null), 4000);
@@ -97,6 +115,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
         let uiReadFailed = false;
         initialUi.current = parseUiState(await ipc.readUiState().catch(() => ((uiReadFailed = true), null)));
         setLastSeenVersion(initialUi.current.last_seen_version);
+        setSizeNotices(initialUi.current.size_notices ?? {});
         uiReadFailedRef.current = uiReadFailed;
         setMetadataReady(true);
       } catch (e) {
@@ -230,6 +249,26 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
     [boards, runner],
   );
 
+  /** 归档（#90）：本页开着且有未完成的任务时先确认停掉（结果写不进只读画板），再保存、搬进归档子目录。 */
+  const archiveBoardAt = useCallback(
+    async (path: string) => {
+      const key = boards.keyOf(path);
+      if (key) {
+        const count = runner.getSnapshot().pending(key);
+        if (count > 0 && !(await confirmStopTasks(count))) return;
+        runner.closeBoard(key);
+      }
+      await boards.archiveBoard(path);
+    },
+    [boards, runner],
+  );
+
+  /** 取消归档 / 复制为新画板（归档画板顶部的按钮）：画板位满时提示统一文案。 */
+  const explainRefusal = useCallback(
+    (run: Promise<string | null>) => void run.then((refusal) => refusal && toast(refusal), (e) => toast(errorText(e))),
+    [toast],
+  );
+
   /** 删除前导出画板包：没打开的先打开（导出流程以已打开的画板为准）。 */
   const exportBoardAt = useCallback(
     async (path: string) => {
@@ -274,10 +313,10 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       let activated = false;
       if (ui.active_board && opened.includes(ui.active_board)) activated = await openPath(ui.active_board, true);
       if (!activated && opened.length) await openPath(opened[0], true);
-      else if (!activated) await createBoard();
+      else if (!activated) await createBoardOrExplain();
       setReady(true);
     })();
-  }, [metadataReady, settings.loaded, openPath, createBoard, toast]);
+  }, [metadataReady, settings.loaded, openPath, createBoardOrExplain, toast]);
 
   useEffect(() => {
     // 没有记录代表首次使用，不提示更新，直接随界面状态记下当前版本。
@@ -294,23 +333,38 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const writeUi = useCallback(() => {
     const { sessions: list, activeKey: key } = boards.snapshot();
     const active = list.find((s) => s.key === key);
-    const text = serializeUiState({ open_boards: list.map((s) => s.path), active_board: active?.path ?? null, last_seen_version: lastSeenVersion });
+    const text = serializeUiState({ open_boards: list.map((s) => s.path), active_board: active?.path ?? null, last_seen_version: lastSeenVersion, size_notices: sizeNotices });
     const write = uiWriteChain.current.then(() => ipc.writeUiState(text));
     uiWriteChain.current = write.catch(() => undefined);
     return write;
-  }, [boards, lastSeenVersion]);
+  }, [boards, lastSeenVersion, sizeNotices]);
   const persistUi = useCallback(() => writeUi().catch(() => undefined), [writeUi]);
   const persistRef = useRef(persistUi);
   persistRef.current = persistUi;
 
-  const uiSignature = JSON.stringify([sessions.map((s) => s.path), sessions.find((s) => s.key === activeKey)?.path, lastSeenVersion]);
+  const uiSignature = JSON.stringify([sessions.map((s) => s.path), sessions.find((s) => s.key === activeKey)?.path, lastSeenVersion, sizeNotices]);
   useEffect(() => {
     if (ready) void persistRef.current();
   }, [ready, uiSignature]);
 
+  // 当前画板越线提示（#87）：只提醒，不碰生成。体量回落时校正已提醒档位（清除回落那条线的记录）。
+  const active = sessions.find((s) => s.key === activeKey);
+  const okActive = active?.status === "ok" ? active : null;
+  /** 当前画板是归档画板（#90）：只读，能看、能放大、能下载结果与导出画板包。 */
+  const activeArchived = !!okActive && !!userRoot && isArchivedPath(userRoot, okActive.path);
+  const activeSize = useActiveBoardSize(okActive?.path ?? null, okActive?.version ?? null);
+  const notice = activeSize ? sizeNotice(activeSize.tier, sizeNotices[activeSize.path]) : null;
+  // 用量上限提醒（#88）：只提醒，生成照常。
+  const usageLimit = useUsageLimit(metadataReady && !!userRoot);
+  const usageNotice = usageLimit.notice && !(usageDismissed === "alert" || usageDismissed === usageLimit.notice.level) ? usageLimit.notice : null;
+  useEffect(() => {
+    if (!activeSize || !notice || notice.notified === sizeNotices[activeSize.path]) return;
+    const { path } = activeSize;
+    setSizeNotices(({ [path]: _dropped, ...rest }) => (notice.notified ? { ...rest, [path]: notice.notified } : rest));
+  }, [activeSize, notice, sizeNotices]);
+
   if (fatal) return <div className="fatal">启动失败：{fatal}</div>;
 
-  const active = sessions.find((s) => s.key === activeKey);
   const failing = sessions.filter((s) => s.status === "ok" && s.saveError);
 
   const canvasReady = active?.status === "ok" && !!userRoot;
@@ -327,7 +381,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           }}
           onClose={(key) => void closeBoard(key)}
           onRename={(key, title) => void boards.renameBoard(key, title)}
-          onCreate={() => void createBoard()}
+          onCreate={() => void createBoardOrExplain()}
           onOpenList={() => void boards.flushAll().then(() => setBoardListOpen(true))}
           onExportPack={(key) => void pack.prepareExport(key)}
         />
@@ -341,7 +395,6 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       )}
       {boardListOpen && userRoot && (
         <BoardListDialog
-          dir={boardsDir(userRoot)}
           openPaths={sessions.map((s) => s.path)}
           onOpen={(path) => {
             void openPath(path, true).then((opened) => {
@@ -349,8 +402,16 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
             }, (e) => toast(errorText(e)));
           }}
           onDelete={deleteBoardAt}
+          onArchive={archiveBoardAt}
+          onUnarchive={boards.unarchiveBoard}
+          onCopy={boards.copyAsNewBoard}
           onExport={(path) => void exportBoardAt(path).catch((e) => toast(errorText(e)))}
-          onClose={() => setBoardListOpen(false)}
+          onClose={() => {
+            setBoardListOpen(false);
+            setManageBoards(false);
+            usageLimit.refresh();
+          }}
+          manage={manageBoards}
         />
       )}
       <div className="board-toolbar">
@@ -441,6 +502,59 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           <button onClick={() => setSettingsOpen(true)}>打开高级设置</button>
         </div>
       )}
+      {usageNotice && (
+        <div className={`bar ${usageNotice.level === "alert" ? "bar-alert" : "bar-warn"} usage-limit-notice`} role="status" data-usage-level={usageNotice.level}>
+          <span>{usageLimitText(usageNotice.level, usageNotice.total, usageNotice.limit)}</span>
+          <button
+            onClick={() =>
+              void boards.flushAll().then(() => {
+                setManageBoards(true);
+                setBoardListOpen(true);
+              })
+            }
+          >
+            {MANAGE_BOARDS_TEXT}
+          </button>
+          <button className="link" aria-label="关闭用量提醒" onClick={() => setUsageDismissed(usageNotice.level)}>
+            关闭
+          </button>
+        </div>
+      )}
+      {activeSize && notice?.show && (
+        <div className={`bar ${notice.show === "alert" ? "bar-alert" : "bar-warn"} size-notice`} role="status" data-size-tier={notice.show}>
+          <span>{sizeNoticeText(activeSize.bytes)}</span>
+          {/* 归档画板只读，不能整理（#90）。 */}
+          {!activeArchived && <button
+            onClick={() => {
+              // 进入整理模式即算用户已看到这条提醒。
+              const { path } = activeSize;
+              const tier = notice.show!;
+              setSizeNotices((m) => ({ ...m, [path]: tier }));
+              if (active) setTidyKey(active.key);
+            }}
+          >
+            {TIDY_TEXT.enter}
+          </button>}
+          <button
+            className="link"
+            aria-label="关闭体量提示"
+            onClick={() => {
+              const { path } = activeSize;
+              const tier = notice.show!;
+              setSizeNotices((m) => ({ ...m, [path]: tier }));
+            }}
+          >
+            关闭
+          </button>
+        </div>
+      )}
+      {activeArchived && okActive && (
+        <div className="bar bar-info archived-notice" role="status">
+          <span>{ARCHIVE_TEXT.banner}</span>
+          <button onClick={() => explainRefusal(boards.unarchiveBoard(okActive.path))}>{ARCHIVE_TEXT.unarchive}</button>
+          <button onClick={() => explainRefusal(boards.copyAsNewBoard(okActive.path))}>{ARCHIVE_TEXT.copy}</button>
+        </div>
+      )}
       {active?.status === "ok" && active.notice && (
         <div className="bar bar-warn">
           <span>{active.notice}</span>
@@ -454,7 +568,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               <>
                 <div>没有打开的画板</div>
                 <div className="empty-actions">
-                  <button className="primary" onClick={() => void createBoard()} disabled={!userRoot}>
+                  <button className="primary" onClick={() => void createBoardOrExplain()} disabled={!userRoot}>
                     新建画板
                   </button>
                   <button onClick={() => void pack.importPack()} disabled={!userRoot}>
@@ -500,7 +614,11 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               onRegenerate={regenerate}
               onViewSendText={(id) => void viewSendText(id)}
               toolbarSlot={toolbarSlot}
+              readOnly={activeArchived}
               focus={focus?.boardKey === active.key ? focus : null}
+              tidying={tidyKey === active.key && !activeArchived}
+              onTidyChange={(on) => setTidyKey(on ? active.key : null)}
+              onMoveOutStage={(stageId) => boards.moveOutStage(active.key, stageId)}
             />
           </ReactFlowProvider>
         )}

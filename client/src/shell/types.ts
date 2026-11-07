@@ -1,5 +1,7 @@
 // Web 壳层端口：UI 只认这些接口，同源 HTTP 与浏览器能力都在 ipc.ts 中实现。
 import type { MergeReport, MergeUnit, PackDuplicates, PackEntryFact, PackExportSpec, PackIo } from "../core/boardPack";
+import type { SizeLines, SizeTier } from "../core/boardSize";
+import type { BoardMeasure } from "../core/tidy";
 import type { DirEntry } from "../core/relocate";
 
 export interface BoardTexts {
@@ -23,6 +25,21 @@ export interface ImageInfo {
   has_alpha: boolean;
 }
 
+/** 画板列表的一行（#87）：path 含用户数据根；bytes 为画板体量，画板读不懂时为 null。 */
+export interface BoardListEntry {
+  name: string;
+  path: string;
+  archived: boolean;
+  bytes: number | null;
+}
+
+/** 服务端画板列表：画板、画板位已用 / 总数与体量提醒线（都来自服务端配置）。 */
+export interface BoardListing {
+  boards: BoardListEntry[];
+  slots: { used: number; total: number };
+  size_lines: SizeLines;
+}
+
 export interface Ipc {
   readBoard(path: string): Promise<BoardTexts>;
   writeBoard(path: string, text: string, options?: BoardWriteOptions): Promise<void>;
@@ -30,6 +47,14 @@ export interface Ipc {
   /** 删除画板：主文件与 .bak 移入回收区（只有管理员能恢复）；带版本时内容已变 409。 */
   deleteBoard(path: string, version?: string): Promise<void>;
   listBoardNames(dir: string): Promise<string[]>;
+  /** 归档（#90）：画板连同 .bak 搬进归档子目录，to 由调用方按同名加 (2) 挑好；带版本时内容已变 409。 */
+  archiveBoard(from: string, to: string, version?: string): Promise<void>;
+  /** 取消归档：搬回画板目录；画板位满 409 board_slots_full。 */
+  unarchiveBoard(from: string, to: string): Promise<void>;
+  /** 画板列表（含体量与画板位），由服务端拼好。 */
+  listBoards(): Promise<BoardListing>;
+  /** 按任务目录量一块画板（画板原文，可未保存），口径与画板体量一致（#92）；读不懂 400。 */
+  measureBoard(text: string): Promise<BoardMeasure>;
   readUiState(): Promise<string | null>;
   writeUiState(text: string): Promise<void>;
   readCapabilityOverride(): Promise<string | null>;
@@ -44,7 +69,8 @@ export interface Ipc {
   boardPackExport(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number }>;
   boardPackEntries(pack: string): Promise<string[]>;
   boardPackReadTexts(pack: string, names: string[]): Promise<Record<string, string>>;
-  boardPackImport(pack: string, units: MergeUnit[], duplicates: PackDuplicates): Promise<MergeReport>;
+  /** boards = 导入后将新增的画板数，服务端据此在写文件前检查画板位（#89，409 board_slots_full）。 */
+  boardPackImport(pack: string, units: MergeUnit[], duplicates: PackDuplicates, boards: { title: string; text: string }[]): Promise<MergeReport & { boards: string[] }>;
   boardPackCancel(cancelled: boolean): Promise<void>;
   listDir(path: string): Promise<DirEntry[]>;
   fileSha256(path: string): Promise<string>;
@@ -82,6 +108,10 @@ export interface Usage {
   by_date: { date: string; bytes: number }[];
   unreferenced: UsageCandidate[] | null;
   unreadable_board: string | null;
+  /** 用量上限（服务端配置，#88）；留空为 null，此时不提醒。 */
+  limit_bytes: number | null;
+  /** 提醒档位：达到提醒比例 warn（黄）、达到上限 alert（红）；只提醒、不阻止生成。 */
+  limit_level: SizeTier | null;
 }
 
 export interface UsagePort {

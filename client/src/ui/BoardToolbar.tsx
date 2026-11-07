@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { textHoverInfo } from "../core/hoverInfo";
 import { HoverButton } from "./hoverInfo";
+import { TIDY_TEXT } from "./boardText";
 
 interface Props {
   /** 没有打开的画板：全部置灰。 */
@@ -19,11 +20,15 @@ interface Props {
   /** 当前选中节点数：> 0 时运行按钮写「运行选中」。 */
   selectedCount?: number;
   onRun?: () => void;
+  /** 是否在整理模式；按钮按下态。 */
+  tidying?: boolean;
+  /** 进入 / 退出整理模式。 */
+  onTidy?: () => void;
 }
 
 const NO_BOARD = "没有打开的画板";
 
-export function BoardToolbar({ disabled = false, modelSelect, onNewPrompt, onAddReferences, onNewTask, onUndo, onRedo, undoLabel = null, redoLabel = null, selectedCount = 0, onRun }: Props) {
+export function BoardToolbar({ disabled = false, modelSelect, onNewPrompt, onAddReferences, onNewTask, onUndo, onRedo, undoLabel = null, redoLabel = null, selectedCount = 0, onRun, tidying = false, onTidy }: Props) {
   const hint = (text: string) => textHoverInfo(disabled ? NO_BOARD : text);
   return (
     <div className="board-toolbar-left" role="toolbar" aria-label="画板工具栏">
@@ -52,6 +57,17 @@ export function BoardToolbar({ disabled = false, modelSelect, onNewPrompt, onAdd
       <div className="toolbar-group">
         <HoverButton className="primary" disabled={disabled} onClick={onRun} info={hint("有选中时只运行选中子图，否则运行整个画板中需要运行的任务")}>
           ▶ 运行{selectedCount > 0 ? "选中" : ""}
+        </HoverButton>
+      </div>
+      <div className="toolbar-group">
+        <HoverButton
+          className={tidying ? "toolbar-tidy active" : "toolbar-tidy"}
+          disabled={disabled}
+          onClick={onTidy}
+          aria-pressed={tidying}
+          info={hint(tidying ? "退出整理模式" : "整理模式：看各阶段体量，收掉未定稿的结果")}
+        >
+          {TIDY_TEXT.enter}
         </HoverButton>
       </div>
     </div>

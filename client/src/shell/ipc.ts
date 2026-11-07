@@ -8,7 +8,7 @@ import type { WorkerMessage, WorkerRequest } from "./packHash.worker";
 import { ApiError } from "./apiError";
 import { API_KEY_STORAGE } from "./apiKeyStorage";
 import { UPLOAD_FAILURES } from "./uploadText";
-import type { BrowserPort, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
+import type { BoardListing, BrowserPort, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
 import { errorText } from "../core/errors";
 
 export type { ImageInfo } from "./types";
@@ -236,7 +236,17 @@ export const ipc: Ipc = {
     if (version) params.set("version", version);
     await api(`/api/boards?${params}`, { method: "DELETE" });
   },
+  archiveBoard: async (from, to, version) =>
+    void (await api("/api/boards/archive", jsonPost({ from: stripRoot(from), to: stripRoot(to), ...(version ? { version } : {}) }))),
+  unarchiveBoard: async (from, to) => void (await api("/api/boards/unarchive", jsonPost({ from: stripRoot(from), to: stripRoot(to) }))),
   listBoardNames: (dir) => api(`/api/boards/names?dir=${encodeURIComponent(stripRoot(dir))}`),
+  listBoards: async () => {
+    const listing = await api<BoardListing>("/api/boards/list");
+    // 服务端给相对用户数据根的路径；core 与标签页用虚拟根绝对路径。
+    return { ...listing, boards: listing.boards.map((b) => ({ ...b, path: `${VIRTUAL_ROOT}/${b.path}` })) };
+  },
+  // 任务目录是相对用户数据根的；这里只做集合运算与求和，不转成虚拟根路径。
+  measureBoard: (text) => api("/api/boards/measure", { method: "POST", headers: { "Content-Type": "application/json" }, body: text }),
   readUiState: () => apiText("/api/ui-state"),
   writeUiState: async (text) => void (await api("/api/ui-state", textBody(text))),
   readCapabilityOverride: () => apiText("/api/capability-override"),
@@ -251,12 +261,12 @@ export const ipc: Ipc = {
   boardPackExport,
   boardPackEntries: (pack) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/entries`),
   boardPackReadTexts: (pack, names) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/texts`, jsonPost(names)),
-  boardPackImport: async (pack, units, duplicates) => {
+  boardPackImport: async (pack, units, duplicates, boards) => {
     const op = requireOp();
     // 上传之后、合并之前被取消：服务端还没有这个操作，取消标记只在这里，不再发起合并。
     if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
     try {
-      return await tracked(op, () => api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, jsonPost({ units, duplicates: Object.entries(duplicates).map(([path, source]) => ({ path, source })) })));
+      return await tracked(op, () => api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, jsonPost({ units, duplicates: Object.entries(duplicates).map(([path, source]) => ({ path, source })), new_boards: boards })));
     } catch (e) {
       throw asCancelled(op, e);
     }
@@ -427,6 +437,6 @@ export const packContent: PackContentPort = {
       await apiResponse(`/api/packs/staging/${encodeURIComponent(staging)}/contents/${sha256}?${params}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body, signal });
     }),
   // 合并不中止请求：取消经服务端的取消标记生效（409），与整包导入一致。
-  importContent: (staging, units, files) => inOp((op) => api(`/api/packs/staging/${encodeURIComponent(staging)}/import?op=${encodeURIComponent(op)}`, jsonPost({ units, files }))),
+  importContent: (staging, units, files, boards) => inOp((op) => api(`/api/packs/staging/${encodeURIComponent(staging)}/import?op=${encodeURIComponent(op)}`, jsonPost({ units, files, new_boards: boards }))),
   discardStaging: async (staging) => void (await api(`/api/packs/staging/${encodeURIComponent(staging)}`, { method: "DELETE", keepalive: true })),
 };

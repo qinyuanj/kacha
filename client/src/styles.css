@@ -55,6 +55,11 @@ textarea {
   background: #fff8c5;
   border-bottom: 1px solid var(--yellow);
 }
+/* 归档画板的只读横条（#90）。 */
+.bar-info {
+  background: #eef2f7;
+  border-bottom: 1px solid var(--border);
+}
 
 .tabs {
   display: flex;
@@ -382,6 +387,90 @@ textarea {
 .image-badges .badge {
   margin: 0;
   background: rgb(221 244 255 / 90%);
+}
+/* 定稿：金色描边，角标排在最前。 */
+.node.node-image.node-final {
+  outline: 3px solid #d4a017;
+  outline-offset: 1px;
+}
+.node-final .image-badges .badge:first-child {
+  background: #d4a017;
+  color: #fff;
+  font-weight: 600;
+}
+/* 阶段框：画在节点之下，框不挡指针，只有标题栏可点。 */
+.stage-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  border: 2px dashed #8c959f;
+  border-radius: 8px;
+  background: rgb(140 149 159 / 6%);
+  pointer-events: none;
+}
+.stage-frame.collapsed {
+  border-style: solid;
+  background: #f6f8fa;
+}
+.stage-header {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 4px;
+  white-space: nowrap;
+  font-size: 13px;
+  pointer-events: auto;
+}
+.stage-frame.collapsed .stage-header {
+  position: static;
+  padding: 4px 8px;
+}
+.stage-name {
+  font-weight: 600;
+  cursor: text;
+}
+.stage-count {
+  color: #57606a;
+}
+.stage-header button {
+  padding: 0 6px;
+  font-size: 12px;
+}
+/* 整理模式（#92）：阶段框加深、标出体量；未定稿结果半透明；顶部浮着整理前后对比。 */
+.stage-frame.tidying {
+  border: 2px solid #0969da;
+  background: rgb(9 105 218 / 5%);
+}
+.stage-size {
+  color: #0969da;
+  font-weight: 600;
+}
+.canvas.tidying .react-flow__node-result .node-image:not(.node-final) {
+  opacity: 0.4;
+}
+.tidy-bar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border: 1px solid #0969da;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+  white-space: nowrap;
+}
+.board-toolbar button.toolbar-tidy.active {
+  background: #ddf4ff;
+  border-color: #0969da;
 }
 .thumb {
   display: block;
@@ -1426,9 +1515,53 @@ button.primary[aria-disabled="true"] {
   align-items: center;
   gap: 8px;
 }
-.board-list .board-list-delete {
+.board-list .board-list-size {
   margin-left: auto;
+  font-size: 12px;
+  color: #57606a;
+  white-space: nowrap;
+}
+/* 画板体量越过提醒线（#87）：黄线标黄、红线标红，只提醒。 */
+.board-list .board-list-size.size-warn {
+  color: #7d4e00;
+  background: #fff8c5;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.board-list .board-list-size.size-alert {
+  color: #fff;
+  background: var(--red);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.board-list .board-list-delete {
   color: var(--red);
+}
+.board-list-group {
+  margin: 8px 0 4px;
+  font-size: 12px;
+}
+/* 画板位用量（#89）：满了标红；超出的老用户另起一句提示。 */
+.board-list-slots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+  font-size: 12px;
+}
+.board-list-slots .board-list-slots-full {
+  color: var(--red);
+  font-weight: 600;
+}
+.board-list-slots .board-list-over {
+  color: #7d4e00;
+  background: #fff8c5;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.bar-alert {
+  background: #ffebe9;
+  border-bottom: 1px solid var(--red);
 }
 .delete-notes {
   margin: 0;
