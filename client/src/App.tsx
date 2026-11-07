@@ -16,7 +16,7 @@ import { imageProbe } from "./shell/adapters";
 import { copyTextToClipboard } from "./shell/clipboard";
 import { browser, ipc, transfer, userRoot } from "./shell/ipc";
 import { isArchivedPath } from "./core/archive";
-import { ARCHIVE_TEXT, BACKUP_HINT_TEXT, MANAGE_BOARDS_TEXT, sizeNoticeText, usageLimitText } from "./ui/boardText";
+import { ARCHIVE_TEXT, BACKUP_HINT_TEXT, MANAGE_BOARDS_TEXT, sizeNoticeText, TIDY_TEXT, usageLimitText } from "./ui/boardText";
 import { useUsageLimit } from "./ui/useUsageLimit";
 import { BoardPackDialog } from "./ui/BoardPackDialog";
 import { BoardListDialog } from "./ui/BoardListDialog";
@@ -41,6 +41,8 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   /** 各画板越线提示已提醒到的档位，随界面状态保存（跨浏览器生效）。 */
   const [sizeNotices, setSizeNotices] = useState<Record<string, SizeTier>>({});
   const [boardListOpen, setBoardListOpen] = useState(false);
+  /** 处在整理模式的画板（会话 key）；整理模式是画布的界面状态，不落盘。 */
+  const [tidyKey, setTidyKey] = useState<string | null>(null);
   /** 画板列表以「管理画板」方式打开（#88，用量提醒入口）：按体量从大到小。 */
   const [manageBoards, setManageBoards] = useState(false);
   /** 本页关掉的用量提醒档位：同档不再出现，升到红再提醒（不跨页面记，重开页面仍提醒）。 */
@@ -520,7 +522,18 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       {activeSize && notice?.show && (
         <div className={`bar ${notice.show === "alert" ? "bar-alert" : "bar-warn"} size-notice`} role="status" data-size-tier={notice.show}>
           <span>{sizeNoticeText(activeSize.bytes)}</span>
-          {/* 「整理」按钮由 #92 整理模式接上。 */}
+          {/* 归档画板只读，不能整理（#90）。 */}
+          {!activeArchived && <button
+            onClick={() => {
+              // 进入整理模式即算用户已看到这条提醒。
+              const { path } = activeSize;
+              const tier = notice.show!;
+              setSizeNotices((m) => ({ ...m, [path]: tier }));
+              if (active) setTidyKey(active.key);
+            }}
+          >
+            {TIDY_TEXT.enter}
+          </button>}
           <button
             className="link"
             aria-label="关闭体量提示"
@@ -602,6 +615,8 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               toolbarSlot={toolbarSlot}
               readOnly={activeArchived}
               focus={focus?.boardKey === active.key ? focus : null}
+              tidying={tidyKey === active.key && !activeArchived}
+              onTidyChange={(on) => setTidyKey(on ? active.key : null)}
             />
           </ReactFlowProvider>
         )}

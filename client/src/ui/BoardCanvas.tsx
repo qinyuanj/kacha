@@ -66,8 +66,11 @@ import { DragContext } from "./ports";
 import { PreviewDialog, type PreviewRequest, type RegionTarget } from "./PreviewDialog";
 import { isTyping, useCanvasInteraction, type Selection } from "./useCanvasInteraction";
 import { errorText } from "../core/errors";
-import { collapsedMembers, finalToggle, nextStageName, stageBoxes } from "../core/stages";
-import { StageLayer } from "./stages";
+import { collapsedMembers, finalToggle, nextStageName, prunableResults, stageBoxes } from "../core/stages";
+import { nodesBytes, pruneSavings } from "../core/tidy";
+import { StageLayer, type StageTidy } from "./stages";
+import { TidyBar, useTidyMeasure } from "./tidy";
+import { TIDY_TEXT } from "./boardText";
 
 /** 复制粘贴的剪贴板：应用内共享，可粘到另一个画板（只带节点之间的连线，不跨画板连线）。 */
 let clipboard: Clip | null = null;
@@ -109,6 +112,9 @@ interface Props {
   toolbarSlot: HTMLElement | null;
   /** 运行指示跳转：居中并选中该节点；nonce 变化即再跳一次。 */
   focus: { nodeId: string; nonce: number } | null;
+  /** 整理模式（#92）：画布的一种界面状态，其它编辑照常可用。 */
+  tidying: boolean;
+  onTidyChange: (tidying: boolean) => void;
   /** 归档画板（#90）：能看、放大、下载结果，不能编辑（不拖动、不连线、不删、菜单只剩查看与下载）。 */
   readOnly?: boolean;
 }
@@ -141,6 +147,8 @@ export function BoardCanvas({
   onViewSendText,
   toolbarSlot,
   focus,
+  tidying,
+  onTidyChange,
   readOnly = false,
 }: Props) {
   const flow = useReactFlow();
@@ -414,6 +422,25 @@ export function BoardCanvas({
   const hidden = useMemo(() => collapsedMembers(board), [board]);
   const boxes = useMemo(() => stageBoxes(board, (id) => measured[id]), [board, measured]);
   const [editingStage, setEditingStage] = useState<string | null>(null);
+  // 整理模式：各阶段体量、「收掉未定稿」的张数与预计减少的体量（按任务目录，服务端量）。
+  const tidyMeasure = useTidyMeasure(board, tidying);
+  const stageTidy = useMemo((): StageTidy | null => {
+    if (!tidying) return null;
+    const { measure } = tidyMeasure;
+    const stageNodes = (id: string) => stagesOf(board).find((s) => s.id === id)?.nodes ?? [];
+    return {
+      bytes: (id) => (measure ? nodesBytes(measure, stageNodes(id)) : null),
+      prunable: (id) => prunableResults(board, [id]).length,
+      onPrune: (id) => {
+        const ids = prunableResults(boardRef.current, [id]);
+        if (!ids.length) return toast(TIDY_TEXT.nothingToPrune);
+        const saved = measure ? pruneSavings(measure, ids) : null;
+        void browser.ask(TIDY_TEXT.pruneConfirm(ids.length, saved), { title: TIDY_TEXT.pruneTitle, okLabel: TIDY_TEXT.pruneOk, cancelLabel: "取消" }).then((ok) => {
+          if (ok) apply({ kind: "pruneUnfinal", stageIds: [id] });
+        });
+      },
+    };
+  }, [tidying, tidyMeasure, board, toast, apply]);
   const newStage = (ids: string[]) => {
     const before = new Set(stagesOf(boardRef.current).map((s) => s.id));
     const r = apply({ kind: "newStage", name: nextStageName(boardRef.current), nodes: ids });
@@ -908,7 +935,7 @@ export function BoardCanvas({
       <DragContext.Provider value={drag}>
       {/* 画布内屏蔽 WebView 默认右键菜单；可编辑元素保留原生菜单（复制粘贴）。 */}
       <div
-        className={["canvas", drag ? "connecting" : ""].join(" ").trim()}
+        className={["canvas", drag ? "connecting" : "", tidying ? "tidying" : ""].join(" ").trim()}
         ref={wrapper}
         onContextMenu={(e) => !isTyping(e.target) && e.preventDefault()}
         onPointerDownCapture={nav.onPointerDownCapture}
@@ -938,6 +965,8 @@ export function BoardCanvas({
               redoLabel={redoLabel}
               selectedCount={selectedNodes.size}
               onRun={() => onRun([...selectedNodes])}
+              tidying={tidying}
+              onTidy={() => onTidyChange(!tidying)}
             />,
             toolbarSlot,
           )}
@@ -984,7 +1013,7 @@ export function BoardCanvas({
           minZoom={0.1}
         >
           <Background />
-          <StageLayer boxes={boxes} selected={selectedNodes} apply={(c) => void apply(c)} editing={editingStage} onEditingDone={() => setEditingStage(null)} />
+          <StageLayer boxes={boxes} selected={selectedNodes} apply={(c) => void apply(c)} editing={editingStage} onEditingDone={() => setEditingStage(null)} tidy={stageTidy} />
           <Controls />
           <MiniMap pannable zoomable />
           {barItems.length > 0 && (
@@ -998,6 +1027,7 @@ export function BoardCanvas({
             </NodeToolbar>
           )}
         </ReactFlow>
+        {tidying && <TidyBar {...tidyMeasure} onDone={() => onTidyChange(false)} />}
         {menu && menuEntries.length > 0 && (
           <ContextMenu at={menu.client} items={menuEntries} onPick={(action) => performAction(action, menu.target, menu.at)} onClose={closeMenu} />
         )}

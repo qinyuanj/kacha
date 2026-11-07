@@ -245,6 +245,8 @@ export const ipc: Ipc = {
     // 服务端给相对用户数据根的路径；core 与标签页用虚拟根绝对路径。
     return { ...listing, boards: listing.boards.map((b) => ({ ...b, path: `${VIRTUAL_ROOT}/${b.path}` })) };
   },
+  // 任务目录是相对用户数据根的；这里只做集合运算与求和，不转成虚拟根路径。
+  measureBoard: (text) => api("/api/boards/measure", { method: "POST", headers: { "Content-Type": "application/json" }, body: text }),
   readUiState: () => apiText("/api/ui-state"),
   writeUiState: async (text) => void (await api("/api/ui-state", textBody(text))),
   readCapabilityOverride: () => apiText("/api/capability-override"),

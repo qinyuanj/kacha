@@ -16,7 +16,7 @@ import { setEdgeRegion } from "./region";
 import { duplicateNodes, nudgeNodes, settleAltDrag } from "./selection";
 import type { Discovery } from "./settings";
 import { autoSizeSpec, manualSizeSpec, withSizeTier } from "./size";
-import { addToStage, createStage, deleteStage, pruneStages, removeFromStage, renameStage, setFinal, setStageCollapsed } from "./stages";
+import { addToStage, createStage, deleteStage, prunableResults, pruneStages, removeFromStage, renameStage, setFinal, setStageCollapsed } from "./stages";
 
 type Pos = [number, number];
 
@@ -110,6 +110,8 @@ export type BoardChange =
   | { kind: "deleteStage"; stageId: string }
   /** 标记 / 取消定稿：nodes 里只有结果节点生效。 */
   | { kind: "setFinal"; nodes: string[]; final: boolean }
+  /** 收掉未定稿：删去选中阶段里未定稿且没有下游连线的结果（判定见 prunableResults）；任务目录不删，按清理规则释放。 */
+  | { kind: "pruneUnfinal"; stageIds: string[] }
   // ---- 视图变更 ----
   | { kind: "viewport"; viewport: Board["viewport"] }
   /** 工具栏的新建任务模型：偏好不是编辑。 */
@@ -352,6 +354,11 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
       return { board: deleteStage(board, change.stageId), step: { label: "删除阶段" } };
     case "setFinal":
       return { board: setFinal(board, change.nodes, change.final), step: { label: change.final ? "标记定稿" : "取消定稿" } };
+    case "pruneUnfinal": {
+      const ids = prunableResults(board, change.stageIds);
+      if (!ids.length) return { board };
+      return { board: removeNodes(board, ids).board, step: { label: countLabel("收掉", ids.length, "张未定稿") } };
+    }
     case "viewport": {
       const { x, y, zoom } = change.viewport;
       const v = board.viewport;

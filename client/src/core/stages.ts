@@ -138,6 +138,17 @@ export const anyStaged = (board: Board, ids: Iterable<string>): boolean => {
   return stagesOf(board).some((s) => s.nodes.some((id) => wanted.has(id)));
 };
 
+/**
+ * 「收掉未定稿」会收掉的结果：选中阶段里未定稿、且没有下游连线（没被拿去当参考图）的结果节点，按画板顺序。
+ * 确认框的张数与变更本身共用这一判定。
+ */
+export function prunableResults(board: Board, stageIds: readonly string[]): string[] {
+  const wanted = new Set(stageIds);
+  const members = new Set(stagesOf(board).flatMap((s) => (wanted.has(s.id) ? s.nodes : [])));
+  const downstream = new Set(board.edges.map((e) => e.from[0]));
+  return board.nodes.filter((n) => n.type === "result" && members.has(n.id) && !isFinal(n) && !downstream.has(n.id)).map((n) => n.id);
+}
+
 /** 标记 / 取消定稿：只作用于结果节点。 */
 export function setFinal(board: Board, ids: readonly string[], final: boolean): Board {
   const wanted = new Set(ids);

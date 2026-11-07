@@ -94,3 +94,21 @@ export const usageLimitText = (level: "warn" | "alert", total: number, limit: nu
 
 /** 当前画板越过体量提醒线时画布顶部的提示。 */
 export const sizeNoticeText = (bytes: number) => `这块画板已经${approxSizeText(bytes)} 了，整理一下？`;
+
+/** 整理模式（#92）。 */
+export const TIDY_TEXT = {
+  /** 越线提示与工具栏上进入整理模式的按钮。 */
+  enter: "整理",
+  done: "完成",
+  measuring: "正在计算体量…",
+  /** 顶部整理前后的体量对比。 */
+  compare: (before: number, now: number) => `整理前${approxSizeText(before)} → 现在${approxSizeText(now)}`,
+  /** 阶段框上的动作。 */
+  prune: (n: number) => `收掉未定稿（${n}）`,
+  pruneTitle: "收掉未定稿",
+  pruneOk: "收掉",
+  /** 确认框；saved 为 null = 体量暂时算不出。 */
+  pruneConfirm: (n: number, saved: number | null) =>
+    `将收掉 ${n} 张，${saved === null ? "画板体量暂时算不出" : `画板约减少 ${formatBytes(saved)}`}。\n定稿与已被下游使用的结果保留；可以撤销。`,
+  nothingToPrune: "这个阶段没有可收掉的结果：定稿与已被下游使用的结果会保留。",
+} as const;

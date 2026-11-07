@@ -93,8 +93,15 @@ fn add_node(out: &mut BTreeSet<String>, node: &Value) {
     }
 }
 
-/// 画板文件引用的任务目录（去重、字典序）；None = 读不懂（损坏 / 版本更高），不能当成没有引用。
-pub fn board_task_dirs(text: &str) -> Option<Vec<String>> {
+/// 一个节点引用的任务目录。
+pub struct NodeTaskDirs {
+    /// 节点 id；读不懂、没有 id 的节点为 None（其引用仍计入画板）。
+    pub id: Option<String>,
+    pub dirs: BTreeSet<String>,
+}
+
+/// 画板文件逐个节点引用的任务目录；None = 读不懂（损坏 / 版本更高），不能当成没有引用。
+pub fn board_node_task_dirs(text: &str) -> Option<Vec<NodeTaskDirs>> {
     let raw: Value = serde_json::from_str(text).ok()?;
     let obj = raw.as_object()?;
     let version = obj.get("format_version")?.as_f64()?;
@@ -102,7 +109,20 @@ pub fn board_task_dirs(text: &str) -> Option<Vec<String>> {
         return None;
     }
     let nodes = obj.get("nodes")?.as_array()?;
-    let mut out = BTreeSet::new();
-    nodes.iter().for_each(|n| add_node(&mut out, n));
-    Some(out.into_iter().collect())
+    Some(
+        nodes
+            .iter()
+            .map(|n| {
+                let mut dirs = BTreeSet::new();
+                add_node(&mut dirs, n);
+                NodeTaskDirs { id: n.get("id").and_then(Value::as_str).map(str::to_owned), dirs }
+            })
+            .collect(),
+    )
+}
+
+/// 画板文件引用的任务目录（去重、字典序）；None = 读不懂（损坏 / 版本更高），不能当成没有引用。
+pub fn board_task_dirs(text: &str) -> Option<Vec<String>> {
+    let nodes = board_node_task_dirs(text)?;
+    Some(nodes.into_iter().flat_map(|n| n.dirs).collect::<BTreeSet<_>>().into_iter().collect())
 }

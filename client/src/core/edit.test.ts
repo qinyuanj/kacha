@@ -6,7 +6,7 @@ import { cardDropConnection } from "./dragCreate";
 import { emptyHistory, MERGE_PAUSE_MS, recordChange, redo, undo } from "./history";
 import { copySelection, LOCKED_HINT, PASTE_OFFSET } from "./iterate";
 import type { RunResult } from "./layout";
-import { nextStageName } from "./stages";
+import { nextStageName, prunableResults } from "./stages";
 import type { Discovery } from "./settings";
 import { autoSizeSpec, type SizeSpec } from "./size";
 
@@ -533,6 +533,67 @@ describe("阶段与定稿：用户变更的结果与撤销", () => {
     expect(nextStageName(board([]))).toBe("阶段 1");
     const two = { ...board([]), stages: [{ id: "s1", name: "阶段 2", nodes: ["a"], collapsed: false, extra: {} }] };
     expect(nextStageName(two)).toBe("阶段 3");
+  });
+});
+
+describe("收掉未定稿：用户变更的结果与撤销", () => {
+  /**
+   * 阶段 s1 = 任务 t 与它的结果 r1（定稿）、r2（未定稿，被下游任务 u 拿去当参考图）、r3（未定稿、没有下游）；
+   * r4 未定稿但不在任何阶段；阶段 s2 只有未定稿的 r5。
+   */
+  function tidyBoard(): Board {
+    const r1 = { ...result("r1", "t"), final: true as const };
+    const nodes = [task("t"), r1, result("r2", "t"), result("r3", "t"), result("r4", "t"), result("r5", "t"), task("u", { image_ports: 1 })];
+    const edges = [systemEdge("t", "r1"), systemEdge("t", "r2"), systemEdge("t", "r3"), systemEdge("t", "r4"), systemEdge("t", "r5"), edge("r2", "u", "image:0")];
+    return {
+      ...board(nodes, edges),
+      stages: [
+        { id: "s1", name: "第一轮", nodes: ["t", "r1", "r2", "r3"], collapsed: false, extra: {} },
+        { id: "s2", name: "第二轮", nodes: ["r5"], collapsed: false, extra: {} },
+      ],
+    };
+  }
+
+  function undoable(b: Board, change: BoardChange) {
+    const r = editBoard(b, change, env());
+    if (!r.step) throw new Error(`应构成撤销步：${r.hint ?? ""}`);
+    const h = recordChange(emptyHistory(), b, r.step, 0);
+    const back = undo(h, r.board, new Set())!;
+    expect(back.board).toEqual(b);
+    expect(redo(back.history, back.board, new Set())!.board).toEqual(r.board);
+    return r;
+  }
+
+  it("只收掉选中阶段里未定稿且没有下游连线的结果；定稿、有下游连线、阶段外的结果都保留", () => {
+    const b = tidyBoard();
+    expect(prunableResults(b, ["s1"])).toEqual(["r3"]);
+    const r = undoable(b, { kind: "pruneUnfinal", stageIds: ["s1"] });
+    expect(r.step).toEqual({ label: "收掉 1 张未定稿" });
+    expect(r.board.nodes.map((n) => n.id)).toEqual(["t", "r1", "r2", "r4", "r5", "u"]);
+    // 收掉的结果连同指向它的系统连线一起去掉；下游连线不动。
+    expect(r.board.edges.some((e) => e.to[0] === "r3")).toBe(false);
+    expect(r.board.edges).toContainEqual(edge("r2", "u", "image:0"));
+    expect(stagesOf(r.board).map((s) => [s.id, s.nodes])).toEqual([
+      ["s1", ["t", "r1", "r2"]],
+      ["s2", ["r5"]],
+    ]);
+  });
+
+  it("可以同时作用于多个阶段；阶段被收空时随之删去，撤销一并回来", () => {
+    const b = tidyBoard();
+    expect(prunableResults(b, ["s1", "s2"])).toEqual(["r3", "r5"]);
+    const r = undoable(b, { kind: "pruneUnfinal", stageIds: ["s1", "s2"] });
+    expect(r.step).toEqual({ label: "收掉 2 张未定稿" });
+    expect(r.board.nodes.map((n) => n.id)).toEqual(["t", "r1", "r2", "r4", "u"]);
+    expect(stagesOf(r.board).map((s) => s.id)).toEqual(["s1"]);
+  });
+
+  it("没有可收的结果（都定稿、都有下游，或阶段不存在）不构成步", () => {
+    const b = tidyBoard();
+    const noLoose = editBoard(b, { kind: "pruneUnfinal", stageIds: ["s1"] }, env()).board;
+    expect(prunableResults(noLoose, ["s1"])).toEqual([]);
+    expect(editBoard(noLoose, { kind: "pruneUnfinal", stageIds: ["s1"] }, env()).step).toBeNull();
+    expect(editBoard(b, { kind: "pruneUnfinal", stageIds: ["zz"] }, env()).step).toBeNull();
   });
 });
 
