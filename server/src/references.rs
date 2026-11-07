@@ -1,7 +1,6 @@
 //! 画板文件引用了哪些任务目录：清理未引用任务目录的依据（ADR 0018）。
 //!
-//! 规则定义在画板文件格式（JSON 原文）上，与前端 `client/src/core/references.ts` 逐条对应，
-//! 两侧共用 `contracts/fixtures/board-references/` 夹具。改这里必须同步改前端。
+//! 规则定义在画板文件格式（JSON 原文）上，用例在 `contracts/fixtures/board-references/` 夹具里。
 
 use std::collections::BTreeSet;
 use std::sync::OnceLock;

@@ -165,12 +165,6 @@ pub fn read_text(path: &Path) -> io::Result<Option<String>> {
     read_optional(path)
 }
 
-/// 重命名画板文件（连同 `.bak`）；目标已存在时拒绝，不覆盖别的画板。
-/// 源文件不存在是明确错误：另一页面已改名时，旧名再改名必须报错而不是静默成功。
-pub fn rename_board(from: &Path, to: &Path) -> io::Result<()> {
-    rename_board_guarded(from, to, None)
-}
-
 /// 改名与删除前的共同检查（调用方持锁）：主文件与 `.bak` 都不存在 → NotFound；
 /// 带版本而主文件内容已变（或主文件已不在）→ InvalidInput（即 board_conflict）。
 pub fn check_board_guard(path: &Path, version: Option<&str>) -> io::Result<()> {
@@ -186,6 +180,8 @@ pub fn check_board_guard(path: &Path, version: Option<&str>) -> io::Result<()> {
     Ok(())
 }
 
+/// 重命名画板文件（连同 `.bak`）；目标已存在时拒绝，不覆盖别的画板。
+/// 源文件不存在是明确错误：另一页面已改名时，旧名再改名必须报错而不是静默成功。
 pub fn rename_board_guarded(from: &Path, to: &Path, version: Option<&str>) -> io::Result<()> {
     check_board_guard(from, version)?;
     if from == to {
@@ -337,13 +333,13 @@ mod tests {
         let b = dir.path().join("b.ugcboard.json");
         write_board(&a, "{\"v\":1}").unwrap();
         write_board(&a, "{\"v\":2}").unwrap();
-        rename_board(&a, &b).unwrap();
+        rename_board_guarded(&a, &b, None).unwrap();
         assert!(!a.exists() && !bak_path(&a).exists());
         assert_eq!(fs::read_to_string(&b).unwrap(), "{\"v\":2}");
         assert_eq!(fs::read_to_string(bak_path(&b)).unwrap(), "{\"v\":1}");
 
         write_board(&a, "{}").unwrap();
-        let err = rename_board(&a, &b).unwrap_err();
+        let err = rename_board_guarded(&a, &b, None).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
         assert_eq!(fs::read_to_string(&b).unwrap(), "{\"v\":2}");
     }
@@ -355,7 +351,7 @@ mod tests {
         let c = dir.path().join("c.ugcboard.json");
         write_board(&a, "{}").unwrap();
         fs::write(bak_path(&c), "{\"orphan\":true}").unwrap();
-        assert_eq!(rename_board(&a, &c).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(rename_board_guarded(&a, &c, None).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
         assert_eq!(fs::read_to_string(bak_path(&c)).unwrap(), "{\"orphan\":true}");
         assert_eq!(list_board_names(dir.path()).unwrap(), vec!["a.ugcboard.json", "c.ugcboard.json"]);
     }

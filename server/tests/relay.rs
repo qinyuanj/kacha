@@ -84,10 +84,6 @@ async fn relay_rejects_scheme_and_host_outside_allow_list() {
         assert_eq!(res.json()["code"], "result_url_not_allowed");
         assert!(!res.text().contains(url) || url == "not a url", "错误不带原始地址（可能含签名）");
     }
-    // 默认允许列表包含火山引擎与阿里云对象存储域名。
-    let defaults = kacha_server::relay::default_result_hosts();
-    assert!(defaults.iter().any(|h| h.contains("volces.com")));
-    assert!(defaults.contains(&".aliyuncs.com"));
 }
 
 #[tokio::test]

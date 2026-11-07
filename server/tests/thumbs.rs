@@ -7,9 +7,9 @@ use std::time::Duration;
 use axum::http::header;
 use common::*;
 use image::{DynamicImage, GenericImageView, ImageFormat, Rgb, RgbImage, Rgba, RgbaImage};
+use kacha_server::cache::IMMUTABLE;
 use tokio::time::timeout;
 
-const IMMUTABLE: &str = "private, max-age=31536000, immutable";
 const TASK_FILE: &str = "2026-11-04/20261104T120000Z-abc/result.png";
 
 async fn get_thumb(h: &Harness, cookie: &str, path: &str) -> Reply {

@@ -1,5 +1,5 @@
 {
-  "description": "画板文件 → 它引用的任务目录（相对用户数据根，<UTC 日期>/<task_id>）。服务端清理（server/src/references.rs）与前端引用解析（client/src/core/references.ts）都跑这组夹具，结论必须一致。readable=false 表示画板读不懂（损坏 / 版本更高）：该用户本轮不清理，不能当成没有引用。",
+  "description": "画板文件 → 它引用的任务目录（相对用户数据根，<UTC 日期>/<task_id>）。服务端清理（server/src/references.rs）跑这组夹具。readable=false 表示画板读不懂（损坏 / 版本更高）：该用户本轮不清理，不能当成没有引用。",
   "cases": [
     {
       "name": "结果节点：path 与 task_id 指向同一任务目录",

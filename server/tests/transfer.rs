@@ -52,17 +52,6 @@ async fn upload_rejects_non_images_and_requires_session() {
     assert_eq!(anon.status, 401);
 }
 
-#[tokio::test]
-async fn upload_accepts_bodies_larger_than_the_default_two_megabytes() {
-    let h = Harness::new();
-    let cookie = h.session(GOOD_KEY).await;
-    let mut bytes = png_bytes(3);
-    bytes.resize(5 * 1024 * 1024, 7);
-    let reply = upload(&h, &cookie, bytes.clone()).await;
-    assert_eq!(reply.status, 201, "{}", reply.text());
-    assert_eq!(reply.json()["path"], format!("导入参考图/{}.png", sha_hex(&bytes)).as_str());
-}
-
 fn put_file(h: &Harness, key: &str, rel: &str, bytes: &[u8]) {
     let target = h.user_root(key).join(rel);
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();

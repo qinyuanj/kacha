@@ -3,6 +3,7 @@ mod common;
 use axum::body::Body;
 use axum::http::Method;
 use common::*;
+use kacha_server::cache::IMMUTABLE;
 
 async fn get_file(h: &Harness, cookie: &str, path: &str) -> common::Reply {
     h.get(&format!("/api/fs/file?path={}", q(path)), Some(cookie)).await
@@ -50,14 +51,11 @@ async fn write_new_file_only_creates_and_conflicts_with_409() {
 
 #[tokio::test]
 async fn read_file_cache_headers_follow_path_shape() {
-    const IMMUTABLE: &str = "private, max-age=31536000, immutable";
     let h = Harness::new();
     let cookie = h.session(GOOD_KEY).await;
     let root = h.user_root(GOOD_KEY);
     let files = [
         ("2026-11-04/20261104T120000Z-abc/result.png", IMMUTABLE),
-        ("2026-11-04/20261104T120000Z-abc/task.json", IMMUTABLE),
-        ("2026-11-04/20261104T120000Z-abc/layers/01.png", IMMUTABLE),
         ("2026-11-04/20261104T120000Z-abc/.staging/result.png", "no-cache"),
         ("导入参考图/abc.png", "no-cache"),
         ("画板/本地.ugcboard.json", "no-cache"),

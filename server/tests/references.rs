@@ -1,4 +1,4 @@
-//! 画板引用判断：与前端 client/src/core/references.test.ts 共用同一组夹具，结论必须一致。
+//! 画板引用判断：逐条跑 contracts/fixtures/board-references 夹具。
 
 use kacha_server::references::board_task_dirs;
 

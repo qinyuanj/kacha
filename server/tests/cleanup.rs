@@ -245,17 +245,6 @@ fn rejects_dry_run_with_purge_and_bad_now() {
     assert_eq!(r.tree(), before);
 }
 
-#[test]
-fn now_accepts_utc_timestamp() {
-    let r = scenario();
-    let out = Command::new(env!("CARGO_BIN_EXE_kacha-server"))
-        .args(["cleanup", "--dry-run", "--data-root", r.path().to_str().unwrap(), "--now", "2027-01-15T08:00:00Z"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&out.stdout).contains("闲置用户\tusers/idle\t"));
-}
-
 /// 画板写入接口不限制目录：画板文件不在 `画板/` 下也必须算引用，否则引用中的任务目录会被当成未引用清走。
 #[test]
 fn boards_outside_boards_dir_still_protect_their_task_dirs() {

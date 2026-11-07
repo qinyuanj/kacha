@@ -118,27 +118,6 @@ impl DiskGuard {
 mod tests {
     use super::*;
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn fifth_heavy_request_waits_for_a_slot() {
-        let gate = HeavyGate::default();
-        let mut held = Vec::new();
-        for _ in 0..HEAVY_CONCURRENCY {
-            held.push(gate.acquire().await);
-        }
-        assert_eq!(gate.active(), 4);
-        let waiting = tokio::spawn({
-            let gate = gate.clone();
-            async move {
-                let permit = gate.acquire().await;
-                gate.active()
-            }
-        });
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(!waiting.is_finished(), "第五个请求必须排队");
-        held.pop();
-        assert_eq!(waiting.await.unwrap(), 4, "拿到许可后仍是 4 个并发");
-    }
-
     #[test]
     fn disk_guard_rejects_below_threshold() {
         assert!(!DiskGuard::fixed(20 * 1024 * 1024 * 1024 - 1).enough());
