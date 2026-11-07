@@ -1,7 +1,7 @@
 // 高级设置：网关地址、连接测试、按页面并发上限、存储用量与自助清理。
 import { browser } from "../shell/ipc";
 import { useEffect, useState } from "react";
-import { DEFAULT_SETTINGS, isPlainHttp, MAX_CONCURRENCY, mayOverwriteSettings, MIN_CONCURRENCY, normalizeBaseUrl, validateBaseUrl, type Settings } from "../core/settings";
+import { DEFAULT_SETTINGS, isPlainHttp, MAX_CONCURRENCY, mayOverwriteSettings, MIN_CONCURRENCY, normalizeBaseUrl, parseConcurrency, validateBaseUrl, type Settings } from "../core/settings";
 import { UsageSection } from "./UsageSection";
 import type { ConnectionResult, useSettings } from "./useSettings";
 
@@ -12,7 +12,9 @@ interface Props {
 
 export function SettingsPanel({ settings, onClose }: Props) {
   const [baseUrl, setBaseUrl] = useState(settings.settings.base_url);
-  const [concurrency, setConcurrency] = useState(settings.settings.concurrency);
+  // 草稿是原始文本，输入中可为空或越界；失焦与保存时才经 parseConcurrency 钳制。
+  const [concurrencyDraft, setConcurrencyDraft] = useState(String(settings.settings.concurrency));
+  const concurrency = parseConcurrency(concurrencyDraft, settings.settings.concurrency);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionResult | null>(null);
   const [saving, setSaving] = useState(false);
@@ -79,8 +81,8 @@ export function SettingsPanel({ settings, onClose }: Props) {
 
         <label className="form-row">
           <span>并发上限</span>
-          <input type="number" min={MIN_CONCURRENCY} max={MAX_CONCURRENCY} value={concurrency}
-            onChange={(e) => setConcurrency(Math.min(MAX_CONCURRENCY, Math.max(MIN_CONCURRENCY, Math.round(Number(e.target.value) || MIN_CONCURRENCY))))} />
+          <input type="number" min={MIN_CONCURRENCY} max={MAX_CONCURRENCY} value={concurrencyDraft}
+            onChange={(e) => setConcurrencyDraft(e.target.value)} onBlur={() => setConcurrencyDraft(String(concurrency))} />
           <span className="muted small">1～{MAX_CONCURRENCY}，默认 {DEFAULT_SETTINGS.concurrency}；按页面各自计算，同一密钥开多个页面时互不共享</span>
         </label>
         {concurrency > 5 && <div className="muted small form-hint">qwen 模型曾在 6 个以上并发时触发网关限流；限流时整条队列会暂停等待。</div>}
