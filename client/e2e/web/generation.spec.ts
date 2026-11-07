@@ -23,7 +23,7 @@ test("url 结果由服务端中转写入任务目录，刷新后结果节点仍�
   const record = taskRecords(rig)[0];
   const dir = path.dirname(record.path);
   expect(existsSync(path.join(dir, "result.png"))).toBe(true);
-  expect(existsSync(path.join(dir, ".staging"))).toBe(false, "提交后不留暂存区");
+  expect(existsSync(path.join(dir, ".staging")), "提交后不留暂存区").toBe(false);
   // 浏览器没有直接跨域取对象存储：桩的 /objects/* 响应不带 CORS，结果图由 <img> 靠 cookie 从服务端加载。
   const src = await page.locator(".react-flow__node-result img").first().getAttribute("src");
   expect(src).toContain("/api/fs/thumb?path=");
@@ -91,12 +91,12 @@ test("另一把密钥看不到这份画板与结果（按用户隔离）", async
   await expect(page.locator(".react-flow__node-result")).toHaveCount(1);
   await page2.getByRole("button", { name: "画板列表", exact: true }).click();
   const list = page2.getByRole("dialog", { name: "画板列表" });
-  await expect(list.locator("ul.board-list li")).toHaveCount(1, "另一把密钥只有它自己新建的空画板");
+  await expect(list.locator("ul.board-list li"), "另一把密钥只有它自己新建的空画板").toHaveCount(1);
   await expect(list.getByRole("button", { name: "文生图", exact: true })).toHaveCount(0);
   expect(existsSync(path.join(rig.userRoot(OTHER_KEY), "画板", "文生图.ugcboard.json"))).toBe(false);
   const resultRel = path.relative(rig.userRoot(GOOD_KEY), path.join(path.dirname(taskRecords(rig)[0].path), "result.png")).replace(/\\/g, "/");
   const denied = await page2.request.get(`${rig.localURL}/api/fs/file?path=${encodeURIComponent(resultRel)}`);
-  expect(denied.status()).toBe(401, "不带会话读不到文件");
+  expect(denied.status(), "不带会话读不到文件").toBe(401);
   await other.close();
 });
 

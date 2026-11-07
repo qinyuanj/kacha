@@ -1,22 +1,16 @@
 // 图层拆分：生成 → 预览 → 重开按任务目录真源还原 → 下载（迁移自旧假壳 specs/layers.spec.ts）。
 // 桌面版「选目录导出图层」在 Web 版换成整包 zip 下载。
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
-import { expect, type Page } from "@playwright/test";
-import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
+import { expect } from "@playwright/test";
+import { board, edge, png, referenceNode, taskNode } from "../common/boards";
 import { unzip } from "../common/zip";
-import { BOX1, FLASH } from "../common/layers";
-import { GOOD_KEY, test } from "./rig";
+import { FLASH } from "../common/layers";
+import { enterWithKey, GOOD_KEY, test } from "./rig";
 import { boardRelPath, openApp, seed, task, taskRecords } from "./kit";
-import { enterWithKey } from "./rig";
 
 const bbox = { absolute: [100, 200, 400, 600], normalized: [100, 200, 400, 600] };
 const base = png(1000, 1000);
 const layer = png(72, 96, { alpha: true, rgb: [210, 80, 42] });
-
-async function openPreview(page: Page, nodeId: string) {
-  await page.locator(`.react-flow__node[data-id="${nodeId}"] img.thumb`).dblclick();
-  await expect(page.getByRole("dialog")).toBeVisible();
-}
 
 test("single image → optional prompt → bbox preview → 下载 zip → 重开按任务目录真源还原", async ({ page, rig }) => {
   const title = "官方契约合成图层";

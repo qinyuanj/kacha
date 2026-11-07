@@ -76,7 +76,7 @@ test("url 形式的透明结果与图层经服务端中转，校验后提交为�
   expect(readFileSync(path.join(dir, "result.png"))).toEqual(Buffer.from(base, "base64"));
   expect(readFileSync(path.join(dir, "layers/01.png"))).toEqual(Buffer.from(layer, "base64"));
   expect(JSON.parse(readFileSync(path.join(dir, "layers.json"), "utf8")).layers[0]).toMatchObject({ file: "layers/01.png", name: "主体" });
-  expect(existsSync(path.join(dir, ".staging"))).toBe(false, "提交后不留暂存区");
+  expect(existsSync(path.join(dir, ".staging")), "提交后不留暂存区").toBe(false);
   expect(readdirSync(dir).sort()).toEqual(["layers", "layers.json", "reference-1.png", "result.png", "task.json"]);
   expect(errors).toEqual([]);
 });

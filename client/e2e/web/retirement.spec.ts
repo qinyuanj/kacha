@@ -56,7 +56,7 @@ test("Lite 普通打开：阻止所有历史入口，手动切换只创建新 Fl
   await expect.poll(() => bodies(rig).length).toBe(1);
   expect(bodies(rig)[0]).toMatchObject({ model: FLASH, size: "2048x2048" });
   const saved = taskRecords(rig).map((r) => r.json);
-  expect(saved.some((r) => r.task_id === ID && r.model === LITE)).toBe(true, "旧任务记录原样保留");
+  expect(saved.some((r) => r.task_id === ID && r.model === LITE), "旧任务记录原样保留").toBe(true);
   expect(saved.filter((r) => r.model === FLASH)).toHaveLength(1);
   expect(errors).toEqual([]);
 });

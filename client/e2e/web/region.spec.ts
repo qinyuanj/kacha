@@ -58,9 +58,10 @@ test("Flash 两张图各带叠加区域，发送四图按原图/叠加图顺序�
   await runTask(page);
   await expect.poll(() => bodies(rig).length).toBe(1);
   const body = bodies(rig)[0];
-  expect(body.image).toHaveLength(4);
-  expect(body.image[0]).toBe(`data:image/png;base64,${files[A].b64}`);
-  expect(body.image[2]).toBe(`data:image/png;base64,${files[B].b64}`);
+  const images = body.image as string[];
+  expect(images).toHaveLength(4);
+  expect(images[0]).toBe(`data:image/png;base64,${files[A].b64}`);
+  expect(images[2]).toBe(`data:image/png;base64,${files[B].b64}`);
   expect(body.prompt).toContain("图2 is an annotated copy of 图1");
   expect(body.prompt).toContain("图4 is an annotated copy of 图3");
   expect(body.prompt).toContain("the yellow region of 图3");

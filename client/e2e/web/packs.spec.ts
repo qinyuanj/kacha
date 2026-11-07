@@ -6,10 +6,10 @@ import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
-import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
+import { board, png, promptNode, referenceNode } from "../common/boards";
 import { unzip, zipBytes, zipNames, zipText } from "../common/zip";
 import { expect, GOOD_KEY, OTHER_KEY, test, type Rig } from "./rig";
-import { openApp, readJson, readText, taskRecords } from "./kit";
+import { openApp, readJson, readText, taskRecords, type WebScenario } from "./kit";
 
 const TASK_ID = "20260916T010000Z-0000000a";
 const DIR = `2026-09-16/${TASK_ID}`;
@@ -51,7 +51,7 @@ async function importPack(page: Page, file: string) {
 }
 
 /** 预置一个 Flash 图层结果的画板与它引用的任务目录（含 layers.json 与根内参考图）。 */
-function layerBoard(title: string) {
+function layerBoard(title: string): WebScenario {
   const layers = [
     { file: "layers/01.png", z_index: 1, bounding_box: { absolute: [0, 0, 64, 64], normalized: [0, 0, 1000, 1000] }, name: "主体", description: "红色层" },
     { file: "layers/02.png", z_index: 2, bounding_box: { absolute: [8, 8, 40, 40], normalized: [125, 125, 625, 625] }, name: "点缀", description: "绿色层" },
@@ -594,13 +594,13 @@ test("磁盘不足（507）时页面提示「服务器空间不足，请联系�
 function makePack(rig: Rig, name: string, entries: Record<string, string>, manifest: Record<string, unknown> = {}): string {
   const file = path.join(rig.dataRoot, name);
   const lines = Object.entries(entries).map(([n, t]) => `z.writestr(${JSON.stringify(n)},${JSON.stringify(t)})`);
-  return makeZip(rig, file, [
+  return makeZip(file, [
     `z.writestr('manifest.json',${JSON.stringify(JSON.stringify({ pack_format_version: 1, app_version: "9.9.9", boards: ["画板/旧版画板.ugcboard.json"], ...manifest }))})`,
     ...lines,
   ]);
 }
 
-function makeZip(rig: Rig, file: string, lines: string[]): string {
+function makeZip(file: string, lines: string[]): string {
   // 用 python 标准库写真 zip：e2e 环境已有 Python，避免给客户端加 zip 依赖。
   execFileSync(PYTHON, ["-I", "-c", `import zipfile,sys;z=zipfile.ZipFile(sys.argv[1],'w');${lines.join(";")};z.close()`, file]);
   return file;
