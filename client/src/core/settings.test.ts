@@ -57,7 +57,7 @@ describe("高级设置 settings.json", () => {
     expect(serializeSettings(DEFAULT_SETTINGS)).not.toMatch(/key/i);
   });
 
-  it("更新版本拒开：报告版本，给出默认值供本次运行，界面禁止覆盖保存", () => {
+  it("更新版本拒开：报告版本，给出默认值供本次运行", () => {
     expect(parseSettings(JSON.stringify({ format_version: 2, base_url: "x" }))).toEqual({ kind: "newer", version: 2, settings: DEFAULT_SETTINGS });
   });
 
@@ -152,6 +152,21 @@ describe("保存设置", () => {
     expect(writes.writeApiKey).toEqual(["sk-new"]);
   });
 
+  it("本次没读到 settings.json（unreadable）时不写 settings.json，但仍存密钥", async () => {
+    const { ports, writes } = memoryPorts();
+    const result = await saveSettings(ports, { fileKind: "unreadable", apiKey: "", keyPersistence: "persisted" }, next, "sk-new");
+    expect(result).toEqual({ ok: true, settingsWritten: false, keyPersistence: "persisted" });
+    expect(writes.settings).toEqual([]);
+    expect(writes.writeApiKey).toEqual(["sk-new"]);
+  });
+
+  it("文件损坏（corrupt）时允许用新设置覆盖", async () => {
+    const { ports, writes } = memoryPorts();
+    const result = await saveSettings(ports, { fileKind: "corrupt", apiKey: "", keyPersistence: "persisted" }, next, "");
+    expect(result).toEqual({ ok: true, settingsWritten: true, keyPersistence: "persisted" });
+    expect(writes.settings).toEqual([serializeSettings(next)]);
+  });
+
   it("文件正常时写 settings.json；密钥未变且已存入 localStorage 时不碰密钥存储", async () => {
     const { ports, writes } = memoryPorts();
     const result = await saveSettings(ports, { fileKind: "ok", apiKey: "sk", keyPersistence: "persisted" }, next, "sk");
@@ -220,12 +235,17 @@ describe("载入设置", () => {
     expect(await loadSettings(ports)).toMatchObject({ apiKey: "", keyPersistence: "session" });
   });
 
-  it("读文件抛错按缺失处理：默认设置、无缓存", async () => {
+  it("读 settings.json 抛错为 unreadable 并用默认设置；读模型缓存抛错按无缓存", async () => {
     const fail = async () => {
-      throw new Error("读失败");
+      throw new Error("读取失败（HTTP 500）：/api/settings");
     };
     const { ports } = memoryPorts({ readSettings: fail, readModelsCache: fail });
-    expect(await loadSettings(ports)).toEqual({ file: { kind: "ok", settings: DEFAULT_SETTINGS }, apiKey: "", keyPersistence: "persisted", cache: null });
+    expect(await loadSettings(ports)).toEqual({ file: { kind: "unreadable", settings: DEFAULT_SETTINGS }, apiKey: "", keyPersistence: "persisted", cache: null });
+  });
+
+  it("文件不存在（端口返回 null）与读取失败区分：前者是 ok", async () => {
+    const { ports } = memoryPorts({ readSettings: async () => null });
+    expect((await loadSettings(ports)).file).toEqual({ kind: "ok", settings: DEFAULT_SETTINGS });
   });
 
   it("文件由更新版本写入时如实报 newer", async () => {

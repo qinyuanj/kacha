@@ -26,7 +26,25 @@ export const DEFAULT_SETTINGS: Settings = {
 export type LoadedSettings =
   | { kind: "ok"; settings: Settings }
   | { kind: "newer"; version: number; settings: Settings }
-  | { kind: "corrupt"; reason: string; settings: Settings };
+  | { kind: "corrupt"; reason: string; settings: Settings }
+  /** 服务端有文件但这次没读到（断网、5xx）：文件不存在已由壳层换成默认值，不会落到这里。 */
+  | { kind: "unreadable"; settings: Settings };
+
+/** 保存时能否写 settings.json：newer 与 unreadable 的原文件不能被本次的默认设置覆盖。 */
+export function mayOverwriteSettings(kind: LoadedSettings["kind"]): boolean {
+  switch (kind) {
+    case "ok":
+    case "corrupt":
+      return true;
+    case "newer":
+    case "unreadable":
+      return false;
+    default: {
+      const _exhaustive: never = kind;
+      return _exhaustive;
+    }
+  }
+}
 
 const KNOWN_KEYS = ["format_version", "base_url", "concurrency"];
 const isObject = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -195,9 +213,9 @@ export interface InitialSettings {
   cache: ModelsCache | null;
 }
 
-/** 读 settings.json、模型缓存与浏览器密钥；读文件失败按缺失处理，本地存储抛错退回 session。 */
+/** 读 settings.json、模型缓存与浏览器密钥；settings.json 读失败为 unreadable，模型缓存读失败按缺失处理，本地存储抛错退回 session。 */
 export async function loadSettings(ports: SettingsPorts): Promise<InitialSettings> {
-  const file = parseSettings(await ports.readSettings().catch(() => null));
+  const file = await ports.readSettings().then(parseSettings, (): LoadedSettings => ({ kind: "unreadable", settings: DEFAULT_SETTINGS }));
   const cache = parseModelsCache(await ports.readModelsCache().catch(() => null));
   try {
     return { file, apiKey: (await ports.readApiKey()) ?? "", keyPersistence: "persisted", cache };
@@ -208,9 +226,9 @@ export async function loadSettings(ports: SettingsPorts): Promise<InitialSetting
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** 保存设置与密钥。newer 时不覆盖 settings.json 但仍存密钥；密钥变了或当前为 session 才写本地存储，失败退回 session。 */
+/** 保存设置与密钥。newer / unreadable 时不覆盖 settings.json 但仍存密钥；密钥变了或当前为 session 才写本地存储，失败退回 session。 */
 export async function saveSettings(ports: SettingsPorts, current: SaveBaseline, next: Settings, apiKey: string): Promise<SaveResult> {
-  const settingsWritten = current.fileKind !== "newer";
+  const settingsWritten = mayOverwriteSettings(current.fileKind);
   if (settingsWritten) {
     try {
       await ports.writeSettings(serializeSettings(next));
