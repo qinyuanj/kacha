@@ -125,7 +125,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       const board = boards.getBoard(activeKey);
       if (!board) return;
       const busy = runner.getSnapshot().board(activeKey).locked;
-      const items = await confirmItemsOf(board, runScope(board, selectedIds, busy), userRoot);
+      const items = await confirmItemsOf(board, runScope(board, table, selectedIds, busy), userRoot);
       const dispatch = runDispatch(items);
       // 没有可提交的任务时先说明原因；真要提交或弹确认窗才需要密钥。
       if (dispatch.kind === "toast") return toast(dispatch.message);
@@ -137,7 +137,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       if (dispatch.kind === "submit") void startRun(activeKey, board, [dispatch.taskId]);
       else setConfirm({ boardKey: activeKey, board, items, scope: selectedIds.length ? "selection" : "board" });
     },
-    [activeKey, userRoot, settings.apiKey, boards, runner, confirmItemsOf, startRun, toast],
+    [activeKey, userRoot, settings.apiKey, boards, runner, table, confirmItemsOf, startRun, toast],
   );
 
   const viewSendText = useCallback(

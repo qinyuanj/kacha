@@ -70,7 +70,7 @@ function editBoard(): Board {
 
 /** 模拟提交：给任务节点写入 last_submitted = task_id + 快照。 */
 function submitted(b: Board, taskId: string, id = "20260916T091500Z-3f9c2a1b"): Board {
-  const snapshot = snapshotOf(b, taskId)!;
+  const snapshot = snapshotOf(b, BUILTIN_TABLE, taskId)!;
   return { ...b, nodes: b.nodes.map((n) => (n.id === taskId && n.type === "task" ? { ...n, last_submitted: { task_id: id, ...snapshot } } : n)) };
 }
 
@@ -92,7 +92,7 @@ function executed(b: Board, taskId: string): Board {
 
 describe("脏判据快照", () => {
   it("快照含上游提示词、图片端口集合（来源图层与区域）、模型、尺寸、开关", () => {
-    expect(snapshotOf(editBoard(), "t")).toEqual({
+    expect(snapshotOf(editBoard(), BUILTIN_TABLE, "t")).toEqual({
       prompt: "把图2的帽子戴到图1头上\n第二行",
       negative_prompt: "模糊",
       model: "qwen-image-3.0-pro",
@@ -106,9 +106,16 @@ describe("脏判据快照", () => {
     });
   });
 
+  it("图层尺寸与输出选项按模型的请求形态进快照，不认具体模型 id", () => {
+    const flash = BUILTIN_TABLE.models.find((m) => m.model_id === "doubao-seedream-5-0-flash-260915")!;
+    const table = { ...BUILTIN_TABLE, models: [...BUILTIN_TABLE.models, { ...flash, model_id: "flash-next" }] };
+    const b = board([prompt("p", "猫"), task("t", { model: "flash-next", layer_decomposition: true })], [edge("p", "t", "positive")]);
+    expect(snapshotOf(b, table, "t")).toMatchObject({ layer_size: "auto", output_options: { response_format: "url", output_format: "png", watermark: false } });
+  });
+
   it("未提交过即脏；刚提交后不脏", () => {
-    expect(isDirty(editBoard(), "t")).toBe(true);
-    expect(isDirty(submitted(editBoard(), "t"), "t")).toBe(false);
+    expect(isDirty(editBoard(), BUILTIN_TABLE, "t")).toBe(true);
+    expect(isDirty(submitted(editBoard(), "t"), BUILTIN_TABLE, "t")).toBe(false);
   });
 
   const mutations: [string, (b: Board) => Board][] = [
@@ -124,20 +131,20 @@ describe("脏判据快照", () => {
   ];
   for (const [name, mutate] of mutations) {
     it(`${name}变化 → 脏`, () => {
-      expect(isDirty(mutate(submitted(editBoard(), "t")), "t")).toBe(true);
+      expect(isDirty(mutate(submitted(editBoard(), "t")), BUILTIN_TABLE, "t")).toBe(true);
     });
   }
 
   it("只改份数不算脏，份数也不进快照", () => {
     const b = submitted(editBoard(), "t");
     const recounted: Board = { ...b, nodes: b.nodes.map((n) => (n.id === "t" ? { ...n, count: 4 } : n)) as BoardNode[] };
-    expect(isDirty(recounted, "t")).toBe(false);
-    expect(snapshotOf(recounted, "t")).not.toHaveProperty("count");
+    expect(isDirty(recounted, BUILTIN_TABLE, "t")).toBe(false);
+    expect(snapshotOf(recounted, BUILTIN_TABLE, "t")).not.toHaveProperty("count");
   });
 
   it("各份任务编号不参与脏判据", () => {
     const b = withCopies(submitted(editBoard(), "t"), "t", ["a", "b"]);
-    expect(isDirty(b, "t")).toBe(false);
+    expect(isDirty(b, BUILTIN_TABLE, "t")).toBe(false);
   });
 
   it("不相干的变化（位置、别的节点、快照里的未知字段顺序）不算脏", () => {
@@ -149,7 +156,7 @@ describe("脏判据快照", () => {
         prompt("other", "x"),
       ] as BoardNode[],
     };
-    expect(isDirty(moved, "t")).toBe(false);
+    expect(isDirty(moved, BUILTIN_TABLE, "t")).toBe(false);
   });
 });
 
@@ -158,41 +165,41 @@ describe("运行范围", () => {
     board([prompt("p", "猫"), prompt("q", "狗"), task("t1"), task("t2")], [edge("p", "t1", "positive"), edge("q", "t2", "positive")]);
 
   it("无选中：整个画板的脏任务，已执行且不脏的跳过", () => {
-    expect(runScope(twoTasks(), [])).toEqual(["t1", "t2"]);
-    expect(runScope(executed(twoTasks(), "t1"), [])).toEqual(["t2"]);
+    expect(runScope(twoTasks(), BUILTIN_TABLE, [])).toEqual(["t1", "t2"]);
+    expect(runScope(executed(twoTasks(), "t1"), BUILTIN_TABLE, [])).toEqual(["t2"]);
   });
 
   it("已执行的任务只改份数：「运行全部」不包含它", () => {
     const b = executed(twoTasks(), "t1");
     const recounted: Board = { ...b, nodes: b.nodes.map((n) => (n.id === "t1" ? { ...n, count: 3 } : n)) as BoardNode[] };
-    expect(runScope(recounted, [])).toEqual(["t2"]);
+    expect(runScope(recounted, BUILTIN_TABLE, [])).toEqual(["t2"]);
   });
 
   it("提交过但没有结果（失败、中断）不算已执行，仍在范围内", () => {
-    expect(runScope(submitted(twoTasks(), "t1"), [])).toEqual(["t1", "t2"]);
+    expect(runScope(submitted(twoTasks(), "t1"), BUILTIN_TABLE, [])).toEqual(["t1", "t2"]);
   });
 
   it("多份时任一份有结果节点就算已执行，与哪一份最后派发无关", () => {
     // 第 1 份成功，最后派发的第 2 份失败。
     const b = withCopies(executed(twoTasks(), "t1"), "t1", ["sub-t1", "20260916T091500Z-0000000f"]);
     const lastFailed = withLastTaskId(b, "t1", "20260916T091500Z-0000000f");
-    expect(runScope(lastFailed, [])).toEqual(["t2"]);
+    expect(runScope(lastFailed, BUILTIN_TABLE, [])).toEqual(["t2"]);
   });
 
   it("多份都没有结果节点：仍在范围内", () => {
     const b = withCopies(submitted(twoTasks(), "t1", "20260916T091500Z-0000000a"), "t1", ["20260916T091500Z-0000000a", "20260916T091500Z-0000000b"]);
-    expect(runScope(b, [])).toEqual(["t1", "t2"]);
+    expect(runScope(b, BUILTIN_TABLE, [])).toEqual(["t1", "t2"]);
   });
 
   it("有选中：只跑选中子图（选中的任务 + 选中节点直接下游的任务）", () => {
-    expect(runScope(twoTasks(), ["t2"])).toEqual(["t2"]);
-    expect(runScope(twoTasks(), ["p"])).toEqual(["t1"]);
-    expect(runScope(twoTasks(), ["p", "t2"])).toEqual(["t1", "t2"]);
-    expect(runScope(executed(twoTasks(), "t2"), ["t2"])).toEqual([]);
+    expect(runScope(twoTasks(), BUILTIN_TABLE, ["t2"])).toEqual(["t2"]);
+    expect(runScope(twoTasks(), BUILTIN_TABLE, ["p"])).toEqual(["t1"]);
+    expect(runScope(twoTasks(), BUILTIN_TABLE, ["p", "t2"])).toEqual(["t1", "t2"]);
+    expect(runScope(executed(twoTasks(), "t2"), BUILTIN_TABLE, ["t2"])).toEqual([]);
   });
 
   it("正在排队或执行的任务不重复提交", () => {
-    expect(runScope(twoTasks(), [], new Set(["t1"]))).toEqual(["t2"]);
+    expect(runScope(twoTasks(), BUILTIN_TABLE, [], new Set(["t1"]))).toEqual(["t2"]);
   });
 });
 
@@ -619,7 +626,7 @@ describe("图层来源", () => {
     const b = board([prompt("p", "@图1 改色"), withLayers([{ file: "layers/01.png", z_index: 1, bounding_box: [] }, { file: "layers/02.jpg", z_index: 2, bounding_box: [] }]), task("t")], [edge("p", "t", "positive"), { ...edge("x", "t", "image:0"), source_layer: 2 }]);
     expect(imageSources(b, "t", "/root")).toEqual([{ nodeId: "x", label: "result.png 图层2", absPath: "/root/2026-09-16/task-x/layers/02.jpg", sourceLayer: 2 }]);
     // 快照也记 source_layer：换图层让任务变脏。
-    expect(snapshotOf(b, "t")?.images[0]).toMatchObject({ kind: "result", source_layer: 2 });
+    expect(snapshotOf(b, BUILTIN_TABLE, "t")?.images[0]).toMatchObject({ kind: "result", source_layer: 2 });
   });
 
   it("无效来源图层身份：absPath 为 null，不猜 layers/NN、不回落底图", () => {
