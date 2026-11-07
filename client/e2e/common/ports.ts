@@ -18,8 +18,8 @@ export function isChromeRestrictedPort(port: number): boolean {
   return RESTRICTED_PORTS.has(port);
 }
 
-/** 一次启动的结果：分到的端口、启动出的对象，以及分到受限端口时用来关掉它的回调。 */
-export interface Started<T> {
+/** 一次启动尝试的结果：分到的端口、启动出的对象，以及分到受限端口时用来关掉它的回调。 */
+export interface StartAttempt<T> {
   port: number;
   value: T;
   release(): Promise<void>;
@@ -27,9 +27,14 @@ export interface Started<T> {
 
 /**
  * 反复调用 start，直到分到浏览器能访问的端口；分到受限端口的那次先 release 再重来。
- * 超过 attempts 次仍未分到时报错，错误里列出 who 与分到的全部端口。
+ * 超过 attempts 次仍未分到时报错，错误里列出 label 与分到的全部端口。
  */
-export async function startOnSafePort<T>(who: string, start: () => Promise<Started<T>>, attempts = 5): Promise<{ port: number; value: T }> {
+export async function startOnSafePort<T>(
+  label: string,
+  start: () => Promise<StartAttempt<T>>,
+  // Windows 的 bind(0) 按顺序分配端口，最长的连续受限段 6665–6669 有 5 个，上限要比它大。
+  attempts = 10,
+): Promise<Omit<StartAttempt<T>, "release">> {
   const rejected: number[] = [];
   for (let i = 0; i < attempts; i++) {
     const { port, value, release } = await start();
@@ -37,5 +42,5 @@ export async function startOnSafePort<T>(who: string, start: () => Promise<Start
     rejected.push(port);
     await release();
   }
-  throw new Error(`${who}连续 ${attempts} 次分到 Chrome 受限端口（${rejected.join(", ")}），放弃启动`);
+  throw new Error(`${label}连续 ${attempts} 次分到 Chrome 受限端口（${rejected.join(", ")}），放弃启动`);
 }

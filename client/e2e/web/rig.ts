@@ -4,14 +4,14 @@ import { test as base, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MODELS, png } from "../common/boards";
-import { startOnSafePort, type Started } from "../common/ports";
+import { startOnSafePort, type StartAttempt } from "../common/ports";
 
 const clientDir = fileURLToPath(new URL("../..", import.meta.url));
 const serverBin = path.join(clientDir, "../server/target/debug/kacha-server");
@@ -114,7 +114,7 @@ async function startStub(): Promise<Stub> {
 }
 
 /** 起一个服务端进程，等它在 stdout 报出监听端口；release 杀掉进程并等它真正退出。 */
-async function spawnServer(dataRoot: string, gatewayURL: string): Promise<Started<ChildProcess>> {
+async function spawnServer(dataRoot: string, gatewayURL: string): Promise<StartAttempt<ChildProcess>> {
   const child: ChildProcess = spawn(
     serverBin,
     ["--listen", "127.0.0.1:0", "--data-root", dataRoot, "--gateway-url", gatewayURL, "--static-dir", staticDir, "--result-hosts", "127.0.0.1"],
@@ -136,7 +136,13 @@ async function spawnServer(dataRoot: string, gatewayURL: string): Promise<Starte
       reject(new Error(`服务端提前退出（${code}）：${stderr}`));
     });
   });
-  return { port, value: child, release: () => stopServer(child) };
+  // 重启前清空数据根：第一次启动可能已写下日志，不让它混进用例的断言。
+  const release = async () => {
+    await stopServer(child);
+    rmSync(dataRoot, { recursive: true, force: true });
+    mkdirSync(dataRoot);
+  };
+  return { port, value: child, release };
 }
 
 /** 先等服务端真正退出再返回：kill 只是发信号，进程退出前仍可能在写数据根。 */

@@ -3,7 +3,7 @@ import { isChromeRestrictedPort, startOnSafePort } from "./ports";
 
 describe("isChromeRestrictedPort", () => {
   it("认出 #75 里撞上的 SIP 端口与动态端口段里的其它受限端口", () => {
-    // 4190、6679 只在 Fetch 规范的 bad port 列表里，Chromium 尚未收录，同样避开。
+    // 期望值手写而不导入列表，避免与实现同义反复。4190、6679 只在 Fetch 规范的 bad port 列表里，Chromium 尚未收录，同样避开。
     for (const port of [1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6669, 6679, 6697, 10080]) {
       expect(isChromeRestrictedPort(port), String(port)).toBe(true);
     }
@@ -38,6 +38,11 @@ describe("startOnSafePort", () => {
     const f = fakeStarter([5060, 6000, 50001]);
     await expect(startOnSafePort("服务端", f.start)).resolves.toEqual({ port: 50001, value: "srv:50001" });
     expect(f.released).toEqual([5060, 6000]);
+  });
+
+  it("默认上限撑得过按顺序分配时连续落入 6665–6669", async () => {
+    const f = fakeStarter([6665, 6666, 6667, 6668, 6669, 6670]);
+    await expect(startOnSafePort("服务端", f.start)).resolves.toEqual({ port: 6670, value: "srv:6670" });
   });
 
   it("超过重试上限时报错并说明是谁、分到了哪些端口", async () => {
