@@ -15,6 +15,7 @@ pub mod cache;
 pub mod cleanup;
 pub mod fs;
 pub mod image_info;
+pub mod launch;
 pub mod limits;
 pub mod logger;
 pub mod packs;
@@ -22,6 +23,8 @@ pub mod paths;
 pub mod redact;
 pub mod references;
 pub mod relay;
+pub mod serve;
+pub mod server_log;
 mod session;
 pub mod store;
 pub mod thumbs;
@@ -29,6 +32,8 @@ pub mod transfer;
 pub mod usage;
 pub mod usage_log;
 pub mod verify;
+#[cfg(windows)]
+pub mod win_service;
 
 pub use session::{fingerprint, SESSION_COOKIE};
 

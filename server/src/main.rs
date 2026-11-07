@@ -1,77 +1,53 @@
 //! 进程入口：单进程托管前端静态文件与 API。
 //!
 //! 配置走命令行参数与环境变量（KACHA_*）；listen / 数据根 / 网关地址 / 静态目录可配置。
+//! 不带子命令时在前台运行，Ctrl+C 优雅关停；`service` 子命令供 Windows 服务控制管理器启动（#70）。
 
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::Duration;
 
-use kacha_server::{router, AppState, Config};
+use kacha_server::launch::{self, Mode, Options};
+use kacha_server::serve::DRAIN_LIMIT;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some("cleanup") {
-        std::process::exit(kacha_server::cleanup::run_cli(&args[1..]));
+    match args.first().map(String::as_str) {
+        Some("cleanup") => std::process::exit(kacha_server::cleanup::run_cli(&args[1..])),
+        Some("service") if !wants_help(&args) => std::process::exit(service(&args[1..])),
+        _ => {}
     }
-    if args.iter().any(|a| a == "--help" || a == "-h") {
+    if wants_help(&args) {
         println!("kacha-server {}", kacha_server::VERSION);
         println!("用法：kacha-server [--listen 0.0.0.0:3004] [--data-root <目录>] [--gateway-url <new-api 地址>] [--static-dir <前端构建目录>] [--result-hosts <逗号分隔主机>] [--min-free-gb 20]");
         println!("环境变量：KACHA_LISTEN、KACHA_DATA_ROOT、KACHA_GATEWAY_URL、KACHA_STATIC_DIR、KACHA_RESULT_HOSTS、KACHA_MIN_FREE_GB");
         println!("清理与恢复：kacha-server cleanup --help；kacha-server cleanup restore --help");
+        println!("Windows 服务：kacha-server service <与上面相同的参数>，只供服务控制管理器启动（见部署说明）；生命周期日志写入 <数据根>/server.log");
         return;
     }
 
-    let opt = |flag: &str, env: &str, default: &str| -> String {
-        args.windows(2)
-            .find(|w| w[0] == flag)
-            .map(|w| w[1].clone())
-            .or_else(|| std::env::var(env).ok())
-            .unwrap_or_else(|| default.to_string())
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("创建异步运行时失败");
+    let ctrl_c = async {
+        if tokio::signal::ctrl_c().await.is_err() {
+            // 无法监听 Ctrl+C 时不能当作收到关停信号。
+            std::future::pending::<()>().await;
+        }
     };
-    let listen = opt("--listen", "KACHA_LISTEN", "0.0.0.0:3004");
-    let data_root = PathBuf::from(opt("--data-root", "KACHA_DATA_ROOT", "./kacha-data"));
-    let gateway_url = opt("--gateway-url", "KACHA_GATEWAY_URL", "http://lzxsvn:3001");
-    let static_dir = args
-        .windows(2)
-        .find(|w| w[0] == "--static-dir")
-        .map(|w| PathBuf::from(&w[1]))
-        .or_else(|| std::env::var("KACHA_STATIC_DIR").ok().map(PathBuf::from));
-    // 结果中转允许列表：默认含火山引擎对象存储，部署可用逗号分隔追加主机（如内网对象存储）。
-    // 磁盘余量门槛（GB），低于它写入类接口返回 507。
-    let min_free_gb: u64 = opt("--min-free-gb", "KACHA_MIN_FREE_GB", "20").parse().unwrap_or(20);
-    let result_hosts = opt("--result-hosts", "KACHA_RESULT_HOSTS", "")
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>();
+    let code = runtime.block_on(launch::start(Options::parse(&args), Mode::Foreground, DRAIN_LIMIT, |_| {}, ctrl_c));
+    // 排空超时后被放弃的请求可能还占着阻塞线程：最多再等一小会儿。
+    runtime.shutdown_timeout(Duration::from_secs(2));
+    std::process::exit(code);
+}
 
-    if let Err(e) = std::fs::create_dir_all(&data_root) {
-        eprintln!("创建数据根失败：{e}");
-        std::process::exit(1);
-    }
-    let state = AppState::new(
-        Config {
-            data_root: data_root.clone(),
-            gateway_url: gateway_url.clone(),
-            static_dir,
-            result_hosts,
-            min_free_bytes: min_free_gb.saturating_mul(1024 * 1024 * 1024),
-        },
-        Arc::new(kacha_server::verify::HttpKeyVerifier::new(gateway_url.clone())),
-        Arc::new(SystemTime::now),
-    );
-    let addr: SocketAddr = listen.parse().unwrap_or_else(|_| {
-        eprintln!("监听地址无效：{listen}");
-        std::process::exit(2);
-    });
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap_or_else(|e| {
-        eprintln!("监听 {addr} 失败：{e}");
-        std::process::exit(1);
-    });
-    println!("kacha-server {} 监听 http://{}，数据根 {}", kacha_server::VERSION, listener.local_addr().unwrap(), data_root.display());
-    // 每日一次记录各用户数据根大小（不含密钥与提示词全文）。
-    kacha_server::usage_log::spawn_daily(std::sync::Arc::new(kacha_server::usage_log::UsageLogger::new(data_root.clone(), Arc::new(SystemTime::now))));
-    axum::serve(listener, router(state)).await.expect("服务端退出");
+fn wants_help(args: &[String]) -> bool {
+    args.iter().any(|a| a == "--help" || a == "-h")
+}
+
+#[cfg(windows)]
+fn service(args: &[String]) -> i32 {
+    kacha_server::win_service::run(args)
+}
+
+#[cfg(not(windows))]
+fn service(_args: &[String]) -> i32 {
+    eprintln!("service 子命令只在 Windows 上可用；其他系统请直接前台运行或交给 systemd 等进程管理器。");
+    2
 }

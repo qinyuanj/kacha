@@ -46,20 +46,57 @@ release/kacha-web/
 
 ## Windows 服务
 
-以下命令需管理员 PowerShell。按实际路径与域名调整；`--result-hosts` 只填需要追加的主机。
+服务端自带原生 Windows 服务模式：`kacha-server.exe service <与前台相同的参数>`。该模式对接服务控制管理器（SCM），启动时报告运行状态；收到停止（或关机）请求后，立即停止接受新连接，等进行中的请求处理完再退出，排空最多 60 秒。超过 60 秒就放弃剩余请求退出，写路径都是临时文件加原子改名，被放弃的请求只会留下临时文件。不带 `service` 时仍是前台运行，Ctrl+C 走同一条优雅关停路径。`service` 子命令只供 SCM 启动，在终端直接运行会报错退出。
+
+以下命令需管理员 PowerShell，服务名统一为 `kacha`。按实际路径与域名调整；`--result-hosts` 只填需要追加的主机。
 
 ```powershell
-$bin = '"C:\kacha\kacha-server.exe" --listen 0.0.0.0:3004 --data-root "D:\kacha-data" --gateway-url "http://lzxsvn:3001" --static-dir "C:\kacha\static" --min-free-gb 20'
-sc.exe create Kacha binPath= $bin start= auto
-sc.exe failure Kacha reset= 86400 actions= restart/5000/restart/5000/restart/5000
-sc.exe failureflag Kacha 1
-sc.exe start Kacha
-sc.exe query Kacha
+$dir  = 'C:\Users\Intel\dev\services\kacha'
+$data = "$dir\data"
+$bin  = "`"$dir\kacha-server.exe`" service --listen 0.0.0.0:3004 --data-root `"$data`" --gateway-url http://lzxsvn:3001 --static-dir `"$dir\static`" --result-hosts .aliyuncs.com --min-free-gb 20"
+sc.exe create kacha binPath= $bin start= auto depend= new-api obj= "NT AUTHORITY\NetworkService"
+sc.exe failure kacha reset= 86400 actions= restart/5000/restart/5000/restart/5000
+sc.exe failureflag kacha 1
+# NetworkService 需要数据根的修改权限（程序目录只需读取与执行）：
+icacls $data /grant "NT AUTHORITY\NetworkService:(OI)(CI)M"
+sc.exe start kacha
+sc.exe query kacha
 ```
 
-`start= auto` 配置开机自启；`failure` 配置三次失败均在 5 秒后重启，`failureflag 1` 让非服务正常退出的崩溃也触发恢复。开放防火墙 3004 端口时只限可信内网。升级前 `sc.exe stop Kacha`，替换程序和 `static/` 后再启动。
+- `sc.exe` 的 `参数= 值` 等号后必须有空格。`obj= "NT AUTHORITY\NetworkService"` 内置账户无需密码；不写 `obj=` 则以 LocalSystem 运行。
+- `depend= new-api` 让服务在网关服务之后启动。
+- `start= auto` 配置开机自启。`failure` 配置三次失败均在 5 秒后重启。`failureflag 1` 让服务以非零退出码报告停止时也触发恢复，例如数据根不可写、端口被占用。
+- 开放防火墙 3004 端口时只限可信内网。
+- 升级前执行 `sc.exe stop kacha`，等 `sc.exe query kacha` 显示 `STOPPED`；最长约 60 秒排空。替换程序和 `static/` 后再启动。
 
-本机为 Linux，以上 Windows 注册、自启与崩溃重启步骤**未实测**；上线前需在 lzxsvn 验证服务状态、重启恢复、端口与磁盘余量。实际上线、qwen 结果域名实测和 Gitea Release 页更新不属于本票。
+**日志**：服务模式没有控制台。启动（版本、监听地址、数据根、运行模式）、启动失败原因、收到关停信号、排空结果和退出都写入 `<数据根>\server.log`；超过 1 MiB 时轮转为 `server.1.log`，总量不超过 2 MiB。前台运行也写这份日志，同时保留控制台输出。它与前端事件日志 `diagnostics.log` 是两份文件。服务起不来时，先看 `server.log` 和 `sc.exe query kacha` 的 `SERVICE_EXIT_CODE`：1 表示数据根或监听失败，2 表示监听地址无效。
+
+### 从 NSSM 服务迁移
+
+lzxsvn 目前由 NSSM 服务 `kacha` 托管控制台程序，停服时硬终止进程。迁移到原生服务模式的步骤如下，需要维护窗口：
+
+1. 记下现有参数：`nssm get kacha AppParameters`，同时核对账户（`NetworkService`）、依赖（`new-api`）与自启设置。
+2. 通知用户暂停上传、保存与导入，然后执行 `nssm stop kacha`。
+3. 执行 `nssm remove kacha confirm` 删除 NSSM 服务，再用 `sc.exe query kacha` 确认服务已不存在。
+4. 用上面的 `sc.exe create` 以原生方式重建服务，参数保持不变（`--listen`、`--data-root`、`--gateway-url`、`--static-dir`、`--result-hosts`、`--min-free-gb`），只在程序路径后加 `service`。
+5. 核对数据目录权限：NetworkService 对 `data\` 有修改权限。
+6. 执行 `sc.exe start kacha`，确认 `GET /api/config` 版本正确，`data\server.log` 有本次启动记录。
+7. 之后看 `data\server.log`；NSSM 的 `C:\Users\Intel\dev\logs\kacha\out.log` / `err.log` 不再更新，可归档。
+
+### 待人工实测（lzxsvn）
+
+以下各项**尚未实测**，需管理员在 lzxsvn 上逐项验证并回写结果：
+
+- [ ] `sc.exe create`（带 `service`、`depend= new-api`、`obj= "NT AUTHORITY\NetworkService"`）成功。
+- [ ] `sc.exe start kacha` 在数秒内进入 `RUNNING`，没有报错 1053；`server.log` 记录启动与「服务模式」。
+- [ ] `sc.exe query kacha` 显示 `RUNNING`，`STOPPABLE` 与 `ACCEPTS_SHUTDOWN`。
+- [ ] `sc.exe stop kacha` 进入 `STOP_PENDING` 后变成 `STOPPED`，退出码为 0；`server.log` 记录关停信号、排空完成与退出。
+- [ ] 停服时有进行中的上传或画板包导入：请求能完成，或在 60 秒上限后被放弃；目标文件没有损坏，`server.log` 记录排空结果。
+- [ ] 崩溃后自动重启：用 `taskkill /F /PID <pid>` 结束进程，5 秒后服务恢复为 `RUNNING`。
+- [ ] 启动失败触发恢复：例如端口被占用时，`server.log` 记录失败原因，SCM 按失败策略重试。
+- [ ] 开机自启：重启 lzxsvn 后服务在 `new-api` 之后自动进入 `RUNNING`。
+
+实际上线、qwen 结果域名实测和 Gitea Release 页更新不属于本节。
 
 ## 清理与恢复
 

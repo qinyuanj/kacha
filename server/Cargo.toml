@@ -40,6 +40,8 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+# 原生 Windows 服务模式（#70）：对接服务控制管理器（SCM）。
+windows-service = "0.8"
 
 [profile.release]
 opt-level = "s"
