@@ -59,11 +59,12 @@ fn seed_task(h: &Harness, key: &str, rel: &str, at: u64) {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("task.json"), "{}").unwrap();
     std::fs::write(dir.join("result.png"), [1u8, 2, 3]).unwrap();
-    let t = UNIX_EPOCH + Duration::from_secs(at);
+    // filetime 跨平台改修改时间：Windows 上只读打开的句柄改不了时间，目录也打不开。
+    let t = filetime::FileTime::from_system_time(UNIX_EPOCH + Duration::from_secs(at));
     for e in std::fs::read_dir(&dir).unwrap() {
-        std::fs::File::open(e.unwrap().path()).unwrap().set_modified(t).unwrap();
+        filetime::set_file_mtime(e.unwrap().path(), t).unwrap();
     }
-    std::fs::File::open(&dir).unwrap().set_modified(t).unwrap();
+    filetime::set_file_mtime(&dir, t).unwrap();
 }
 
 fn board_referencing(dirs: &[&str]) -> String {
