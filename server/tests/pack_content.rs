@@ -163,6 +163,26 @@ async fn existing_response_bytes_are_fixed_for_present_absent_and_unreadable_uni
     );
 }
 
+/// 问已有遇到越界路径回 403，响应逐字节与改造前（paths::resolve 的文案）一致（#81）。
+/// 期望值手写：要独立于被测实现固定前端看到的字节，防同义反复。
+#[tokio::test]
+async fn existing_rejects_an_escaping_path_with_a_fixed_403_body() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let cases = [
+        (serde_json::json!([{ "path": "../x", "identity": null }]), r#"{"code":"forbidden","message":"路径越界，只允许用户数据根内的相对路径：../x"}"#),
+        (
+            serde_json::json!([{ "path": TASK_A, "identity": "../../../x" }]),
+            r#"{"code":"forbidden","message":"路径越界，只允许用户数据根内的相对路径：2026-09-16/20260916T010000Z-0000000a/../../../x"}"#,
+        ),
+    ];
+    for (body, expected) in cases {
+        let reply = h.send(Method::POST, "/api/packs/existing", Some(&cookie), body.to_string()).await;
+        assert_eq!(reply.status, 403, "{body}");
+        assert_eq!(reply.text(), expected);
+    }
+}
+
 #[tokio::test]
 async fn content_whose_sha256_differs_from_the_declared_one_is_rejected_as_corrupt() {
     let h = Harness::new();
