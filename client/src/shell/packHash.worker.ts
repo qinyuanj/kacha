@@ -5,6 +5,7 @@
 import type { PackEntryFact } from "../core/boardPack";
 import { entryBody, hashEntries } from "../core/packHash";
 import { blobSource, type ZipEntry } from "../core/zipIndex";
+import { errorText } from "../core/errors";
 
 export type WorkerRequest = { kind: "hash"; file: File; entries: ZipEntry[] } | { kind: "body"; file: File; entry: ZipEntry };
 export type WorkerMessage =
@@ -35,6 +36,6 @@ scope.onmessage = async (e) => {
     });
     scope.postMessage({ kind: "hashed", facts });
   } catch (err) {
-    scope.postMessage({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+    scope.postMessage({ kind: "error", message: errorText(err) });
   }
 };

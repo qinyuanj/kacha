@@ -4,6 +4,7 @@
 // 发什么由发送计划（sendPlan.ts）决定；这里只把发送文本与原生负向放进请求体。
 import { withinPixelRange } from "./size";
 import { isSupported, type ModelCapability } from "./capabilities";
+import { errorText } from "./errors";
 
 /** Flash 图层拆分的尺寸档，顺序即界面下拉顺序。 */
 export const LAYER_SIZES = ["auto", "1K", "1.5K", "2K"] as const;
@@ -235,7 +236,7 @@ async function send(config: GatewayConfig, method: string, path: string, body?: 
   try {
     response = await config.fetch(endpoint(config.baseUrl, path), { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch (e) {
-    throw new GatewayError("network", redact(`无法连接网关：${e instanceof Error ? e.message : String(e)}`, config.apiKey));
+    throw new GatewayError("network", redact(`无法连接网关：${errorText(e)}`, config.apiKey));
   }
   const requestId = response.headers.get("X-Oneapi-Request-Id");
   const text = await response.text().catch(() => "");

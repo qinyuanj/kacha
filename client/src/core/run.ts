@@ -12,6 +12,7 @@ import { isAutoRatio, resolveSize } from "./size";
 import { joinPath } from "./paths";
 import { snapshotOf } from "./submission";
 import { LocalError, newTaskId, readSubmission, taskDirOfTaskId, saveLayers, saveResult, sniffImage, writeSubmission, layerFileName, layersExportJson, type LayerRecord, type ReferenceSource, type SubmissionPlan, type TaskFs } from "./taskDir";
+import { errorText } from "./errors";
 
 export type TaskStatus =
   | { kind: "queued" }
@@ -75,7 +76,7 @@ export function failureLabel(error: unknown): string {
  *  服务端不回显签名地址，这里也只用服务端文案。 */
 function relayError(e: unknown): Error {
   const { status, upstreamStatus } = (e ?? {}) as { status?: unknown; upstreamStatus?: unknown };
-  const message = e instanceof Error ? e.message : String(e);
+  const message = errorText(e);
   if (typeof upstreamStatus === "number") return new GatewayError(upstreamStatus === 401 ? "rejected" : categoryForStatus(upstreamStatus), message, upstreamStatus);
   if (typeof status !== "number") return e instanceof Error ? e : new Error(message);
   if (status === 422) return new GatewayError("invalid_response", message, status);
@@ -127,7 +128,7 @@ async function validateFlashOrdinaryOutput(deps: RunDeps, bytes: Uint8Array): Pr
 }
 
 function readError(label: string, e: unknown): LocalError {
-  return new LocalError(`读取${label}失败：${e instanceof Error ? e.message : String(e)}`);
+  return new LocalError(`读取${label}失败：${errorText(e)}`);
 }
 
 /** 准备好的任务与派发时要写到任务节点上的 last_submitted；undefined = 不改（生成变体）。 */
@@ -322,7 +323,7 @@ export async function writeJob(deps: RunDeps, userRoot: string, job: PreparedJob
     const { relDir, references } = await writeSubmission(deps, userRoot, job.plan);
     return { ...job, relDir, input: { ...job.input, references: references.map(ref => ({ ...ref, ...(job.plan.transparentBackground && isFlashShape(job.input.model) ? { hasAlpha: true } : {}) })) } };
   } catch (e) {
-    throw new LocalError(`写任务目录失败：${e instanceof Error ? e.message : String(e)}`);
+    throw new LocalError(`写任务目录失败：${errorText(e)}`);
   }
 }
 
@@ -369,7 +370,7 @@ export async function executeJob(
         try {
           bytes = await deps.readFile(joinPath(args.userRoot, saved.path));
         } catch (e) {
-          throw new LocalError(`读回中转结果失败：${e instanceof Error ? e.message : String(e)}`);
+          throw new LocalError(`读回中转结果失败：${errorText(e)}`);
         }
       } else {
         bytes = await fetchResultImage(deps.fetch, image);
@@ -459,7 +460,7 @@ export async function executeJob(
     }
   } catch (e) {
     await discard();
-    throw new LocalError(`保存结果图失败：${e instanceof Error ? e.message : String(e)}`);
+    throw new LocalError(`保存结果图失败：${errorText(e)}`);
   }
   return { taskId: job.taskNodeId, submittedTaskId: job.taskId, file: saved.file, path: saved.path, record: job.record, layers };
 }

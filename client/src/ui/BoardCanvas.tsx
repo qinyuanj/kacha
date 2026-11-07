@@ -64,6 +64,7 @@ import { ModelOptions, nodeTypes, type ImagePortInfo, type ImageSlotInfo, type P
 import { DragContext } from "./ports";
 import { PreviewDialog, type PreviewRequest, type RegionTarget } from "./PreviewDialog";
 import { isTyping, useCanvasInteraction, type Selection } from "./useCanvasInteraction";
+import { errorText } from "../core/errors";
 
 /** 复制粘贴的剪贴板：应用内共享，可粘到另一个画板（只带节点之间的连线，不跨画板连线）。 */
 let clipboard: Clip | null = null;
@@ -372,7 +373,7 @@ export function BoardCanvas({
               logRelocate({ ok: true });
             } catch (e) {
               logRelocate({ ok: false, reason: "unreadable" });
-              toast(`无法读取 ${file.name}：${e instanceof Error ? e.message : String(e)}`);
+              toast(`无法读取 ${file.name}：${errorText(e)}`);
             }
             return;
           }
@@ -391,7 +392,7 @@ export function BoardCanvas({
             logRelocate({ ok: true });
           } catch (e) {
             logRelocate({ ok: false, reason: "unreadable" });
-            toast(`无法读取 ${basename(abs)}：${e instanceof Error ? e.message : String(e)}`);
+            toast(`无法读取 ${basename(abs)}：${errorText(e)}`);
           }
         })(),
     }),
@@ -725,7 +726,7 @@ export function BoardCanvas({
           primeImageInfo(abs, info);
           images.push({ path: uploaded.path, sha256: info.sha256, display_name: file.name, width: info.width, height: info.height });
         } catch (e) {
-          toast(`无法导入 ${file.name}：${e instanceof Error ? e.message : String(e)}`);
+          toast(`无法导入 ${file.name}：${errorText(e)}`);
         }
       }
       if (images.length) apply({ kind: "addReferences", images, at: [at.x, at.y], attach: attach ?? null });
@@ -786,7 +787,7 @@ export function BoardCanvas({
       await saveCopyAs(resolveFromRoot(userRoot, node.path));
       toast("已开始下载（结果带图层时为 zip）");
     } catch (e) {
-      toast(`另存失败：${e instanceof Error ? e.message : String(e)}`);
+      toast(`另存失败：${errorText(e)}`);
     }
   };
 
