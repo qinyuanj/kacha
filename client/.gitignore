@@ -4,3 +4,4 @@ dist/
 src-tauri/gen/
 test-results/
 playwright-report/
+.e2e-run.lock
