@@ -167,4 +167,13 @@ npm --prefix client run test:e2e -- --workers=4
 cargo test --manifest-path server/Cargo.toml
 ```
 
-符号链接逃逸测试在当前账户无权创建符号链接（未开开发者模式、也不是管理员）时打印原因并跳过，其余断言照常运行。
+符号链接逃逸测试在无权创建符号链接时打印原因并跳过，其余断言照常运行。无权的原因可能有两种：当前账户既没开开发者模式，也不是管理员；或者测试程序以 Low 完整性级别运行。
+
+Windows 启动程序时，进程的完整性级别不会高于 exe 文件自身的标签；文件的标签从所在目录继承。仓库若放在带 Low 完整性标签的目录下（例如某些沙箱工具会这样标记 Desktop），编译出的测试程序和服务端都会以 Low 运行。这时它们不能写 `%TEMP%`（报错误 5，测试建临时目录失败、压测启动时报「数据根不可写」），也不能创建符号链接。可以用 `icacls <目录>` 查看目录的标签。处理方法是把两个构建输出目录设为 Medium，其中已有的文件会随之继承：
+
+```powershell
+icacls server\target /setintegritylevel '(OI)(CI)M'
+icacls release /setintegritylevel '(OI)(CI)M'
+```
+
+`cargo clean` 会删掉整个 `target` 目录，标签也随之消失，之后需要重新设置。部署时复制到 lzxsvn 的程序按目标目录的标签运行，不受影响。
