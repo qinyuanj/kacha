@@ -26,6 +26,7 @@ import { useSettings } from "./ui/useSettings";
 import { TabBar } from "./ui/TabBar";
 import { useBoardPack } from "./ui/useBoardPack";
 import { useBoardSessions } from "./ui/useBoardSessions";
+import { errorText } from "./core/errors";
 
 export function App({ onLogout, version }: { onLogout?: () => void; version?: string | null } = {}) {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -259,7 +260,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           if (await openPath(p, false)) opened.push(p);
           else toast(`找不到画板文件：${p}`);
         } catch (e) {
-          toast(e instanceof Error ? e.message : String(e));
+          toast(errorText(e));
         }
       }
       let activated = false;
@@ -319,10 +320,10 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           onOpen={(path) => {
             void openPath(path, true).then((opened) => {
               if (!opened) toast("画板不存在，可能已在别处改名；请刷新列表");
-            }, (e) => toast(e instanceof Error ? e.message : String(e)));
+            }, (e) => toast(errorText(e)));
           }}
           onDelete={deleteBoardAt}
-          onExport={(path) => void exportBoardAt(path).catch((e) => toast(e instanceof Error ? e.message : String(e)))}
+          onExport={(path) => void exportBoardAt(path).catch((e) => toast(errorText(e)))}
           onClose={() => setBoardListOpen(false)}
         />
       )}

@@ -3,6 +3,7 @@
 // 两套序号：用户序号（「图N」，只数用户图片连线）与发送序号（叠加图紧随原图的实际发送顺序）；发送文本里一律是发送序号。
 // 文本改写与引用校验共用同一正则、同一组固定句、同一张用户序号 → 发送序号换算表。
 import { isSupported, workflowFor, type ModelCapability, type WorkflowName } from "./capabilities";
+import { isFlashShape } from "./gateway";
 import { REGION_COLORS } from "./overlay";
 import { firstRegionOf, type SlotRef } from "./region";
 
@@ -36,7 +37,7 @@ export function planSend(model: ModelCapability, slots: SlotRef[], prompt: strin
   const negativeInlined = !isSupported(model.workflows[workflow].supports_negative_prompt);
   const phrases = [...overlayPhrases(model, slots, language), ...coordinatePhrases(slots, language)];
   const rewritten = rewriteRegionRefs(rewriteImageRefs(prompt, imageRefMap(slots)), regionNames(slots, language));
-  const note = imageRefMap(slots).length === 1 && !(model.request_shape === "seedream_flash_images_generations" && slots.length > 1) ? singleImageNote(language) : referenceNote(slots.length, language);
+  const note = imageRefMap(slots).length === 1 && !(isFlashShape(model) && slots.length > 1) ? singleImageNote(language) : referenceNote(slots.length, language);
   const withNote = slots.length === 0 ? rewritten : `${note}\n${rewritten}`;
   const negative = negativeInlined && negativePrompt ? `\n${language === "en" ? "Avoid: " : "避免出现："}${negativePrompt}` : "";
   return {
@@ -63,7 +64,7 @@ export function referenceProblemsOf(model: ModelCapability | undefined, slots: S
   });
   const referenced = new Set([...referencedIndexes([prompt]), ...injected]);
   // 红是硬阻断，只认用户明确写的 @图N；「地图5」之类的普通文字不拦。
-  const tagged = new Set([...prompt.matchAll(model?.request_shape === "seedream_flash_images_generations" ? REFERENCE : TAG)].map((m) => Number(m.groups ? m.groups.tagged ?? m.groups.zhN ?? m.groups.enN : m[1])));
+  const tagged = new Set([...prompt.matchAll(isFlashShape(model) ? REFERENCE : TAG)].map((m) => Number(m.groups ? m.groups.tagged ?? m.groups.zhN ?? m.groups.enN : m[1])));
   const outOfRange = [...tagged].filter((n) => n < 1 || n > count).sort((a, b) => a - b);
   const unreferenced = count === 1 ? [] : Array.from({ length: count }, (_, i) => i + 1).filter((n) => !referenced.has(n));
   // 只有区域真的生效（叠加槽存在）时才校验「区域N」；没有框选时这两个字是普通文字。
@@ -159,7 +160,7 @@ function overlayPhrases(model: ModelCapability, slots: SlotRef[], language: Prom
 
 /** 区域编号 → 发送文本里的指代（区域1 → 紫色区域 / the purple region），按区域编号排列。 */
 function officialReferences(text: string, model: ModelCapability): string {
-  return model.request_shape === "seedream_flash_images_generations" ? text.replace(/\bImage\s*(\d+)/gi, "图$1") : text;
+  return isFlashShape(model) ? text.replace(/\bImage\s*(\d+)/gi, "图$1") : text;
 }
 
 function coordinateName(slot: SlotRef, index: number): string {

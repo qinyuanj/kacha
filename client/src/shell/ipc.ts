@@ -9,6 +9,7 @@ import { ApiError } from "./apiError";
 import { API_KEY_STORAGE } from "./apiKeyStorage";
 import { UPLOAD_FAILURES } from "./uploadText";
 import type { BrowserPort, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
+import { errorText } from "../core/errors";
 
 export type { ImageInfo } from "./types";
 
@@ -35,7 +36,7 @@ async function send(url: string, init: RequestInit = {}): Promise<Response> {
   try {
     res = await fetch(url, { credentials: "same-origin", ...init });
   } catch (e) {
-    throw new ApiError(0, "network", `无法连接服务端：${e instanceof Error ? e.message : String(e)}`);
+    throw new ApiError(0, "network", `无法连接服务端：${errorText(e)}`);
   }
   if (res.status === 401) sessionListeners.forEach((l) => l());
   return res;

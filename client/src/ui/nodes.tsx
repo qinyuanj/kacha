@@ -28,7 +28,7 @@ import { actionHoverInfo, CANCELLED_HINT, portThumbHoverInfo, referenceHoverInfo
 import type { TaskStatus } from "../core/run";
 import type { SummaryTone } from "../core/runner";
 import { inputImageAdviceAll } from "../core/fitImage";
-import { DEFAULT_OUTPUT_OPTIONS, isLayerSize, LAYER_SIZES } from "../core/gateway";
+import { DEFAULT_OUTPUT_OPTIONS, isFlashShape, isLayerSize, LAYER_SIZES } from "../core/gateway";
 import { IMAGE_PORT_PREFIX, type TaskPorts } from "../core/graph";
 import { imageMinSize } from "../core/nodeSize";
 import { regionCss } from "../core/overlay";
@@ -745,7 +745,7 @@ export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskF
               ⓘ
             </HoverButton>
           </div>
-          {model?.request_shape === "seedream_flash_images_generations" && (
+          {isFlashShape(model) && (
             <div className="field nodrag">
               <label>输出格式 <select aria-label="输出格式" value={outputOptions.output_format} disabled={locked} onChange={(e) => apply({ kind: "setOutputOptions", taskId: node.id, options: { ...outputOptions, output_format: e.target.value as "png" | "jpeg" } })}><option value="png">PNG</option><option value="jpeg">JPEG</option></select></label>
               <label><input type="checkbox" checked={outputOptions.watermark} disabled={locked} onChange={(e) => apply({ kind: "setOutputOptions", taskId: node.id, options: { ...outputOptions, watermark: e.target.checked } })} />水印</label>
@@ -787,7 +787,7 @@ export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskF
       )}
 
       {/* 分辨率档与宽高比常驻：收起时也能改；模型与开关只在展开区。 */}
-      {node.layer_decomposition && model?.request_shape === "seedream_flash_images_generations" ? (
+      {node.layer_decomposition && isFlashShape(model) ? (
         <div className="field size-field nodrag">
           <select aria-label="图层尺寸" value={node.layer_size ?? "auto"} disabled={locked} onChange={(e) => isLayerSize(e.target.value) && apply({ kind: "setLayerSize", taskId: node.id, size: e.target.value })}>
             {LAYER_SIZES.map((s) => <option key={s} value={s}>{s === "auto" ? "自动" : s}</option>)}

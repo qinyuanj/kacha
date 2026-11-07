@@ -8,6 +8,7 @@ import { fileUrl, transfer } from "../shell/ipc";
 import { saveCopyAs } from "../shell/saveFile";
 import { useBoardActions, useImageInfos } from "./context";
 import { dragRect, isMeaningful, moveRect, resizeRect, type Corner, type Point01, type Rect01 } from "./rects";
+import { errorText } from "../core/errors";
 
 export interface PreviewLayer {
   record: LayerRecord;
@@ -163,7 +164,7 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
       const done = await fn();
       if (done) toast(done);
     } catch (e) {
-      toast(`导出失败：${e instanceof Error ? e.message : String(e)}`);
+      toast(`导出失败：${errorText(e)}`);
     } finally {
       setBusy(false);
     }

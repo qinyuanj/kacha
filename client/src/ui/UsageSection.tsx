@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { usage as usagePort } from "../shell/ipc";
 import type { Usage } from "../shell/types";
+import { errorText } from "../core/errors";
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -27,7 +28,7 @@ export function UsageSection() {
     try {
       setUsage(await usagePort!.usage());
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   }, []);
   useEffect(() => {
@@ -44,7 +45,7 @@ export function UsageSection() {
       setConfirm(false);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }

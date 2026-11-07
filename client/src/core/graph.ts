@@ -11,7 +11,6 @@ import {
 } from "./capabilities";
 import { resolveFromRoot } from "./paths";
 import { expandImageEdges, type PortSlot } from "./region";
-import { defaultTaskModel, type Discovery } from "./settings";
 
 export const IMAGE_PORT_PREFIX = "image:";
 
@@ -308,14 +307,13 @@ export function forkPrompt(board: Board, promptId: string, fork: { newNodeId: st
 
 /**
  * 图片节点按哪些模型的输入规则提示：直接下游任务的模型（去重）。
- * 未接线的参考图按新建任务实际会用的默认模型（defaultTaskModel）；结果图没接任务不提示。
+ * 未接线的参考图按调用方给的回退模型（新建任务实际会用的默认模型）；结果图没接任务不提示。
  */
-export function inputRuleModels(board: Board, table: CapabilityTable, discovery: Discovery, nodeId: string): string[] {
+export function inputRuleModels(board: Board, nodeId: string, fallbackModel: string | null): string[] {
   const downstream = [...new Set(board.edges.filter((e) => e.from[0] === nodeId).flatMap((e) => findTask(board, e.to[0])?.model ?? []))];
   if (downstream.length > 0) return downstream;
   if (board.nodes.find((n) => n.id === nodeId)?.type !== "reference") return [];
-  const fallback = defaultTaskModel(table, discovery, board.last_model);
-  return fallback ? [fallback] : [];
+  return fallbackModel ? [fallbackModel] : [];
 }
 
 export interface ImageFacts {
