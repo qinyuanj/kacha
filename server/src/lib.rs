@@ -44,8 +44,14 @@ pub const META_DIR: &str = ".kacha";
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// 单文件请求体上限：64 MB。
+/// 单文件请求体上限：64 MB；画板包单份内容、图片上传、中转结果同用这一个数。
+/// client 的 core/boardPack.ts `MAX_CONTENT_BYTES` 是它的跨语言副本，改一处要同改另一处。
 pub const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
+
+/// 413 文案里的上限，如「64 MB」。
+pub fn max_body_label() -> String {
+    format!("{} MB", MAX_BODY_BYTES / (1024 * 1024))
+}
 
 #[derive(Clone, Debug)]
 pub struct Config {

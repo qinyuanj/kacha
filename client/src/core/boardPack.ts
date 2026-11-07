@@ -352,7 +352,10 @@ export function importSummary(units: MergeUnit[], outcomes: { path: string; outc
 /** 取消时包命令以此失败（壳层把服务端的 code cancelled 也统一成它）。 */
 export const PACK_CANCELLED = "已取消";
 
-/** 单份内容上传的上限，与服务端单文件请求体上限一致（ADR 0018）；包里有更大的条目时回退为整包上传。 */
+/**
+ * 单份内容上传的上限，与服务端单文件请求体上限一致（ADR 0018）；包里有更大的条目时回退为整包上传。
+ * 服务端 server/src/lib.rs 的 `MAX_BODY_BYTES` 是它的跨语言副本，改一处要同改另一处。
+ */
 export const MAX_CONTENT_BYTES = 64 * 1024 * 1024;
 
 /** 用户数据根里某个合并单元的现状（去重上传前问服务端）。读不出的按冲突处理，与合并时「读不了视为不同」一致。 */

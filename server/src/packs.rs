@@ -349,7 +349,7 @@ async fn receive_body(body: Body, out: &mut tokio::fs::File, rules: Receive<'_>)
 const UPLOAD_TIMEOUT_MESSAGE: &str = "上传中断：超过 60 秒没有收到数据，请检查网络后重试";
 
 fn too_large() -> Response {
-    error(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large", "单份内容超过 64 MB 上限")
+    error(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large", &format!("单份内容超过 {} 上限", crate::max_body_label()))
 }
 
 pub async fn upload(State(state): State<AppState>, user: User, Query(q): Query<UploadQuery>, headers: axum::http::HeaderMap, body: Body) -> Response {
