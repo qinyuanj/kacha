@@ -1,5 +1,6 @@
 // Web 壳层端口：UI 只认这些接口，同源 HTTP 与浏览器能力都在 ipc.ts 中实现。
 import type { MergeReport, MergeUnit, PackDuplicates, PackEntryFact, PackExportSpec, PackIo } from "../core/boardPack";
+import type { SizeLines } from "../core/boardSize";
 import type { DirEntry } from "../core/relocate";
 
 export interface BoardTexts {
@@ -23,6 +24,21 @@ export interface ImageInfo {
   has_alpha: boolean;
 }
 
+/** 画板列表的一行（#87）：path 含用户数据根；bytes 为画板体量，画板读不懂时为 null。 */
+export interface BoardListEntry {
+  name: string;
+  path: string;
+  archived: boolean;
+  bytes: number | null;
+}
+
+/** 服务端画板列表：画板、画板位已用 / 总数与体量提醒线（都来自服务端配置）。 */
+export interface BoardListing {
+  boards: BoardListEntry[];
+  slots: { used: number; total: number };
+  size_lines: SizeLines;
+}
+
 export interface Ipc {
   readBoard(path: string): Promise<BoardTexts>;
   writeBoard(path: string, text: string, options?: BoardWriteOptions): Promise<void>;
@@ -30,6 +46,8 @@ export interface Ipc {
   /** 删除画板：主文件与 .bak 移入回收区（只有管理员能恢复）；带版本时内容已变 409。 */
   deleteBoard(path: string, version?: string): Promise<void>;
   listBoardNames(dir: string): Promise<string[]>;
+  /** 画板列表（含体量与画板位），由服务端拼好。 */
+  listBoards(): Promise<BoardListing>;
   readUiState(): Promise<string | null>;
   writeUiState(text: string): Promise<void>;
   readCapabilityOverride(): Promise<string | null>;

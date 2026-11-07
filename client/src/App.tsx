@@ -4,16 +4,18 @@ import { type Board } from "./core/board";
 import { BUILTIN_TABLE, effectiveTable, type CapabilityTable } from "./core/capabilities";
 import type { BoardChange } from "./core/edit";
 import { redoLabel, undoLabel } from "./core/history";
-import { basename, boardsDir } from "./core/paths";
+import { basename } from "./core/paths";
 import type { RegenerateRequest, Runner, RunTarget } from "./core/runner";
 import { copiesByNode, regenerateDispatch, runDispatch, runScope, buildConfirmItems, collectRunFacts, type ConfirmItem } from "./core/submission";
 import { parseUiState, serializeUiState, type UiState } from "./core/uiState";
+import { sizeNotice, type SizeTier } from "./core/boardSize";
+import { useActiveBoardSize } from "./ui/useBoardSize";
 import { shouldShowUpdateNotice } from "./core/changelog";
 import { ChangelogDialog } from "./ui/ChangelogDialog";
 import { imageProbe } from "./shell/adapters";
 import { copyTextToClipboard } from "./shell/clipboard";
 import { browser, ipc, transfer, userRoot } from "./shell/ipc";
-import { BACKUP_HINT_TEXT } from "./ui/boardText";
+import { BACKUP_HINT_TEXT, sizeNoticeText } from "./ui/boardText";
 import { BoardPackDialog } from "./ui/BoardPackDialog";
 import { BoardListDialog } from "./ui/BoardListDialog";
 import { BoardToolbar } from "./ui/BoardToolbar";
@@ -34,6 +36,8 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [lastSeenVersion, setLastSeenVersion] = useState<string | undefined>();
+  /** 各画板越线提示已提醒到的档位，随界面状态保存（跨浏览器生效）。 */
+  const [sizeNotices, setSizeNotices] = useState<Record<string, SizeTier>>({});
   const [boardListOpen, setBoardListOpen] = useState(false);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
   const [packMenu, setPackMenu] = useState<{ x: number; y: number } | null>(null);
@@ -97,6 +101,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
         let uiReadFailed = false;
         initialUi.current = parseUiState(await ipc.readUiState().catch(() => ((uiReadFailed = true), null)));
         setLastSeenVersion(initialUi.current.last_seen_version);
+        setSizeNotices(initialUi.current.size_notices ?? {});
         uiReadFailedRef.current = uiReadFailed;
         setMetadataReady(true);
       } catch (e) {
@@ -294,23 +299,33 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const writeUi = useCallback(() => {
     const { sessions: list, activeKey: key } = boards.snapshot();
     const active = list.find((s) => s.key === key);
-    const text = serializeUiState({ open_boards: list.map((s) => s.path), active_board: active?.path ?? null, last_seen_version: lastSeenVersion });
+    const text = serializeUiState({ open_boards: list.map((s) => s.path), active_board: active?.path ?? null, last_seen_version: lastSeenVersion, size_notices: sizeNotices });
     const write = uiWriteChain.current.then(() => ipc.writeUiState(text));
     uiWriteChain.current = write.catch(() => undefined);
     return write;
-  }, [boards, lastSeenVersion]);
+  }, [boards, lastSeenVersion, sizeNotices]);
   const persistUi = useCallback(() => writeUi().catch(() => undefined), [writeUi]);
   const persistRef = useRef(persistUi);
   persistRef.current = persistUi;
 
-  const uiSignature = JSON.stringify([sessions.map((s) => s.path), sessions.find((s) => s.key === activeKey)?.path, lastSeenVersion]);
+  const uiSignature = JSON.stringify([sessions.map((s) => s.path), sessions.find((s) => s.key === activeKey)?.path, lastSeenVersion, sizeNotices]);
   useEffect(() => {
     if (ready) void persistRef.current();
   }, [ready, uiSignature]);
 
+  // 当前画板越线提示（#87）：只提醒，不碰生成。体量回落时校正已提醒档位（清除回落那条线的记录）。
+  const active = sessions.find((s) => s.key === activeKey);
+  const okActive = active?.status === "ok" ? active : null;
+  const activeSize = useActiveBoardSize(okActive?.path ?? null, okActive?.version ?? null);
+  const notice = activeSize ? sizeNotice(activeSize.tier, sizeNotices[activeSize.path]) : null;
+  useEffect(() => {
+    if (!activeSize || !notice || notice.notified === sizeNotices[activeSize.path]) return;
+    const { path } = activeSize;
+    setSizeNotices(({ [path]: _dropped, ...rest }) => (notice.notified ? { ...rest, [path]: notice.notified } : rest));
+  }, [activeSize, notice, sizeNotices]);
+
   if (fatal) return <div className="fatal">启动失败：{fatal}</div>;
 
-  const active = sessions.find((s) => s.key === activeKey);
   const failing = sessions.filter((s) => s.status === "ok" && s.saveError);
 
   const canvasReady = active?.status === "ok" && !!userRoot;
@@ -341,7 +356,6 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       )}
       {boardListOpen && userRoot && (
         <BoardListDialog
-          dir={boardsDir(userRoot)}
           openPaths={sessions.map((s) => s.path)}
           onOpen={(path) => {
             void openPath(path, true).then((opened) => {
@@ -439,6 +453,23 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
         <div className="bar bar-warn">
           <span>{settings.fileProblem}</span>
           <button onClick={() => setSettingsOpen(true)}>打开高级设置</button>
+        </div>
+      )}
+      {activeSize && notice?.show && (
+        <div className={`bar ${notice.show === "alert" ? "bar-alert" : "bar-warn"} size-notice`} role="status" data-size-tier={notice.show}>
+          <span>{sizeNoticeText(activeSize.bytes)}</span>
+          {/* 「整理」按钮由 #92 整理模式接上。 */}
+          <button
+            className="link"
+            aria-label="关闭体量提示"
+            onClick={() => {
+              const { path } = activeSize;
+              const tier = notice.show!;
+              setSizeNotices((m) => ({ ...m, [path]: tier }));
+            }}
+          >
+            关闭
+          </button>
         </div>
       )}
       {active?.status === "ok" && active.notice && (

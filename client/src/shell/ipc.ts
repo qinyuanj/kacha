@@ -8,7 +8,7 @@ import type { WorkerMessage, WorkerRequest } from "./packHash.worker";
 import { ApiError } from "./apiError";
 import { API_KEY_STORAGE } from "./apiKeyStorage";
 import { UPLOAD_FAILURES } from "./uploadText";
-import type { BrowserPort, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
+import type { BoardListing, BrowserPort, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
 import { errorText } from "../core/errors";
 
 export type { ImageInfo } from "./types";
@@ -237,6 +237,11 @@ export const ipc: Ipc = {
     await api(`/api/boards?${params}`, { method: "DELETE" });
   },
   listBoardNames: (dir) => api(`/api/boards/names?dir=${encodeURIComponent(stripRoot(dir))}`),
+  listBoards: async () => {
+    const listing = await api<BoardListing>("/api/boards/list");
+    // 服务端给相对用户数据根的路径；core 与标签页用虚拟根绝对路径。
+    return { ...listing, boards: listing.boards.map((b) => ({ ...b, path: `${VIRTUAL_ROOT}/${b.path}` })) };
+  },
   readUiState: () => apiText("/api/ui-state"),
   writeUiState: async (text) => void (await api("/api/ui-state", textBody(text))),
   readCapabilityOverride: () => apiText("/api/capability-override"),
