@@ -168,7 +168,7 @@ pub async fn export(State(state): State<AppState>, user: User, Query(q): Query<O
     let root = state.user_root(&user.fingerprint);
     // 预检在流开始前完成：路径越界 / 条目重复还能回 4xx；打包中途的失败只能中止流（前端按下载失败处理）。
     let check_root = root.clone();
-    let check_spec = serde_json::from_slice::<ExportSpec>(&body).unwrap();
+    let check_spec = spec.clone();
     match tokio::task::spawn_blocking(move || board_pack::validate_export(&check_root, &check_spec)).await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => return error(StatusCode::UNPROCESSABLE_ENTITY, "export_failed", &e.to_string()),

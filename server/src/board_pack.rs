@@ -34,7 +34,7 @@ pub struct PackText {
     pub text: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct PackFile {
     /// 相对用户数据根的路径（Web 版接口不收绝对路径；绝对路径 / 越界 / 符号链接越界一律拒绝）。
     pub source: String,
@@ -42,7 +42,7 @@ pub struct PackFile {
     pub entry: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ExportSpec {
     /// 直接写入的文本条目（清单、画板）；算字节事实时不需要。
     #[serde(default)]
