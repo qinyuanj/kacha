@@ -70,7 +70,23 @@ impl Mode {
     }
 }
 
-/// 启动并服务到 `shutdown` 完成，返回进程退出码：0 正常退出（含排空超时），1 数据根或监听失败，2 监听地址无效。
+/// 进程退出码。0：正常退出（含排空超时）。
+pub const EXIT_OK: i32 = 0;
+/// 数据根不可用（不能创建或写不了日志）、监听失败或服务异常退出；服务模式据此触发失败恢复。
+pub const EXIT_FAILED: i32 = 1;
+/// 监听地址无效（配置错误，重启也不会好）。
+pub const EXIT_BAD_LISTEN: i32 = 2;
+
+/// 在新建的多线程运行时上跑完 `future`（通常是 `start`），返回它给出的退出码。
+/// 排空超时后被放弃的请求可能还占着阻塞线程：运行时最多再等 2 秒就结束。
+pub fn run_blocking(future: impl Future<Output = i32>) -> std::io::Result<i32> {
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let code = runtime.block_on(future);
+    runtime.shutdown_timeout(Duration::from_secs(2));
+    Ok(code)
+}
+
+/// 启动并服务到 `shutdown` 完成，返回进程退出码（见 `EXIT_*`）。
 /// 开始监听后调用 `on_listening`（服务模式据此向 SCM 报告 RUNNING）。
 pub async fn start(
     options: Options,
@@ -83,16 +99,21 @@ pub async fn start(
     let log = ServerLog::new(data_root.clone());
     let fail = |code: i32, message: String| {
         eprintln!("{message}");
-        log.log(&format!("启动失败：{message}"));
+        let _ = log.log(&format!("启动失败：{message}"));
         code
     };
 
     if let Err(e) = std::fs::create_dir_all(&data_root) {
-        return fail(1, format!("创建数据根失败：{e}"));
+        return fail(EXIT_FAILED, format!("创建数据根失败：{e}"));
+    }
+    // 写入探测：数据根不可写（如服务账户缺权限）时立即启动失败，而不是带病运行到第一次保存才出错。
+    if let Err(e) = log.log(&format!("kacha-server {} 正在启动（{}），数据根 {}", crate::VERSION, mode.label(), data_root.display())) {
+        eprintln!("数据根不可写（{}）：{e}", log.path().display());
+        return EXIT_FAILED;
     }
     let addr: SocketAddr = match options.listen.parse() {
         Ok(addr) => addr,
-        Err(_) => return fail(2, format!("监听地址无效：{}", options.listen)),
+        Err(_) => return fail(EXIT_BAD_LISTEN, format!("监听地址无效：{}", options.listen)),
     };
     let state = AppState::new(
         Config {
@@ -107,11 +128,11 @@ pub async fn start(
     );
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(listener) => listener,
-        Err(e) => return fail(1, format!("监听 {addr} 失败：{e}")),
+        Err(e) => return fail(EXIT_FAILED, format!("监听 {addr} 失败：{e}")),
     };
     let local = listener.local_addr().unwrap_or(addr);
     println!("kacha-server {} 监听 http://{}，数据根 {}", crate::VERSION, local, data_root.display());
-    log.log(&format!("kacha-server {} 启动（{}），监听 http://{}，数据根 {}，进程 {}", crate::VERSION, mode.label(), local, data_root.display(), std::process::id()));
+    let _ = log.log(&format!("kacha-server {} 启动（{}），监听 http://{}，数据根 {}，进程 {}", crate::VERSION, mode.label(), local, data_root.display(), std::process::id()));
     // 每日一次记录各用户数据根大小（不含密钥与提示词全文）。
     crate::usage_log::spawn_daily(Arc::new(crate::usage_log::UsageLogger::new(data_root.clone(), Arc::new(SystemTime::now))));
     on_listening(local);
@@ -122,13 +143,13 @@ pub async fn start(
                 Drained::Completed => "正常退出".to_string(),
                 Drained::TimedOut { abandoned } => format!("排空超时退出（放弃 {abandoned} 个请求）"),
             };
-            log.log(&format!("kacha-server {how}"));
-            0
+            let _ = log.log(&format!("kacha-server {how}"));
+            EXIT_OK
         }
         Err(e) => {
             eprintln!("服务端退出：{e}");
-            log.log(&format!("kacha-server 异常退出：{e}"));
-            1
+            let _ = log.log(&format!("kacha-server 异常退出：{e}"));
+            EXIT_FAILED
         }
     }
 }

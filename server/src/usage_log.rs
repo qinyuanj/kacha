@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use crate::Clock;
 
 /// 服务端日志目录：与用户目录并列，避免被用户清理 / 画板包导出当成内容。
-const SERVER_LOG_DIR: &str = "server-log";
+pub const SERVER_LOG_DIR: &str = "server-log";
 
 /// 目录大小（递归，跟随普通文件与目录；读不了的条目跳过）。
 pub fn dir_size(path: &Path) -> u64 {

@@ -50,7 +50,7 @@ pub fn segment_paths(dir: &Path) -> Vec<PathBuf> {
     (0..).map(|i| segment_path(dir, i)).take_while(|p| p.is_file()).collect()
 }
 
-fn file_size(path: &Path) -> u64 {
+pub(crate) fn file_size(path: &Path) -> u64 {
     fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 

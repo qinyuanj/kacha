@@ -13,8 +13,18 @@ fn options(listen: &str, data_root: &std::path::Path) -> Options {
     Options::parse(&args)
 }
 
+/// 生命周期日志的约定位置：数据根下的服务端日志目录（与 users/ 并列）。
 fn server_log(data_root: &std::path::Path) -> String {
-    std::fs::read_to_string(data_root.join("server.log")).unwrap_or_default()
+    std::fs::read_to_string(data_root.join("server-log").join("server.log")).unwrap_or_default()
+}
+
+#[tokio::test]
+async fn unwritable_server_log_is_a_start_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    // 日志目录位置被一个普通文件占住：写不了日志，服务模式就没有任何现场记录，必须启动失败。
+    std::fs::write(dir.path().join("server-log"), b"not a dir").unwrap();
+    let code = start(options("127.0.0.1:0", dir.path()), Mode::Service, Duration::from_secs(60), |_| panic!("不应开始监听"), std::future::pending()).await;
+    assert_eq!(code, 1);
 }
 
 #[tokio::test]

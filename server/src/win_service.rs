@@ -38,7 +38,7 @@ pub fn run(args: &[String]) -> i32 {
         Err(e) => {
             eprintln!("无法连接 Windows 服务控制管理器：{e}");
             eprintln!("service 子命令只供 Windows 服务启动（sc.exe create ... binPath= \"kacha-server.exe service ...\"）；在终端前台运行请去掉 service。");
-            1
+            launch::EXIT_FAILED
         }
     }
 }
@@ -48,8 +48,8 @@ fn service_main(arguments: Vec<OsString>) {
     let options = OPTIONS.get().cloned().unwrap_or_else(|| Options::parse(&[]));
     let log = ServerLog::new(options.data_root.clone());
     if let Err(e) = serve_as(&name, options) {
-        log.log(&format!("服务控制处理器注册失败（服务名 {name}）：{e}"));
-        EXIT_CODE.store(1, Ordering::SeqCst);
+        let _ = log.log(&format!("服务控制处理器注册失败（服务名 {name}）：{e}"));
+        EXIT_CODE.store(launch::EXIT_FAILED, Ordering::SeqCst);
     }
 }
 
@@ -67,17 +67,9 @@ fn serve_as(name: &str, options: Options) -> windows_service::Result<()> {
     let status = Reporter { handle, checkpoint: Arc::new(AtomicU32::new(0)) };
     status.pending(ServiceState::StartPending, START_PENDING_HINT);
 
-    let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
-        Ok(rt) => rt,
-        Err(e) => {
-            ServerLog::new(options.data_root.clone()).log(&format!("启动失败：无法创建异步运行时：{e}"));
-            status.stopped(1);
-            EXIT_CODE.store(1, Ordering::SeqCst);
-            return Ok(());
-        }
-    };
+    let log = ServerLog::new(options.data_root.clone());
     let ticker = status.clone();
-    let code = runtime.block_on(launch::start(options, Mode::Service, DRAIN_LIMIT, |_| status.running(), async move {
+    let started = launch::start(options, Mode::Service, DRAIN_LIMIT, |_| status.running(), async move {
         stop.notified().await;
         // 排空可能持续到上限：期间不断递增 checkpoint，避免被 SCM 判定为无响应。
         tokio::spawn(async move {
@@ -86,9 +78,11 @@ fn serve_as(name: &str, options: Options) -> windows_service::Result<()> {
                 tokio::time::sleep(STOP_PENDING_TICK).await;
             }
         });
-    }));
-    // 被放弃的请求可能还占着阻塞线程：最多再等一小会儿就结束运行时。
-    runtime.shutdown_timeout(Duration::from_secs(2));
+    });
+    let code = launch::run_blocking(started).unwrap_or_else(|e| {
+        let _ = log.log(&format!("启动失败：无法创建异步运行时：{e}"));
+        launch::EXIT_FAILED
+    });
     status.stopped(code);
     EXIT_CODE.store(code, Ordering::SeqCst);
     Ok(())
@@ -124,7 +118,7 @@ impl Reporter {
     }
 
     fn stopped(&self, code: i32) {
-        let exit_code = if code == 0 { ServiceExitCode::Win32(0) } else { ServiceExitCode::ServiceSpecific(code as u32) };
+        let exit_code = if code == launch::EXIT_OK { ServiceExitCode::Win32(0) } else { ServiceExitCode::ServiceSpecific(code as u32) };
         self.set(ServiceState::Stopped, ServiceControlAccept::empty(), exit_code, 0, Duration::ZERO);
     }
 }

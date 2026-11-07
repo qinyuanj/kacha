@@ -3,8 +3,6 @@
 //! 配置走命令行参数与环境变量（KACHA_*）；listen / 数据根 / 网关地址 / 静态目录可配置。
 //! 不带子命令时在前台运行，Ctrl+C 优雅关停；`service` 子命令供 Windows 服务控制管理器启动（#70）。
 
-use std::time::Duration;
-
 use kacha_server::launch::{self, Mode, Options};
 use kacha_server::serve::DRAIN_LIMIT;
 
@@ -24,16 +22,16 @@ fn main() {
         return;
     }
 
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("创建异步运行时失败");
     let ctrl_c = async {
         if tokio::signal::ctrl_c().await.is_err() {
             // 无法监听 Ctrl+C 时不能当作收到关停信号。
             std::future::pending::<()>().await;
         }
     };
-    let code = runtime.block_on(launch::start(Options::parse(&args), Mode::Foreground, DRAIN_LIMIT, |_| {}, ctrl_c));
-    // 排空超时后被放弃的请求可能还占着阻塞线程：最多再等一小会儿。
-    runtime.shutdown_timeout(Duration::from_secs(2));
+    let code = launch::run_blocking(launch::start(Options::parse(&args), Mode::Foreground, DRAIN_LIMIT, |_| {}, ctrl_c)).unwrap_or_else(|e| {
+        eprintln!("创建异步运行时失败：{e}");
+        launch::EXIT_FAILED
+    });
     std::process::exit(code);
 }
 
@@ -49,5 +47,5 @@ fn service(args: &[String]) -> i32 {
 #[cfg(not(windows))]
 fn service(_args: &[String]) -> i32 {
     eprintln!("service 子命令只在 Windows 上可用；其他系统请直接前台运行或交给 systemd 等进程管理器。");
-    2
+    launch::EXIT_FAILED
 }

@@ -97,3 +97,15 @@ async fn idle_server_stops_promptly() {
     let drained = tokio::time::timeout(Duration::from_secs(5), s.server).await.expect("空闲时应立即退出").unwrap().unwrap();
     assert_eq!(drained, Drained::Completed);
 }
+
+/// 空闲时服务器与关停信号同时就绪：关停与排空结果也必须进日志（反复多次，排除轮询顺序的偶然）。
+#[tokio::test]
+async fn idle_shutdown_is_always_logged() {
+    for _ in 0..30 {
+        let s = start(Duration::from_secs(60)).await;
+        s.stop.send(()).unwrap();
+        s.server.await.unwrap().unwrap();
+        let log = std::fs::read_to_string(ServerLog::new(s._dir.path().to_path_buf()).path()).unwrap_or_default();
+        assert!(log.contains("收到关停信号") && log.contains("排空完成"), "缺少关停记录：{log:?}");
+    }
+}

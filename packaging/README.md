@@ -46,7 +46,7 @@ release/kacha-web/
 
 ## Windows 服务
 
-服务端自带原生 Windows 服务模式：`kacha-server.exe service <与前台相同的参数>`。该模式对接服务控制管理器（SCM），启动时报告运行状态；收到停止（或关机）请求后，立即停止接受新连接，等进行中的请求处理完再退出，排空最多 60 秒。超过 60 秒就放弃剩余请求退出，写路径都是临时文件加原子改名，被放弃的请求只会留下临时文件。不带 `service` 时仍是前台运行，Ctrl+C 走同一条优雅关停路径。`service` 子命令只供 SCM 启动，在终端直接运行会报错退出。
+服务端自带原生 Windows 服务模式：`kacha-server.exe service <与前台相同的参数>`。该模式对接服务控制管理器（SCM），启动时报告运行状态；收到停止（或关机）请求后，立即停止接受新连接，等进行中的请求处理完再退出，排空最多 60 秒。超过 60 秒就放弃剩余请求退出。单个文件都经临时文件加原子改名落位，被放弃的请求不会留下半截文件，只会留下临时文件；画板改名或删除恰好在两步之间被结束时，可能多出一个孤立的 `.bak`，可手动处理。不带 `service` 时仍是前台运行，Ctrl+C 走同一条优雅关停路径。`service` 子命令只供 SCM 启动，在终端直接运行会报错退出。
 
 以下命令需管理员 PowerShell，服务名统一为 `kacha`。按实际路径与域名调整；`--result-hosts` 只填需要追加的主机。
 
@@ -66,10 +66,11 @@ sc.exe query kacha
 - `sc.exe` 的 `参数= 值` 等号后必须有空格。`obj= "NT AUTHORITY\NetworkService"` 内置账户无需密码；不写 `obj=` 则以 LocalSystem 运行。
 - `depend= new-api` 让服务在网关服务之后启动。
 - `start= auto` 配置开机自启。`failure` 配置三次失败均在 5 秒后重启。`failureflag 1` 让服务以非零退出码报告停止时也触发恢复，例如数据根不可写、端口被占用。
+- `$bin` 示例按 PowerShell 7 编写。Windows PowerShell 5.1 传给外部程序时会剥掉内嵌的双引号，路径含空格就会出错；这种情况请改用 PowerShell 7，或改用不含空格的路径。
 - 开放防火墙 3004 端口时只限可信内网。
 - 升级前执行 `sc.exe stop kacha`，等 `sc.exe query kacha` 显示 `STOPPED`；最长约 60 秒排空。替换程序和 `static/` 后再启动。
 
-**日志**：服务模式没有控制台。启动（版本、监听地址、数据根、运行模式）、启动失败原因、收到关停信号、排空结果和退出都写入 `<数据根>\server.log`；超过 1 MiB 时轮转为 `server.1.log`，总量不超过 2 MiB。前台运行也写这份日志，同时保留控制台输出。它与前端事件日志 `diagnostics.log` 是两份文件。服务起不来时，先看 `server.log` 和 `sc.exe query kacha` 的 `SERVICE_EXIT_CODE`：1 表示数据根或监听失败，2 表示监听地址无效。
+**日志**：服务模式没有控制台。启动（版本、监听地址、数据根、运行模式）、启动失败原因、收到关停信号、排空结果和退出都写入 `<数据根>\server-log\server.log`；超过 1 MiB 时轮转为 `server.1.log`，总量不超过 2 MiB。前台运行也写这份日志，同时保留控制台输出。同目录下的 `diagnostics.log` 是另一份日志（每日用量等事件），不记进程生命周期。启动时会先写一行日志，探测数据根是否可写；写不进去就直接启动失败。服务起不来时，先看 `server.log` 和 `sc.exe query kacha` 的 `SERVICE_EXIT_CODE`：1 表示数据根不可用（不能创建或不可写）、监听失败或异常退出，2 表示监听地址无效。数据根不可写时 `server.log` 也写不进去，只能看退出码；先检查服务账户的权限。
 
 ### 从 NSSM 服务迁移
 
@@ -80,8 +81,8 @@ lzxsvn 目前由 NSSM 服务 `kacha` 托管控制台程序，停服时硬终止�
 3. 执行 `nssm remove kacha confirm` 删除 NSSM 服务，再用 `sc.exe query kacha` 确认服务已不存在。
 4. 用上面的 `sc.exe create` 以原生方式重建服务，参数保持不变（`--listen`、`--data-root`、`--gateway-url`、`--static-dir`、`--result-hosts`、`--min-free-gb`），只在程序路径后加 `service`。
 5. 核对数据目录权限：NetworkService 对 `data\` 有修改权限。
-6. 执行 `sc.exe start kacha`，确认 `GET /api/config` 版本正确，`data\server.log` 有本次启动记录。
-7. 之后看 `data\server.log`；NSSM 的 `C:\Users\Intel\dev\logs\kacha\out.log` / `err.log` 不再更新，可归档。
+6. 执行 `sc.exe start kacha`，确认 `GET /api/config` 版本正确，`data\server-log\server.log` 有本次启动记录。
+7. 之后看 `data\server-log\server.log`；NSSM 的 `C:\Users\Intel\dev\logs\kacha\out.log` / `err.log` 不再更新，可归档。
 
 ### 待人工实测（lzxsvn）
 
