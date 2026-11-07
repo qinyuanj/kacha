@@ -3,8 +3,8 @@
 // 换模型绝不自动删线或改设置，只报告原因。
 import { runCopies, type Board, type TaskNode } from "./board";
 import { findModel, isRetiredModel, isSupported, LITE_RETIRED_HINT, type CapabilityTable, type ModelCapability } from "./capabilities";
-import { isRequestShapeImplemented } from "./gateway";
-import { imageEdges, imagePortSlots, imageSources, promptText, workflowOf } from "./graph";
+import { isLayerSize, isRequestShapeImplemented } from "./gateway";
+import { imageEdges, imageKey, imagePortSlots, imageSources, promptText, workflowOf } from "./graph";
 import { MAX_REGIONS } from "./overlay";
 import { effectiveRegionRender, expandImageEdges } from "./region";
 import { planSend, promptLanguage, referenceProblemsOf, type ReferenceProblems, type SendPlan } from "./sendPlan";
@@ -100,7 +100,7 @@ export function taskView(board: Board, table: CapabilityTable, taskId: string, f
   const reasons = [
     ...(flashLayers ? [] : promptReasons(board, taskId)),
     ...(flashLayers && imagePortSlots(board, table, taskId).length !== 1 ? [reason("layerNeedsOneImage", "图层拆分需要恰好一张 PNG/JPEG 参考图，不支持区域派生图")] : []),
-    ...(flashLayers && !["1K", "1.5K", "2K", "auto"].includes(task.layer_size ?? "auto") ? [reason("sizeUnsupported", "图层尺寸只支持 1K / 1.5K / 2K / auto")] : []),
+    ...(flashLayers && !isLayerSize(task.layer_size ?? "auto") ? [reason("sizeUnsupported", "图层尺寸只支持 1K / 1.5K / 2K / auto")] : []),
     ...(isRetiredModel(task.model) ? [reason("modelRetired", LITE_RETIRED_HINT)] : model ? [...availabilityReasons(table, facts.discovery, model), ...modelReasons(board, model, task)] : [reason("modelUnknown", `模型 ${task.model} 不在能力表内`)]),
     ...(task.layer_decomposition && layer ? [reason("layerUnsupported", layer)] : []),
     ...(task.transparent_background && transparent ? [reason(transparent.kind, transparent.text)] : []),
@@ -108,7 +108,7 @@ export function taskView(board: Board, table: CapabilityTable, taskId: string, f
     ...imageSources(board, taskId, "").flatMap((src, i) => {
       if (src.absPath === null) return [reason("sourceLayerInvalid", `图${i + 1} 来源图层无效：${src.label}`)];
       // 缺图按来源分键：图层线只看自己那层，底图线只看底图，互不株连。
-      const key = src.sourceLayer === null ? src.nodeId : `${src.nodeId}:layer:${src.sourceLayer}`;
+      const key = imageKey(src.nodeId, src.sourceLayer);
       return facts.missingNodes.has(key) ? [reason("imageMissing", `图${i + 1} 图片缺失：${src.label}`)] : [];
     }),
   ];
@@ -155,7 +155,7 @@ function transparentBlock(board: Board, model: ModelCapability | undefined, task
   const task = findTask(board, taskId)!;
   if (model.request_shape === "seedream_flash_images_generations" && task.output_options?.output_format === "jpeg") return { kind: "transparentNeedsPng", text: "透明背景输出必须为 PNG", hint: "输出必须为 PNG" };
   const edge = edges[0];
-  const alpha = facts.alphaByNode.get(edge.source_layer === null ? edge.from[0] : `${edge.from[0]}:layer:${edge.source_layer}`);
+  const alpha = facts.alphaByNode.get(imageKey(edge.from[0], edge.source_layer));
   return alpha === true ? null : { kind: "transparentNoAlpha", text: alpha === false ? "该图不带透明通道" : "参考图透明通道尚未确认", hint: alpha === false ? "该图不带透明通道" : "透明通道尚未确认" };
 }
 

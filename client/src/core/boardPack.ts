@@ -8,6 +8,7 @@ import { BOARDS_DIR_NAME, basename, resolveFromRoot, toRootRelative } from "./pa
 import { TASK_RECORD_FILE, taskDirOfRelPath, taskDirOfTaskId } from "./taskDir";
 import { sha256Hex } from "./sha256";
 import { blobSource, readEntryBytes, readZipIndex, type ZipEntry, type ZipSource } from "./zipIndex";
+import { errorText } from "./errors";
 
 /** 本机能导入、也是导出写的包格式版本。v2 = 导出时按内容去重，被省略的路径记在清单的 duplicates 里（ADR 0013 补记）。 */
 export const PACK_FORMAT_VERSION = 2;
@@ -411,8 +412,6 @@ export interface PackIo {
 }
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; result: "cancelled" | "failed"; error: string };
-
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** 先复位取消标记，复位之后才进入进度阶段（调用方在此弹进度），再跑命令：进度弹出后立刻点的取消才不会丢。 */
 export async function runCancellable<T>(io: Pick<PackIo, "cancel">, onStage: (stage: "progress") => void, run: () => Promise<T>): Promise<Outcome<T>> {

@@ -3,6 +3,7 @@ import type { Board, PortRef } from "../core/board";
 import type { CapabilityTable, ModelCapability } from "../core/capabilities";
 import type { BoardAction, MenuTarget } from "../core/contextMenu";
 import type { BoardChange } from "../core/edit";
+import { imageKey, layerRelPath } from "../core/graph";
 import { resolveFromRoot } from "../core/paths";
 import type { NodeRunState } from "../core/runner";
 import { createInterruptedLog, interruptedCandidates, storedStatuses } from "../core/submission";
@@ -122,15 +123,14 @@ function cachedImageInfo(absPath: string): Promise<ImageInfo | null> {
   return pending;
 }
 
-/** 图片文件读不到的参考图 / 结果节点 id；读完之前为空（不闪缺图占位）。结果节点的图层文件按 `节点id:layer:序号` 分键，与底图互不株连。 */
+/** 图片文件读不到的参考图 / 结果节点 id；读完之前为空（不闪缺图占位）。结果节点的图层文件按 imageKey 分键，与底图互不株连。 */
 export function useMissingImages(board: Board, userRoot: string): ReadonlySet<string> {
   const [missing, setMissing] = useState<ReadonlySet<string>>(new Set());
   const images = board.nodes.flatMap((n): (readonly [string, string])[] => {
     if (n.type !== "reference" && n.type !== "result") return [];
     const main = [[n.id, resolveFromRoot(userRoot, n.path)] as const];
     if (n.type !== "result") return main;
-    const dir = n.path.slice(0, n.path.length - n.file.length);
-    return [...main, ...(n.record.layers ?? []).map((l, i) => [`${n.id}:layer:${i + 1}`, resolveFromRoot(userRoot, `${dir}${l.file}`)] as const)];
+    return [...main, ...(n.record.layers ?? []).map((l, i) => [imageKey(n.id, i + 1), resolveFromRoot(userRoot, layerRelPath(n, l.file))] as const)];
   });
   const signature = JSON.stringify(images);
   useEffect(() => {

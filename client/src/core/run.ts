@@ -147,7 +147,7 @@ export async function prepareJob(
   const { board, table, userRoot, taskNodeId } = args;
   const task = board.nodes.find((n) => n.id === taskNodeId);
   if (task?.type === "task" && isRetiredModel(task.model)) throw new LocalError(LITE_RETIRED_HINT);
-  const snapshot = snapshotOf(board, taskNodeId);
+  const snapshot = snapshotOf(board, table, taskNodeId);
   const model = task?.type === "task" ? findModel(table, task.model) : undefined;
   if (task?.type !== "task" || !snapshot || !model) throw new LocalError("任务节点或模型不存在");
   const flashLayers = model.request_shape === "seedream_flash_images_generations" && task.layer_decomposition;

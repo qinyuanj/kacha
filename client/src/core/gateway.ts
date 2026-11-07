@@ -5,7 +5,13 @@
 import { withinPixelRange } from "./size";
 import { isSupported, type ModelCapability } from "./capabilities";
 
-export type LayerSize = "1K" | "1.5K" | "2K" | "auto";
+/** Flash 图层拆分的尺寸档，顺序即界面下拉顺序。 */
+export const LAYER_SIZES = ["auto", "1K", "1.5K", "2K"] as const;
+export type LayerSize = (typeof LAYER_SIZES)[number];
+
+export function isLayerSize(value: unknown): value is LayerSize {
+  return (LAYER_SIZES as readonly unknown[]).includes(value);
+}
 export interface LayerMetadata { z_index: number; bounding_box?: LayerBoundingBox | number[]; name?: string; description?: string }
 
 /** 图层定位：absolute 为底图像素坐标 [left,top,right,bottom]，normalized 为 0–1000（与提示坐标 0–999 互不相干）。 */
@@ -160,7 +166,7 @@ const buildFlashImagesGenerations: RequestShape["build"] = (input) => {
   if (input.references.length > 10) throw new GatewayError("config", "Flash 参考图最多 10 张");
   if (!input.layerDecomposition && !withinPixelRange({ min_total_pixels: 921600, max_total_pixels: 4624220, min_aspect_ratio: 1 / 16, max_aspect_ratio: 16 }, input.size.width, input.size.height)) throw new GatewayError("config", "Flash 生成尺寸超出范围");
   if (input.layerDecomposition && (input.references.length !== 1 || !["image/png", "image/jpeg"].includes(input.references[0].mediaType) || input.references[0].bytes.length > 30000000)) throw new GatewayError("config", "Flash 图层拆分需要一张 PNG/JPEG 参考图（不超过 30MB）");
-  if (input.layerDecomposition && !["1K", "1.5K", "2K", "auto"].includes(input.layerSize ?? "auto")) throw new GatewayError("config", "Flash 图层尺寸无效");
+  if (input.layerDecomposition && !isLayerSize(input.layerSize ?? "auto")) throw new GatewayError("config", "Flash 图层尺寸无效");
   const options = outputOptions(input.outputOptions);
   if (input.transparentBackground) {
     if (input.references.length !== 1) throw new GatewayError("config", "透明背景需要恰好一张实际参考图");

@@ -9,8 +9,10 @@ import {
   disconnect,
   forkPrompt,
   hasDownstreamRecords,
+  imageKey,
   imageRuleViolations,
   inputRuleModels,
+  layerRelPath,
   moveImagePort,
   taskPorts,
 } from "./graph";
@@ -300,6 +302,17 @@ describe("区域指示", () => {
   });
 });
 
+
+describe("图层路径与图层键", () => {
+  it("图层文件与结果文件同在任务目录下", () => {
+    expect(layerRelPath({ path: "2026-09-16/task-x/result.png", file: "result.png" }, "layers/02.jpg")).toBe("2026-09-16/task-x/layers/02.jpg");
+  });
+
+  it("底图的键是节点 id，图层的键带序号，两者互不相同", () => {
+    expect(imageKey("r", null)).toBe("r");
+    expect(imageKey("r", 2)).toBe("r:layer:2");
+  });
+});
 
 describe("图片节点按哪些模型给输入规则提示", () => {
   const none = { source: "none" } as const;
