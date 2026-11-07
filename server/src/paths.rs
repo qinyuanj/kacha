@@ -80,7 +80,7 @@ pub(crate) fn symlink_dir_for_test(target: &Path, link: &Path) -> bool {
         Ok(()) => true,
         // ERROR_PRIVILEGE_NOT_HELD：当前账户无权创建符号链接。
         Err(e) if cfg!(windows) && e.raw_os_error() == Some(1314) => {
-            eprintln!("跳过符号链接断言：无权创建符号链接（需开发者模式或管理员权限）：{e}");
+            eprintln!("跳过符号链接断言：无权创建符号链接（未开开发者模式且非管理员，或程序以 Low 完整性级别运行，见 packaging/README.md「验证」）：{e}");
             false
         }
         Err(e) => panic!("创建符号链接 {} 失败：{e}", link.display()),
