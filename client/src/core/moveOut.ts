@@ -53,8 +53,23 @@ export function moveOutSources(board: Board, stageId: string): string[] {
   return [...upstreams(board, new Set(moved)).values()].filter((u) => u.sha256 === null).map((u) => u.path);
 }
 
+/** 异步采集只针对同一份画板；期间有变更就中止，由用户重新发起。采集失败不产生任何画板。 */
+export async function prepareStageSplit(boardOf: () => Board | null, stageId: string, fileSha256: (path: string) => Promise<string>, newId: () => string): Promise<{ source: Board; board: Board } | null> {
+  const source = boardOf();
+  if (!source) return null;
+  const shas = new Map<string, string>();
+  for (const path of moveOutSources(source, stageId)) {
+    const sha = await fileSha256(path);
+    if (!sha) throw new Error(`无法采集图片身份：${path}`);
+    shas.set(path, sha);
+  }
+  if (boardOf() !== source) throw new Error("采集图片身份期间画板有了新的改动，请重试");
+  const board = splitStage(source, stageId, { sha256: (p) => shas.get(p) ?? null, newId });
+  return board ? { source, board } : null;
+}
+
 export interface SplitOptions {
-  /** moveOutSources 列出的文件的 sha256；读不到为 null（参考图照建，之后按缺图处理）。 */
+  /** moveOutSources 列出的文件的 sha256；缺失时拒绝拆分。 */
   sha256: (path: string) => string | null;
   newId: () => string;
 }
@@ -74,6 +89,8 @@ export function splitStage(board: Board, stageId: string, opts: SplitOptions): B
   const refIds = new Map<string, string>();
   for (const u of upstreams(board, moved).values()) {
     const src = u.node as Extract<BoardNode, { type: "reference" | "result" }>;
+    const sha256 = u.sha256 ?? opts.sha256(u.path);
+    if (!sha256) throw new Error(`无法采集图片身份：${u.path}`);
     const ref: ReferenceNode = {
       id: opts.newId(),
       type: "reference",
@@ -81,7 +98,7 @@ export function splitStage(board: Board, stageId: string, opts: SplitOptions): B
       size: src.size,
       extra: {},
       path: u.path,
-      sha256: u.sha256 ?? opts.sha256(u.path) ?? "",
+      sha256,
       display_name: src.type === "reference" ? src.display_name : basename(u.path),
       source_board: board.title,
     };

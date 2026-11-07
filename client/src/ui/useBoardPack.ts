@@ -14,7 +14,7 @@ interface PackBoards {
   flushAll: () => Promise<void>;
   getBoard: (key: string) => Board | null;
   boardFileName: (key: string) => string | null;
-  addImportedBoard: (board: Board) => Promise<string>;
+  openImportedBoard: (path: string) => Promise<void>;
 }
 
 /** 导入进度对话框里各步的说明（#62）。 */
@@ -83,7 +83,7 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
       if (!file) return;
       const result = await importPackIn(packIo, {
         file,
-        addBoard: (board) => boards.addImportedBoard(board),
+        openBoard: boards.openImportedBoard,
         // 画板位预检（#89）：读不到列表时不拦，服务端合并前仍会检查。
         slotsRefusal: async (adding) => {
           const slots = await ipc.listBoards().then((l) => l.slots, () => null);

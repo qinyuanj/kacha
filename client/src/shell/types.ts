@@ -70,7 +70,7 @@ export interface Ipc {
   boardPackEntries(pack: string): Promise<string[]>;
   boardPackReadTexts(pack: string, names: string[]): Promise<Record<string, string>>;
   /** boards = 导入后将新增的画板数，服务端据此在写文件前检查画板位（#89，409 board_slots_full）。 */
-  boardPackImport(pack: string, units: MergeUnit[], duplicates: PackDuplicates, boards: number): Promise<MergeReport>;
+  boardPackImport(pack: string, units: MergeUnit[], duplicates: PackDuplicates, boards: { title: string; text: string }[]): Promise<MergeReport & { boards: string[] }>;
   boardPackCancel(cancelled: boolean): Promise<void>;
   listDir(path: string): Promise<DirEntry[]>;
   fileSha256(path: string): Promise<string>;

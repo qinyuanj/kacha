@@ -1,12 +1,13 @@
 // 画板文件：用户数据根/画板/<标题>.ugcboard.json。
 // 任务目录是真源、画板只是视图；本模块只负责文件格式的读写、版本与未知字段保留、文件名派生。
+import policy from "../../../contracts/board-policy.json";
 import { isLayerSize, LAYER_SIZES_TEXT, type LayerSize, type OutputOptions } from "./gateway";
 import type { AutoRatio, SizeSpec } from "./size";
 
 /** 2：加入阶段（顶层 stages）与定稿（结果节点 final）。旧版本照常读入，写回一律写本版本。 */
 export const BOARD_FORMAT_VERSION = 2;
 export const BOARD_EXTENSION = ".ugcboard.json";
-export const DEFAULT_BOARD_TITLE = "未命名画板";
+export const DEFAULT_BOARD_TITLE = policy.default_board_title;
 
 type Json = Record<string, unknown>;
 type Vec2 = [number, number];

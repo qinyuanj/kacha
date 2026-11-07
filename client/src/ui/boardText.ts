@@ -1,4 +1,5 @@
-// 画板相关的用户可见提示文案：源码与 e2e 断言共用这一份，改文案只改这里。
+// 画板相关的用户可见提示文案；跨语言的值由共享契约定义。
+import policy from "../../../contracts/board-policy.json";
 
 /** 画板已不存在（另一页面删除或改名）。 */
 export const BOARD_MISSING_TEXT = "该画板已不存在，可能已在别处改名或删除";
@@ -31,13 +32,10 @@ export interface Slots {
   total: number;
 }
 
-const SLOTS_FULL_HEAD = "画板位满了";
+const SLOTS_FULL_HEAD = policy.slots_full_head;
 
-/**
- * 画板位满时新建 / 导入被拒的统一文案。服务端 board_list::ensure_board_slots 的 409 message 是同一句，
- * 改一处要同改另一处（前端在发请求前就按列表里的画板位自己判定，用这一份）。
- */
-export const boardSlotsFullText = ({ used, total }: Slots) => `${SLOTS_FULL_HEAD}（${used}/${total}），归档或删掉一块再新建。`;
+/** 上传前的预检与服务端拒绝共用契约文案。 */
+export const boardSlotsFullText = ({ used, total }: Slots) => policy.slots_full.replace("{head}", SLOTS_FULL_HEAD).replace("{used}", String(used)).replace("{total}", String(total));
 
 /** 服务端合并前按画板位拒绝时，导入报错原文就是统一文案（错误码在 runCancellable 里变成了文本）。 */
 export const isSlotsFullText = (text: string) => text.startsWith(SLOTS_FULL_HEAD);
@@ -62,7 +60,7 @@ export const ARCHIVE_TEXT = {
   /** 画板列表里归档画板一组的标题。 */
   group: "已归档",
   /** 在归档画板上试图编辑时的提示。 */
-  readOnly: "归档画板只读：取消归档或复制为新画板后再编辑。",
+  readOnly: policy.archived_read_only,
 } as const;
 
 /** 已超出画板位的老用户：现有画板照常编辑，列表顶部提示。 */

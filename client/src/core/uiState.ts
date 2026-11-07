@@ -38,6 +38,16 @@ export function parseUiState(text: string | null): UiState {
   }
 }
 
+/** 画板改名或搬到归档目录时，提示记录跟随同一块画板；复制不调用这个动作。 */
+export function moveSizeNotice(notices: Record<string, SizeTier>, from: string, to: string): Record<string, SizeTier> {
+  const norm = (p: string) => p.replace(/\\/g, "/").toLowerCase();
+  const key = Object.keys(notices).find((p) => norm(p) === norm(from));
+  if (key === undefined || from === to) return notices;
+  const next = { ...notices, [to]: notices[key] };
+  delete next[key];
+  return next;
+}
+
 export function serializeUiState(state: UiState): string {
   return `${JSON.stringify(state, null, 2)}\n`;
 }

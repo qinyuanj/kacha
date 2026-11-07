@@ -37,18 +37,20 @@ pub async fn measure_board(State(state): State<AppState>, user: User, body: Byte
         for node in nodes {
             for dir in &node.dirs {
                 if !out.dirs.contains_key(dir) {
-                    out.dirs.insert(dir.clone(), tree_bytes(&root.join(dir)));
+                    let path = crate::paths::resolve(&root, dir)
+                        .map_err(|e| error(StatusCode::FORBIDDEN, "forbidden", e.message()))?;
+                    out.dirs.insert(dir.clone(), tree_bytes(&path));
                 }
             }
             if let (Some(id), false) = (node.id, node.dirs.is_empty()) {
                 out.nodes.entry(id).or_default().extend(node.dirs);
             }
         }
-        out
+        Ok(out)
     })
     .await;
     match measured {
-        Ok(m) => Json(m).into_response(),
-        Err(r) => r,
+        Ok(Ok(m)) => Json(m).into_response(),
+        Ok(Err(r)) | Err(r) => r,
     }
 }

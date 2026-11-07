@@ -422,8 +422,8 @@ export function BoardCanvas({
   );
 
   // 阶段：收起的成员不显示；框按成员的显示尺寸画。刚建的阶段标题直接进入改名。
-  const hidden = useMemo(() => collapsedMembers(board), [board]);
-  const boxes = useMemo(() => stageBoxes(board, (id) => measured[id]), [board, measured]);
+  const hidden = useMemo(() => collapsedMembers(board, readOnly), [board, readOnly]);
+  const boxes = useMemo(() => stageBoxes(board, (id) => measured[id], readOnly), [board, measured, readOnly]);
   const [editingStage, setEditingStage] = useState<string | null>(null);
   // 整理模式：各阶段体量、「收掉未定稿」的张数与预计减少的体量（按任务目录，服务端量）。
   const tidyMeasure = useTidyMeasure(board, tidying);
@@ -1024,7 +1024,7 @@ export function BoardCanvas({
           minZoom={0.1}
         >
           <Background />
-          <StageLayer boxes={boxes} selected={selectedNodes} apply={(c) => void apply(c)} editing={editingStage} onEditingDone={() => setEditingStage(null)} tidy={stageTidy} />
+          <StageLayer readOnly={readOnly} boxes={boxes} selected={selectedNodes} apply={(c) => void apply(c)} editing={editingStage} onEditingDone={() => setEditingStage(null)} tidy={stageTidy} />
           <Controls />
           <MiniMap pannable zoomable />
           {barItems.length > 0 && (

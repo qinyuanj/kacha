@@ -1,7 +1,7 @@
 // 画板存服务端：新建 / 列出 / 打开 / 重命名 / 删除、跨浏览器同密钥可见、两页面版本冲突、旧名保存报错。
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { BOARD_MISSING_TEXT } from "../../src/ui/boardText";
+import { ARCHIVE_TEXT, BOARD_MISSING_TEXT, TIDY_TEXT } from "../../src/ui/boardText";
 import { zipText } from "../common/zip";
 import { enterWithKey, expect, GOOD_KEY, metaFile, readMeta, test, type Rig } from "./rig";
 
@@ -142,6 +142,45 @@ function recycledBoards(rig: Rig): string[] {
     return existsSync(dir) ? readdirSync(dir).map((n) => path.join(dir, n)) : [];
   });
 }
+
+// 本 smoke 随集成分支 pre-push 首次运行；实现分支只写测试，不运行 e2e。
+test("整理可进入退出，收起阶段的画板归档后默认展开并保持只读", async ({ page, rig }) => {
+  await enterWithKey(page, rig.baseURL, GOOD_KEY);
+  await expect(page.locator(".tab").first()).toBeVisible();
+  await renameActiveTab(page, "归档查看");
+  await page.getByRole("button", { name: "＋ 提示词", exact: true }).click();
+  const file = path.join(boardsDir(rig.userRoot(GOOD_KEY)), "归档查看.ugcboard.json");
+  await expect.poll(() => existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).nodes.length : 0).toBe(1);
+  const raw = JSON.parse(readFileSync(file, "utf8"));
+  raw.stages = [{ id: "s", name: "收起的阶段", nodes: [raw.nodes[0].id], collapsed: true }];
+  const response = await page.request.put(`/api/boards?path=${encodeURIComponent("画板/归档查看.ugcboard.json")}`, { data: JSON.stringify(raw) });
+  expect(response.status()).toBe(204);
+  await page.reload();
+  const member = page.locator(`.react-flow__node[data-id="${raw.nodes[0].id}"]`);
+  await expect(member).not.toBeVisible();
+  await page.getByRole("button", { name: TIDY_TEXT.enter, exact: true }).click();
+  await expect(page.getByRole("status", { name: "整理模式" })).toBeVisible();
+  await page.getByRole("button", { name: TIDY_TEXT.done, exact: true }).click();
+  await expect(page.getByRole("status", { name: "整理模式" })).toHaveCount(0);
+  await page.getByRole("button", { name: "画板列表", exact: true }).click();
+  await page.getByRole("button", { name: `${ARCHIVE_TEXT.action}「归档查看」`, exact: true }).click();
+  const confirm = page.getByRole("dialog", { name: "归档画板" });
+  await expect(confirm).toContainText(ARCHIVE_TEXT.confirm);
+  await confirm.getByRole("button", { name: ARCHIVE_TEXT.action, exact: true }).click();
+  await expect(confirm).toHaveCount(0);
+  await page.getByRole("dialog", { name: "画板列表" }).getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(page.getByText(ARCHIVE_TEXT.banner, { exact: true })).toBeVisible();
+  await expect(member).toBeVisible();
+  await expect(page.getByRole("button", { name: ARCHIVE_TEXT.unarchive, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: ARCHIVE_TEXT.copy, exact: true })).toBeVisible();
+  const archivedFile = path.join(boardsDir(rig.userRoot(GOOD_KEY)), "归档", "归档查看.ugcboard.json");
+  expect(JSON.parse(readFileSync(archivedFile, "utf8")).stages[0].collapsed).toBe(true);
+  const before = readFileSync(archivedFile, "utf8");
+  await member.click();
+  await page.keyboard.press("Delete");
+  await expect(member).toBeVisible();
+  expect(readFileSync(archivedFile, "utf8")).toBe(before);
+});
 
 async function openDeleteConfirm(page: import("@playwright/test").Page, title: string) {
   await page.getByRole("button", { name: "画板列表", exact: true }).click();

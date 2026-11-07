@@ -80,6 +80,43 @@ async fn measure_counts_missing_task_dirs_as_zero() {
 }
 
 #[tokio::test]
+async fn measure_and_list_never_scan_escaping_task_references() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    std::fs::create_dir_all(h.user_root(GOOD_KEY).join("2026-01-01")).unwrap();
+    for node in [
+        json!({"id":"x", "type":"reference", "path":"2026-01-01/..\\..\\other-user/x"}),
+        json!({"id":"x", "type":"result", "task_id":"20260101T000000Z-../../../../outside"}),
+    ] {
+        let text = json!({"format_version":2,"nodes":[node]}).to_string();
+        let reply = h.send(Method::POST, "/api/boards/measure", Some(&cookie), text.clone()).await;
+        assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.text());
+        let path = h.user_root(GOOD_KEY).join("画板/unsafe.ugcboard.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+        let list = h.get("/api/boards/list", Some(&cookie)).await;
+        assert_eq!(list.json()["boards"][0]["bytes"], serde_json::Value::Null);
+    }
+}
+
+#[tokio::test]
+async fn measure_and_list_reject_task_directories_reached_through_escaping_symlinks() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let outside = h.data_root().join("outside");
+    std::fs::create_dir_all(outside.join("t")).unwrap();
+    std::fs::write(outside.join("t/private"), "private contents").unwrap();
+    if !symlink_dir(&outside, &h.user_root(GOOD_KEY).join("2026-01-01")) { return; }
+    let text = json!({"format_version":2,"nodes":[{"id":"x","type":"reference","path":"2026-01-01/t/private"}]}).to_string();
+    let measured = h.send(Method::POST, "/api/boards/measure", Some(&cookie), text.clone()).await;
+    assert_eq!(measured.status, StatusCode::FORBIDDEN, "{}", measured.text());
+    let path = h.user_root(GOOD_KEY).join("画板/unsafe.ugcboard.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, text).unwrap();
+    assert_eq!(h.get("/api/boards/list", Some(&cookie)).await.json()["boards"][0]["bytes"], serde_json::Value::Null);
+}
+
+#[tokio::test]
 async fn measure_rejects_unreadable_boards_and_needs_a_session() {
     let h = Harness::new();
     let cookie = h.session(GOOD_KEY).await;

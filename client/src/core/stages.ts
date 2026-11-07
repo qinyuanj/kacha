@@ -12,9 +12,9 @@ function withStages(board: Board, stages: Stage[]): Board {
 /** 阶段框在成员外留的边距（画布坐标）。 */
 export const STAGE_PADDING = 24;
 
-/** 收起的阶段里的节点：画布上不显示。 */
-export function collapsedMembers(board: Board): ReadonlySet<string> {
-  return new Set(stagesOf(board).flatMap((s) => (s.collapsed ? s.nodes : [])));
+/** 收起的阶段里的节点：画布上不显示。只读查看默认展开，不修改画板内容。 */
+export function collapsedMembers(board: Board, readOnly = false): ReadonlySet<string> {
+  return new Set(readOnly ? [] : stagesOf(board).flatMap((s) => (s.collapsed ? s.nodes : [])));
 }
 
 export interface StageBox {
@@ -28,7 +28,7 @@ export interface StageBox {
 }
 
 /** 各阶段在画布上的框：包住全部成员并留边距。sizeOf = 节点的显示尺寸（还没测到为 undefined，退回存的尺寸）。 */
-export function stageBoxes(board: Board, sizeOf: (id: string) => { width?: number; height?: number } | undefined): StageBox[] {
+export function stageBoxes(board: Board, sizeOf: (id: string) => { width?: number; height?: number } | undefined, readOnly = false): StageBox[] {
   const byId = new Map(board.nodes.map((n) => [n.id, n]));
   return stagesOf(board).flatMap((stage) => {
     const members = stage.nodes.flatMap((id) => {
@@ -44,7 +44,7 @@ export function stageBoxes(board: Board, sizeOf: (id: string) => { width?: numbe
     const y = Math.min(...rects.map((r) => r[1])) - STAGE_PADDING;
     const right = Math.max(...rects.map((r) => r[2])) + STAGE_PADDING;
     const bottom = Math.max(...rects.map((r) => r[3])) + STAGE_PADDING;
-    return [{ stage, x, y, width: right - x, height: bottom - y, count: members.length }];
+    return [{ stage: readOnly ? { ...stage, collapsed: false } : stage, x, y, width: right - x, height: bottom - y, count: members.length }];
   });
 }
 

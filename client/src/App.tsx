@@ -7,7 +7,7 @@ import { redoLabel, undoLabel } from "./core/history";
 import { basename } from "./core/paths";
 import type { RegenerateRequest, Runner, RunTarget } from "./core/runner";
 import { copiesByNode, regenerateDispatch, runDispatch, runScope, buildConfirmItems, collectRunFacts, type ConfirmItem } from "./core/submission";
-import { parseUiState, serializeUiState, type UiState } from "./core/uiState";
+import { moveSizeNotice, parseUiState, serializeUiState, type UiState } from "./core/uiState";
 import { sizeNotice, type SizeTier } from "./core/boardSize";
 import { useActiveBoardSize } from "./ui/useBoardSize";
 import { shouldShowUpdateNotice } from "./core/changelog";
@@ -68,6 +68,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const boards = useBoardSessions(
     userRoot,
     useCallback((key: string) => ({ ...envRef.current, locked: runnerRef.current!.getSnapshot().board(key).locked }), []),
+    useCallback((from: string, to: string) => setSizeNotices((s) => moveSizeNotice(s, from, to)), []),
   );
   const { sessions, activeKey, openPath, createBoard } = boards;
 

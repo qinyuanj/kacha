@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isArchivedPath, readOnlyMenu } from "./archive";
+import { collapsedMembers } from "./stages";
+import { newBoard } from "./board";
 import type { MenuItem } from "./contextMenu";
 
 describe("归档画板的位置（#90）", () => {
@@ -9,6 +11,14 @@ describe("归档画板的位置（#90）", () => {
     expect(isArchivedPath("/~", "/~/画板/甲.ugcboard.json")).toBe(false);
     expect(isArchivedPath("/~", "/~/别处/归档/甲.ugcboard.json")).toBe(false);
     expect(isArchivedPath("C:\\data", "C:\\data\\画板\\归档\\甲.ugcboard.json")).toBe(true);
+  });
+});
+
+describe("归档画板的只读查看", () => {
+  it("默认展开收起阶段，不改归档内容", () => {
+    const board = { ...newBoard("归档"), nodes: [{ id: "p", type: "prompt" as const, pos: [0, 0] as [number, number], size: [1, 1] as [number, number], extra: {}, text: "a" }], stages: [{ id: "s", name: "阶段", nodes: ["p"], collapsed: true, extra: {} }] };
+    expect([...collapsedMembers(board, true)]).toEqual([]);
+    expect(board.stages[0].collapsed).toBe(true);
   });
 });
 

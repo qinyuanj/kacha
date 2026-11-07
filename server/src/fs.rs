@@ -165,11 +165,8 @@ pub async fn write_board(State(state): State<AppState>, user: User, Query(q): Qu
     let total = state.board_slots();
     match off_thread(move || -> Result<(), Response> {
         // 有版本的保存仍按原 409 约定处理；已有主文件或 .bak 的编辑不新增画板位。
-        if !matches!(guard, store::BoardWriteGuard::Version(_))
-            && !path.exists() && !store::bak_path(&path).exists()
-            && crate::board_list::occupies_board_slot(&root, &path)
-        {
-            crate::board_list::ensure_board_slots(&root, total, 1)?;
+        if !matches!(guard, store::BoardWriteGuard::Version(_)) {
+            crate::board_list::ensure_new_board_path(&root, total, &path)?;
         }
         let text = String::from_utf8(body.to_vec()).map_err(|e| io_error(std::io::Error::new(ErrorKind::InvalidData, e)))?;
         store::write_board_guarded(&path, &text, guard).map_err(board_save_error)
@@ -179,7 +176,7 @@ pub async fn write_board(State(state): State<AppState>, user: User, Query(q): Qu
     }
 }
 
-fn board_save_error(e: store::BoardSaveError) -> Response {
+pub(crate) fn board_save_error(e: store::BoardSaveError) -> Response {
     match e {
         store::BoardSaveError::Conflict => error(StatusCode::CONFLICT, "board_conflict", "画板已在别处修改，请重新载入"),
         store::BoardSaveError::Missing => error(StatusCode::CONFLICT, "board_missing", "画板已不存在，可能已在别处改名或删除；未保存的改动仍在本页，可先导出画板包"),
@@ -201,7 +198,18 @@ pub async fn rename_board(State(state): State<AppState>, user: User, body: axum:
         return crate::board_list::archived_read_only();
     }
     let _lock = state.board_lock().lock().await;
-    board_guarded_result(off_thread(move || store::rename_board_guarded(&from, &to, req.version.as_deref())).await)
+    let total = state.board_slots();
+    let checked = off_thread(move || -> Result<std::io::Result<()>, Response> {
+        if !crate::board_list::occupies_board_slot(&root, &from)
+            || (crate::board_list::board_main_path(&from) != from && crate::board_list::board_main_path(&from).exists()) {
+            crate::board_list::ensure_new_board_path(&root, total, &to)?;
+        }
+        Ok(store::rename_board_guarded(&from, &to, req.version.as_deref()))
+    }).await;
+    match checked {
+        Ok(Ok(result)) => board_guarded_result(Ok(result)),
+        Ok(Err(r)) | Err(r) => r,
+    }
 }
 
 /// 改名 / 删除的结果映射：主文件与 `.bak` 都不存在 404，版本已变 409 board_conflict。
@@ -310,11 +318,19 @@ pub async fn write_new_file(State(state): State<AppState>, user: User, Query(q):
         Err(r) => return r,
         Ok(p) => p,
     };
-    // 大请求：文件写入计入全局并发，阻塞 IO 在 spawn_blocking。
+    let root = state.user_root(&user.fingerprint);
+    if crate::board_list::in_archive(&root, &path) {
+        return crate::board_list::archived_read_only();
+    }
     let _permit = state.heavy().acquire().await;
-    match blocking(move || store::write_new_file(&path, &body)).await {
-        Ok(()) => StatusCode::CREATED.into_response(),
-        Err(r) => r,
+    let _lock = state.board_lock().lock().await;
+    let total = state.board_slots();
+    match off_thread(move || -> Result<(), Response> {
+        crate::board_list::ensure_new_board_path(&root, total, &path)?;
+        store::write_new_file(&path, &body).map_err(io_error)
+    }).await {
+        Ok(Ok(())) => StatusCode::CREATED.into_response(),
+        Ok(Err(r)) | Err(r) => r,
     }
 }
 

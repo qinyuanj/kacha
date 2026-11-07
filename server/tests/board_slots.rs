@@ -54,7 +54,7 @@ async fn whole_pack_import(h: &Harness, cookie: &str, boards: usize) -> Reply {
     let up = h.send(Method::POST, "/api/packs/uploads", Some(cookie), Body::from(one_task_pack())).await;
     assert_eq!(up.status, StatusCode::OK, "{}", up.text());
     let id = up.json()["id"].as_str().unwrap().to_string();
-    let body = serde_json::json!({ "units": [{ "path": TASK, "identity": "task.json" }], "duplicates": [], "boards": boards });
+    let body = serde_json::json!({ "units": [{ "path": TASK, "identity": "task.json" }], "duplicates": [], "boards": boards, "new_boards": (0..boards).map(|i| serde_json::json!({"title":format!("导入{i}"),"text":"{}"})).collect::<Vec<_>>() });
     h.send(Method::POST, &format!("/api/packs/uploads/{id}/import?op=w"), Some(cookie), body.to_string()).await
 }
 
@@ -69,7 +69,7 @@ async fn staged_import(h: &Harness, cookie: &str, boards: usize) -> Reply {
         .header(header::CONTENT_LENGTH, RECORD.len().to_string());
     let put = h.app.clone().oneshot(req.body(Body::from(RECORD.to_vec())).unwrap()).await.unwrap();
     assert_eq!(put.status(), StatusCode::NO_CONTENT);
-    let body = serde_json::json!({ "units": [{ "path": TASK, "identity": "task.json" }], "files": [{ "path": format!("{TASK}/task.json"), "sha256": sha }], "boards": boards });
+    let body = serde_json::json!({ "units": [{ "path": TASK, "identity": "task.json" }], "files": [{ "path": format!("{TASK}/task.json"), "sha256": sha }], "boards": boards, "new_boards": (0..boards).map(|i| serde_json::json!({"title":format!("导入{i}"),"text":"{}"})).collect::<Vec<_>>() });
     h.send(Method::POST, &format!("/api/packs/staging/{staging}/import?op=s"), Some(cookie), body.to_string()).await
 }
 
@@ -81,6 +81,27 @@ fn seed(h: &Harness, rel: &str) {
 
 async fn create(h: &Harness, cookie: &str, name: &str) -> Reply {
     h.put(&format!("/api/boards?path={}&create_only=true", q(&format!("画板/{name}.ugcboard.json"))), cookie, "{}").await
+}
+
+#[tokio::test]
+async fn generic_writes_and_rename_cannot_bypass_slots_or_archive_read_only() {
+    let h = Harness::with_board_config(1, BoardSizeLines::default());
+    let cookie = h.session(GOOD_KEY).await;
+    seed(&h, "画板/已有.ugcboard.json");
+    seed(&h, "别处/新.ugcboard.json");
+    let moved = h.send(Method::POST, "/api/boards/rename", Some(&cookie), serde_json::json!({"from":"别处/新.ugcboard.json","to":"画板/新.ugcboard.json"}).to_string()).await;
+    assert_eq!(moved.json()["code"], "board_slots_full", "{}", moved.text());
+    assert!(h.user_root(GOOD_KEY).join("别处/新.ugcboard.json").is_file());
+    let written = h.put(&format!("/api/fs/file?path={}", q("画板/新.ugcboard.json")), &cookie, "{}").await;
+    assert_eq!(written.json()["code"], "board_slots_full", "{}", written.text());
+    let backup = h.put(&format!("/api/fs/file?path={}", q("画板/备份.ugcboard.json.bak")), &cookie, "{}").await;
+    assert_eq!(backup.json()["code"], "board_slots_full", "{}", backup.text());
+    let moved_backup = h.send(Method::POST, "/api/boards/rename", Some(&cookie), serde_json::json!({"from":"别处/新.ugcboard.json","to":"画板/备份.ugcboard.json.bak"}).to_string()).await;
+    assert_eq!(moved_backup.json()["code"], "board_slots_full", "{}", moved_backup.text());
+    let archived = h.put(&format!("/api/fs/file?path={}", q("画板/归档/新.ugcboard.json")), &cookie, "{}").await;
+    assert_eq!(archived.json()["code"], "board_archived", "{}", archived.text());
+    assert!(!h.user_root(GOOD_KEY).join("画板/新.ugcboard.json").exists());
+    assert!(!h.user_root(GOOD_KEY).join("画板/归档/新.ugcboard.json").exists());
 }
 
 #[tokio::test]
@@ -135,6 +156,63 @@ async fn importing_more_boards_than_free_slots_is_rejected_before_writing_any_fi
     let ok = staged_import(&h, &cookie, 1).await;
     assert_eq!(ok.status, StatusCode::OK, "{}", ok.text());
     assert!(h.user_root(GOOD_KEY).join(TASK).join("task.json").is_file());
+}
+
+#[tokio::test]
+async fn concurrent_imports_commit_prepared_boards_before_releasing_the_slot_lock() {
+    let h = Harness::with_board_config(2, BoardSizeLines::default());
+    let cookie = h.session(GOOD_KEY).await;
+    seed(&h, "画板/已有.ugcboard.json");
+    async fn prepare(h: &Harness, cookie: &str, title: &str) -> (String, String) {
+        let staging = h.send(Method::POST, "/api/packs/staging", Some(cookie), Body::empty()).await.json()["id"].as_str().unwrap().to_string();
+        filetime::set_file_mtime(h.user_root(GOOD_KEY).join(".kacha/pack-content").join(format!("{staging}.staging.tmp")), filetime::FileTime::from_system_time(h.now())).unwrap();
+        let sha = format!("{:x}", Sha256::digest(RECORD));
+        let put = h.app.clone().oneshot(Request::builder().method(Method::PUT).uri(format!("/api/packs/staging/{staging}/contents/{sha}")).header(header::COOKIE, cookie).body(Body::from(RECORD.to_vec())).unwrap()).await.unwrap();
+        assert_eq!(put.status(), StatusCode::NO_CONTENT);
+        let task = format!("{TASK}-{title}");
+        let body = serde_json::json!({"boards":0,"units":[{"path":task,"identity":"task.json"}],"files":[{"path":format!("{task}/task.json"),"sha256":sha}],"new_boards":[{"title":title,"text":"{\"format_version\":2,\"nodes\":[]}"}]});
+        // 上传会更新目录 mtime；与测试时钟对齐，避免下一次开暂存误回收。
+        filetime::set_file_mtime(h.user_root(GOOD_KEY).join(".kacha/pack-content").join(format!("{staging}.staging.tmp")), filetime::FileTime::from_system_time(h.now())).unwrap();
+        (format!("/api/packs/staging/{staging}/import?op=test"), body.to_string())
+    }
+    let (uri_a, body_a) = prepare(&h, &cookie, "甲").await;
+    let (uri_b, body_b) = prepare(&h, &cookie, "乙").await;
+    let before = user_files(&h);
+    let (a, b) = tokio::join!(h.send(Method::POST, &uri_a, Some(&cookie), body_a), h.send(Method::POST, &uri_b, Some(&cookie), body_b));
+    let replies = [a, b];
+    assert_eq!(replies.iter().filter(|r| r.status == StatusCode::OK).count(), 1);
+    assert!(replies.iter().any(|r| r.json()["code"] == "board_slots_full"));
+    assert_eq!(user_files(&h).len(), before.len() + 2, "成功导入的任务和画板，失败的只留下已有文件");
+}
+
+#[tokio::test]
+async fn merge_units_cannot_be_used_to_write_boards() {
+    let h = Harness::with_board_config(10, BoardSizeLines::default());
+    let cookie = h.session(GOOD_KEY).await;
+    for path in ["画板/x.ugcboard.json", "画板/归档/x.ugcboard.json"] {
+    let staging = h.send(Method::POST, "/api/packs/staging", Some(&cookie), Body::empty()).await.json()["id"].as_str().unwrap().to_string();
+    let content = b"{\"format_version\":2}";
+    let sha = format!("{:x}", Sha256::digest(content));
+    let put = h.app.clone().oneshot(Request::builder().method(Method::PUT).uri(format!("/api/packs/staging/{staging}/contents/{sha}")).header(header::COOKIE, &cookie).body(Body::from(content.to_vec())).unwrap()).await.unwrap();
+    assert_eq!(put.status(), StatusCode::NO_CONTENT);
+        let body = serde_json::json!({"boards":0,"units":[{"path":path,"identity":null}],"files":[{"path":path,"sha256":sha}]});
+        let reply = h.send(Method::POST, &format!("/api/packs/staging/{staging}/import?op=x"), Some(&cookie), body.to_string()).await;
+        assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", reply.text());
+        assert!(!h.user_root(GOOD_KEY).join(path).exists());
+    }
+}
+
+#[tokio::test]
+async fn prepared_board_titles_support_unicode_and_collisions_without_overwriting() {
+    let h = Harness::with_board_config(10, BoardSizeLines::default());
+    let cookie = h.session(GOOD_KEY).await;
+    seed(&h, "画板/😀.ugcboard.json");
+    let staging = h.send(Method::POST, "/api/packs/staging", Some(&cookie), Body::empty()).await.json()["id"].as_str().unwrap().to_string();
+    let body = serde_json::json!({"boards":0,"units":[],"files":[],"new_boards":[{"title":"😀","text":"emoji"},{"title":"a中","text":"Chinese"},{"title":"😀","text":"second"}]});
+    let r = h.send(Method::POST, &format!("/api/packs/staging/{staging}/import?op=unicode"), Some(&cookie), body.to_string()).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.json()["boards"], serde_json::json!(["画板/😀 (2).ugcboard.json", "画板/a中.ugcboard.json", "画板/😀 (3).ugcboard.json"]));
+    assert_eq!(std::fs::read_to_string(h.user_root(GOOD_KEY).join("画板/😀.ugcboard.json")).unwrap(), "{}");
 }
 
 #[tokio::test]

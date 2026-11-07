@@ -1,9 +1,10 @@
 // 归档画板（#90，ADR 0019）：放在画板目录下的归档子目录里，只读、不占画板位；画板文件格式不变。
+import policy from "../../../contracts/board-policy.json";
 import type { BoardAction, MenuItem } from "./contextMenu";
 import { boardsDir, dirname, joinPath } from "./paths";
 
-/** 归档子目录名。服务端 board_list::ARCHIVE_DIR 是它的跨语言副本，改一处要同改另一处。 */
-export const ARCHIVE_DIR_NAME = "归档";
+/** TS 与 Rust 同读共享契约。 */
+export const ARCHIVE_DIR_NAME = policy.archive_dir;
 
 export const archiveDir = (userRoot: string) => joinPath(boardsDir(userRoot), ARCHIVE_DIR_NAME);
 

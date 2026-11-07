@@ -501,6 +501,7 @@ describe("导入画板包", () => {
     const placed: { path: string; sha256: string }[] = [];
     /** 每次合并请求声明的将新增画板数（#89：服务端据此在合并前检查画板位）。 */
     const boardCounts: number[] = [];
+    const prepared: { title: string; text: string }[][] = [];
     const io: PackIo = {
       existing: async (units) => {
         steps.push("existing");
@@ -527,13 +528,14 @@ describe("导入画板包", () => {
       },
       importContent: async (staging, units, files, boards) => {
         steps.push(`importContent(${staging})`);
-        boardCounts.push(boards);
+        boardCounts.push(boards.length);
+        prepared.push(boards);
         placed.push(...files);
         for (const unit of units) {
           moved.push(unit.path);
           if (opts.failAfterMove !== undefined) throw opts.failAfterMove;
         }
-        return { outcomes: units.map((u) => ({ path: u.path, outcome: "moved" as const })), bytes: uploaded.reduce((n, u) => n + u.size, 0) };
+        return { boards: boards.map((b) => `画板/${b.title}.ugcboard.json`), outcomes: units.map((u) => ({ path: u.path, outcome: "moved" as const })), bytes: uploaded.reduce((n, u) => n + u.size, 0) };
       },
       discardStaging: async (staging) => void steps.push(`discardStaging(${staging})`),
       cancel: async (cancelled) => void steps.push(`cancel(${cancelled})`),
@@ -553,16 +555,17 @@ describe("导入画板包", () => {
       discard: async (id) => void steps.push(`discard(${id})`),
       importUnits: async (id, units, duplicates, boards) => {
         steps.push(`import(${id})`);
-        boardCounts.push(boards);
+        boardCounts.push(boards.length);
+        prepared.push(boards);
         if (Object.keys(duplicates).length > 0) restored.push(duplicates);
         for (const unit of units) {
           moved.push(unit.path);
           if (opts.failAfterMove !== undefined) throw opts.failAfterMove;
         }
-        return { outcomes: units.map((u) => ({ path: u.path, outcome: "moved" as const })), bytes: 1234 };
+        return { boards: boards.map((b) => `画板/${b.title}.ugcboard.json`), outcomes: units.map((u) => ({ path: u.path, outcome: "moved" as const })), bytes: 1234 };
       },
     };
-    return { io, moved, steps, restored, hashed, uploaded, placed, boardCounts };
+    return { io, moved, steps, restored, hashed, uploaded, placed, boardCounts, prepared };
   }
 
   function run(
@@ -578,9 +581,10 @@ describe("导入画板包", () => {
     const outcome = importPack(io, {
       file,
       ...(slotsRefusal ? { slotsRefusal } : {}),
-      addBoard: async (board) => {
-        added.push(board.title);
-        return addBoard(board);
+      openBoard: async (path) => {
+        const title = path.split("/").at(-1)!.replace(".ugcboard.json", "");
+        added.push(title);
+        await addBoard(newBoard(title));
       },
       onStage: (stage) => stages.push(stage),
       onPhase: (phase) => phases.push(phase),
@@ -665,13 +669,15 @@ describe("导入画板包", () => {
     expect(r.logs).toEqual([{ kind: "board_pack", action: "import", pack_file: "千问测试.ugcpack", board_file: "甲.ugcboard.json, 乙.ugcboard.json", result: "failed" }]);
   });
 
-  it("读取器认不了的包、成功：先复位取消再进入进度，上传后按上传句柄判定与导入，逐个写画板，日志记计数与实际写入的文件名", async () => {
+  it("读取器认不了的包：由服务端提交并返回重名后的路径，前端只打开这些路径", async () => {
     const { io, steps } = memoryPackIo(goodPack);
-    const r = run(io, async (b) => `${ROOT}/画板/${b.title} (2).ugcboard.json`);
+    const merge = io.importUnits;
+    io.importUnits = async (...args) => ({ ...await merge(...args), boards: ["画板/甲 (2).ugcboard.json", "画板/乙 (2).ugcboard.json"] });
+    const r = run(io);
     const outcome = await r.outcome;
     expect(steps).toEqual(["cancel(false)", "upload(千问测试.ugcpack)", `entries(${UPLOAD_ID})`, "readTexts", `import(${UPLOAD_ID})`]);
     expect(r.stages).toEqual(["progress"]);
-    expect(r.added).toEqual(["甲", "乙"]);
+    expect(r.added).toEqual(["甲 (2)", "乙 (2)"]);
     expect(outcome).toEqual({
       kind: "done",
       summary: { imported: 1, skipped: 0, conflicts: [], message: "导入 1 个任务，跳过 0 个" },
@@ -731,13 +737,17 @@ describe("导入画板包", () => {
       expect(moved).toEqual([]);
     });
 
-    it("合并请求带上将新增的画板数，服务端据此在写文件前再检查一次", async () => {
+    it("两种导入入口均随合并请求提交完整画板内容，由服务端按实际内容数检查容量", async () => {
       const staged = memoryPackIo(goodPack);
       await run(staged.io, undefined, zipFile(goodPack), async () => null).outcome;
       expect(staged.boardCounts).toEqual([2]);
       const whole = memoryPackIo(goodPack);
       await run(whole.io).outcome;
       expect(whole.boardCounts).toEqual([2]);
+      for (const payload of [staged.prepared[0], whole.prepared[0]]) {
+        expect(payload.map((b) => b.title)).toEqual(["甲", "乙"]);
+        expect(payload.map((b) => parseBoard(b.text))).toEqual([parseBoard(goodPack[boardA]), parseBoard(goodPack[boardB])]);
+      }
     });
   });
 
@@ -929,7 +939,7 @@ describe("导入画板包", () => {
       const r = run(io, undefined, zipFile(v1Pack));
       expect(await r.outcome).toMatchObject({ kind: "done", summary: { imported: 0, skipped: 2, conflicts: [], message: "导入 0 个任务，跳过 2 个" }, written: ["甲.ugcboard.json"] });
       // 参考图要比对整文件，仍要算它的 hash（只读本地，不上传）。
-      expect(steps).toEqual(["cancel(false)", "existing", "hash"]);
+      expect(steps).toEqual(["cancel(false)", "existing", "hash", "stage", `importContent(${STAGING_ID})`]);
       expect(r.logs).toEqual([expect.objectContaining({ result: "ok", task_dirs: 0, skipped: 2, bytes: 0 })]);
     });
 

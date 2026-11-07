@@ -1,4 +1,4 @@
-// 分层守护：core 是纯业务模块，生产代码只依赖 core 自身与 npm 包，不依赖 shell / ui / e2e。
+// 分层守护：core 是纯业务模块，只依赖 core、npm 包与跨语言的静态 JSON 契约，不依赖 shell / ui / e2e。
 // 壳层能力经端口（参数）注入；core 需要的错误语义按结构读（如 status），不导入壳层的类。
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
 const coreDir = path.dirname(fileURLToPath(import.meta.url));
+const contractsDir = path.resolve(coreDir, "../../../contracts");
 
 function productionFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -23,6 +24,11 @@ it("core 生产代码只导入 core 内部与 npm 包", () => {
       .map((m) => m[1])
       .filter((spec) => spec.startsWith("."))
       .filter((spec) => path.relative(coreDir, path.resolve(path.dirname(file), spec)).startsWith(".."))
+      .filter((spec) => {
+        const target = path.resolve(path.dirname(file), spec);
+        const relative = path.relative(contractsDir, target);
+        return !(relative && !relative.startsWith("..") && !path.isAbsolute(relative) && target.endsWith(".json"));
+      })
       .map((spec) => `${path.relative(coreDir, file)} -> ${spec}`),
   );
   expect(outside).toEqual([]);

@@ -4,7 +4,7 @@ import { BUILTIN_TABLE } from "./capabilities";
 import { editBoard, type EditEnv } from "./edit";
 import { emptyHistory, recordChange, undo } from "./history";
 import { LOCKED_HINT } from "./iterate";
-import { moveOutSources, splitStage } from "./moveOut";
+import { moveOutSources, prepareStageSplit, splitStage } from "./moveOut";
 import type { SizeSpec } from "./size";
 
 const PRO = "doubao-seedream-5-0-pro-260628";
@@ -150,6 +150,24 @@ describe("移出为新画板：拆分结果", () => {
     expect(removed.board.nodes.filter((n) => n.type === "result").map((n) => n.id)).toEqual(["r0", "r1", "r2"]);
     expect(removed.board.edges.some((line) => line.from[0] === "t1")).toBe(false);
     expect(undo(recordChange(emptyHistory(), original, removed.step!, 0), removed.board, new Set())!.board).toEqual(original);
+  });
+
+  it("必要图片的 sha256 缺失时拒绝拆分，不能生成无身份的参考图", () => {
+    expect(() => splitStage(big(), "s1", { sha256: () => null, newId: () => "x" })).toThrow();
+  });
+
+  it("图片身份采集失败时不返回可写的新画板", async () => {
+    const b = big();
+    await expect(prepareStageSplit(() => b, "s1", async () => { throw new Error("offline"); }, () => "x")).rejects.toThrow("offline");
+    expect(b.nodes).toHaveLength(9);
+  });
+
+  it("采集期间加入新的上游图片时中止，不能沿用缺少身份的采集结果", async () => {
+    let current = big();
+    await expect(prepareStageSplit(() => current, "s1", async () => {
+      current = { ...current, nodes: [...current.nodes, result("new", [0, 0])], edges: [...current.edges, edge("new", "t1", "image:3")] };
+      return R0_SHA;
+    }, () => "x")).rejects.toThrow("新的改动");
   });
 
   it("阶段不存在时不拆", () => {

@@ -1,6 +1,7 @@
 // 整理模式（#92）：画布的一种界面状态，不是弹窗。进入后按任务目录量画板（服务端，口径与画板体量一致），
 // 顶部显示整理前后的体量对比与「完成」；阶段框上显示各阶段体量与「收掉未定稿」（见 stages.tsx）。其它编辑照常可用。
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { TidyMeter } from "../core/tidyMeter";
 import { serializeBoard, type Board } from "../core/board";
 import { boardBytes, type BoardMeasure } from "../core/tidy";
 import { ipc } from "../shell/ipc";
@@ -19,28 +20,25 @@ export interface TidyMeasure {
 /** 整理模式期间量当前画板（含未保存的改动）；只看节点，平移缩放不重量。退出即清空。 */
 export function useTidyMeasure(board: Board, tidying: boolean): TidyMeasure {
   const [state, setState] = useState<TidyMeasure>({ measure: null, before: null });
-  const { nodes } = board;
+  const meter = useRef<TidyMeter | null>(null);
+  const boardRef = useRef(board);
+  boardRef.current = board;
   useEffect(() => {
     if (!tidying) {
-      setState((s) => (s.measure || s.before !== null ? { measure: null, before: null } : s));
+      setState({ measure: null, before: null });
       return;
     }
-    let cancelled = false;
-    const text = serializeBoard({ ...board, nodes });
-    const timer = setTimeout(
-      () =>
-        ipc.measureBoard(text).then(
-          (measure) => !cancelled && setState((s) => ({ measure, before: s.before ?? boardBytes(measure) })),
-          () => undefined,
-        ),
-      state.measure ? REMEASURE_DELAY_MS : 0,
-    );
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-    // 只随节点与开关重量：board 的其它字段（视口、标题）不影响体量。
-  }, [nodes, tidying]);
+    const active = new TidyMeter(serializeBoard(boardRef.current), ipc.measureBoard, setState);
+    meter.current = active;
+    active.update(serializeBoard(boardRef.current));
+    return () => { active.dispose(); meter.current = null; };
+  }, [tidying]);
+  useEffect(() => {
+    if (!tidying) return;
+    const text = serializeBoard(boardRef.current);
+    const timer = setTimeout(() => meter.current?.update(text), REMEASURE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [board.nodes, tidying]);
   return state;
 }
 

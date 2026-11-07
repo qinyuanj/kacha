@@ -31,17 +31,17 @@ interface Props {
   tidy: StageTidy | null;
 }
 
-export function StageLayer({ boxes, selected, apply, editing, onEditingDone, tidy }: Props) {
+export function StageLayer({ boxes, selected, apply, editing, onEditingDone, tidy, readOnly }: Props & { readOnly?: boolean }) {
   return (
     <ViewportPortal>
       {boxes.map((box) => (
-        <StageFrame key={box.stage.id} box={box} selected={selected} apply={apply} editing={editing === box.stage.id} onEditingDone={onEditingDone} tidy={tidy} />
+        <StageFrame key={box.stage.id} box={box} selected={selected} apply={apply} editing={editing === box.stage.id} onEditingDone={onEditingDone} tidy={tidy} readOnly={readOnly} />
       ))}
     </ViewportPortal>
   );
 }
 
-function StageFrame({ box, selected, apply, editing, onEditingDone, tidy }: { box: StageBox; selected: ReadonlySet<string>; apply: Props["apply"]; editing: boolean; onEditingDone: () => void; tidy: StageTidy | null }) {
+function StageFrame({ box, selected, apply, editing, onEditingDone, tidy, readOnly }: { box: StageBox; selected: ReadonlySet<string>; apply: Props["apply"]; editing: boolean; onEditingDone: () => void; tidy: StageTidy | null; readOnly?: boolean }) {
   const { stage } = box;
   const [renaming, setRenaming] = useState(editing);
   useEffect(() => {
@@ -64,7 +64,7 @@ function StageFrame({ box, selected, apply, editing, onEditingDone, tidy }: { bo
   const style = stage.collapsed ? { transform: `translate(${box.x}px, ${box.y}px)` } : { transform: `translate(${box.x}px, ${box.y}px)`, width: box.width, height: box.height };
   return (
     <div className={`stage-frame${stage.collapsed ? " collapsed" : ""}${tidy ? " tidying" : ""}`} style={style} data-stage-id={stage.id}>
-      <div className="stage-header nodrag nopan" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={() => setRenaming(true)}>
+      <div className="stage-header nodrag nopan" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={() => !readOnly && setRenaming(true)}>
         {renaming ? (
           <input
             ref={input}
@@ -86,17 +86,17 @@ function StageFrame({ box, selected, apply, editing, onEditingDone, tidy }: { bo
         )}
         {stage.collapsed && <span className="stage-count">{STAGE_TEXT.count(box.count)}</span>}
         {tidy && <StageTidyActions stageId={stage.id} tidy={tidy} />}
-        <button type="button" onClick={() => apply({ kind: "setStageCollapsed", stageId: stage.id, collapsed: !stage.collapsed })}>
+        {!readOnly && <button type="button" onClick={() => apply({ kind: "setStageCollapsed", stageId: stage.id, collapsed: !stage.collapsed })}>
           {stage.collapsed ? STAGE_TEXT.expand : STAGE_TEXT.collapse}
-        </button>
-        {!stage.collapsed && fresh.length > 0 && (
+        </button>}
+        {!readOnly && !stage.collapsed && fresh.length > 0 && (
           <button type="button" onClick={() => apply({ kind: "addToStage", stageId: stage.id, nodes: fresh })}>
             {STAGE_TEXT.addSelected}
           </button>
         )}
-        <button type="button" onClick={() => apply({ kind: "deleteStage", stageId: stage.id })}>
+        {!readOnly && <button type="button" onClick={() => apply({ kind: "deleteStage", stageId: stage.id })}>
           {STAGE_TEXT.delete}
-        </button>
+        </button>}
       </div>
     </div>
   );
