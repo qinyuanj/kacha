@@ -1,6 +1,7 @@
 // 高级设置与模型发现。settings.json 在 app-data 目录，只前向迁移；API 密钥不在这里（系统凭据库）。
 import { type CapabilityTable, type ModelCapability, modelsByTier } from "./capabilities";
 import { ERROR_CATEGORY_LABELS, GatewayError, listModels, type FetchLike } from "./gateway";
+import { errorText } from "./errors";
 
 export const SETTINGS_FORMAT_VERSION = 1;
 export const MIN_CONCURRENCY = 1;
@@ -223,8 +224,6 @@ export async function loadSettings(ports: SettingsPorts): Promise<InitialSetting
     return { file, apiKey: "", keyPersistence: "session", cache };
   }
 }
-
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** 保存设置与密钥。newer / unreadable 时不覆盖 settings.json 但仍存密钥；密钥变了或当前为 session 才写本地存储，失败退回 session。 */
 export async function saveSettings(ports: SettingsPorts, current: SaveBaseline, next: Settings, apiKey: string): Promise<SaveResult> {

@@ -19,6 +19,7 @@ import { ipc } from "../shell/ipc";
 import { ApiError } from "../shell/apiError";
 import { logEvent } from "../shell/log";
 import { knownImageInfo } from "./context";
+import { errorText } from "../core/errors";
 
 export const AUTOSAVE_DEBOUNCE_MS = 1000;
 
@@ -47,7 +48,6 @@ interface Saver {
   chain: Promise<void>;
 }
 
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const samePath = (a: string, b: string) => a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
 
 /** 编辑环境里随应用状态变化的部分：能力表、网关发现、该画板的锁定集（排队 / 执行 / 限流退避中的任务节点）。 */
