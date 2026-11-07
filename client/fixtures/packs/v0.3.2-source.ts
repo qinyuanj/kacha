@@ -1,5 +1,5 @@
 // v0.3.2 画板包夹具的源数据：桌面版输出根目录（Flash 图层结果 + layers.json + 根外参考图）与 v0.3.2 前端
-// planExport / buildExportSpec 会交给 Rust 壳的导出规格。由 generate-v0.3.2.sh 调用，再用 tag v0.3.2 的
+// planExport / buildExportSpec 会交给 Rust 壳的导出规格。由 generate-v0.3.2.py 调用，再用 tag v0.3.2 的
 // board_pack.rs 打包；改动这里要重新生成并提交 .ugcpack。
 // 用法：node v0.3.2-source.ts <输出根目录> <根外参考图路径> <spec.json>
 import { createHash } from "node:crypto";
