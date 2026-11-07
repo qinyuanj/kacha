@@ -16,6 +16,8 @@
 
 新 clone 后执行 `git config core.hooksPath .githooks` 启用 pre-push 验证；新 clone 或新建 worktree 后先跑 `python packaging\verify.py --preflight`；构建或测试报 os error 5、cl D8050、建不了符号链接时，读 `packaging/README.md`「验证」。
 
+e2e 只在集成分支（`main`、`integration/*`）上跑，`verify.py` 会自动跳过其他分支。集成分支上全套 e2e 只由合完各票后的 push 跑一次，修复时只重跑失败的 spec。在其他分支上跑任何 e2e（`verify.py --e2e`、`npm run test:e2e`、`playwright test`，含只跑单个 spec）都要用户明确授权，一次授权只管当次。
+
 ## Agent skills
 
 ### Issue tracker

@@ -2,7 +2,8 @@
 """提交前的全套验证：预检构建输出目录，再依次跑打包脚本单测、前端单测、类型检查、e2e 与服务端测试。
 
 只依赖 Python 标准库。每条命令都跑完再汇总（cargo 带 --no-fail-fast），任一失败即以非 0 退出。
-用法：python packaging\\verify.py [--preflight]
+e2e 很慢，只在集成分支（main、integration/*）上跑；其他分支跳过，--e2e 强制跑（须经用户授权）。
+用法：python packaging\\verify.py [--preflight] [--e2e]
 """
 
 import os
@@ -16,14 +17,27 @@ ROOT = Path(__file__).resolve().parent.parent
 # 编译和复制出来的程序放在这里，文件的完整性标签从目录继承。
 BUILD_OUTPUTS = (Path("server") / "target", Path("release"))
 
+E2E = ["npm", "--prefix", "client", "run", "test:e2e", "--", "--workers=4"]
+
 COMMANDS = (
     [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"],
     ["npm", "--prefix", "client", "test"],
     ["npm", "--prefix", "client", "run", "typecheck"],
     ["npm", "--prefix", "client", "run", "lint:dead"],
-    ["npm", "--prefix", "client", "run", "test:e2e", "--", "--workers=4"],
+    E2E,
     ["cargo", "test", "--manifest-path", "server/Cargo.toml", "--no-fail-fast"],
 )
+
+
+def runs_e2e(branch: str, argv: list[str]) -> bool:
+    """集成分支（main、integration/*）跑 e2e；其他分支与分离 HEAD 只在带 --e2e 时跑。"""
+    return "--e2e" in argv or branch == "main" or branch.startswith("integration/")
+
+
+def current_branch(root: Path) -> str:
+    """当前分支名；分离 HEAD 时为 "HEAD"，不在 git 仓库里时为空串。"""
+    run = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root, capture_output=True, text=True, errors="replace")
+    return run.stdout.strip() if run.returncode == 0 else ""
 
 
 def integrity_problems(root: Path) -> list[Path]:
@@ -58,20 +72,27 @@ def preflight(root: Path) -> int:
 
 
 def main(argv: list[str]) -> int:
-    """用法：verify.py [--preflight]；--preflight 只做预检，不跑测试（新建 worktree 或 clone 后先跑一次）。"""
+    """用法：verify.py [--preflight] [--e2e]；--preflight 只做预检，不跑测试（新建 worktree 或 clone 后先跑一次）。"""
     code = preflight(ROOT)
     if code or "--preflight" in argv:
         return code
 
+    branch = current_branch(ROOT)
+    skipped = [] if runs_e2e(branch, argv) else [" ".join(E2E)]
     failed = []
     for command in COMMANDS:
-        print(f"\n=== {' '.join(command)}", flush=True)
+        line = " ".join(command)
+        if line in skipped:
+            print(f"\n=== 跳过 e2e：当前分支 {branch or '（未知）'} 不是集成分支（main、integration/*），经用户授权可加 --e2e 强制跑", flush=True)
+            continue
+        print(f"\n=== {line}", flush=True)
         executable = shutil.which(command[0])
         if executable is None or subprocess.run([executable, *command[1:]], cwd=ROOT).returncode != 0:
-            failed.append(" ".join(command))
+            failed.append(line)
     print("\n=== 汇总")
     for command in COMMANDS:
-        print(f"{'失败' if ' '.join(command) in failed else '通过'}  {' '.join(command)}")
+        line = " ".join(command)
+        print(f"{'跳过' if line in skipped else '失败' if line in failed else '通过'}  {line}")
     return 1 if failed else 0
 
 
