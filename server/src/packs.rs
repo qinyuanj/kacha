@@ -436,16 +436,12 @@ pub async fn upload_texts(State(state): State<AppState>, user: User, AxPath(id):
     }
 }
 
-/// 导入请求体：v1 包只有合并单元列表；v2 包另带被省略路径的还原清单（为空时与 v1 相同）。
+/// 导入请求体：合并单元与 v2 包被省略路径的还原清单（v1 包为空）。
 #[derive(Deserialize)]
-#[serde(untagged)]
-enum ImportRequest {
-    Units(Vec<MergeUnit>),
-    WithDuplicates {
-        units: Vec<MergeUnit>,
-        #[serde(default)]
-        duplicates: Vec<PackDuplicate>,
-    },
+struct ImportRequest {
+    units: Vec<MergeUnit>,
+    #[serde(default)]
+    duplicates: Vec<PackDuplicate>,
 }
 
 /// 执行导入：结束后无论结局都删除上传临时文件（已移入的单元保留）。
@@ -453,10 +449,8 @@ pub async fn import(State(state): State<AppState>, user: User, AxPath(id): AxPat
     if let Err(r) = crate::fs::ensure_space(&state) {
         return r;
     }
-    let (units, duplicates) = match serde_json::from_slice::<ImportRequest>(&body) {
-        Ok(ImportRequest::Units(units)) => (units, Vec::new()),
-        Ok(ImportRequest::WithDuplicates { units, duplicates }) => (units, duplicates),
-        Err(_) => return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表"),
+    let Ok(ImportRequest { units, duplicates }) = serde_json::from_slice::<ImportRequest>(&body) else {
+        return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表");
     };
     let file = match resolve_upload(&state, &user, &id) {
         Ok(f) => f,
