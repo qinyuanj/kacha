@@ -29,6 +29,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
 use crate::board_pack::{self, ExportSpec, MergeUnit, PackDuplicate, CANCELLED};
+use crate::pack_staging;
 use crate::session::error;
 use crate::{AppState, User, META_DIR};
 
@@ -257,13 +258,9 @@ fn upload_path(root: &Path, id: &str) -> PathBuf {
     root.join(META_DIR).join(UPLOAD_DIR).join(format!("{id}{UPLOAD_SUFFIX}"))
 }
 
-/// 去重上传（#62）的暂存：每次导入一个目录 `<id>.staging.tmp/`，里面每份内容一个文件，以 sha256 命名。
-const CONTENT_DIR: &str = "pack-content";
-const CONTENT_SUFFIX: &str = ".staging.tmp";
-
 /// 该用户的上传暂存：(元数据目录下的子目录, 暂存条目名后缀)。新的上传暂存位置加在这里，
-/// 每次上传开始时一并回收。
-const UPLOAD_STAGING: &[(&str, &str)] = &[(UPLOAD_DIR, UPLOAD_SUFFIX), (CONTENT_DIR, CONTENT_SUFFIX)];
+/// 每次上传开始时一并回收。去重上传（#62）的暂存布局见 pack_staging。
+const UPLOAD_STAGING: &[(&str, &str)] = &[(UPLOAD_DIR, UPLOAD_SUFFIX), (pack_staging::DIR, pack_staging::SUFFIX)];
 
 /// 上传暂存最后一次写入超过这个时间才回收：并发进行中的上传在持续写入，等待导入的不会等这么久。
 const STALE_UPLOAD_AGE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
@@ -510,15 +507,11 @@ pub async fn existing(State(state): State<AppState>, user: User, body: axum::bod
     }
 }
 
-fn staging_path(root: &Path, id: &str) -> PathBuf {
-    root.join(META_DIR).join(CONTENT_DIR).join(format!("{id}{CONTENT_SUFFIX}"))
-}
-
 fn resolve_staging(state: &AppState, user: &User, id: &str) -> Result<PathBuf, Response> {
     if !valid_op_id(id) {
         return Err(error(StatusCode::BAD_REQUEST, "bad_request", "暂存 id 无效"));
     }
-    let dir = staging_path(&state.user_root(&user.fingerprint), id);
+    let dir = pack_staging::dir(&state.user_root(&user.fingerprint), id);
     if !dir.is_dir() {
         return Err(error(StatusCode::NOT_FOUND, "not_found", "上传暂存不存在或已被清理"));
     }
@@ -530,7 +523,7 @@ pub async fn open_staging(State(state): State<AppState>, user: User) -> Response
     let root = state.user_root(&user.fingerprint);
     sweep_stale_uploads(&root, state.now());
     let id = format!("{:x}", rand_u64());
-    match std::fs::create_dir_all(staging_path(&root, &id)) {
+    match std::fs::create_dir_all(pack_staging::dir(&root, &id)) {
         Ok(()) => Json(Uploaded { id }).into_response(),
         Err(e) => crate::fs::io_error(e),
     }
@@ -553,7 +546,7 @@ pub async fn put_content(
     headers: axum::http::HeaderMap,
     body: Body,
 ) -> Response {
-    if !board_pack::valid_sha256(&sha256) {
+    if !pack_staging::valid_sha256(&sha256) {
         return error(StatusCode::BAD_REQUEST, "bad_request", "sha256 应为 64 位小写十六进制");
     }
     let dir = match resolve_staging(&state, &user, &id) {
@@ -577,8 +570,8 @@ pub async fn put_content(
         op.total.store(q.total.unwrap_or(base + length.unwrap_or(0)), Ordering::Relaxed);
         op.done.store(base, Ordering::Relaxed);
     }
-    let target = board_pack::staged_content(&dir, &sha256);
-    let part = dir.join(format!("{sha256}.{:x}.part", rand_u64()));
+    let target = pack_staging::content(&dir, &sha256);
+    let part = pack_staging::part(&dir, &sha256, rand_u64());
     let mut guard = PartGuard { file: part.clone(), keep: false };
     let mut out = match tokio::fs::OpenOptions::new().write(true).create_new(true).open(&part).await {
         Ok(f) => f,
@@ -664,6 +657,6 @@ pub async fn discard_staging(State(state): State<AppState>, user: User, AxPath(i
     if !valid_op_id(&id) {
         return error(StatusCode::BAD_REQUEST, "bad_request", "暂存 id 无效");
     }
-    let _ = std::fs::remove_dir_all(staging_path(&state.user_root(&user.fingerprint), &id));
+    let _ = std::fs::remove_dir_all(pack_staging::dir(&state.user_root(&user.fingerprint), &id));
     StatusCode::NO_CONTENT.into_response()
 }

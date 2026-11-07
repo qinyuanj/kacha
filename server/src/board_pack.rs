@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 
-use crate::store;
+use crate::{pack_staging, store};
 
 pub const CANCELLED: &str = "已取消";
 const CHUNK: usize = 1 << 20;
@@ -548,15 +548,6 @@ pub struct PlacedFile {
     pub sha256: String,
 }
 
-pub fn valid_sha256(s: &str) -> bool {
-    s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
-/// 暂存里一份内容的文件名（即它的 sha256）。
-pub fn staged_content(staging: &Path, sha256: &str) -> PathBuf {
-    staging.join(sha256)
-}
-
 pub fn import_staged(staging: &Path, root: &Path, units: &[MergeUnit], files: &[PlacedFile], progress: &dyn Fn(u64, u64), cancel: &AtomicBool) -> io::Result<ImportReport> {
     import_staged_with(staging, root, units, files, &|from, to| fs::hard_link(from, to), progress, cancel)
 }
@@ -571,13 +562,13 @@ pub(crate) fn import_staged_with(staging: &Path, root: &Path, units: &[MergeUnit
         if !belongs_to_unit(units, &f.path) {
             return Err(invalid(format!("落盘清单里的 {} 不属于任何合并单元", f.path)));
         }
-        if !valid_sha256(&f.sha256) {
+        if !pack_staging::valid_sha256(&f.sha256) {
             return Err(invalid(format!("{} 的 sha256 无效", f.path)));
         }
         if declared.insert(f.path.as_str(), f.sha256.as_str()).is_some() {
             return Err(invalid(format!("落盘清单里的路径重复：{}", f.path)));
         }
-        if !staged_content(staging, &f.sha256).is_file() {
+        if !pack_staging::content(staging, &f.sha256).is_file() {
             return Err(invalid(format!("缺少 {} 的内容（没有上传）", f.path)));
         }
     }
@@ -586,7 +577,7 @@ pub(crate) fn import_staged_with(staging: &Path, root: &Path, units: &[MergeUnit
     let temp = TempDir(store::temp_path_for(&root.join(IMPORT_TEMP_STEM)));
     fs::create_dir(&temp.0)?;
     let mut placed: BTreeMap<&str, PathBuf> = BTreeMap::new();
-    let total: u64 = declared.values().collect::<BTreeSet<_>>().iter().map(|sha| fs::metadata(staged_content(staging, sha)).map(|m| m.len()).unwrap_or(0)).sum();
+    let total: u64 = declared.values().collect::<BTreeSet<_>>().iter().map(|sha| fs::metadata(pack_staging::content(staging, sha)).map(|m| m.len()).unwrap_or(0)).sum();
     let mut done = 0;
     for (path, sha256) in &declared {
         check_cancel(cancel)?;
@@ -598,7 +589,7 @@ pub(crate) fn import_staged_with(staging: &Path, root: &Path, units: &[MergeUnit
             Some(first) => link_or_copy(link, first, &dest)?,
             None => {
                 // 第一份落盘：暂存与用户数据根在同一文件系统，直接移过来；移不了就复制。
-                let blob = staged_content(staging, sha256);
+                let blob = pack_staging::content(staging, sha256);
                 done += fs::metadata(&blob)?.len();
                 if fs::rename(&blob, &dest).is_err() {
                     fs::copy(&blob, &dest)?;
@@ -928,7 +919,7 @@ mod tests {
         let staging = tmp.path().join("staging");
         let sha = |b: &[u8]| format!("{:x}", Sha256::digest(b));
         for bytes in [&b"png"[..], b"{\"same\":1}"] {
-            write(&staged_content(&staging, &sha(bytes)), bytes);
+            write(&pack_staging::content(&staging, &sha(bytes)), bytes);
         }
         let placed = |path: String, bytes: &[u8]| PlacedFile { path, sha256: sha(bytes) };
         let files = vec![

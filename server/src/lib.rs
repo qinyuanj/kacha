@@ -19,6 +19,7 @@ pub mod image_info;
 pub mod launch;
 pub mod limits;
 pub mod logger;
+pub mod pack_staging;
 pub mod packs;
 pub mod paths;
 pub mod redact;
