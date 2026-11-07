@@ -20,8 +20,8 @@ use crate::{paths, relay, AppState, User};
 
 /// 参考图上传落点（与画板包导入的参考图同目录）。
 pub const IMPORTED_REFERENCES_DIR: &str = "导入参考图";
-/// 单文件上限：与中转结果一致（ADR 0018 的 64 MB 请求预算）。
-const MAX_UPLOAD_BYTES: u64 = 64 * 1024 * 1024;
+/// 单文件上限：与中转结果一致（ADR 0018 的请求预算）。
+const MAX_UPLOAD_BYTES: u64 = crate::MAX_BODY_BYTES as u64;
 
 fn forbidden(e: paths::PathError) -> Response {
     error(StatusCode::FORBIDDEN, "forbidden", e.message())
@@ -79,7 +79,7 @@ pub async fn upload_reference(State(state): State<AppState>, user: User, body: B
         };
         total += chunk.len() as u64;
         if total > MAX_UPLOAD_BYTES {
-            return error(StatusCode::PAYLOAD_TOO_LARGE, "too_large", "图片超过 64 MB 上限");
+            return error(StatusCode::PAYLOAD_TOO_LARGE, "too_large", &format!("图片超过 {} 上限", crate::max_body_label()));
         }
         if head.len() < 64 {
             head.extend_from_slice(&chunk[..chunk.len().min(64 - head.len())]);

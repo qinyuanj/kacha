@@ -29,6 +29,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
 use crate::board_pack::{self, ExportSpec, MergeUnit, PackDuplicate, CANCELLED};
+use crate::pack_staging;
 use crate::session::error;
 use crate::{AppState, User, META_DIR};
 
@@ -167,7 +168,7 @@ pub async fn export(State(state): State<AppState>, user: User, Query(q): Query<O
     let root = state.user_root(&user.fingerprint);
     // 预检在流开始前完成：路径越界 / 条目重复还能回 4xx；打包中途的失败只能中止流（前端按下载失败处理）。
     let check_root = root.clone();
-    let check_spec = serde_json::from_slice::<ExportSpec>(&body).unwrap();
+    let check_spec = spec.clone();
     match tokio::task::spawn_blocking(move || board_pack::validate_export(&check_root, &check_spec)).await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => return error(StatusCode::UNPROCESSABLE_ENTITY, "export_failed", &e.to_string()),
@@ -257,13 +258,9 @@ fn upload_path(root: &Path, id: &str) -> PathBuf {
     root.join(META_DIR).join(UPLOAD_DIR).join(format!("{id}{UPLOAD_SUFFIX}"))
 }
 
-/// 去重上传（#62）的暂存：每次导入一个目录 `<id>.staging.tmp/`，里面每份内容一个文件，以 sha256 命名。
-const CONTENT_DIR: &str = "pack-content";
-const CONTENT_SUFFIX: &str = ".staging.tmp";
-
 /// 该用户的上传暂存：(元数据目录下的子目录, 暂存条目名后缀)。新的上传暂存位置加在这里，
-/// 每次上传开始时一并回收。
-const UPLOAD_STAGING: &[(&str, &str)] = &[(UPLOAD_DIR, UPLOAD_SUFFIX), (CONTENT_DIR, CONTENT_SUFFIX)];
+/// 每次上传开始时一并回收。去重上传（#62）的暂存布局见 pack_staging。
+const UPLOAD_STAGING: &[(&str, &str)] = &[(UPLOAD_DIR, UPLOAD_SUFFIX), (pack_staging::DIR, pack_staging::SUFFIX)];
 
 /// 上传暂存最后一次写入超过这个时间才回收：并发进行中的上传在持续写入，等待导入的不会等这么久。
 const STALE_UPLOAD_AGE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
@@ -352,7 +349,7 @@ async fn receive_body(body: Body, out: &mut tokio::fs::File, rules: Receive<'_>)
 const UPLOAD_TIMEOUT_MESSAGE: &str = "上传中断：超过 60 秒没有收到数据，请检查网络后重试";
 
 fn too_large() -> Response {
-    error(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large", "单份内容超过 64 MB 上限")
+    error(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large", &format!("单份内容超过 {} 上限", crate::max_body_label()))
 }
 
 pub async fn upload(State(state): State<AppState>, user: User, Query(q): Query<UploadQuery>, headers: axum::http::HeaderMap, body: Body) -> Response {
@@ -439,16 +436,12 @@ pub async fn upload_texts(State(state): State<AppState>, user: User, AxPath(id):
     }
 }
 
-/// 导入请求体：v1 包只有合并单元列表；v2 包另带被省略路径的还原清单（为空时与 v1 相同）。
+/// 导入请求体：合并单元与 v2 包被省略路径的还原清单（v1 包为空）。
 #[derive(Deserialize)]
-#[serde(untagged)]
-enum ImportRequest {
-    Units(Vec<MergeUnit>),
-    WithDuplicates {
-        units: Vec<MergeUnit>,
-        #[serde(default)]
-        duplicates: Vec<PackDuplicate>,
-    },
+struct ImportRequest {
+    units: Vec<MergeUnit>,
+    #[serde(default)]
+    duplicates: Vec<PackDuplicate>,
 }
 
 /// 执行导入：结束后无论结局都删除上传临时文件（已移入的单元保留）。
@@ -456,10 +449,8 @@ pub async fn import(State(state): State<AppState>, user: User, AxPath(id): AxPat
     if let Err(r) = crate::fs::ensure_space(&state) {
         return r;
     }
-    let (units, duplicates) = match serde_json::from_slice::<ImportRequest>(&body) {
-        Ok(ImportRequest::Units(units)) => (units, Vec::new()),
-        Ok(ImportRequest::WithDuplicates { units, duplicates }) => (units, duplicates),
-        Err(_) => return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表"),
+    let Ok(ImportRequest { units, duplicates }) = serde_json::from_slice::<ImportRequest>(&body) else {
+        return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表");
     };
     let file = match resolve_upload(&state, &user, &id) {
         Ok(f) => f,
@@ -496,54 +487,25 @@ pub async fn discard_upload(State(state): State<AppState>, user: User, AxPath(id
 // 另外每份内容遵守单文件 64 MB 上限（413），并边写边算 sha256 与声明核对（不一致按损坏 422）。
 // 问已有（要读身份文件算 sha256）与合并落盘仍拿大请求名额。
 
-/// 用户数据根里已有的合并单元，每个单元一种状态：
-/// - `absent`：没有；
-/// - `present`：有，带 sha256（任务目录给身份文件 task.json 的，参考图给整文件的）；
-/// - `unreadable`：在但身份文件（或参考图本身）读不出——前端按冲突处理，与合并时「读不了视为不同」的比对一致。
+/// 用户数据根里已有的合并单元，每个单元一种状态（见 board_pack::ExistingUnit）；路径越界回 403。
 pub async fn existing(State(state): State<AppState>, user: User, body: axum::body::Bytes) -> Response {
     let Ok(units) = serde_json::from_slice::<Vec<MergeUnit>>(&body) else {
         return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表");
     };
     let root = state.user_root(&user.fingerprint);
     let _permit = state.heavy().acquire().await;
-    let result = tokio::task::spawn_blocking(move || -> Result<Vec<serde_json::Value>, String> {
-        let resolve = |rel: &str| crate::paths::resolve(&root, rel).map_err(|e| e.message().to_string());
-        let mut out = Vec::with_capacity(units.len());
-        for unit in &units {
-            let path = resolve(&unit.path)?;
-            let identity = match &unit.identity {
-                Some(identity) => resolve(&format!("{}/{identity}", unit.path))?,
-                None => path.clone(),
-            };
-            let state = if !path.exists() {
-                serde_json::json!({ "path": unit.path, "state": "absent" })
-            } else {
-                match board_pack::sha256_file(&identity) {
-                    Ok(sha256) => serde_json::json!({ "path": unit.path, "state": "present", "sha256": sha256 }),
-                    Err(_) => serde_json::json!({ "path": unit.path, "state": "unreadable" }),
-                }
-            };
-            out.push(state);
-        }
-        Ok(out)
-    })
-    .await;
-    match result {
+    match tokio::task::spawn_blocking(move || board_pack::existing_units(&root, &units)).await {
         Ok(Ok(out)) => Json(out).into_response(),
-        Ok(Err(message)) => error(StatusCode::FORBIDDEN, "forbidden", &message),
+        Ok(Err(e)) => error(StatusCode::FORBIDDEN, "forbidden", &e.to_string()),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "io", &e.to_string()),
     }
-}
-
-fn staging_path(root: &Path, id: &str) -> PathBuf {
-    root.join(META_DIR).join(CONTENT_DIR).join(format!("{id}{CONTENT_SUFFIX}"))
 }
 
 fn resolve_staging(state: &AppState, user: &User, id: &str) -> Result<PathBuf, Response> {
     if !valid_op_id(id) {
         return Err(error(StatusCode::BAD_REQUEST, "bad_request", "暂存 id 无效"));
     }
-    let dir = staging_path(&state.user_root(&user.fingerprint), id);
+    let dir = pack_staging::dir(&state.user_root(&user.fingerprint), id);
     if !dir.is_dir() {
         return Err(error(StatusCode::NOT_FOUND, "not_found", "上传暂存不存在或已被清理"));
     }
@@ -555,7 +517,7 @@ pub async fn open_staging(State(state): State<AppState>, user: User) -> Response
     let root = state.user_root(&user.fingerprint);
     sweep_stale_uploads(&root, state.now());
     let id = format!("{:x}", rand_u64());
-    match std::fs::create_dir_all(staging_path(&root, &id)) {
+    match std::fs::create_dir_all(pack_staging::dir(&root, &id)) {
         Ok(()) => Json(Uploaded { id }).into_response(),
         Err(e) => crate::fs::io_error(e),
     }
@@ -578,7 +540,7 @@ pub async fn put_content(
     headers: axum::http::HeaderMap,
     body: Body,
 ) -> Response {
-    if !board_pack::valid_sha256(&sha256) {
+    if !pack_staging::valid_sha256(&sha256) {
         return error(StatusCode::BAD_REQUEST, "bad_request", "sha256 应为 64 位小写十六进制");
     }
     let dir = match resolve_staging(&state, &user, &id) {
@@ -602,8 +564,8 @@ pub async fn put_content(
         op.total.store(q.total.unwrap_or(base + length.unwrap_or(0)), Ordering::Relaxed);
         op.done.store(base, Ordering::Relaxed);
     }
-    let target = board_pack::staged_content(&dir, &sha256);
-    let part = dir.join(format!("{sha256}.{:x}.part", rand_u64()));
+    let target = pack_staging::content(&dir, &sha256);
+    let part = pack_staging::part(&dir, &sha256, rand_u64());
     let mut guard = PartGuard { file: part.clone(), keep: false };
     let mut out = match tokio::fs::OpenOptions::new().write(true).create_new(true).open(&part).await {
         Ok(f) => f,
@@ -689,6 +651,6 @@ pub async fn discard_staging(State(state): State<AppState>, user: User, AxPath(i
     if !valid_op_id(&id) {
         return error(StatusCode::BAD_REQUEST, "bad_request", "暂存 id 无效");
     }
-    let _ = std::fs::remove_dir_all(staging_path(&state.user_root(&user.fingerprint), &id));
+    let _ = std::fs::remove_dir_all(pack_staging::dir(&state.user_root(&user.fingerprint), &id));
     StatusCode::NO_CONTENT.into_response()
 }
