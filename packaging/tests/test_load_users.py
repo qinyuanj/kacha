@@ -15,6 +15,10 @@ import threading
 import unittest
 import urllib.parse
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from load_users import server_profile  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "packaging" / "load_users.py"
 PACK = REPO / "client" / "fixtures" / "packs" / "v0.3.2-flash-layers.ugcpack"
@@ -89,6 +93,14 @@ class LoadUsersCliTest(unittest.TestCase):
         self.http.server_close()
         self.tmp.cleanup()
 
+    def test_reports_debug_profile_for_debug_server(self):
+        debug_dir = Path(self.tmp.name) / "target" / "debug"
+        debug_dir.mkdir(parents=True)
+        self.stand_in = debug_dir / "fake_server.py"
+        self.stand_in.write_text(STAND_IN, encoding="utf-8")
+        result = self.run_load()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.json["profile"], "debug")
     def run_load(self, *extra: str, exit_early: bool = False) -> subprocess.CompletedProcess:
         env = dict(os.environ, KACHA_FAKE_PORT=str(self.http.server_port), KACHA_FAKE_EXIT="1" if exit_early else "0")
         output = Path(self.tmp.name) / "result.json"
@@ -116,6 +128,21 @@ class LoadUsersCliTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("峰值", result.stderr)
         self.assertIsNone(result.json, "读不到峰值时不得写出测量结果")
+
+
+class ServerProfileTest(unittest.TestCase):
+    """profile 字段如实反映所用服务端：按 --server 路径里离可执行文件最近的 debug / release 目录判断。"""
+
+    def test_profile_from_server_path(self):
+        cases = {
+            Path("server/target/debug/kacha-server.exe"): "debug",
+            Path("server/target/release/kacha-server.exe"): "release",
+            Path("release/kacha-web/kacha-server.exe"): "release",
+            Path("release/worktree/server/target/debug/kacha-server.exe"): "debug",
+            Path("D:/Debug/kacha-server.exe"): "debug",
+            Path("tools/kacha-server.exe"): "unknown",
+        }
+        self.assertEqual({str(path): server_profile(path) for path in cases}, {str(path): profile for path, profile in cases.items()})
 
 
 if __name__ == "__main__":
