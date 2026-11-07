@@ -19,7 +19,7 @@ use crate::{AppState, User};
 /// 画板位数量默认值（ADR 0019）。
 pub const DEFAULT_BOARD_SLOTS: u32 = 10;
 
-/// 归档画板放在画板目录下的这个子目录里（画板文件格式不变）。
+/// 归档画板放在画板目录下的这个子目录里（画板文件格式不变）；client/src/core/archive.ts 的 `ARCHIVE_DIR_NAME` 是它的跨语言副本。
 pub const ARCHIVE_DIR: &str = "归档";
 
 const MIB: u64 = 1024 * 1024;
@@ -83,6 +83,27 @@ pub fn ensure_board_slots(user_root: &Path, total: u32, additional: usize) -> Re
 pub fn occupies_board_slot(user_root: &Path, path: &Path) -> bool {
     path.parent() == Some(user_root.join(BOARDS_DIR).as_path())
         && path.file_name().is_some_and(|n| n.to_string_lossy().ends_with(crate::store::BOARD_EXTENSION))
+}
+
+/// 归档子目录（不保证存在）。
+pub fn archive_dir(user_root: &Path) -> std::path::PathBuf {
+    user_root.join(BOARDS_DIR).join(ARCHIVE_DIR)
+}
+
+/// 归档画板的位置：归档子目录直属的画板文件（#90）。
+pub fn is_archive_slot(user_root: &Path, path: &Path) -> bool {
+    path.parent() == Some(archive_dir(user_root).as_path())
+        && path.file_name().is_some_and(|n| n.to_string_lossy().ends_with(crate::store::BOARD_EXTENSION))
+}
+
+/// 归档子目录下的任何路径都只读：写画板、改名都不能进出这里，只能经归档 / 取消归档（取消归档要检查画板位）。
+pub fn in_archive(user_root: &Path, path: &Path) -> bool {
+    path.starts_with(archive_dir(user_root))
+}
+
+/// 写入或改名碰到归档画板时的 409；client/src/ui/boardText.ts 的 `ARCHIVE_TEXT.readOnly` 是它的跨语言副本。
+pub fn archived_read_only() -> Response {
+    crate::session::error(axum::http::StatusCode::CONFLICT, "board_archived", "归档画板只读：取消归档或复制为新画板后再编辑。")
 }
 
 #[derive(Serialize)]

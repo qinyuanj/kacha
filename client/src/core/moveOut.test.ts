@@ -139,11 +139,17 @@ describe("移出为新画板：拆分结果", () => {
     expect(b.nodes.filter((n) => n.type === "reference" && n.path === "参考/ref.png")).toHaveLength(1);
   });
 
-  it("阶段里的任务的结果在阶段外时一同带走（原画板删任务会连带删它的结果列）", () => {
+  it("阶段里的任务的结果在阶段外时仍留在原画板，跨阶段系统连线断开", () => {
     const b0 = big();
-    const b = split({ ...b0, stages: [{ id: "s1", name: "第二轮", nodes: ["p1", "t1"], collapsed: false, extra: {} }] });
-    expect(b.nodes.filter((n) => n.type === "result")).toHaveLength(2);
+    const original = { ...b0, stages: [{ id: "s1", name: "第二轮", nodes: ["p1", "t1"], collapsed: false, extra: {} }] };
+    const b = split(original);
+    expect(b.nodes.filter((n) => n.type === "result")).toHaveLength(0);
     expect(stagesOf(b)[0].nodes).toHaveLength(2);
+    const e: EditEnv = { table: BUILTIN_TABLE, discovery: { source: "none" }, locked: new Set(), imageSize: () => undefined, newId: () => "unused" };
+    const removed = editBoard(original, { kind: "moveOutStage", stageId: "s1" }, e);
+    expect(removed.board.nodes.filter((n) => n.type === "result").map((n) => n.id)).toEqual(["r0", "r1", "r2"]);
+    expect(removed.board.edges.some((line) => line.from[0] === "t1")).toBe(false);
+    expect(undo(recordChange(emptyHistory(), original, removed.step!, 0), removed.board, new Set())!.board).toEqual(original);
   });
 
   it("阶段不存在时不拆", () => {

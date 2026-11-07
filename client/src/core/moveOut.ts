@@ -4,10 +4,19 @@ import { BOARD_FORMAT_VERSION, stagesOf, type Board, type BoardEdge, type BoardN
 import { imageKey, imagePortIndex, layerRelPath, removeNodes, sourceLayerRecord } from "./graph";
 import { basename } from "./paths";
 
-/** 移出的节点：阶段成员，加上成员任务的结果列（原画板删任务会连带删它们）。按画板顺序；阶段不存在为 null。 */
+/** 移出的节点严格限于阶段成员。按画板顺序；阶段不存在为 null。 */
 export function movedIds(board: Board, stageId: string): string[] | null {
   const stage = stagesOf(board).find((s) => s.id === stageId);
-  return stage ? removeNodes(board, stage.nodes).removedIds : null;
+  return stage ? board.nodes.filter((n) => stage.nodes.includes(n.id)).map((n) => n.id) : null;
+}
+
+/** 原画板移出阶段：阶段外的结果仍保留，只断开跨阶段的系统连线，避免普通删除任务的级联规则带走它们。 */
+export function removeMovedStage(board: Board, stageId: string): Board {
+  const ids = movedIds(board, stageId);
+  if (!ids?.length) return board;
+  const moved = new Set(ids);
+  const edges = board.edges.filter((e) => !(e.system && moved.has(e.from[0]) && !moved.has(e.to[0])));
+  return removeNodes({ ...board, edges }, ids).board;
 }
 
 /** 阶段外、经图片连线接进移出节点的上游图片：一张图（节点 + 图层）一项。 */

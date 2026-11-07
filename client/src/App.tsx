@@ -15,7 +15,8 @@ import { ChangelogDialog } from "./ui/ChangelogDialog";
 import { imageProbe } from "./shell/adapters";
 import { copyTextToClipboard } from "./shell/clipboard";
 import { browser, ipc, transfer, userRoot } from "./shell/ipc";
-import { BACKUP_HINT_TEXT, MANAGE_BOARDS_TEXT, sizeNoticeText, TIDY_TEXT, usageLimitText } from "./ui/boardText";
+import { isArchivedPath } from "./core/archive";
+import { ARCHIVE_TEXT, BACKUP_HINT_TEXT, MANAGE_BOARDS_TEXT, sizeNoticeText, TIDY_TEXT, usageLimitText } from "./ui/boardText";
 import { useUsageLimit } from "./ui/useUsageLimit";
 import { BoardPackDialog } from "./ui/BoardPackDialog";
 import { BoardListDialog } from "./ui/BoardListDialog";
@@ -247,6 +248,26 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
     [boards, runner],
   );
 
+  /** 归档（#90）：本页开着且有未完成的任务时先确认停掉（结果写不进只读画板），再保存、搬进归档子目录。 */
+  const archiveBoardAt = useCallback(
+    async (path: string) => {
+      const key = boards.keyOf(path);
+      if (key) {
+        const count = runner.getSnapshot().pending(key);
+        if (count > 0 && !(await confirmStopTasks(count))) return;
+        runner.closeBoard(key);
+      }
+      await boards.archiveBoard(path);
+    },
+    [boards, runner],
+  );
+
+  /** 取消归档 / 复制为新画板（归档画板顶部的按钮）：画板位满时提示统一文案。 */
+  const explainRefusal = useCallback(
+    (run: Promise<string | null>) => void run.then((refusal) => refusal && toast(refusal), (e) => toast(errorText(e))),
+    [toast],
+  );
+
   /** 删除前导出画板包：没打开的先打开（导出流程以已打开的画板为准）。 */
   const exportBoardAt = useCallback(
     async (path: string) => {
@@ -328,6 +349,8 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   // 当前画板越线提示（#87）：只提醒，不碰生成。体量回落时校正已提醒档位（清除回落那条线的记录）。
   const active = sessions.find((s) => s.key === activeKey);
   const okActive = active?.status === "ok" ? active : null;
+  /** 当前画板是归档画板（#90）：只读，能看、能放大、能下载结果与导出画板包。 */
+  const activeArchived = !!okActive && !!userRoot && isArchivedPath(userRoot, okActive.path);
   const activeSize = useActiveBoardSize(okActive?.path ?? null, okActive?.version ?? null);
   const notice = activeSize ? sizeNotice(activeSize.tier, sizeNotices[activeSize.path]) : null;
   // 用量上限提醒（#88）：只提醒，生成照常。
@@ -378,6 +401,9 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
             }, (e) => toast(errorText(e)));
           }}
           onDelete={deleteBoardAt}
+          onArchive={archiveBoardAt}
+          onUnarchive={boards.unarchiveBoard}
+          onCopy={boards.copyAsNewBoard}
           onExport={(path) => void exportBoardAt(path).catch((e) => toast(errorText(e)))}
           onClose={() => {
             setBoardListOpen(false);
@@ -496,7 +522,8 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       {activeSize && notice?.show && (
         <div className={`bar ${notice.show === "alert" ? "bar-alert" : "bar-warn"} size-notice`} role="status" data-size-tier={notice.show}>
           <span>{sizeNoticeText(activeSize.bytes)}</span>
-          <button
+          {/* 归档画板只读，不能整理（#90）。 */}
+          {!activeArchived && <button
             onClick={() => {
               // 进入整理模式即算用户已看到这条提醒。
               const { path } = activeSize;
@@ -506,7 +533,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
             }}
           >
             {TIDY_TEXT.enter}
-          </button>
+          </button>}
           <button
             className="link"
             aria-label="关闭体量提示"
@@ -518,6 +545,13 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           >
             关闭
           </button>
+        </div>
+      )}
+      {activeArchived && okActive && (
+        <div className="bar bar-info archived-notice" role="status">
+          <span>{ARCHIVE_TEXT.banner}</span>
+          <button onClick={() => explainRefusal(boards.unarchiveBoard(okActive.path))}>{ARCHIVE_TEXT.unarchive}</button>
+          <button onClick={() => explainRefusal(boards.copyAsNewBoard(okActive.path))}>{ARCHIVE_TEXT.copy}</button>
         </div>
       )}
       {active?.status === "ok" && active.notice && (
@@ -579,8 +613,9 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               onRegenerate={regenerate}
               onViewSendText={(id) => void viewSendText(id)}
               toolbarSlot={toolbarSlot}
+              readOnly={activeArchived}
               focus={focus?.boardKey === active.key ? focus : null}
-              tidying={tidyKey === active.key}
+              tidying={tidyKey === active.key && !activeArchived}
               onTidyChange={(on) => setTidyKey(on ? active.key : null)}
               onMoveOutStage={(stageId) => boards.moveOutStage(active.key, stageId)}
             />

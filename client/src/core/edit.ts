@@ -13,7 +13,7 @@ import { addAsReference, addAsReferenceTarget, continueEditing, LOCKED_HINT, pas
 import { addResultNode, PROMPT_NODE_SIZE, type RunResult } from "./layout";
 import { IMAGE_NODE_WIDTH, imageNodeSize } from "./nodeSize";
 import { setEdgeRegion } from "./region";
-import { movedIds } from "./moveOut";
+import { removeMovedStage } from "./moveOut";
 import { duplicateNodes, nudgeNodes, settleAltDrag } from "./selection";
 import type { Discovery } from "./settings";
 import { autoSizeSpec, manualSizeSpec, withSizeTier } from "./size";
@@ -363,8 +363,7 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
       return { board: removeNodes(board, ids).board, step: { label: countLabel("收掉", ids.length, "张未定稿") } };
     }
     case "moveOutStage": {
-      const ids = movedIds(board, change.stageId);
-      return ids ? { board: removeNodes(board, ids).board, step: { label: "移出为新画板" }, selection: [] } : { board };
+      return { board: removeMovedStage(board, change.stageId), step: { label: "移出为新画板" }, selection: [] };
     }
     case "viewport": {
       const { x, y, zoom } = change.viewport;
