@@ -3,7 +3,7 @@
 // 换模型绝不自动删线或改设置，只报告原因。
 import { runCopies, type Board, type TaskNode } from "./board";
 import { findModel, isRetiredModel, isSupported, LITE_RETIRED_HINT, type CapabilityTable, type ModelCapability } from "./capabilities";
-import { isRequestShapeImplemented } from "./gateway";
+import { isLayerSize, isRequestShapeImplemented } from "./gateway";
 import { imageEdges, imageKey, imagePortSlots, imageSources, promptText, workflowOf } from "./graph";
 import { MAX_REGIONS } from "./overlay";
 import { effectiveRegionRender, expandImageEdges } from "./region";
@@ -100,7 +100,7 @@ export function taskView(board: Board, table: CapabilityTable, taskId: string, f
   const reasons = [
     ...(flashLayers ? [] : promptReasons(board, taskId)),
     ...(flashLayers && imagePortSlots(board, table, taskId).length !== 1 ? [reason("layerNeedsOneImage", "图层拆分需要恰好一张 PNG/JPEG 参考图，不支持区域派生图")] : []),
-    ...(flashLayers && !["1K", "1.5K", "2K", "auto"].includes(task.layer_size ?? "auto") ? [reason("sizeUnsupported", "图层尺寸只支持 1K / 1.5K / 2K / auto")] : []),
+    ...(flashLayers && !isLayerSize(task.layer_size ?? "auto") ? [reason("sizeUnsupported", "图层尺寸只支持 1K / 1.5K / 2K / auto")] : []),
     ...(isRetiredModel(task.model) ? [reason("modelRetired", LITE_RETIRED_HINT)] : model ? [...availabilityReasons(table, facts.discovery, model), ...modelReasons(board, model, task)] : [reason("modelUnknown", `模型 ${task.model} 不在能力表内`)]),
     ...(task.layer_decomposition && layer ? [reason("layerUnsupported", layer)] : []),
     ...(task.transparent_background && transparent ? [reason(transparent.kind, transparent.text)] : []),

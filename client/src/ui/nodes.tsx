@@ -28,7 +28,7 @@ import { actionHoverInfo, CANCELLED_HINT, portThumbHoverInfo, referenceHoverInfo
 import type { TaskStatus } from "../core/run";
 import type { SummaryTone } from "../core/runner";
 import { inputImageAdviceAll } from "../core/fitImage";
-import { DEFAULT_OUTPUT_OPTIONS } from "../core/gateway";
+import { DEFAULT_OUTPUT_OPTIONS, isLayerSize, LAYER_SIZES } from "../core/gateway";
 import { IMAGE_PORT_PREFIX, type TaskPorts } from "../core/graph";
 import { imageMinSize } from "../core/nodeSize";
 import { regionCss } from "../core/overlay";
@@ -789,8 +789,8 @@ export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskF
       {/* 分辨率档与宽高比常驻：收起时也能改；模型与开关只在展开区。 */}
       {node.layer_decomposition && model?.request_shape === "seedream_flash_images_generations" ? (
         <div className="field size-field nodrag">
-          <select aria-label="图层尺寸" value={node.layer_size ?? "auto"} disabled={locked} onChange={(e) => apply({ kind: "setLayerSize", taskId: node.id, size: e.target.value as "1K" | "1.5K" | "2K" | "auto" })}>
-            {["auto", "1K", "1.5K", "2K"].map((s) => <option key={s} value={s}>{s === "auto" ? "自动" : s}</option>)}
+          <select aria-label="图层尺寸" value={node.layer_size ?? "auto"} disabled={locked} onChange={(e) => isLayerSize(e.target.value) && apply({ kind: "setLayerSize", taskId: node.id, size: e.target.value })}>
+            {LAYER_SIZES.map((s) => <option key={s} value={s}>{s === "auto" ? "自动" : s}</option>)}
           </select>
           <span className="muted small" title="auto：921600–4624220 像素保持原尺寸，较小放到 1K，较大缩到 2K">底图跟随输入，图层跟随元素</span>
         </div>
