@@ -87,6 +87,17 @@ export function parseConcurrency(draft: string, fallback: number): number {
   return Math.min(MAX_CONCURRENCY, Math.max(MIN_CONCURRENCY, Math.round(value)));
 }
 
+/** 设置面板的表单（原始文本）。 */
+export interface SettingsForm {
+  baseUrl: string;
+  concurrencyDraft: string;
+}
+
+/** 点保存时写入的设置：在已存设置上套用表单。并发草稿此刻才钳制——不失焦直接保存也不会存进空值或越界值。 */
+export function settingsFromForm(saved: Settings, form: SettingsForm): Settings {
+  return { ...saved, base_url: normalizeBaseUrl(form.baseUrl), concurrency: parseConcurrency(form.concurrencyDraft, saved.concurrency) };
+}
+
 export function serializeSettings(settings: Settings): string {
   const { extra, ...known } = settings;
   return `${JSON.stringify({ ...known, format_version: SETTINGS_FORMAT_VERSION, ...extra }, null, 2)}\n`;

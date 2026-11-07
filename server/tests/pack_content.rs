@@ -163,6 +163,26 @@ async fn existing_response_bytes_are_fixed_for_present_absent_and_unreadable_uni
     );
 }
 
+/// 问已有遇到越界路径回 403，响应逐字节与改造前（paths::resolve 的文案）一致（#81）。
+/// 期望值手写：要独立于被测实现固定前端看到的字节，防同义反复。
+#[tokio::test]
+async fn existing_rejects_an_escaping_path_with_a_fixed_403_body() {
+    let h = Harness::new();
+    let cookie = h.session(GOOD_KEY).await;
+    let cases = [
+        (serde_json::json!([{ "path": "../x", "identity": null }]), r#"{"code":"forbidden","message":"路径越界，只允许用户数据根内的相对路径：../x"}"#),
+        (
+            serde_json::json!([{ "path": TASK_A, "identity": "../../../x" }]),
+            r#"{"code":"forbidden","message":"路径越界，只允许用户数据根内的相对路径：2026-09-16/20260916T010000Z-0000000a/../../../x"}"#,
+        ),
+    ];
+    for (body, expected) in cases {
+        let reply = h.send(Method::POST, "/api/packs/existing", Some(&cookie), body.to_string()).await;
+        assert_eq!(reply.status, 403, "{body}");
+        assert_eq!(reply.text(), expected);
+    }
+}
+
 #[tokio::test]
 async fn content_whose_sha256_differs_from_the_declared_one_is_rejected_as_corrupt() {
     let h = Harness::new();
@@ -230,7 +250,8 @@ async fn content_over_the_64_mb_body_limit_is_rejected_with_413() {
         .unwrap();
     let reply = reply_of(h.app.clone().oneshot(req).await.unwrap()).await;
     assert_eq!(reply.status, StatusCode::PAYLOAD_TOO_LARGE);
-    assert_eq!(reply.json()["message"], "单份内容超过 64 MB 上限");
+    // 上限的数值与写法只在 lib.rs（MAX_BODY_BYTES / max_body_label）定义一处，这里导入而不手抄「64 MB」。
+    assert_eq!(reply.json()["message"], format!("单份内容超过 {} 上限", kacha_server::max_body_label()));
     // 没有 Content-Length、实际超限：写到上限即拒绝并删掉半成品。
     let big = vec![0u8; kacha_server::MAX_BODY_BYTES + 1];
     let req = Request::builder()

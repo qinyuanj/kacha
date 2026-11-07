@@ -1,6 +1,6 @@
 // 节点图规则：连线合法性、任务节点按能力露出的端口与开关、提示词与图片来源。
 // 全部是 Board → 结果的纯函数；换模型绝不自动删线或改设置。不可运行原因见 taskView。
-import type { Board, BoardEdge, LayerRecord, ResultRecord, TaskNode } from "./board";
+import type { Board, BoardEdge, BoardNode, LayerRecord, ResultRecord, TaskNode } from "./board";
 import {
   findModel,
   isSupported,
@@ -95,6 +95,20 @@ export function layerRelPath(node: { path: string; file: string }, file: string)
 /** 缺图集合与透明通道集合共用的图片键：底图（layer 为 null）就是节点 id，图层按序号（1 起）另起一键，与底图互不株连。 */
 export function imageKey(nodeId: string, layer: number | null): string {
   return layer === null ? nodeId : `${nodeId}:layer:${layer}`;
+}
+
+export interface NodeImage {
+  /** 缺图 / 透明通道集合的键（见 imageKey）。 */
+  key: string;
+  absPath: string;
+}
+
+/** 图片节点的全部图片文件：参考图是它本身；结果节点是底图，再按序跟结果记录里的各图层。其余节点没有图片。 */
+export function nodeImages(node: BoardNode, userRoot: string): NodeImage[] {
+  if (node.type !== "reference" && node.type !== "result") return [];
+  const main = { key: imageKey(node.id, null), absPath: resolveFromRoot(userRoot, node.path) };
+  if (node.type !== "result") return [main];
+  return [main, ...(node.record.layers ?? []).map((layer, i) => ({ key: imageKey(node.id, i + 1), absPath: resolveFromRoot(userRoot, layerRelPath(node, layer.file)) }))];
 }
 
 /** 任务的参考图来源，按端口顺序；结果节点回灌的是文件本身，不带会话参数。 */

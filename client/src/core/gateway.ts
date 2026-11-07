@@ -9,6 +9,9 @@ import { isSupported, type ModelCapability } from "./capabilities";
 export const LAYER_SIZES = ["auto", "1K", "1.5K", "2K"] as const;
 export type LayerSize = (typeof LAYER_SIZES)[number];
 
+/** 提示文案里的取值列举，如「1K / 1.5K / 2K / auto」：具体档在前，auto 殿后。 */
+export const LAYER_SIZES_TEXT = [...LAYER_SIZES.filter((s) => s !== "auto"), "auto"].join(" / ");
+
 export function isLayerSize(value: unknown): value is LayerSize {
   return (LAYER_SIZES as readonly unknown[]).includes(value);
 }

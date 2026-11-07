@@ -1,6 +1,6 @@
 // 画板文件：用户数据根/画板/<标题>.ugcboard.json。
 // 任务目录是真源、画板只是视图；本模块只负责文件格式的读写、版本与未知字段保留、文件名派生。
-import { isLayerSize, type LayerSize, type OutputOptions } from "./gateway";
+import { isLayerSize, LAYER_SIZES_TEXT, type LayerSize, type OutputOptions } from "./gateway";
 import type { AutoRatio, SizeSpec } from "./size";
 
 export const BOARD_FORMAT_VERSION = 1;
@@ -209,7 +209,7 @@ const NODE_KEYS = {
 
 /** 图层尺寸的封闭取值；画板里出现别的值视为损坏，不静默断言。 */
 function layerSizeOf(raw: unknown): LayerSize {
-  return need<LayerSize>(isLayerSize(raw), raw, "layer_size 必须是 1K / 1.5K / 2K / auto");
+  return need<LayerSize>(isLayerSize(raw), raw, `layer_size 必须是 ${LAYER_SIZES_TEXT}`);
 }
 
 /** 画板里的输出选项做结构化校验；取值越界即损坏（与 gateway.outputOptions 同口径，但损坏归画板格式）。 */

@@ -14,6 +14,7 @@ import {
   inputRuleModels,
   layerRelPath,
   moveImagePort,
+  nodeImages,
   taskPorts,
 } from "./graph";
 
@@ -311,6 +312,20 @@ describe("图层路径与图层键", () => {
   it("底图的键是节点 id，图层的键带序号，两者互不相同", () => {
     expect(imageKey("r", null)).toBe("r");
     expect(imageKey("r", 2)).toBe("r:layer:2");
+  });
+
+  it("图片节点的全部图片：参考图只有底图，结果节点底图后按序跟各图层，其余节点没有", () => {
+    const res = node("x", "result");
+    if (res.type !== "result") throw new Error("unreachable");
+    res.record.layers = [{ file: "layers/01.png", z_index: 1, bounding_box: [0, 0, 1, 1] }, { file: "layers/02.jpg", z_index: 2, bounding_box: [0, 0, 1, 1] }];
+    expect(nodeImages(res, "/data")).toEqual([
+      { key: "x", absPath: "/data/x/x/result.png" },
+      { key: "x:layer:1", absPath: "/data/x/x/layers/01.png" },
+      { key: "x:layer:2", absPath: "/data/x/x/layers/02.jpg" },
+    ]);
+    expect(nodeImages(node("x", "result"), "/data")).toEqual([{ key: "x", absPath: "/data/x/x/result.png" }]);
+    expect(nodeImages(node("r", "reference"), "/data")).toEqual([{ key: "r", absPath: "/data/r.png" }]);
+    expect(nodeImages(node("p", "prompt"), "/data")).toEqual([]);
   });
 });
 

@@ -15,6 +15,7 @@ import {
   saveSettings,
   serializeModelsCache,
   serializeSettings,
+  settingsFromForm,
   validateBaseUrl,
   type SettingsPorts,
 } from "./settings";
@@ -88,6 +89,18 @@ describe("并发上限输入框草稿", () => {
     expect(parseConcurrency("0", 3)).toBe(1);
     expect(parseConcurrency("3.6", 3)).toBe(4);
     expect(parseConcurrency("abc", 3)).toBe(3);
+  });
+
+  it("不失焦直接保存：保存值按草稿钳制，清空则保持原值", () => {
+    const saved = { ...DEFAULT_SETTINGS, concurrency: 4 };
+    expect(settingsFromForm(saved, { baseUrl: saved.base_url, concurrencyDraft: "" }).concurrency).toBe(4);
+    expect(settingsFromForm(saved, { baseUrl: saved.base_url, concurrencyDraft: "17" }).concurrency).toBe(10);
+    expect(settingsFromForm(saved, { baseUrl: saved.base_url, concurrencyDraft: "7" }).concurrency).toBe(7);
+  });
+
+  it("保存时网关地址去掉首尾空白与末尾斜杠，其余字段沿用原设置", () => {
+    const saved = { ...DEFAULT_SETTINGS, extra: { future: [1] } };
+    expect(settingsFromForm(saved, { baseUrl: " https://gw.example/ ", concurrencyDraft: "5" })).toEqual({ ...saved, base_url: "https://gw.example", concurrency: 5 });
   });
 });
 

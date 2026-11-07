@@ -140,7 +140,8 @@ describe("画板文件读入", () => {
     badSize.nodes[2].layer_size = "3K";
     const sizeResult = parseBoard(JSON.stringify(badSize));
     expect(sizeResult.kind).toBe("corrupt");
-    if (sizeResult.kind === "corrupt") expect(sizeResult.reason).toContain("layer_size");
+    // 期望文案手写：独立于 LAYER_SIZES 的拼接，固定用户看到的原因（防同义反复）。
+    if (sizeResult.kind === "corrupt") expect(sizeResult.reason).toBe("layer_size 必须是 1K / 1.5K / 2K / auto");
   });
 
   it("合法的 output_options / layer_size 读写往返保持", () => {
