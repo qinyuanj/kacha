@@ -6,6 +6,7 @@ import { imagePortIndex } from "./graph";
 import { countLabel } from "./history";
 import { effectiveRegionRender } from "./region";
 import { addAsReferenceTarget, LOCKED_HINT, regenerateBlocker, TASK_BUSY, variantBlocker } from "./iterate";
+import { anyStaged, finalToggle } from "./stages";
 
 export type MenuTarget = { kind: "pane" } | { kind: "node"; nodeId: string } | { kind: "edge"; edge: BoardEdge };
 
@@ -28,6 +29,10 @@ export type BoardAction =
   | "viewSendText"
   | "disconnect"
   | "editRegion"
+  /** 整理：把选区建为阶段 / 移出所在阶段 / 标记或取消定稿。 */
+  | "newStage"
+  | "removeFromStage"
+  | "toggleFinal"
   | "exportPack"
   /** Web 版：整板全部结果由服务端打成 zip 下载（#28）。 */
   | "downloadResults"
@@ -79,20 +84,29 @@ export function menuItems(target: MenuTarget, facts: MenuFacts): MenuItem[] {
         const refTarget = addAsReferenceTarget(board, [...selected]);
         return item("addAsReference", "加为参考图", refTarget.ok ? (locked.has(refTarget.taskId) ? LOCKED_HINT : null) : refTarget.reason);
       };
+      // 整理：作用于整个选区（单选时选区即该节点）。
+      const toggle = finalToggle(board, selected);
+      const tidy = [
+        item("newStage", "建为阶段"),
+        ...(anyStaged(board, selected) ? [item("removeFromStage", "移出阶段")] : []),
+        ...(toggle ? [item("toggleFinal", toggle.final ? "标记定稿" : "取消定稿")] : []),
+      ];
       if (selected.size > 1 && selected.has(target.nodeId)) {
         const hasImage = board.nodes.some((n) => selected.has(n.id) && (n.type === "reference" || n.type === "result"));
         return grouped(
           [...(hasImage ? [item("continueEditing", "以此继续编辑")] : []), ...(node?.type === "result" ? [addAsReferenceItem()] : [])],
+          tidy,
           [item("delete", countLabel("删除", selected.size))],
         );
       }
       switch (node?.type) {
         case "reference":
-          return grouped([item("continueEditing", "以此继续编辑")], [item("preview", "放大预览"), item("saveAs", "另存为…")], [item("delete", "删除")]);
+          return grouped([item("continueEditing", "以此继续编辑")], [item("preview", "放大预览"), item("saveAs", "另存为…")], tidy, [item("delete", "删除")]);
         case "result": {
           return grouped(
             [item("continueEditing", "以此继续编辑"), addAsReferenceItem(), item("generateVariant", "生成变体", variantBlocker(board, node.id, locked))],
             [item("preview", "放大预览"), item("saveAs", "另存为…")],
+            tidy,
             [item("delete", "删除")],
           );
         }
@@ -106,11 +120,12 @@ export function menuItems(target: MenuTarget, facts: MenuFacts): MenuItem[] {
               item("cancel", "取消", busy ? null : "任务不在排队 / 执行中"),
             ],
             [item("toggleSettings", facts.expanded.has(node.id) ? "收起" : "展开"), item("viewSendText", "查看发送文本", busy ? TASK_BUSY : null)],
+            tidy,
             [item("delete", "删除")],
           );
         }
         case "prompt":
-          return [item("delete", "删除")];
+          return grouped(tidy, [item("delete", "删除")]);
         default:
           return [];
       }

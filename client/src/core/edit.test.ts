@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { newBoard, type Board, type BoardEdge, type BoardNode, type PromptNode, type ReferenceNode, type ResultNode, type TaskNode, taskCount } from "./board";
+import { isFinal, newBoard, stagesOf, type Board, type BoardEdge, type BoardNode, type PromptNode, type ReferenceNode, type ResultNode, type TaskNode, taskCount } from "./board";
 import { BUILTIN_TABLE } from "./capabilities";
 import { continueEditingChange, editBoard, type BoardChange, type EditEnv } from "./edit";
 import { cardDropConnection } from "./dragCreate";
-import { MERGE_PAUSE_MS } from "./history";
+import { emptyHistory, MERGE_PAUSE_MS, recordChange, redo, undo } from "./history";
 import { copySelection, LOCKED_HINT, PASTE_OFFSET } from "./iterate";
 import type { RunResult } from "./layout";
+import { nextStageName } from "./stages";
 import type { Discovery } from "./settings";
 import { autoSizeSpec, type SizeSpec } from "./size";
 
@@ -423,6 +424,115 @@ describe("系统变更", () => {
     expect(taskOf(known.board).size_spec.ratio).toBe("16:9");
     expect(known.step).toBeNull();
     expect(editBoard(known.board, { kind: "syncAutoRatios" }, env()).board).toBe(known.board);
+  });
+});
+
+describe("阶段与定稿：用户变更的结果与撤销", () => {
+  /** 应用一次用户变更并落账，再撤销、重做：撤销回到原画板，重做回到变更后的画板。 */
+  function undoable(b: Board, change: BoardChange, e = env()) {
+    const r = editBoard(b, change, e);
+    if (!r.step) throw new Error(`应构成撤销步：${r.hint ?? ""}`);
+    const h = recordChange(emptyHistory(), b, r.step, 0);
+    const back = undo(h, r.board, new Set())!;
+    expect(back.board).toEqual(b);
+    expect(redo(back.history, back.board, new Set())!.board).toEqual(r.board);
+    return r;
+  }
+  const stages = (b: Board) => stagesOf(b).map(({ id, name, nodes, collapsed }) => ({ id, name, nodes, collapsed }));
+
+  it("标记 / 取消定稿：只作用于结果节点；已是该状态不构成步", () => {
+    const b = board([result("r", "t"), result("s", "t"), reference("a")]);
+    const marked = undoable(b, { kind: "setFinal", nodes: ["r", "a"], final: true });
+    expect(marked.step).toEqual({ label: "标记定稿" });
+    expect(isFinal(node(marked.board, "r"))).toBe(true);
+    expect(isFinal(node(marked.board, "s"))).toBe(false);
+    expect(node(marked.board, "a")).toBe(node(b, "a"));
+    const unmarked = undoable(marked.board, { kind: "setFinal", nodes: ["r"], final: false });
+    expect(unmarked.step).toEqual({ label: "取消定稿" });
+    expect(isFinal(node(unmarked.board, "r"))).toBe(false);
+    expect(editBoard(marked.board, { kind: "setFinal", nodes: ["r"], final: true }, env()).step).toBeNull();
+    expect(editBoard(b, { kind: "setFinal", nodes: ["a"], final: true }, env()).step).toBeNull();
+  });
+
+  it("建阶段：框选的节点成为成员（不在画板上的忽略），名字去首尾空白；空名或没有节点不构成步", () => {
+    const b = board([reference("a"), result("r", "t"), prompt("p")]);
+    const r = undoable(b, { kind: "newStage", name: " 第一轮 ", nodes: ["a", "r", "gone"] });
+    expect(r.step).toEqual({ label: "新建阶段" });
+    expect(stages(r.board)).toEqual([{ id: "n1", name: "第一轮", nodes: ["a", "r"], collapsed: false }]);
+    expect(r.board.nodes).toBe(b.nodes);
+    expect(editBoard(b, { kind: "newStage", name: "  ", nodes: ["a"] }, env()).step).toBeNull();
+    expect(editBoard(b, { kind: "newStage", name: "x", nodes: ["gone"] }, env()).step).toBeNull();
+  });
+
+  it("一个节点至多属于一个阶段：建新阶段把成员从原阶段带走，原阶段空了随之删去", () => {
+    const b = { ...board([reference("a"), reference("b"), reference("c")]), stages: [{ id: "s1", name: "旧", nodes: ["a", "b"], collapsed: false, extra: {} }, { id: "s2", name: "也旧", nodes: ["c"], collapsed: false, extra: {} }] };
+    const r = undoable(b, { kind: "newStage", name: "新", nodes: ["b", "c"] });
+    expect(stages(r.board)).toEqual([
+      { id: "s1", name: "旧", nodes: ["a"], collapsed: false },
+      { id: "n1", name: "新", nodes: ["b", "c"], collapsed: false },
+    ]);
+  });
+
+  const staged = () => ({ ...board([reference("a"), reference("b"), reference("c"), result("r", "t")]), stages: [{ id: "s1", name: "第一轮", nodes: ["a", "b"], collapsed: false, extra: { color: "blue" } }] });
+
+  it("改阶段名：去首尾空白；空名或同名不构成步，未知字段保留", () => {
+    const r = undoable(staged(), { kind: "renameStage", stageId: "s1", name: " 草图 " });
+    expect(r.step).toEqual({ label: "重命名阶段" });
+    expect(stagesOf(r.board)).toEqual([{ id: "s1", name: "草图", nodes: ["a", "b"], collapsed: false, extra: { color: "blue" } }]);
+    expect(editBoard(staged(), { kind: "renameStage", stageId: "s1", name: " " }, env()).step).toBeNull();
+    expect(editBoard(staged(), { kind: "renameStage", stageId: "s1", name: "第一轮" }, env()).step).toBeNull();
+    expect(editBoard(staged(), { kind: "renameStage", stageId: "zz", name: "x" }, env()).step).toBeNull();
+  });
+
+  it("加入阶段：追加新成员（从别的阶段带走），已在其中的不重复；没有新成员不构成步", () => {
+    const b = { ...staged(), stages: [...staged().stages, { id: "s2", name: "别的", nodes: ["c"], collapsed: false, extra: {} }] };
+    const r = undoable(b, { kind: "addToStage", stageId: "s1", nodes: ["b", "c", "r", "gone"] });
+    expect(r.step).toEqual({ label: "加入阶段" });
+    expect(stages(r.board)).toEqual([{ id: "s1", name: "第一轮", nodes: ["a", "b", "c", "r"], collapsed: false }]);
+    expect(editBoard(staged(), { kind: "addToStage", stageId: "s1", nodes: ["a"] }, env()).step).toBeNull();
+    expect(editBoard(staged(), { kind: "addToStage", stageId: "zz", nodes: ["c"] }, env()).step).toBeNull();
+  });
+
+  it("移出阶段：节点留在画板上；最后一个成员移出时阶段随之删去", () => {
+    const r = undoable(staged(), { kind: "removeFromStage", nodes: ["a", "c"] });
+    expect(r.step).toEqual({ label: "移出阶段" });
+    expect(stages(r.board)).toEqual([{ id: "s1", name: "第一轮", nodes: ["b"], collapsed: false }]);
+    expect(r.board.nodes.map((n) => n.id)).toEqual(["a", "b", "c", "r"]);
+    expect(stagesOf(undoable(r.board, { kind: "removeFromStage", nodes: ["b"] }).board)).toEqual([]);
+    expect(editBoard(staged(), { kind: "removeFromStage", nodes: ["c"] }, env()).step).toBeNull();
+  });
+
+  it("收起 / 展开阶段：已是该状态不构成步", () => {
+    const folded = undoable(staged(), { kind: "setStageCollapsed", stageId: "s1", collapsed: true });
+    expect(folded.step).toEqual({ label: "收起阶段" });
+    expect(stages(folded.board)[0].collapsed).toBe(true);
+    const unfolded = undoable(folded.board, { kind: "setStageCollapsed", stageId: "s1", collapsed: false });
+    expect(unfolded.step).toEqual({ label: "展开阶段" });
+    expect(stages(unfolded.board)[0].collapsed).toBe(false);
+    expect(editBoard(staged(), { kind: "setStageCollapsed", stageId: "s1", collapsed: false }, env()).step).toBeNull();
+  });
+
+  it("删阶段：只删区域，成员节点与连线不动", () => {
+    const b = staged();
+    const r = undoable(b, { kind: "deleteStage", stageId: "s1" });
+    expect(r.step).toEqual({ label: "删除阶段" });
+    expect(stagesOf(r.board)).toEqual([]);
+    expect(r.board.nodes).toBe(b.nodes);
+    expect(r.board.edges).toBe(b.edges);
+    expect(editBoard(b, { kind: "deleteStage", stageId: "zz" }, env()).step).toBeNull();
+  });
+
+  it("删除节点时一并移出阶段，阶段空了随之删去；撤销删除连同阶段一起回来", () => {
+    const one = undoable(staged(), { kind: "delete", nodes: ["a"], edges: [], cancelled: [] });
+    expect(stages(one.board)).toEqual([{ id: "s1", name: "第一轮", nodes: ["b"], collapsed: false }]);
+    const all = undoable(staged(), { kind: "delete", nodes: ["a", "b"], edges: [], cancelled: [] });
+    expect(stagesOf(all.board)).toEqual([]);
+  });
+
+  it("默认阶段名按已有阶段数递增，不与现有名字重复", () => {
+    expect(nextStageName(board([]))).toBe("阶段 1");
+    const two = { ...board([]), stages: [{ id: "s1", name: "阶段 2", nodes: ["a"], collapsed: false, extra: {} }] };
+    expect(nextStageName(two)).toBe("阶段 3");
   });
 });
 

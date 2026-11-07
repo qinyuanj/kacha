@@ -24,6 +24,7 @@ pub struct Options {
     pub min_free_gb: u64,
     pub board_slots: u32,
     pub board_size_lines: crate::BoardSizeLines,
+    pub usage_limit: crate::UsageLimit,
 }
 
 impl Options {
@@ -62,6 +63,11 @@ impl Options {
                     warn: mib("--board-warn-mb", "KACHA_BOARD_WARN_MB", default.warn),
                     alert: mib("--board-alert-mb", "KACHA_BOARD_ALERT_MB", default.alert),
                 }
+            },
+            // 用量上限（GiB）留空即不提醒；数值待按数据盘可用空间定，改参数重启服务即可（#88）。
+            usage_limit: crate::UsageLimit {
+                bytes: opt("--usage-limit-gb", "KACHA_USAGE_LIMIT_GB", "").parse::<u64>().ok().map(|g| g.saturating_mul(1024 * 1024 * 1024)),
+                warn_percent: opt("--usage-warn-percent", "KACHA_USAGE_WARN_PERCENT", "").parse().unwrap_or(crate::UsageLimit::default().warn_percent),
             },
         }
     }
@@ -136,6 +142,7 @@ pub async fn start(
             min_free_bytes: options.min_free_gb.saturating_mul(1024 * 1024 * 1024),
             board_slots: options.board_slots,
             board_size_lines: options.board_size_lines,
+            usage_limit: options.usage_limit,
         },
         Arc::new(crate::verify::HttpKeyVerifier::new(options.gateway_url)),
         Arc::new(SystemTime::now),

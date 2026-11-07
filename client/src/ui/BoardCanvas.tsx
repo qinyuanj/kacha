@@ -17,7 +17,7 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { type Board, type BoardEdge } from "../core/board";
+import { stagesOf, type Board, type BoardEdge } from "../core/board";
 import { findModel, type CapabilityTable, type InputImageRule } from "../core/capabilities";
 import type { TaskStatus } from "../core/run";
 import { nodeCopyDetail, nodeStatus, nodeSummary, summaryTone, type NodeRunState } from "../core/runner";
@@ -65,6 +65,8 @@ import { DragContext } from "./ports";
 import { PreviewDialog, type PreviewRequest, type RegionTarget } from "./PreviewDialog";
 import { isTyping, useCanvasInteraction, type Selection } from "./useCanvasInteraction";
 import { errorText } from "../core/errors";
+import { collapsedMembers, finalToggle, nextStageName, stageBoxes } from "../core/stages";
+import { StageLayer } from "./stages";
 
 /** 复制粘贴的剪贴板：应用内共享，可粘到另一个画板（只带节点之间的连线，不跨画板连线）。 */
 let clipboard: Clip | null = null;
@@ -399,6 +401,17 @@ export function BoardCanvas({
     [table, boardFile, userRoot, discovery, concurrency, apply, onRegenerate, toast, openNodePreview, regionTargetsOf],
   );
 
+  // 阶段：收起的成员不显示；框按成员的显示尺寸画。刚建的阶段标题直接进入改名。
+  const hidden = useMemo(() => collapsedMembers(board), [board]);
+  const boxes = useMemo(() => stageBoxes(board, (id) => measured[id]), [board, measured]);
+  const [editingStage, setEditingStage] = useState<string | null>(null);
+  const newStage = (ids: string[]) => {
+    const before = new Set(stagesOf(boardRef.current).map((s) => s.id));
+    const r = apply({ kind: "newStage", name: nextStageName(boardRef.current), nodes: ids });
+    const created = r?.step && stagesOf(r.board).find((s) => !before.has(s.id));
+    if (created) setEditingStage(created.id);
+  };
+
   // 选中任一节点即高亮其谱系。
   const highlighted = useMemo(() => lineage(board, [...selectedNodes]), [board, selectedNodes]);
 
@@ -456,6 +469,8 @@ export function BoardCanvas({
         id: n.id,
         position: { x: n.pos[0], y: n.pos[1] },
         selected: selectedNodes.has(n.id),
+        // 收起的阶段里的节点：React Flow 连同其连线一起隐藏。
+        hidden: hidden.has(n.id),
         // 承重逻辑（xyflow#3816）：开启 onlyRenderVisibleElements 后，React Flow 只强制渲染还没有 handleBounds（未测量）的节点。
         // 重建的节点不带 measured 时，adoptUserNodes 会清空已测得的 handleBounds，节点（含视口外的）被重新强制渲染、连线闪断；
         // 还没回传到这里的（刚测完、setMeasured 未提交）也要带一个空对象，否则这次重建清空后不会再测，节点永远留在 DOM 中。
@@ -521,7 +536,7 @@ export function BoardCanvas({
         }
       }
     });
-  }, [board, table, userRoot, selectedNodes, measured, statusOf, runStateOf, locked, discovery, concurrency, highlighted, missing, focusPrompt, promptDrafts, alphaByNode, imageInfos, expanded, menuFacts, drag]);
+  }, [board, table, userRoot, selectedNodes, measured, statusOf, runStateOf, locked, discovery, concurrency, highlighted, missing, focusPrompt, promptDrafts, alphaByNode, imageInfos, expanded, menuFacts, drag, hidden]);
 
   const dragging = drag !== null;
   const edges = useMemo<Edge[]>(
@@ -811,6 +826,12 @@ export function BoardCanvas({
       else if (action === "viewSendText") onViewSendText(id);
       else if (action === "toggleSettings") setExpandOverrides((o) => toggleExpanded(o, selectedRef.current, id));
       else if (action === "delete") void flow.deleteElements({ nodes: [...selectionForMenu(selectedRef.current, id)].map((n) => ({ id: n })) });
+      else if (action === "newStage") newStage([...selectionForMenu(selectedRef.current, id)]);
+      else if (action === "removeFromStage") apply({ kind: "removeFromStage", nodes: [...selectionForMenu(selectedRef.current, id)] });
+      else if (action === "toggleFinal") {
+        const toggle = finalToggle(boardRef.current, selectionForMenu(selectedRef.current, id));
+        if (toggle) apply({ kind: "setFinal", ...toggle });
+      }
     } else if (target.kind === "edge") {
       const { edge } = target;
       if (action === "disconnect") void flow.deleteElements({ edges: [{ id: edgeId(edge) }] });
@@ -949,6 +970,7 @@ export function BoardCanvas({
           minZoom={0.1}
         >
           <Background />
+          <StageLayer boxes={boxes} selected={selectedNodes} apply={(c) => void apply(c)} editing={editingStage} onEditingDone={() => setEditingStage(null)} />
           <Controls />
           <MiniMap pannable zoomable />
           {barItems.length > 0 && (

@@ -20,6 +20,11 @@ export function sizeTier(bytes: number | null, lines: SizeLines): SizeTier | nul
   return null;
 }
 
+/** 「管理画板」（#88）的顺序：体量从大到小，体量未知（画板读不懂）排最后，同体量按名称；返回新数组。 */
+export function bySizeDescending<T extends { name: string; bytes: number | null }>(boards: readonly T[]): T[] {
+  return [...boards].sort((a, b) => (b.bytes ?? -1) - (a.bytes ?? -1) || a.name.localeCompare(b.name));
+}
+
 /**
  * 当前画板的越线提示：`notified` 是这块画板已提醒到（用户关过）的档位，记在 ui-state。
  * 返回此刻该显示的档位（null 不显示）与按当前体量校正后的已提醒档位：回落到某条线下，该线的记录随之清除，

@@ -70,9 +70,12 @@ pub struct Config {
     pub board_slots: u32,
     /// 画板体量提醒线（默认 500 MiB 黄、1 GiB 红）：只提醒、不阻止生成。
     pub board_size_lines: BoardSizeLines,
+    /// 用量上限与提醒比例（默认上限留空即不提醒、80% 黄）：只提醒、不阻止生成（#88）。
+    pub usage_limit: UsageLimit,
 }
 
 pub use board_list::BoardSizeLines;
+pub use usage::UsageLimit;
 
 /// 网关对一把密钥的结论。Unavailable 是服务故障，不能当成密钥无效。
 #[derive(Debug, Clone, PartialEq)]
@@ -183,6 +186,10 @@ impl AppState {
 
     pub fn board_size_lines(&self) -> BoardSizeLines {
         self.inner.config.board_size_lines
+    }
+
+    pub fn usage_limit(&self) -> UsageLimit {
+        self.inner.config.usage_limit
     }
 }
 
