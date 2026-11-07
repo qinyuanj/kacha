@@ -159,13 +159,13 @@ python packaging\load_users.py --users 12 --output release\memory-12-users.json
 
 ## 验证
 
+提交前在仓库根目录执行：
+
 ```powershell
-python -m unittest discover -s packaging/tests
-npm --prefix client test
-npm --prefix client run typecheck
-npm --prefix client run test:e2e -- --workers=4
-cargo test --manifest-path server/Cargo.toml
+python packaging\verify.py
 ```
+
+脚本先预检构建输出目录的完整性标签（见下文），再依次跑打包脚本单测、前端单测、类型检查、e2e（4 个 worker）与服务端测试（`--no-fail-fast`）。每一项都会跑完，最后汇总；任一失败即以非 0 退出。只需重跑其中一项时，命令见 [verify.py](verify.py) 的 `COMMANDS`。
 
 符号链接逃逸测试在无权创建符号链接时打印原因并跳过，其余断言照常运行。无权的原因可能有两种：当前账户既没开开发者模式，也不是管理员；或者测试程序以 Low 完整性级别运行。
 
@@ -176,4 +176,4 @@ icacls server\target /setintegritylevel '(OI)(CI)M'
 icacls release /setintegritylevel '(OI)(CI)M'
 ```
 
-`cargo clean` 会删掉整个 `target` 目录，标签也随之消失，之后需要重新设置。部署时复制到 lzxsvn 的程序按目标目录的标签运行，不受影响。
+`cargo clean` 会删掉整个 `target` 目录，标签也随之消失，之后需要重新设置；`verify.py` 的预检会在跑测试前发现这种情况，并打印上面的命令。部署时复制到 lzxsvn 的程序按目标目录的标签运行，不受影响。
