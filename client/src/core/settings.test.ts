@@ -24,6 +24,7 @@ function memoryPorts(stub: Partial<SettingsPorts> = {}) {
   const logs: { kind: string; fields: Record<string, unknown> }[] = [];
   const ports: SettingsPorts = {
     readSettings: async () => null,
+    defaultBaseUrl: async () => DEFAULT_SETTINGS.base_url,
     writeSettings: async (text) => void writes.settings.push(text),
     readModelsCache: async () => null,
     writeModelsCache: async (text) => void writes.cache.push(text),
@@ -246,6 +247,26 @@ describe("载入设置", () => {
   it("文件不存在（端口返回 null）与读取失败区分：前者是 ok", async () => {
     const { ports } = memoryPorts({ readSettings: async () => null });
     expect((await loadSettings(ports)).file).toEqual({ kind: "ok", settings: DEFAULT_SETTINGS });
+  });
+
+  it("settings.json 不存在：用服务端给的默认网关地址合成默认设置", async () => {
+    const { ports } = memoryPorts({ readSettings: async () => null, defaultBaseUrl: async () => "http://gw.example:3001" });
+    expect((await loadSettings(ports)).file).toEqual({ kind: "ok", settings: { format_version: 1, base_url: "http://gw.example:3001", concurrency: 4, extra: {} } });
+  });
+
+  it("settings.json 不存在且拿不到默认网关地址：按 unreadable 处理", async () => {
+    const { ports } = memoryPorts({
+      readSettings: async () => null,
+      defaultBaseUrl: async () => {
+        throw new Error("读取失败（HTTP 500）：/api/config");
+      },
+    });
+    expect((await loadSettings(ports)).file).toEqual({ kind: "unreadable", settings: DEFAULT_SETTINGS });
+  });
+
+  it("settings.json 存在但缺 base_url：沿用客户端默认地址，不问服务端", async () => {
+    const { ports } = memoryPorts({ readSettings: async () => JSON.stringify({ format_version: 1 }), defaultBaseUrl: async () => "http://gw.example:3001" });
+    expect((await loadSettings(ports)).file).toMatchObject({ kind: "ok", settings: { base_url: "http://lzxsvn:3001" } });
   });
 
   it("文件由更新版本写入时如实报 newer", async () => {

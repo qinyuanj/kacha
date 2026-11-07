@@ -8,7 +8,6 @@ import type { WorkerMessage, WorkerRequest } from "./packHash.worker";
 import { ApiError } from "./apiError";
 import { API_KEY_STORAGE } from "./apiKeyStorage";
 import { UPLOAD_FAILURES } from "./uploadText";
-import { DEFAULT_SETTINGS, serializeSettings } from "../core/settings";
 import type { BrowserPort, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
 
 export type { ImageInfo } from "./types";
@@ -241,13 +240,7 @@ export const ipc: Ipc = {
   writeUiState: async (text) => void (await api("/api/ui-state", textBody(text))),
   readCapabilityOverride: () => apiText("/api/capability-override"),
   inspectImage: (path) => api(`/api/fs/inspect-image?${query(path)}`),
-  // 首次使用（服务端还没有 settings.json）时以服务端下发的网关地址为默认，避免两端默认不一致。
-  readSettings: async () => {
-    const text = await apiText("/api/settings");
-    if (text !== null) return text;
-    const config = await webConfig();
-    return serializeSettings({ ...DEFAULT_SETTINGS, base_url: config.gateway_url });
-  },
+  readSettings: () => apiText("/api/settings"),
   writeSettings: async (text) => void (await api("/api/settings", textBody(text))),
   readModelsCache: () => apiText("/api/models-cache"),
   writeModelsCache: async (text) => void (await api("/api/models-cache", textBody(text))),
