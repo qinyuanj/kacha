@@ -1452,6 +1452,24 @@ button.primary[aria-disabled="true"] {
   margin: 8px 0 4px;
   font-size: 12px;
 }
+/* 画板位用量（#89）：满了标红；超出的老用户另起一句提示。 */
+.board-list-slots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+  font-size: 12px;
+}
+.board-list-slots .board-list-slots-full {
+  color: var(--red);
+  font-weight: 600;
+}
+.board-list-slots .board-list-over {
+  color: #7d4e00;
+  background: #fff8c5;
+  border-radius: 4px;
+  padding: 0 4px;
+}
 .bar-alert {
   background: #ffebe9;
   border-bottom: 1px solid var(--red);

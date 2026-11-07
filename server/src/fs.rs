@@ -158,10 +158,21 @@ pub async fn write_board(State(state): State<AppState>, user: User, Query(q): Qu
     };
     // 读、比较、写之间不能插进另一个写：同进程内画板写与改名串行。
     let _lock = state.board_lock().lock().await;
-    match off_thread(move || String::from_utf8(body.to_vec()).map_err(|e| std::io::Error::new(ErrorKind::InvalidData, e)).map_err(store::BoardSaveError::from).and_then(|text| store::write_board_guarded(&path, &text, guard))).await {
+    let root = state.user_root(&user.fingerprint);
+    let total = state.board_slots();
+    match off_thread(move || -> Result<(), Response> {
+        // 有版本的保存仍按原 409 约定处理；已有主文件或 .bak 的编辑不新增画板位。
+        if !matches!(guard, store::BoardWriteGuard::Version(_))
+            && !path.exists() && !store::bak_path(&path).exists()
+            && crate::board_list::occupies_board_slot(&root, &path)
+        {
+            crate::board_list::ensure_board_slots(&root, total, 1)?;
+        }
+        let text = String::from_utf8(body.to_vec()).map_err(|e| io_error(std::io::Error::new(ErrorKind::InvalidData, e)))?;
+        store::write_board_guarded(&path, &text, guard).map_err(board_save_error)
+    }).await {
         Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
-        Ok(Err(e)) => board_save_error(e),
-        Err(r) => r,
+        Ok(Err(r)) | Err(r) => r,
     }
 }
 

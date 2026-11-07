@@ -6,7 +6,7 @@ import { sizeTier } from "../core/boardSize";
 import { ipc } from "../shell/ipc";
 import type { BoardListEntry, BoardListing } from "../shell/types";
 import { errorText } from "../core/errors";
-import { approxSizeText } from "./boardText";
+import { approxSizeText, OVER_SLOTS_TEXT, slotsUsageText } from "./boardText";
 
 interface Props {
   /** 本页已打开的画板路径：列表里标注，不重复开。 */
@@ -79,6 +79,13 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
         <h2>画板列表</h2>
         <p className="muted">画板保存在服务端；换浏览器后用同一把密钥也能看到同一份。</p>
         {error && <div className="bar bar-error">读取画板列表失败：{error}</div>}
+        {listing && !error && (
+          <div className="board-list-slots" data-slots-full={listing.slots.used >= listing.slots.total}>
+            <span className={listing.slots.used >= listing.slots.total ? "board-list-slots-full" : "muted"}>{slotsUsageText(listing.slots)}</span>
+            {/* 超出画板位的老用户（#89）：现有画板照常编辑，只是不能新建。 */}
+            {listing.slots.used > listing.slots.total && <span className="board-list-over" role="status">{OVER_SLOTS_TEXT}</span>}
+          </div>
+        )}
         {listing === null ? (
           <div>正在加载…</div>
         ) : listing.boards.length === 0 ? (

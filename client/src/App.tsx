@@ -82,6 +82,11 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const redoActive = useCallback(() => activeKey && redoBoard(activeKey), [activeKey, redoBoard]);
   const toast = useCallback((message: string) => setToastText(message), []);
   const pack = useBoardPack(userRoot, boards, toast);
+  /** 新建画板；画板位满时提示统一文案（#89）。 */
+  const createBoardOrExplain = useCallback(async () => {
+    const refusal = await createBoard();
+    if (refusal) toast(refusal);
+  }, [createBoard, toast]);
   useEffect(() => {
     if (!toastText) return;
     const timer = setTimeout(() => setToastText(null), 4000);
@@ -279,10 +284,10 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       let activated = false;
       if (ui.active_board && opened.includes(ui.active_board)) activated = await openPath(ui.active_board, true);
       if (!activated && opened.length) await openPath(opened[0], true);
-      else if (!activated) await createBoard();
+      else if (!activated) await createBoardOrExplain();
       setReady(true);
     })();
-  }, [metadataReady, settings.loaded, openPath, createBoard, toast]);
+  }, [metadataReady, settings.loaded, openPath, createBoardOrExplain, toast]);
 
   useEffect(() => {
     // 没有记录代表首次使用，不提示更新，直接随界面状态记下当前版本。
@@ -342,7 +347,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           }}
           onClose={(key) => void closeBoard(key)}
           onRename={(key, title) => void boards.renameBoard(key, title)}
-          onCreate={() => void createBoard()}
+          onCreate={() => void createBoardOrExplain()}
           onOpenList={() => void boards.flushAll().then(() => setBoardListOpen(true))}
           onExportPack={(key) => void pack.prepareExport(key)}
         />
@@ -485,7 +490,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               <>
                 <div>没有打开的画板</div>
                 <div className="empty-actions">
-                  <button className="primary" onClick={() => void createBoard()} disabled={!userRoot}>
+                  <button className="primary" onClick={() => void createBoardOrExplain()} disabled={!userRoot}>
                     新建画板
                   </button>
                   <button onClick={() => void pack.importPack()} disabled={!userRoot}>

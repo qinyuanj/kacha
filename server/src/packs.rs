@@ -442,6 +442,19 @@ struct ImportRequest {
     units: Vec<MergeUnit>,
     #[serde(default)]
     duplicates: Vec<PackDuplicate>,
+    /// 导入后将新增的画板数（#89）：画板位不够时合并之前就拒绝。
+    #[serde(default)]
+    boards: usize,
+}
+
+/// 导入前的画板位检查（#89）：在画板写锁下判定，不够时 409 board_slots_full，此时还没写任何文件。
+/// 检查后即放锁，不让长时间的合并挡住画板保存；之后逐块写画板时 PUT /api/boards 会在锁内再检查一次，
+/// 两个导入并发时画板位也不会超出（多出的任务目录只是未引用任务目录）。
+async fn ensure_import_slots(state: &AppState, user: &User, boards: usize) -> Result<(), Response> {
+    let root = state.user_root(&user.fingerprint);
+    let total = state.board_slots();
+    let _lock = state.board_lock().lock().await;
+    crate::fs::off_thread(move || crate::board_list::ensure_board_slots(&root, total, boards)).await?
 }
 
 /// 执行导入：结束后无论结局都删除上传临时文件（已移入的单元保留）。
@@ -449,15 +462,18 @@ pub async fn import(State(state): State<AppState>, user: User, AxPath(id): AxPat
     if let Err(r) = crate::fs::ensure_space(&state) {
         return r;
     }
-    let Ok(ImportRequest { units, duplicates }) = serde_json::from_slice::<ImportRequest>(&body) else {
+    let Ok(ImportRequest { units, duplicates, boards }) = serde_json::from_slice::<ImportRequest>(&body) else {
         return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元列表");
     };
     let file = match resolve_upload(&state, &user, &id) {
         Ok(f) => f,
         Err(r) => return r,
     };
-    // 导入结束即删除上传的包。
+    // 导入结束即删除上传的包（被画板位拒绝也算结束）。
     let cleanup = UploadGuard { file: file.clone(), keep: false };
+    if let Err(r) = ensure_import_slots(&state, &user, boards).await {
+        return r;
+    }
     let (op, _guard) = match begin_op(&state, &user, &q.op) {
         Ok(v) => v,
         Err(r) => return r,
@@ -595,6 +611,9 @@ pub async fn put_content(
 struct StagedImport {
     units: Vec<MergeUnit>,
     files: Vec<board_pack::PlacedFile>,
+    /// 同 ImportRequest::boards。
+    #[serde(default)]
+    boards: usize,
 }
 
 /// 按落盘清单合并：结束后无论结局都删除暂存（已移入的单元保留）。
@@ -602,7 +621,7 @@ pub async fn import_staging(State(state): State<AppState>, user: User, AxPath(id
     if let Err(r) = crate::fs::ensure_space(&state) {
         return r;
     }
-    let Ok(StagedImport { units, files }) = serde_json::from_slice::<StagedImport>(&body) else {
+    let Ok(StagedImport { units, files, boards }) = serde_json::from_slice::<StagedImport>(&body) else {
         return error(StatusCode::BAD_REQUEST, "bad_request", "需要合并单元与落盘清单");
     };
     let dir = match resolve_staging(&state, &user, &id) {
@@ -610,6 +629,9 @@ pub async fn import_staging(State(state): State<AppState>, user: User, AxPath(id
         Err(r) => return r,
     };
     let cleanup = StagingGuard(dir.clone());
+    if let Err(r) = ensure_import_slots(&state, &user, boards).await {
+        return r;
+    }
     let (op, _guard) = match begin_op(&state, &user, &q.op) {
         Ok(v) => v,
         Err(r) => return r,

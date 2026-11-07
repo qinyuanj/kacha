@@ -256,12 +256,12 @@ export const ipc: Ipc = {
   boardPackExport,
   boardPackEntries: (pack) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/entries`),
   boardPackReadTexts: (pack, names) => api(`/api/packs/uploads/${encodeURIComponent(pack)}/texts`, jsonPost(names)),
-  boardPackImport: async (pack, units, duplicates) => {
+  boardPackImport: async (pack, units, duplicates, boards) => {
     const op = requireOp();
     // 上传之后、合并之前被取消：服务端还没有这个操作，取消标记只在这里，不再发起合并。
     if (cancelledOps.has(op)) throw new Error(PACK_CANCELLED);
     try {
-      return await tracked(op, () => api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, jsonPost({ units, duplicates: Object.entries(duplicates).map(([path, source]) => ({ path, source })) })));
+      return await tracked(op, () => api(`/api/packs/uploads/${encodeURIComponent(pack)}/import?op=${encodeURIComponent(op)}`, jsonPost({ units, duplicates: Object.entries(duplicates).map(([path, source]) => ({ path, source })), boards })));
     } catch (e) {
       throw asCancelled(op, e);
     }
@@ -432,6 +432,6 @@ export const packContent: PackContentPort = {
       await apiResponse(`/api/packs/staging/${encodeURIComponent(staging)}/contents/${sha256}?${params}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body, signal });
     }),
   // 合并不中止请求：取消经服务端的取消标记生效（409），与整包导入一致。
-  importContent: (staging, units, files) => inOp((op) => api(`/api/packs/staging/${encodeURIComponent(staging)}/import?op=${encodeURIComponent(op)}`, jsonPost({ units, files }))),
+  importContent: (staging, units, files, boards) => inOp((op) => api(`/api/packs/staging/${encodeURIComponent(staging)}/import?op=${encodeURIComponent(op)}`, jsonPost({ units, files, boards }))),
   discardStaging: async (staging) => void (await api(`/api/packs/staging/${encodeURIComponent(staging)}`, { method: "DELETE", keepalive: true })),
 };

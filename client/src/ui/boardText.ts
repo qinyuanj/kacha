@@ -12,6 +12,36 @@ export const BACKUP_HINT_TEXT = "服务端不备份，重要画板请导出。";
 /** 设置 › 用量：闲置用户规则（画板没有有效期）。 */
 export const IDLE_USER_RULE_TEXT = "画板不会因为时间被删。60 天没用 Kacha，全部数据可能被清理。";
 
+/** 画板位已用 / 总数（#89）。 */
+export interface Slots {
+  used: number;
+  total: number;
+}
+
+const SLOTS_FULL_HEAD = "画板位满了";
+
+/**
+ * 画板位满时新建 / 导入被拒的统一文案。服务端 board_list::ensure_board_slots 的 409 message 是同一句，
+ * 改一处要同改另一处（前端在发请求前就按列表里的画板位自己判定，用这一份）。
+ */
+export const boardSlotsFullText = ({ used, total }: Slots) => `${SLOTS_FULL_HEAD}（${used}/${total}），归档或删掉一块再新建。`;
+
+/** 服务端合并前按画板位拒绝时，导入报错原文就是统一文案（错误码在 runCancellable 里变成了文本）。 */
+export const isSlotsFullText = (text: string) => text.startsWith(SLOTS_FULL_HEAD);
+
+/** 服务端画板位满的错误码（409）。 */
+export const BOARD_SLOTS_FULL = "board_slots_full";
+
+/** 要新增 adding 块画板时：放不下给出统一文案，放得下为 null。 */
+export const slotsRefusal = (slots: Slots, adding: number): string | null =>
+  adding > 0 && slots.used + adding > slots.total ? boardSlotsFullText(slots) : null;
+
+/** 画板列表里的画板位用量。 */
+export const slotsUsageText = ({ used, total }: Slots) => `画板位 ${used}/${total}`;
+
+/** 已超出画板位的老用户：现有画板照常编辑，列表顶部提示。 */
+export const OVER_SLOTS_TEXT = "归档几块后才能新建。";
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KiB", "MiB", "GiB", "TiB"];
