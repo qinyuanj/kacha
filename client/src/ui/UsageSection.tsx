@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { usage as usagePort } from "../shell/ipc";
 import type { Usage } from "../shell/types";
 import { errorText } from "../core/errors";
+import { IDLE_USER_RULE_TEXT } from "./boardText";
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -84,7 +85,8 @@ export function UsageSection() {
               画板读不懂（{usage.unreadable_board}），为避免误删暂不清理；仍被画板引用的结果不会按时间清理。
             </div>
           )}
-          <div className="muted small form-hint">只有所有画板都不再引用、且建立超过 30 天的任务目录才会被清理；删除后先进入回收区，14 天内可由管理员恢复。</div>
+          <div className="muted small form-hint" data-testid="usage-idle-rule">{IDLE_USER_RULE_TEXT}</div>
+          <div className="muted small form-hint">没有画板引用、建立超过 30 天的任务目录可以清理；清掉的先进回收区，14 天内可找管理员恢复。</div>
         </>
       )}
       {note && <div className="muted small form-hint">{note}</div>}

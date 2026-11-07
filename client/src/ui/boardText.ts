@@ -7,4 +7,7 @@ export const BOARD_MISSING_TEXT = "该画板已不存在，可能已在别处改
 export const FLASH_UNAVAILABLE_TEXT = "Flash 不可用，请刷新模型列表";
 
 /** 顶栏常驻的备份提示。 */
-export const BACKUP_HINT_TEXT = "服务端不备份；60 天未使用的数据可能被清理，请定期导出画板包";
+export const BACKUP_HINT_TEXT = "服务端不备份，重要画板请导出。";
+
+/** 设置 › 用量：闲置用户规则（画板没有有效期）。 */
+export const IDLE_USER_RULE_TEXT = "画板不会因为时间被删。60 天没用 Kacha，全部数据可能被清理。";

@@ -12,7 +12,9 @@ python packaging\build_web.py
 python packaging\build_web.py --skip-npm-ci
 ```
 
-脚本运行前端 release 构建和 `cargo build --release`，输出：
+脚本先检查更新说明 [docs/release/web-changelog.md](../docs/release/web-changelog.md)：去掉 HTML 注释后，必须有一个一级标题与 `server/Cargo.toml` 的 `version` 完全相同（如 `# 1.2.0`），且该节的「新增 / 改进 / 修复」至少一组下有一条列表项。不满足时以中文原因退出，不运行任何构建，也不动已有的 `release/kacha-web`。发版改版本号时同时在更新说明最上面加这一节。
+
+检查通过后，脚本运行前端 release 构建和 `cargo build --release`，输出：
 
 ```text
 release/kacha-web/

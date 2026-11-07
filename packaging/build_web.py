@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tomllib
 
 
 SERVER_BINARY = "kacha-server.exe" if os.name == "nt" else "kacha-server"
@@ -22,6 +23,43 @@ def run(command: list[str], cwd: Path) -> None:
     subprocess.run([executable, *command[1:]], cwd=cwd, check=True)
 
 
+CHANGELOG = Path("docs") / "release" / "web-changelog.md"
+"""网页版更新说明，相对仓库根；界面「更新内容」的唯一来源。"""
+CHANGELOG_GROUPS = ("新增", "改进", "修复")
+
+
+def server_version(root: Path) -> str:
+    with (root / "server" / "Cargo.toml").open("rb") as f:
+        return tomllib.load(f)["package"]["version"]
+
+
+def check_changelog(root: Path, version: str) -> None:
+    """更新说明缺少当前版本一节、或该节「新增 / 改进 / 修复」下没有条目时，以中文信息退出。"""
+    text = (root / CHANGELOG).read_text(encoding="utf-8")
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)  # HTML 注释是写作约定，不算内容
+    section: list[str] | None = None
+    for line in text.splitlines():
+        if line.startswith("# "):
+            if section is not None:
+                break
+            if line[2:].strip() == version:
+                section = []
+        elif section is not None:
+            section.append(line)
+    where = f"更新说明 {CHANGELOG.as_posix()}"
+    if section is None:
+        raise SystemExit(f"{where} 缺少当前版本 {version} 的一节")
+    group = None
+    items = 0
+    for line in section:
+        if line.startswith("## "):
+            group = line[3:].strip()
+        elif group in CHANGELOG_GROUPS and line.startswith("- ") and line[2:].strip():
+            items += 1
+    if items == 0:
+        raise SystemExit(f"{where} 中 {version} 一节没有条目：至少在「新增 / 改进 / 修复」之一下写一条")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="构建 kacha-server 与前端静态文件到 release/kacha-web")
     parser.add_argument("--skip-npm-ci", action="store_true", help="沿用已按 package-lock.json 安装的依赖")
@@ -29,6 +67,7 @@ def main() -> int:
     root = Path(__file__).resolve().parent.parent
     client = root / "client"
     server = root / "server"
+    check_changelog(root, server_version(root))
 
     if not args.skip_npm_ci:
         run(["npm", "ci"], client)

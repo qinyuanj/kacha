@@ -660,6 +660,69 @@ body[data-port-drag="ok"] * {
   color: #8a6d1f;
   white-space: nowrap;
 }
+.update-notice {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  background: #dafbe1;
+  border-bottom: 1px solid #aceebb;
+}
+.update-notice > span {
+  flex: 1 1 130px;
+}
+.update-notice button {
+  min-height: 32px;
+}
+.changelog-dialog {
+  overflow: hidden;
+}
+.changelog-dialog .modal-head {
+  flex-shrink: 0;
+}
+.changelog-dialog .modal-head button {
+  min-height: 40px;
+  min-width: 40px;
+}
+.changelog-releases {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  line-height: 1.8;
+}
+.changelog-release {
+  scroll-margin-top: 8px;
+}
+.changelog-release + .changelog-release {
+  border-top: 1px solid var(--border);
+  margin-top: 20px;
+  padding-top: 16px;
+}
+.changelog-release h2 {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.changelog-release h2 span {
+  font-weight: normal;
+}
+.changelog-group h3 {
+  font-size: 13px;
+  margin: 12px 0 4px;
+}
+.changelog-group ul {
+  margin: 0;
+  padding-left: 22px;
+}
+.changelog-group li + li {
+  margin-top: 6px;
+}
+.changelog-notice {
+  color: #9a6700;
+  background: #fff8c5;
+  border-radius: 3px;
+}
 .usage-candidates {
   max-height: 260px;
   overflow: auto;

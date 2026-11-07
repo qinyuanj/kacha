@@ -8,6 +8,8 @@ import { basename, boardsDir } from "./core/paths";
 import type { RegenerateRequest, Runner, RunTarget } from "./core/runner";
 import { copiesByNode, regenerateDispatch, runDispatch, runScope, buildConfirmItems, collectRunFacts, type ConfirmItem } from "./core/submission";
 import { parseUiState, serializeUiState, type UiState } from "./core/uiState";
+import { shouldShowUpdateNotice } from "./core/changelog";
+import { ChangelogDialog } from "./ui/ChangelogDialog";
 import { imageProbe } from "./shell/adapters";
 import { copyTextToClipboard } from "./shell/clipboard";
 import { browser, ipc, transfer, userRoot } from "./shell/ipc";
@@ -30,6 +32,8 @@ import { errorText } from "./core/errors";
 
 export function App({ onLogout, version }: { onLogout?: () => void; version?: string | null } = {}) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
+  const [lastSeenVersion, setLastSeenVersion] = useState<string | undefined>();
   const [boardListOpen, setBoardListOpen] = useState(false);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
   const [packMenu, setPackMenu] = useState<{ x: number; y: number } | null>(null);
@@ -44,6 +48,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const [toastText, setToastText] = useState<string | null>(null);
   const started = useRef(false);
   const initialUi = useRef<UiState | null>(null);
+  const uiReadFailedRef = useRef(false);
   // 编辑环境随渲染更新（能力表、网关发现），锁定集按画板现取运行器的最新快照；sessions 在每次画板变更时取。
   const envRef = useRef({ table, discovery: settings.discovery });
   envRef.current = { table, discovery: settings.discovery };
@@ -89,7 +94,10 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
         const effective = effectiveTable(override);
         setTable(effective.table);
         if (effective.error) setTableError(effective.error);
-        initialUi.current = parseUiState(await ipc.readUiState().catch(() => null));
+        let uiReadFailed = false;
+        initialUi.current = parseUiState(await ipc.readUiState().catch(() => ((uiReadFailed = true), null)));
+        setLastSeenVersion(initialUi.current.last_seen_version);
+        uiReadFailedRef.current = uiReadFailed;
         setMetadataReady(true);
       } catch (e) {
         setFatal(String(e));
@@ -271,20 +279,31 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
     })();
   }, [metadataReady, settings.loaded, openPath, createBoard, toast]);
 
+  useEffect(() => {
+    // 没有记录代表首次使用，不提示更新，直接随界面状态记下当前版本。
+    // 读界面状态失败时不知道是否新用户，不记，免得吞掉老用户这次的更新提示。
+    if (metadataReady && version && lastSeenVersion === undefined && !uiReadFailedRef.current) setLastSeenVersion(version);
+  }, [metadataReady, version, lastSeenVersion]);
+
+  const openChangelog = () => {
+    if (version) setLastSeenVersion(version);
+    setChangelogOpen(true);
+  };
+
   const uiWriteChain = useRef(Promise.resolve());
   const writeUi = useCallback(() => {
     const { sessions: list, activeKey: key } = boards.snapshot();
     const active = list.find((s) => s.key === key);
-    const text = serializeUiState({ open_boards: list.map((s) => s.path), active_board: active?.path ?? null });
+    const text = serializeUiState({ open_boards: list.map((s) => s.path), active_board: active?.path ?? null, last_seen_version: lastSeenVersion });
     const write = uiWriteChain.current.then(() => ipc.writeUiState(text));
     uiWriteChain.current = write.catch(() => undefined);
     return write;
-  }, [boards]);
+  }, [boards, lastSeenVersion]);
   const persistUi = useCallback(() => writeUi().catch(() => undefined), [writeUi]);
   const persistRef = useRef(persistUi);
   persistRef.current = persistUi;
 
-  const uiSignature = JSON.stringify([sessions.map((s) => s.path), sessions.find((s) => s.key === activeKey)?.path]);
+  const uiSignature = JSON.stringify([sessions.map((s) => s.path), sessions.find((s) => s.key === activeKey)?.path, lastSeenVersion]);
   useEffect(() => {
     if (ready) void persistRef.current();
   }, [ready, uiSignature]);
@@ -313,6 +332,13 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           onExportPack={(key) => void pack.prepareExport(key)}
         />
       </div>
+      {ready && version && shouldShowUpdateNotice(version, lastSeenVersion) && (
+        <div className="bar update-notice" role="status">
+          <span>已更新到 {version}</span>
+          <button onClick={openChangelog}>看看改了什么</button>
+          <button className="link" onClick={() => setLastSeenVersion(version)} aria-label="关闭更新提示">关闭</button>
+        </div>
+      )}
       {boardListOpen && userRoot && (
         <BoardListDialog
           dir={boardsDir(userRoot)}
@@ -358,7 +384,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
           >
             画板包 ▾
           </button>
-          {version && <span className="muted small topbar-version">Kacha {version}</span>}
+          {version && <button className="topbar-button topbar-version" onClick={openChangelog} disabled={!ready} aria-haspopup="dialog" title="查看更新内容">Kacha {version}</button>}
           <button className="topbar-button" onClick={() => setSettingsOpen(true)} disabled={!settings.loaded || !userRoot}>
             ⚙ 高级设置
           </button>
@@ -482,6 +508,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
       {settingsOpen && (
         <SettingsPanel settings={settings} onClose={() => setSettingsOpen(false)} />
       )}
+      {changelogOpen && <ChangelogDialog currentVersion={version ?? ""} onClose={() => setChangelogOpen(false)} />}
       {confirm && (
         <RunConfirmDialog
           items={confirm.items}

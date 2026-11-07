@@ -17,4 +17,20 @@ describe("界面状态 ui-state.json", () => {
     const text = JSON.stringify({ open_boards: ["/a"], active_board: "/zzz" });
     expect(parseUiState(text).active_board).toBe("/a");
   });
+
+  it("往返：上次看过的版本", () => {
+    const state = { open_boards: [], active_board: null, last_seen_version: "1.2.0" };
+    expect(parseUiState(serializeUiState(state))).toEqual(state);
+  });
+
+  it("旧文件没有上次看过的版本时不带该字段", () => {
+    const parsed = parseUiState(JSON.stringify({ open_boards: ["/a"], active_board: "/a" }));
+    expect(parsed).toStrictEqual({ open_boards: ["/a"], active_board: "/a" });
+    expect("last_seen_version" in parsed).toBe(false);
+  });
+
+  it("上次看过的版本不是字符串时忽略，标签页照常恢复", () => {
+    const parsed = parseUiState(JSON.stringify({ open_boards: ["/a"], active_board: "/a", last_seen_version: 120 }));
+    expect(parsed).toStrictEqual({ open_boards: ["/a"], active_board: "/a" });
+  });
 });
