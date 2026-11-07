@@ -230,7 +230,8 @@ async fn content_over_the_64_mb_body_limit_is_rejected_with_413() {
         .unwrap();
     let reply = reply_of(h.app.clone().oneshot(req).await.unwrap()).await;
     assert_eq!(reply.status, StatusCode::PAYLOAD_TOO_LARGE);
-    assert_eq!(reply.json()["message"], "单份内容超过 64 MB 上限");
+    // 上限的数值与写法只在 lib.rs（MAX_BODY_BYTES / max_body_label）定义一处，这里导入而不手抄「64 MB」。
+    assert_eq!(reply.json()["message"], format!("单份内容超过 {} 上限", kacha_server::max_body_label()));
     // 没有 Content-Length、实际超限：写到上限即拒绝并删掉半成品。
     let big = vec![0u8; kacha_server::MAX_BODY_BYTES + 1];
     let req = Request::builder()
