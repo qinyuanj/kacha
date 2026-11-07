@@ -1,7 +1,7 @@
 // 高级设置：网关地址、连接测试、按页面并发上限、存储用量与自助清理。
 import { browser } from "../shell/ipc";
 import { useEffect, useState } from "react";
-import { DEFAULT_SETTINGS, isPlainHttp, MAX_CONCURRENCY, mayOverwriteSettings, MIN_CONCURRENCY, normalizeBaseUrl, parseConcurrency, validateBaseUrl, type Settings } from "../core/settings";
+import { DEFAULT_SETTINGS, isPlainHttp, MAX_CONCURRENCY, mayOverwriteSettings, MIN_CONCURRENCY, normalizeBaseUrl, parseConcurrency, settingsFromForm, validateBaseUrl } from "../core/settings";
 import { UsageSection } from "./UsageSection";
 import type { ConnectionResult, useSettings } from "./useSettings";
 
@@ -39,8 +39,7 @@ export function SettingsPanel({ settings, onClose }: Props) {
     if (urlError) return;
     setSaving(true);
     setError(null);
-    const next: Settings = { ...settings.settings, base_url: normalizeBaseUrl(baseUrl), concurrency };
-    const problem = await settings.save(next, settings.apiKey);
+    const problem = await settings.save(settingsFromForm(settings.settings, { baseUrl, concurrencyDraft }), settings.apiKey);
     setSaving(false);
     if (problem) return setError(problem);
     onClose();
