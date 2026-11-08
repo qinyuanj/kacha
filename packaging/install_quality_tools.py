@@ -17,10 +17,10 @@ import tempfile
 from quality import tools_home
 
 PINS = {
-    "uml-viewer": "a618f552d5db994675489c6286a4541b75d32678",
-    "crapper": "2006e8d8aad898c967e75226206d1bfd6615c283",
-    "mutator": "84113c71304344f7fe43031cfcd3a2393e2703fd",
-    "dryer": "af411b6f69cbee7cca2fd5e69695728c7c83eb6f",
+    "uml-viewer": "687b264143e03c8630aff5d67ea7bba598b7c492",
+    "crapper": "f0aa6483592d0820184bb00ae2143227aac3b452",
+    "mutator": "f772a8329fba3f2f81bfca0a81abfa3210af9f4a",
+    "dryer": "b3f72ad9681a6574c5714d3c54d50e2ea3eff91a",
 }
 
 REINSTALL = "python packaging\\install_quality_tools.py"
