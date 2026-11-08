@@ -174,7 +174,7 @@ python packaging\load_users.py --users 12 --output release\memory-12-users.json
 python packaging\verify.py
 ```
 
-脚本先预检构建输出目录的完整性标签（见下文），再依次跑打包脚本单测、前端单测、类型检查、e2e（4 个 worker）与服务端测试（`--no-fail-fast`）。每一项都会跑完，最后汇总；任一失败即以非 0 退出。只需重跑其中一项时，命令见 [verify.py](verify.py) 的 `COMMANDS`。
+脚本先预检构建输出目录的完整性标签（见下文），再依次跑打包脚本单测、前端单测、类型检查、e2e（4 个 worker）、服务端测试（`--no-fail-fast`）与质量门禁（见下文「质量门禁」）。每一项都会跑完，最后汇总；任一失败即以非 0 退出。只需重跑其中一项时，命令见 [verify.py](verify.py) 的 `COMMANDS`。
 
 e2e 很慢，只在集成分支（`main`、`integration/*`）上跑：各票合完后，推送集成分支时由 pre-push 跑一次全套。其他分支（`impl/*`、`spec/*` 等）和分离 HEAD 跳过 e2e，汇总里记为「跳过」；需要时加 `--e2e` 强制跑。
 
@@ -186,11 +186,38 @@ git config core.hooksPath .githooks
 
 符号链接逃逸测试在无权创建符号链接时打印原因并跳过，其余断言照常运行。无权的原因可能有两种：当前账户既没开开发者模式，也不是管理员；或者测试程序以 Low 完整性级别运行。
 
-Windows 启动程序时，进程的完整性级别不会高于 exe 文件自身的标签；文件的标签从所在目录继承。仓库若放在带 Low 完整性标签的目录下（例如某些沙箱工具会这样标记 Desktop），编译出的测试程序和服务端都会以 Low 运行。这时它们不能写 `%TEMP%`（报错误 5，测试建临时目录失败、压测启动时报「数据根不可写」），也不能创建符号链接；`cargo build` 编译 ring 时 cl.exe 报 `D8050: 无法执行 c1.dll` 也是这个原因。新 clone 或新建 worktree 的目录同样继承标签，先跑 `python packaging\verify.py --preflight`，它只做这项预检。可以用 `icacls <目录>` 查看目录的标签。处理方法是把两个构建输出目录设为 Medium，其中已有的文件会随之继承：
+Windows 启动程序时，进程的完整性级别不会高于 exe 文件自身的标签；文件的标签从所在目录继承。仓库若放在带 Low 完整性标签的目录下（例如某些沙箱工具会这样标记 Desktop），编译出的测试程序和服务端都会以 Low 运行。这时它们不能写 `%TEMP%`（报错误 5，测试建临时目录失败、压测启动时报「数据根不可写」），也不能创建符号链接；`cargo build` 编译 ring 时 cl.exe 报 `D8050: 无法执行 c1.dll` 也是这个原因。新 clone 或新建 worktree 的目录同样继承标签，先跑 `python packaging\verify.py --preflight`，它只做这项预检。可以用 `icacls <目录>` 查看目录的标签。处理方法是把构建输出目录设为 Medium，其中已有的文件会随之继承（`client\target` 与 `.uml-viewer` 属于质量门禁，要在建 venv 前设好）：
 
 ```powershell
 icacls server\target /setintegritylevel '(OI)(CI)M'
 icacls release /setintegritylevel '(OI)(CI)M'
+icacls client\target /setintegritylevel '(OI)(CI)M'
+icacls .uml-viewer /setintegritylevel '(OI)(CI)M'
 ```
 
 `cargo clean` 会删掉整个 `target` 目录，标签也随之消失，之后需要重新设置；`verify.py` 的预检会在跑测试前发现这种情况，并打印上面的命令。部署时复制到 lzxsvn 的程序按目标目录的标签运行，不受影响。
+
+
+## 质量门禁
+
+决定与理由见 [ADR 0020](../docs/adr/0020-quality-gate-with-crapper-dryer-and-mutator.md)。门禁只查自 `origin/main` 分叉以来改动过的 `client/src`、`server/src` 源码（含未提交与未跟踪文件），范围与排除只在 [uml-quality.json](../uml-quality.json) 声明：
+
+- CRAP 超过 10，或没有 CRAP 分（覆盖率缺失）失败（crapper）；
+- 至少一边在改动文件里的重复配对，相似度不低于 0.8 即失败（dryer）；
+- 有存活变异体或未覆盖变异点失败（mutator，只在 `--quality` 时跑）。
+
+```powershell
+python packaging\quality.py            # 只跑 CRAP 与重复，verify.py 默认流程里就有
+python packaging\quality.py --mutate   # 连变异测试一起跑
+python packaging\verify.py --quality   # 全套验证加变异测试，合入集成分支前必须跑
+```
+
+工具按包运行（`--root client`、`--root server`），覆盖率与指标快照落在包内的 `target/`、`.metrics/`，都不提交。
+
+工具安装在主 checkout 的 `.uml-viewer/`，各 worktree 共用。每个 clone 装一次；升级时改 [install_quality_tools.py](install_quality_tools.py) 的 `PINS` 后重跑。`verify.py`（含 `--preflight`）发现没装或版本不符时会提示：
+
+```powershell
+python packaging\install_quality_tools.py
+```
+
+前置条件需要自己装：Rust 1.99.1 MSVC 工具链、git、Python 3.12+、Herdr ≥ 0.9.3（uml-viewer 安装器强制检查，门禁本身用不到）。crapper 缺 `cargo-llvm-cov` 时会自动装。如果 `%USERPROFILE%\.cargo\bin\cargo-llvm-cov.exe` 带 Low 完整性标签（被 Low 进程装上时会这样），它在 `server\target` 下建不了目录，Rust 覆盖率失败，门禁报「没有 CRAP 分」；用 `icacls <该 exe> /setintegritylevel M` 改回 Medium。看架构图用 `uml.cmd ir` 生成 `examples/kacha.edn`，再用 `uml.cmd` 打开；policy 在 [examples/kacha.policy.edn](../examples/kacha.policy.edn)。
