@@ -34,8 +34,17 @@ dist/
 
 # Web 服务端构建产物
 /server/target/
+
+# 质量门禁（docs/adr/0020）：覆盖率与变异 worker、指标快照、生成的 UML 图都不提交
+/client/target/
+.metrics/
+/examples/kacha.edn
 # 已退役桌面客户端在旧检出里残留的构建缓存
 /client/src-tauri/
 
 # e2e 截图与 Playwright 输出（以仓库根为 cwd 运行时产生）
 test-results/
+# BEGIN UML-VIEWER
+.uml-viewer/
+uml-viewer-log.txt
+# END UML-VIEWER

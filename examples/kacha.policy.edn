@@ -1,0 +1,8 @@
+{:title "Kacha"
+ :prefix "kacha"
+ :out "examples/kacha.edn"
+ :hierarchical true
+ :sources [{:lang :typescript :root "client/src"}
+           {:lang :rust :root "server/src" :prefix "kacha.kacha_server"}]
+ :foreign [react react-dom at.xyflow at.noble axum tokio serde serde_json]
+ :order [shell ui core kacha_server]}

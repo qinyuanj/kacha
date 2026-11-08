@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "standardTools": {
+    "sourceRoots": ["client/src", "server/src"],
+    "exclude": [
+      "client/src/**/*.test.ts",
+      "client/src/**/*.test.tsx",
+      "client/src/core/__fixtures__",
+      "client/src/core/testing"
+    ]
+  }
+}
