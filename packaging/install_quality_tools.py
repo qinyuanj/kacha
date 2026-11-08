@@ -18,7 +18,7 @@ from quality import tools_home
 
 PINS = {
     "uml-viewer": "687b264143e03c8630aff5d67ea7bba598b7c492",
-    "crapper": "f0aa6483592d0820184bb00ae2143227aac3b452",
+    "crapper": "4068857bc44e6383cf4a5e4d0b5c1111b49ce0b4",
     "mutator": "f772a8329fba3f2f81bfca0a81abfa3210af9f4a",
     "dryer": "b3f72ad9681a6574c5714d3c54d50e2ea3eff91a",
 }

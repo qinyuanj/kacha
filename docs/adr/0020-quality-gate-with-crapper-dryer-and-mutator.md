@@ -27,5 +27,5 @@ CRAP 和 dryer 进 `verify.py` 的默认流程，pre-push 每次都跑。mutator
 - 第一次改动某个文件时，就要为这个文件的存量问题负责，哪怕超标的函数不是这次改的。
 - 开发机多了前置：Rust 1.99.1 MSVC、Python 3.12+（mutator 在 Windows 上需要）、Herdr ≥ 0.9.3（uml-viewer 安装器强制检查，门禁本身用不到）、`cargo-llvm-cov`（crapper 缺了会自动装）。
 - mutator 在 Windows 上的隔离不是 OS 边界：用绝对路径、注册表或网络的测试仍能越出复制出来的项目副本；仓库里有目录符号链接或 junction 时，它会拒绝运行。
-- 三个工具都按包运行（`--root client`、`--root server`），不以仓库根运行。原因是 vitest 写出的 lcov 路径相对 `client/`，以仓库根运行时 crapper 对不上，覆盖率成了 N/A（上游 [crapper#11](https://github.com/qinyuanj/crapper/issues/11)）。附带的好处是 mutator 在 Windows 上只复制所在的包，不会复制仓库根下的 worktree。覆盖率报告和 `.metrics/` 也都落在包内（`client/target`、`server/target`、`*/.metrics`）。
-- 改动文件里有函数没有 CRAP 分（覆盖率缺失）也算失败。crapper 在这种情况下仍退出 0，门禁要自己从报告里判断。
+- 三个工具都按包运行（`--root client`、`--root server`），不以仓库根运行。最初的原因是 vitest 写出的 lcov 路径相对 `client/`，以仓库根运行时 crapper 对不上，覆盖率成了 N/A（上游 [crapper#11](https://github.com/qinyuanj/crapper/issues/11)）；crapper `5f4ddce` 起把 TypeScript 和 Python 的 SF 锚定到包目录，这个原因不再成立。门禁仍按包运行：mutator 在 Windows 上只复制所在的包，不会复制仓库根下的 worktree，覆盖率报告和 `.metrics/` 也都落在包内（`client/target`、`server/target`、`*/.metrics`）。
+- 改动文件里有函数没有 CRAP 分（覆盖率缺失）也算失败。一个包里没有任何函数测到覆盖率时，带 `--threshold` 的 crapper 会退出 3；只有部分函数 N/A 时仍退出 0。门禁对两种情况都判失败，后者从报告里判断。
