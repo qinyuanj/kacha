@@ -12,12 +12,19 @@ import shutil
 import subprocess
 import sys
 
+from install_quality_tools import install_problems
+from quality import tools_home
+
 ROOT = Path(__file__).resolve().parent.parent
 
 # 编译和复制出来的程序放在这里，文件的完整性标签从目录继承。
-BUILD_OUTPUTS = (Path("server") / "target", Path("release"))
+# client/target 是质量工具在前端包里的覆盖率与变异 worker 目录（服务端的落在 server/target），
+# .uml-viewer 是质量工具的安装与 venv（见 packaging/quality.py）。
+BUILD_OUTPUTS = (Path("server") / "target", Path("release"), Path("client") / "target", Path(".uml-viewer"))
 
 E2E = ["npm", "--prefix", "client", "run", "test:e2e", "--", "--workers=4"]
+
+QUALITY = [sys.executable, "packaging/quality.py"]
 
 COMMANDS = (
     [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"],
@@ -26,7 +33,13 @@ COMMANDS = (
     ["npm", "--prefix", "client", "run", "lint:dead"],
     E2E,
     ["cargo", "test", "--manifest-path", "server/Cargo.toml", "--no-fail-fast"],
+    QUALITY,
 )
+
+
+def commands(argv: list[str]) -> list[list[str]]:
+    """--quality 时质量门禁连变异测试一起跑（合入集成分支前必须跑，见 docs/adr/0020）。"""
+    return [[*command, "--mutate"] if command is QUALITY and "--quality" in argv else command for command in COMMANDS]
 
 
 def runs_e2e(branch: str, argv: list[str]) -> bool:
@@ -73,14 +86,18 @@ def preflight(root: Path) -> int:
 
 def main(argv: list[str]) -> int:
     """用法：verify.py [--preflight] [--e2e]；--preflight 只做预检，不跑测试（新建 worktree 或 clone 后先跑一次）。"""
-    code = preflight(ROOT)
+    tools = install_problems(tools_home(ROOT))
+    for problem in tools:
+        print(problem, file=sys.stderr)
+    code = preflight(ROOT) or (2 if tools else 0)
     if code or "--preflight" in argv:
         return code
 
     branch = current_branch(ROOT)
     skipped = [] if runs_e2e(branch, argv) else [" ".join(E2E)]
     failed = []
-    for command in COMMANDS:
+    selected = commands(argv)
+    for command in selected:
         line = " ".join(command)
         if line in skipped:
             print(f"\n=== 跳过 e2e：当前分支 {branch or '（未知）'} 不是集成分支（main、integration/*），经用户授权可加 --e2e 强制跑", flush=True)
@@ -90,7 +107,7 @@ def main(argv: list[str]) -> int:
         if executable is None or subprocess.run([executable, *command[1:]], cwd=ROOT).returncode != 0:
             failed.append(line)
     print("\n=== 汇总")
-    for command in COMMANDS:
+    for command in selected:
         line = " ".join(command)
         print(f"{'跳过' if line in skipped else '失败' if line in failed else '通过'}  {line}")
     return 1 if failed else 0

@@ -9,7 +9,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from verify import integrity_problems, preflight, runs_e2e  # noqa: E402
+from verify import QUALITY, commands, integrity_problems, preflight, runs_e2e  # noqa: E402
 
 VERIFY = Path(__file__).resolve().parents[1] / "verify.py"
 
@@ -27,6 +27,16 @@ class E2eOnlyOnIntegrationBranchesTest(unittest.TestCase):
         self.assertTrue(runs_e2e("impl/79-default-model", ["--e2e"]))
 
 
+class QualityGateTest(unittest.TestCase):
+    def test_the_gate_runs_without_mutation_by_default(self):
+        self.assertIn(QUALITY, commands([]))
+        self.assertNotIn([*QUALITY, "--mutate"], commands([]))
+
+    def test_quality_flag_adds_mutation_to_the_gate(self):
+        self.assertIn([*QUALITY, "--mutate"], commands(["--quality"]))
+        self.assertNotIn(QUALITY, commands(["--quality"]))
+
+
 class PreflightOnlyTest(unittest.TestCase):
     def test_preflight_flag_checks_without_running_the_suite(self):
         run = subprocess.run([sys.executable, str(VERIFY), "--preflight"], capture_output=True, text=True, errors="replace", timeout=60)
@@ -41,7 +51,7 @@ class IntegrityPreflightTest(unittest.TestCase):
             root = Path(tmp)
             (root / "server").mkdir()
             subprocess.run(["icacls", str(root), "/setintegritylevel", "(OI)(CI)L"], check=True, capture_output=True)
-            self.assertEqual(integrity_problems(root), [root / "server" / "target", root / "release"])
+            self.assertEqual(integrity_problems(root), [root / "server" / "target", root / "release", root / "client" / "target", root / ".uml-viewer"])
             self.assertEqual(preflight(root), 2)
 
     def test_medium_build_outputs_pass(self):
