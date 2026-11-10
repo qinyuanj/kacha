@@ -34,16 +34,8 @@ import { IMAGE_PORT_PREFIX, type TaskPorts } from "../core/graph";
 import { imageMinSize } from "../core/nodeSize";
 import { regionCss } from "../core/overlay";
 import { resolveFromRoot } from "../core/paths";
-import {
-  autoRatioLabel,
-  commitRatioInput,
-  isAutoRatio,
-  ratioRangeText,
-  ratiosForSizeTier,
-  ratioText,
-  sizeTiersOf,
-  type SizeSpec,
-} from "../core/size";
+import { autoRatioLabel, isAutoRatio, ratiosForSizeTier, ratioText, sizeTiersOf, type SizeSpec } from "../core/size";
+import { AUTO_RATIO, commitRatioDraft, ratioComboClass, ratioComboText, ratioFocusText, ratioPickChanges, ratioPresetLabel, ratioPresetSelected } from "./ratioCombo";
 import type { TaskView } from "../core/taskView";
 import { thumbUrl } from "../shell/ipc";
 import { useBoardActions, useImageInfo } from "./context";
@@ -120,8 +112,6 @@ export type TaskFlowNode = Node<
   "task"
 >;
 
-/** 宽高比控件里「自动」项的 value。 */
-const AUTO_RATIO = "auto";
 /** 手填越界后范围提示的停留时间。 */
 const RATIO_HINT_MS = 4000;
 
@@ -167,8 +157,9 @@ function MissingImage({ nodeId, name }: { nodeId: string; name: string }) {
 /**
  * 精简图片节点：只有图片、端口与角标；选中时可拖角等比缩放（尺寸由画布写回 size）。
  * 显示宽高由画布按 size 与图片比例给到 React Flow 节点上；缺图时高度随占位内容。
+ * 导出只作为单测接缝（生产调用都在本文件内）。
  */
-function ImageNode({
+export function ImageNode({
   id,
   absPath,
   name,
@@ -431,7 +422,8 @@ export function ModelOptions({ table, available }: { table: CapabilityTable; ava
   );
 }
 
-function ModelInfo({ modelId, onClose }: { modelId: string; onClose: () => void }) {
+/** 模型说明浮层：档位、参考图上限、待测能力与官方文档链接。导出只作为单测接缝（生产调用都在本文件内）。 */
+export function ModelInfo({ modelId, onClose }: { modelId: string; onClose: () => void }) {
   const { table } = useBoardActions();
   const model = findModel(table, modelId);
   if (!model) return null;
@@ -466,7 +458,8 @@ function ModelInfo({ modelId, onClose }: { modelId: string; onClose: () => void 
   );
 }
 
-function StatusBadge({ status }: { status: TaskStatus }) {
+/** 任务状态徽标；排队 / 执行中的计时随每秒刷新。导出只作为单测接缝（生产调用都在本文件内）。 */
+export function StatusBadge({ status }: { status: TaskStatus }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (status.kind !== "running" && status.kind !== "backoff") return;
@@ -524,11 +517,86 @@ function PortRow({
   );
 }
 
+/** 组合框输入框的受控状态与回调：手填草稿、展开、范围提示与焦点保留都在外面（组合框里）。 */
+interface RatioInputProps {
+  spec: SizeSpec;
+  /** 当前宽高比文本；自动时是推测标签。 */
+  shown: string;
+  /** 非 null = 正在手填。 */
+  draft: string | null;
+  /** 手动的宽高比在当前档发不出去。 */
+  unsupported: boolean;
+  disabled: boolean;
+  open: boolean;
+  input: { current: HTMLInputElement | null };
+  /** 选了列表项或按了 Esc：随后的失焦不提交手填内容。 */
+  discard: { current: boolean };
+  /** 聚焦时填入的文本：没改过就失焦不提交（越界的「（不支持）」值点一下不会被钳制）。 */
+  initial: { current: string };
+  setDraft: (text: string) => void;
+  setOpen: (open: boolean) => void;
+  setHint: (hint: string | null) => void;
+  commit: () => void;
+}
+
+/** 组合框的输入框：聚焦时填入当前值，Enter / 失焦提交，Esc 放弃，↓ 展开预设。 */
+function RatioInput({ spec, shown, draft, unsupported, disabled, open, input, discard, initial, setDraft, setOpen, setHint, commit }: RatioInputProps) {
+  return (
+    <input
+      ref={input}
+      role="combobox"
+      aria-label="宽高比"
+      aria-expanded={open}
+      aria-invalid={unsupported}
+      className="nowheel"
+      value={draft ?? shown}
+      title={draft ?? shown}
+      placeholder="W:H"
+      disabled={disabled}
+      spellCheck={false}
+      onFocus={(e) => {
+        initial.current = ratioFocusText(spec);
+        setDraft(initial.current);
+        setHint(null);
+        const el = e.currentTarget;
+        requestAnimationFrame(() => el.select());
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        else if (e.key === "Escape") {
+          discard.current = true;
+          e.currentTarget.blur();
+        } else if (e.key === "ArrowDown") setOpen(true);
+      }}
+    />
+  );
+}
+
+/** 预设列表：首项「自动」，其余为当前分辨率档的宽高比。 */
+function RatioPresets({ ratios, spec, autoText, open, disabled, onPick }: { ratios: string[]; spec: SizeSpec; autoText: string; open: boolean; disabled: boolean; onPick: (value: string) => void }) {
+  if (!open || disabled) return null;
+  return (
+    <ul className="ratio-combo-list nowheel" role="listbox" aria-label="宽高比预设" onMouseDown={(e) => e.preventDefault()}>
+      {[AUTO_RATIO, ...ratios].map((r) => {
+        const selected = ratioPresetSelected(r, spec);
+        return (
+          <li key={r} role="option" aria-selected={selected} className={selected ? "selected" : ""} onClick={() => onPick(r)}>
+            {ratioPresetLabel(r, spec, autoText)}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /**
  * 宽高比组合框（模型允许任意宽高比时）：首项「自动」、预设作快捷项，也能手填 W:H。
  * 手填在失焦 / Enter 时才提交（连续键入只有一个撤销步）：越界钳制到模型边界并提示范围，读不出恢复原值；Esc 放弃。
+ * 判定逻辑在 ui/ratioCombo.ts；导出只作为单测接缝（生产调用都在本文件内）。
  */
-function RatioCombo({
+export function RatioCombo({
   rule,
   spec,
   ratios,
@@ -544,15 +612,11 @@ function RatioCombo({
   /** AUTO_RATIO 或具体宽高比。 */
   onPick: (value: string) => void;
 }) {
-  const isAuto = isAutoRatio(spec);
-  /** 非 null = 正在手填。 */
   const [draft, setDraft] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
-  /** 选了列表项或按了 Esc：随后的失焦不提交手填内容。 */
   const discard = useRef(false);
-  /** 聚焦时填入的文本：没改过就失焦不提交（越界的「（不支持）」值点一下不会被钳制）。 */
   const initial = useRef("");
   // 手填途中任务被锁定（禁用的输入框不触发失焦）：丢掉草稿。
   useEffect(() => {
@@ -565,53 +629,39 @@ function RatioCombo({
     const timer = setTimeout(() => setHint(null), RATIO_HINT_MS);
     return () => clearTimeout(timer);
   }, [hint]);
-  const shown = isAuto ? autoRatioLabel(rule, spec) : unsupported ? `${spec.ratio}（不支持）` : (spec.ratio ?? "");
+  const shown = ratioComboText(rule, spec, unsupported);
   const commit = () => {
-    const result = draft === null || draft === initial.current || discard.current ? null : commitRatioInput(rule, draft);
+    const result = commitRatioDraft(rule, spec, draft, initial.current, discard.current);
     discard.current = false;
     setDraft(null);
     setOpen(false);
-    if (!result) return;
-    if (result.clamped) setHint(`该模型宽高比范围 ${ratioRangeText(rule)}`);
-    if (isAuto || result.ratio !== spec.ratio) onPick(result.ratio);
+    if (result === null) return;
+    if (result.hint !== null) setHint(result.hint);
+    if (result.ratio !== null) onPick(result.ratio);
   };
   const pick = (value: string) => {
     discard.current = document.activeElement === input.current;
     input.current?.blur();
     setOpen(false);
     setHint(null);
-    if (value === AUTO_RATIO ? !isAuto : isAuto || value !== spec.ratio) onPick(value);
+    if (ratioPickChanges(value, spec)) onPick(value);
   };
   return (
-    <div className={`ratio-combo ${unsupported ? "ratio-unsupported" : ""}`}>
-      <input
-        ref={input}
-        role="combobox"
-        aria-label="宽高比"
-        aria-expanded={open}
-        aria-invalid={unsupported}
-        className="nowheel"
-        value={draft ?? shown}
-        title={draft ?? shown}
-        placeholder="W:H"
+    <div className={ratioComboClass(unsupported)}>
+      <RatioInput
+        spec={spec}
+        shown={shown}
+        draft={draft}
+        unsupported={unsupported}
         disabled={disabled}
-        spellCheck={false}
-        onFocus={(e) => {
-          initial.current = isAuto ? "" : (spec.ratio ?? "");
-          setDraft(initial.current);
-          setHint(null);
-          const el = e.currentTarget;
-          requestAnimationFrame(() => el.select());
-        }}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
-          else if (e.key === "Escape") {
-            discard.current = true;
-            e.currentTarget.blur();
-          } else if (e.key === "ArrowDown") setOpen(true);
-        }}
+        open={open}
+        input={input}
+        discard={discard}
+        initial={initial}
+        setDraft={setDraft}
+        setOpen={setOpen}
+        setHint={setHint}
+        commit={commit}
       />
       <button
         className="icon ratio-combo-toggle"
@@ -626,18 +676,7 @@ function RatioCombo({
       >
         ▾
       </button>
-      {open && !disabled && (
-        <ul className="ratio-combo-list nowheel" role="listbox" aria-label="宽高比预设" onMouseDown={(e) => e.preventDefault()}>
-          {[AUTO_RATIO, ...ratios].map((r) => {
-            const selected = r === AUTO_RATIO ? isAuto : !isAuto && r === spec.ratio;
-            return (
-              <li key={r} role="option" aria-selected={selected} className={selected ? "selected" : ""} onClick={() => pick(r)}>
-                {r === AUTO_RATIO ? (isAuto ? shown : "自动") : r}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      <RatioPresets ratios={ratios} spec={spec} autoText={shown} open={open} disabled={disabled} onPick={pick} />
       {hint !== null && (
         <div className="ratio-combo-hint" role="status">
           {hint}
