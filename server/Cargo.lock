@@ -699,7 +699,7 @@ dependencies = [
 
 [[package]]
 name = "kacha-server"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "axum",
  "filetime",
