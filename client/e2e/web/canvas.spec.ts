@@ -56,6 +56,24 @@ test("撤销 / 重做、右键菜单、悬浮动作条、平移与拖线建节�
   await expect(page.locator(".react-flow__viewport")).not.toHaveAttribute("style", before!);
 });
 
+// 画板文本经 xyflow 节点数据回到输入框会晚一次提交：受控值若不同步跟上 DOM，光标会跳到末尾。
+// 有未提交文本时回车是「分叉」，换行用 Shift+Enter。
+for (const [name, extra, newline] of [
+  ["直接编辑", {}, "Enter"],
+  ["下游有执行记录（未提交文本）", { last_submitted: { task_id: "20260916T000000Z-aaaa0001" } }, "Shift+Enter"],
+] as const) {
+  test(`提示词中间回车换行与连续输入，光标留在原处：${name}`, async ({ page, rig }) => {
+    await openApp(page, rig, { title: "光标", boardText: board("光标", [promptNode("p1", "一只猫在睡觉"), taskNode("t1", extra)], [edge("p1", "t1", "positive")]) });
+    const field = task(page, "p1").locator("textarea");
+    await field.click();
+    await field.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(3, 3));
+    await page.keyboard.press(newline);
+    await page.keyboard.type("白黑");
+    await expect(field).toHaveValue("一只猫\n白黑在睡觉");
+    expect(await field.evaluate((el) => (el as HTMLTextAreaElement).selectionStart)).toBe(6);
+  });
+}
+
 test("中文输入法提交单个标点不重复", async ({ page, rig }) => {
   await openApp(page, rig, { title: "输入法", boardText: board("输入法", [promptNode("p1", "")], []) });
   const field = task(page, "p1").locator("textarea");

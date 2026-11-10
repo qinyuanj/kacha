@@ -231,19 +231,29 @@ export const PromptNodeView = memo(function PromptNodeView({ data, width, height
   // 未提交文本由画布保管：节点离开视口卸载再挂载时仍在。
   const setPending = (text: string | null) => setPromptDraft(node.id, text);
   const [keep, setKeep] = useState(false);
-  // 输入法组字期间文本只留在节点内：受控值必须同步跟上 DOM，否则组字被打断（拼音清空或重复）；组字结束再提交一次。
-  const [composing, setComposing] = useState<string | null>(null);
+  // 受控值必须同步跟上 DOM：画板文本经 xyflow 节点数据回到这里会晚一次提交，期间 React 把旧值写回，光标跳到末尾、
+  // 输入法组字被打断。所以输入框显示的是节点内的 DOM 文本镜像，画板文本追上它时镜像即失效；三选、Esc、失焦时丢弃。
+  const source = pending ?? node.text;
+  const [typedText, setTypedText] = useState<string | null>(null);
+  useEffect(() => {
+    if (typedText === source) setTypedText(null);
+  }, [typedText, source]);
+  // 输入法组字期间文本只留在节点内，组字结束再提交一次。
+  const composing = useRef(false);
   const fork = () => {
     if (pending !== null) apply({ kind: "forkPrompt", promptId: node.id, text: pending });
     setPending(null);
+    setTypedText(null);
   };
   const noFork = () => {
     if (pending !== null) apply({ kind: "editPrompt", promptId: node.id, text: pending });
     setPending(null);
+    setTypedText(null);
     setKeep(true);
   };
   const holdFocus = (e: React.MouseEvent) => e.preventDefault();
   const change = (text: string, cursor: number | null = null) => {
+    setTypedText(text);
     if (pending !== null || (recorded && !keep)) setPending(text);
     else apply({ kind: "editPrompt", promptId: node.id, text });
     if (cursor !== null) requestAnimationFrame(() => {
@@ -256,11 +266,12 @@ export const PromptNodeView = memo(function PromptNodeView({ data, width, height
   };
   // 部分浏览器在 compositionend 后还会补发一次同文本的 input；文本没变不算改动，免得误触发三选。
   const typed = (text: string) => {
-    if (text !== (pending ?? node.text)) change(text);
+    if (text !== source) change(text);
+    else setTypedText(null);
   };
   const insertReference = (port: number) => {
     const el = textarea.current;
-    const current = pending ?? node.text;
+    const current = typedText ?? source;
     const start = el?.selectionStart ?? current.length;
     const end = el?.selectionEnd ?? start;
     const tag = `@图${port}`;
@@ -271,23 +282,31 @@ export const PromptNodeView = memo(function PromptNodeView({ data, width, height
       <textarea
         ref={textarea}
         className="nodrag nowheel prompt-text"
-        value={composing ?? pending ?? node.text}
+        value={typedText ?? source}
         placeholder="输入提示词…"
-        onBlur={() => setKeep(false)}
-        onCompositionStart={(e) => setComposing(e.currentTarget.value)}
+        onBlur={() => {
+          setKeep(false);
+          setTypedText(null);
+        }}
+        onCompositionStart={() => {
+          composing.current = true;
+        }}
         onCompositionEnd={(e) => {
-          setComposing(null);
+          composing.current = false;
           typed(e.currentTarget.value);
         }}
         onKeyDown={(e) => {
-          if (pending === null || composing !== null) return;
+          if (pending === null || composing.current) return;
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             fork();
-          } else if (e.key === "Escape") setPending(null);
+          } else if (e.key === "Escape") {
+            setPending(null);
+            setTypedText(null);
+          }
         }}
         onChange={(e) => {
-          if (composing !== null) setComposing(e.target.value);
+          if (composing.current) setTypedText(e.target.value);
           else typed(e.target.value);
         }}
       />
