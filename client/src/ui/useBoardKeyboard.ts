@@ -8,9 +8,10 @@ import { copyTarget, nodeMarker } from "../core/pageInput";
 import { resolveFromRoot } from "../core/paths";
 import { copyTextToClipboard } from "../shell/clipboard";
 import { copyImageToClipboard } from "../shell/imageClipboard";
-import { fileUrl } from "../shell/ipc";
+import { fileUrl, userRoot } from "../shell/ipc";
 import { isEditableTarget } from "../shell/pageInput";
-import { COPY_TEXT, PASTE_TEXT } from "./boardText";
+import { PASTE_TEXT } from "./boardText";
+import { COPY_TEXT } from "./copyText";
 import { shortcutCommand, writeClipboard, type ShortcutCommand } from "./canvasKeyboard";
 
 interface Options {
@@ -18,8 +19,6 @@ interface Options {
   wrapper: RefObject<HTMLDivElement | null>;
   /** 当前画板：复制的来源。 */
   boardRef: RefObject<Board>;
-  /** 用户数据根：图片节点原图的同源地址从这里解析。 */
-  userRoot: string;
   /** 选区的同步视图：Ctrl / ⌘+C 复制它。 */
   selectedRef: RefObject<ReadonlySet<string>>;
   /** 弹窗（预览、上下文菜单）开着时快捷键不作用于背后的画板。 */
@@ -43,9 +42,10 @@ function keyInputOf(e: KeyboardEvent) {
 
 /** 判定上下文：焦点在不在输入区、画布是否还挂着、弹窗、选区大小。 */
 function shortcutContextOf(e: KeyboardEvent, opts: Options) {
+  const connected = !!opts.wrapper.current?.isConnected;
   return {
     editable: isEditableTarget(e.target),
-    connected: !!opts.wrapper.current?.isConnected,
+    connected,
     dialogOpen: opts.dialogOpen.current,
     selectedCount: opts.selectedRef.current.size,
   };
@@ -59,7 +59,7 @@ function copyShortcut(e: KeyboardEvent, opts: Options): void {
   if (target.mode === "image") {
     // 立即拦掉原生复制，避免默认动作在异步解码完成后覆盖图片；不改画板，也不写节点标记或内存剪贴板。
     e.preventDefault();
-    const src = fileUrl(resolveFromRoot(opts.userRoot, target.node.path));
+    const src = fileUrl(resolveFromRoot(userRoot, target.node.path));
     void copyImageToClipboard(src)
       .then((failure) => {
         if (failure) opts.toast(COPY_TEXT.imageFailed(COPY_TEXT.imageReason[failure]));
@@ -89,9 +89,9 @@ function runShortcut(cmd: ShortcutCommand, e: KeyboardEvent, opts: Options): voi
  * Ctrl / ⌘+Z 撤销，Ctrl / ⌘+Shift+Z、Ctrl / ⌘+Y 重做；文本框聚焦时交给原生撤销。
  * Ctrl / ⌘+V 不在这里处理：粘贴由页面级 paste 接管（见 canvasPaste）。
  */
-export function useBoardKeyboard({ wrapper, boardRef, userRoot, selectedRef, dialogOpen, onUndo, onRedo, toast }: Options): void {
+export function useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen, onUndo, onRedo, toast }: Options): void {
   useEffect(() => {
-    const opts: Options = { wrapper, boardRef, userRoot, selectedRef, dialogOpen, onUndo, onRedo, toast };
+    const opts: Options = { wrapper, boardRef, selectedRef, dialogOpen, onUndo, onRedo, toast };
     const onKey = (e: KeyboardEvent) => {
       const cmd = shortcutCommand(keyInputOf(e), shortcutContextOf(e, opts));
       if (cmd === null) return;
@@ -99,5 +99,5 @@ export function useBoardKeyboard({ wrapper, boardRef, userRoot, selectedRef, dia
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onUndo, onRedo, toast, wrapper, boardRef, userRoot, selectedRef, dialogOpen]);
+  }, [onUndo, onRedo, toast, wrapper, boardRef, selectedRef, dialogOpen]);
 }

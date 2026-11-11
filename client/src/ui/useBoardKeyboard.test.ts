@@ -69,7 +69,6 @@ beforeEach(async () => {
   opts = {
     wrapper: { current: canvasEl },
     boardRef: { current: board },
-    userRoot: "/~",
     selectedRef: { current: new Set(["p1"]) },
     dialogOpen: { current: false },
     onUndo,
