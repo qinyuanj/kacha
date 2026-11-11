@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { textHoverInfo } from "../core/hoverInfo";
 import { HoverButton } from "./hoverInfo";
-import { TIDY_TEXT } from "./boardText";
+import { PASTE_TEXT, TIDY_TEXT } from "./boardText";
 
 interface Props {
   /** 没有打开的画板：全部置灰。 */
@@ -36,7 +36,7 @@ export function BoardToolbar({ disabled = false, modelSelect, onNewPrompt, onAdd
         <HoverButton disabled={disabled} onClick={onNewPrompt} info={hint("在视口中央新建一个提示词节点")}>
           ＋ 提示词
         </HoverButton>
-        <HoverButton disabled={disabled} onClick={onAddReferences} info={hint("选择图片文件加为参考图节点")}>
+        <HoverButton disabled={disabled} onClick={onAddReferences} info={hint(PASTE_TEXT.toolbarHint)}>
           ＋ 参考图…
         </HoverButton>
         <span className="toolbar-pair">

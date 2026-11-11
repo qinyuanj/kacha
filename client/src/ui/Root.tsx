@@ -112,7 +112,8 @@ export function Root() {
   if (phase === "enter") return <div className="key-entry-page">{form}</div>;
   return (
     <>
-      <App key={sessionNonce} onLogout={() => void logout()} version={version} />
+      {/* 会话失效时遮罩盖在 App 之上、不销毁它：告诉画布此刻有模态，粘贴不落到背后的画板（#96）。 */}
+      <App key={sessionNonce} onLogout={() => void logout()} version={version} sessionExpired={expired} />
       {expired && (
         <div className="modal-backdrop">
           <div className="modal">

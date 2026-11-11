@@ -1,5 +1,6 @@
 // 画板相关的用户可见提示文案；跨语言的值由共享契约定义。
 import policy from "../../../contracts/board-policy.json" with { type: "json" };
+import { MAX_PASTE_BYTES, type PasteRefusal } from "../core/pageInput";
 
 /** 画板已不存在（另一页面删除或改名）。 */
 export const BOARD_MISSING_TEXT = "该画板已不存在，可能已在别处改名或删除";
@@ -128,3 +129,20 @@ export const TIDY_TEXT = {
   moveOutFailed: (reason: string) => `移出失败：${reason}`,
   moveOutBusy: "正在移出另一个阶段，请稍候",
 } as const;
+
+/** 粘贴（#96）：被拒时的原因文案与超限提示。只读归档沿用共享的 ARCHIVE_TEXT.readOnly。 */
+export const PASTE_TEXT = {
+  /** 剪贴板里的节点标记还在，但应用内剪贴板已空：刷新过页面、或标记来自另一个标签页。 */
+  staleNodeClip: "剪贴板里的节点已失效，重新复制节点后再粘贴",
+  /** 剪贴板里是文件本身：浏览器不给页面读文件内容，只能拖入。 */
+  filesNotReadable: "剪贴板里是文件，浏览器读不到内容：请把文件拖进画板",
+  /** 单张图片超过服务端单请求上限：不发请求，先提示压缩。 */
+  tooLarge: `图片超过 ${MAX_PASTE_BYTES / (1024 * 1024)} MB 上限，先压缩再粘贴`,
+  /** 节点标记写不进系统剪贴板：Ctrl+V 粘节点会失效，给一条不等粘贴的替代动作。 */
+  markerUnwritable: "无法写入系统剪贴板：Ctrl+V 粘贴节点可能不生效，可用 Ctrl+J 原地复制",
+  /** 工具栏「＋ 参考图…」的悬浮提示：粘贴没有按钮入口（内网 HTTP 下页面读不到剪贴板），只能用文案告诉用户。 */
+  toolbarHint: "选择图片文件加为参考图节点（也可以直接按 Ctrl+V 粘贴截图）",
+} as const;
+
+/** 粘贴被拒时给用户的话：拒绝原因到文案的映射只在这里，界面不各自写一份。 */
+export const pasteRefusalText = (reason: PasteRefusal): string => (reason === "readOnly" ? ARCHIVE_TEXT.readOnly : PASTE_TEXT[reason]);

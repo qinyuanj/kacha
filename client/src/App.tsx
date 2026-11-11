@@ -34,7 +34,7 @@ import { useBoardPack } from "./ui/useBoardPack";
 import { useBoardSessions } from "./ui/useBoardSessions";
 import { errorText } from "./core/errors";
 
-export function App({ onLogout, version }: { onLogout?: () => void; version?: string | null } = {}) {
+export function App({ onLogout, version, sessionExpired = false }: { onLogout?: () => void; version?: string | null; sessionExpired?: boolean } = {}) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [lastSeenVersion, setLastSeenVersion] = useState<string | undefined>();
@@ -352,6 +352,8 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
   const okActive = active?.status === "ok" ? active : null;
   /** 当前画板是归档画板（#90）：只读，能看、能放大、能下载结果与导出画板包。 */
   const activeArchived = !!okActive && !!userRoot && isArchivedPath(userRoot, okActive.path);
+  /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框、会话失效遮罩）：粘贴放行给弹窗，不落到背后的画板（#96）。 */
+  const modalOpen = settingsOpen || changelogOpen || boardListOpen || confirm !== null || sendText !== null || pack.dialog !== null || sessionExpired;
   const activeSize = useActiveBoardSize(okActive?.path ?? null, okActive?.version ?? null);
   const notice = activeSize ? sizeNotice(activeSize.tier, sizeNotices[activeSize.path]) : null;
   // 用量上限提醒（#88）：只提醒，生成照常。
@@ -615,6 +617,7 @@ export function App({ onLogout, version }: { onLogout?: () => void; version?: st
               onViewSendText={(id) => void viewSendText(id)}
               toolbarSlot={toolbarSlot}
               readOnly={activeArchived}
+              modalOpen={modalOpen}
               focus={focus?.boardKey === active.key ? focus : null}
               tidying={tidyKey === active.key && !activeArchived}
               onTidyChange={(on) => setTidyKey(on ? active.key : null)}
