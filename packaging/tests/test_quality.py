@@ -5,11 +5,13 @@
 """
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -28,8 +30,17 @@ DUPLICATE score=0.85
 """
 
 
+def git_env() -> dict[str, str]:
+    """临时仓库用的干净环境。
+
+    pre-push 会设 GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE 等变量；不剥掉的话，
+    这里的 git add / commit 会写进被推送的那个真实仓库，而不是测试的临时目录。
+    """
+    return {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+
+
 def git(root: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, env=git_env())
 
 
 class ScopeTest(unittest.TestCase):
@@ -241,20 +252,49 @@ class ChangedFilesTest(unittest.TestCase):
     def test_committed_since_base_and_uncommitted_changes_count_but_deletions_do_not(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            git(root, "init", "-q", "-b", "main")
-            git(root, "config", "user.email", "t@example.com")
-            git(root, "config", "user.name", "t")
-            for name in ("kept.ts", "gone.ts", "edited.ts"):
-                (root / name).write_text("x\n", encoding="utf-8")
-            git(root, "add", ".")
-            git(root, "commit", "-q", "-m", "base")
-            base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True).stdout.strip()
-            (root / "edited.ts").write_text("y\n", encoding="utf-8")
-            (root / "gone.ts").unlink()
-            git(root, "commit", "-q", "-am", "work")
-            (root / "new dir").mkdir()
-            (root / "new dir" / "fresh.ts").write_text("z\n", encoding="utf-8")
-            self.assertEqual(changed_files(root, base), ["edited.ts", "new dir/fresh.ts"])
+            # 模拟 pre-push：写临时仓库时这些变量必须被剥掉，否则提交落在真实仓库。
+            polluted = {"GIT_DIR": str(root / "elsewhere.git"), "GIT_WORK_TREE": str(root / "elsewhere"),
+                        "GIT_INDEX_FILE": str(root / "elsewhere.index")}
+            with mock.patch.dict(os.environ, polluted):
+                git(root, "init", "-q", "-b", "main")
+                git(root, "config", "user.email", "t@example.com")
+                git(root, "config", "user.name", "t")
+                for name in ("kept.ts", "gone.ts", "edited.ts"):
+                    (root / name).write_text("x\n", encoding="utf-8")
+                git(root, "add", ".")
+                git(root, "commit", "-q", "-m", "base")
+                base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True,
+                                      env=git_env()).stdout.strip()
+                (root / "edited.ts").write_text("y\n", encoding="utf-8")
+                (root / "gone.ts").unlink()
+                git(root, "commit", "-q", "-am", "work")
+                (root / "new dir").mkdir()
+                (root / "new dir" / "fresh.ts").write_text("z\n", encoding="utf-8")
+                # changed_files 的职责是读 root 指定的那个仓库，读的时候同样不能被套用别的 GIT_DIR。
+                with mock.patch.dict(os.environ, git_env(), clear=True):
+                    self.assertEqual(changed_files(root, base), ["edited.ts", "new dir/fresh.ts"])
+
+
+    def test_git_hook_environment_does_not_redirect_writes_out_of_the_temporary_repository(self):
+        """pre-push 环境里跑这套测试时，提交只能落在临时目录，不能碰真实仓库（发布时实测踩到）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            elsewhere = root / "elsewhere.git"
+            polluted = {"GIT_DIR": str(elsewhere), "GIT_WORK_TREE": str(root / "elsewhere"),
+                        "GIT_INDEX_FILE": str(root / "elsewhere.index")}
+            with mock.patch.dict(os.environ, polluted):
+                git(root, "init", "-q", "-b", "main")
+                git(root, "config", "user.email", "t@example.com")
+                git(root, "config", "user.name", "t")
+                (root / "kept.ts").write_text("x\n", encoding="utf-8")
+                git(root, "add", ".")
+                git(root, "commit", "-q", "-m", "base")
+            self.assertTrue((root / ".git").is_dir())
+            self.assertFalse(elsewhere.exists())
+            self.assertFalse((root / "elsewhere.index").exists())
+            head = subprocess.run(["git", "log", "-1", "--format=%s"], cwd=root, capture_output=True, text=True,
+                                  env=git_env())
+            self.assertEqual(head.stdout.strip(), "base")
 
 
 if __name__ == "__main__":
