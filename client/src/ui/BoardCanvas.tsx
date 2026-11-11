@@ -40,12 +40,13 @@ import { createPortal } from "react-dom";
 import { expandedTasks, forgetOnSelectionChange, toggleExpanded, type ExpandOverrides } from "../core/expand";
 import { cardDropConnection, dragCreateItems } from "../core/dragCreate";
 import { BoardToolbar } from "./BoardToolbar";
-import { ARCHIVE_TEXT, FLASH_UNAVAILABLE_TEXT } from "./boardText";
+import { ARCHIVE_TEXT, FLASH_UNAVAILABLE_TEXT, PASTE_TEXT, pasteRefusalText } from "./boardText";
 import { isReadOnlyAction, readOnlyMenu } from "../core/archive";
 import { edgeHoverInfo, type HoverInfo } from "../core/hoverInfo";
 import { connectablePorts, dragKind, edgeClassName, nodeClassName, promptPortKind, type DragFrom, type DragState } from "../core/ports";
 import { continueEditingChange, type BoardChange, type EdgeRef, type EditResult, type ImportedImage } from "../core/edit";
 import { copySelection, lineage, LOCKED_HINT, PASTE_OFFSET, producerOf, type Clip } from "../core/iterate";
+import { dispatchPaste, MAX_PASTE_BYTES, nodeMarker, pasteDisplayNames } from "../core/pageInput";
 import { renderedImageSize } from "../core/nodeSize";
 import { basename, dirname, joinPath, resolveFromRoot, toRootRelative } from "../core/paths";
 import { coordinateRegionAvailable, effectiveRegionRender } from "../core/region";
@@ -53,6 +54,7 @@ import { findReferenceFile, findResultFile, IMAGE_EXTENSIONS } from "../core/rel
 import type { SnapshotImage } from "../core/submission";
 import { taskView } from "../core/taskView";
 import { relocateFs } from "../shell/adapters";
+import { copyTextToClipboard } from "../shell/clipboard";
 import { browser, ipc, transfer } from "../shell/ipc";
 import { logEvent } from "../shell/log";
 import { saveCopyAs } from "../shell/saveFile";
@@ -119,10 +121,14 @@ interface Props {
   onMoveOutStage: (stageId: string) => Promise<string>;
   /** 归档画板（#90）：能看、放大、下载结果，不能编辑（不拖动、不连线、不删、菜单只剩查看与下载）。 */
   readOnly?: boolean;
+  /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框）：粘贴放行给它们，不落到背后的画板。 */
+  modalOpen?: boolean;
 }
 
 const edgeId = (e: BoardEdge) => `${e.from.join(":")}->${e.to.join(":")}`;
 const dims = (w: number | undefined, h: number | undefined) => ({ width: w, height: h });
+/** 拖入 / 粘贴进来的图片：MIME 或扩展名认得（粘贴还要求真读到内容，资源管理器复制的文件只有名字，见 paste 接管）。 */
+const isImageFile = (f: File) => f.type.startsWith("image/") || IMAGE_EXTENSIONS.some((ext) => f.name.toLowerCase().endsWith(`.${ext}`));
 /** 尚未回传测量结果的节点：非空即可让 React Flow 保留内部已测得的 handleBounds（见 nodes 的 measured）。 */
 const NOT_MEASURED: { width?: number; height?: number } = {};
 
@@ -153,9 +159,12 @@ export function BoardCanvas({
   onTidyChange,
   onMoveOutStage,
   readOnly = false,
+  modalOpen = false,
 }: Props) {
   const flow = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
+  /** 粘贴落点：鼠标最后在画布内的窗口坐标；离开画布后仍记着最后那次，从没进过画布则为 null（取视口中心）。 */
+  const lastPointer = useRef<{ x: number; y: number } | null>(null);
   const [selectedNodes, setSelectedNodes] = useState<ReadonlySet<string>>(new Set());
   const [selectedEdges, setSelectedEdges] = useState<ReadonlySet<string>>(new Set());
   const [measured, setMeasured] = useState<Record<string, { width?: number; height?: number }>>({});
@@ -777,24 +786,47 @@ export function BoardCanvas({
   /** promptId = 从该提示词拖出（拖线建节点），接新任务的正向端口，与建节点同一步。 */
   const addTask = (at = centerPosition(), promptId?: string) => void apply({ kind: "newTask", at: posOf(at), promptId: promptId ?? null });
 
-  /** 本机图片先上传到用户数据根的 导入参考图/，再按服务端给出的路径导入。 */
+  /**
+   * 本机图片先上传到用户数据根的 导入参考图/，再按服务端给出的路径导入。
+   * displayNames = 整批上传后统一合成显示名（粘贴的图按「粘贴-…」命名，扩展名取落盘路径而不是剪贴板里的类型声明）；缺省用本机文件名。
+   */
   const importLocalFiles = useCallback(
-    async (files: File[], at: { x: number; y: number }, attach?: { taskId: string; place: "asIs" | "left" }) => {
-      const images: ImportedImage[] = [];
+    async (files: File[], at: { x: number; y: number }, attach?: { taskId: string; place: "asIs" | "left" }, displayNames?: (uploadedPaths: string[]) => string[]) => {
+      const done: { file: File; path: string; sha256: string; width: number; height: number }[] = [];
       for (const file of files) {
         try {
           const uploaded = await transfer.uploadReference(file);
           const abs = resolveFromRoot(userRoot, uploaded.path);
           const info = await ipc.inspectImage(abs);
           primeImageInfo(abs, info);
-          images.push({ path: uploaded.path, sha256: info.sha256, display_name: file.name, width: info.width, height: info.height });
+          done.push({ file, path: uploaded.path, sha256: info.sha256, width: info.width, height: info.height });
         } catch (e) {
           toast(`无法导入 ${file.name}：${errorText(e)}`);
         }
       }
-      if (images.length) apply({ kind: "addReferences", images, at: [at.x, at.y], attach: attach ?? null });
+      if (!done.length) return;
+      const names = displayNames?.(done.map((u) => u.path));
+      const images: ImportedImage[] = done.map((u, i) => ({ path: u.path, sha256: u.sha256, display_name: names?.[i] ?? u.file.name, width: u.width, height: u.height }));
+      apply({ kind: "addReferences", images, at: [at.x, at.y], attach: attach ?? null });
     },
     [apply, userRoot, toast],
+  );
+
+  /** 粘贴进来的图片：超限的当场提示、不发请求；其余与「添加参考图」同一条链路，一次粘多张仍算一个撤销步。 */
+  const importPastedImages = useCallback(
+    async (files: File[], at: { x: number; y: number }) => {
+      const usable = files.filter((file) => {
+        if (file.size <= MAX_PASTE_BYTES) return true;
+        toast(PASTE_TEXT.tooLarge);
+        return false;
+      });
+      if (!usable.length) return;
+      const now = new Date();
+      // 显示名整批一起算：同一分钟的第二张自动 -2，与画板里已有的名字也不撞。
+      const taken = new Set(boardRef.current.nodes.flatMap((n) => (n.type === "reference" ? [n.display_name] : [])));
+      await importLocalFiles(usable, at, undefined, (paths) => pasteDisplayNames(now, paths, taken));
+    },
+    [importLocalFiles, toast],
   );
 
   /** attachTo = 任务节点 id：只选一张，接到该任务的空图片端口（从图片端口反向拖线建节点）。 */
@@ -804,7 +836,7 @@ export function BoardCanvas({
     await importLocalFiles(files, at ?? centerPosition(), attachTo ? { taskId: attachTo, place: "asIs" } : undefined);
   };
 
-  // 通用复制粘贴：Ctrl/⌘+C 复制选中节点，Ctrl/⌘+V 粘贴（新节点整体偏移、从未提交过）。
+  // 通用复制：Ctrl/⌘+C 复制选中节点。粘贴不在键盘事件里做——键盘事件拦截默认行为会把 paste 事件一起压掉（见下面的页面级 paste 接管）。
   // Ctrl/⌘+Z 撤销，Ctrl/⌘+Shift+Z、Ctrl/⌘+Y 重做；文本框聚焦时交给原生撤销。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -819,13 +851,15 @@ export function BoardCanvas({
       }
       if (e.shiftKey || dialogOpenRef.current) return;
       if (key === "c" && selectedRef.current.size) {
-        clipboard = copySelection(boardRef.current, [...selectedRef.current]);
-      } else if (key === "v" && clipboard?.nodes.length) {
-        e.preventDefault();
-        const clip = clipboard;
-        apply({ kind: "paste", clip });
-        // 连续粘贴逐次错开。
-        clipboard = { ...clip, nodes: clip.nodes.map((n) => ({ ...n, pos: [n.pos[0] + PASTE_OFFSET, n.pos[1] + PASTE_OFFSET] as [number, number] })) };
+        const clip = copySelection(boardRef.current, [...selectedRef.current]);
+        clipboard = clip;
+        if (clip.nodes.length) {
+          // 先拦掉浏览器的原生复制：默认复制动作在本处理器之后才写剪贴板，会把刚写好的标记冲掉。
+          e.preventDefault();
+          // 同时向系统剪贴板写一段节点标记（#96）：Ctrl+V 靠它分辨该粘节点还是该落一张剪贴板里的图。
+          // 写不进去时粘贴节点会失效，所以给一句话和一条可用的替代动作，而不是静默失败。
+          void copyTextToClipboard(nodeMarker(clip.nodes.length)).catch(() => toast(PASTE_TEXT.markerUnwritable));
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -925,7 +959,7 @@ export function BoardCanvas({
       e.stopPropagation();
       if (readOnly) return toast(ARCHIVE_TEXT.readOnly);
       const at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/") || IMAGE_EXTENSIONS.some((ext) => f.name.toLowerCase().endsWith(`.${ext}`)));
+      const files = [...e.dataTransfer.files].filter(isImageFile);
       if (!files.length) return toast("只支持拖入图片文件");
       const hit = dropTargetAt({ x: e.clientX, y: e.clientY });
       const card = hit?.kind === "node" ? boardRef.current.nodes.find((n) => n.id === hit.nodeId) : undefined;
@@ -938,6 +972,46 @@ export function BoardCanvas({
       el.removeEventListener("drop", drop);
     };
   }, [flow, importLocalFiles, toast, readOnly]);
+
+  // 粘贴落点跟着鼠标：记下最后在画布内的位置（没有则取视口中心，见 lastPointer）。
+  useEffect(() => {
+    const el = wrapper.current;
+    if (!el) return;
+    const move = (e: PointerEvent) => {
+      lastPointer.current = { x: e.clientX, y: e.clientY };
+    };
+    el.addEventListener("pointermove", move);
+    return () => el.removeEventListener("pointermove", move);
+  }, [wrapper]);
+
+  // 页面级粘贴接管（#96）：分派是纯逻辑（core/pageInput），这里只做事件读数、上传与画板写入。
+  // 监听挂在 window 上而不是画布元素：焦点在工具栏、标签栏时粘贴也落图；没有画板时这个组件不挂载，登录页粘贴不受影响。
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      const data = event.clipboardData;
+      const files = [...(data?.files ?? [])];
+      // 读得到内容才算图片；资源管理器里复制的文件只有名字没有内容，归到 opaqueFiles 里提示改为拖入。
+      const images = files.filter((f) => isImageFile(f) && f.size > 0);
+      const at = posOf(lastPointer.current ? flow.screenToFlowPosition(lastPointer.current) : centerPosition());
+      const action = dispatchPaste(
+        { text: data?.getData("text/plain") || null, images: images.length, opaqueFiles: files.length - images.length },
+        // board 恒为 true：这个组件只在有画板时挂载，「没有画板就放行」由登录页 / 空工作台不挂载兑现。
+        { board: true, readOnly, modal: modalOpen || dialogOpenRef.current, textFocus: isTyping(document.activeElement), hasNodeClip: (clipboard?.nodes.length ?? 0) > 0, at },
+      );
+      if (action.kind === "pass") return;
+      // 落到这一步都是本应用要处理 / 要拒绝的粘贴：吞掉，免得浏览器再往别处塞一份。
+      event.preventDefault();
+      if (action.kind === "refuse") return toast(pasteRefusalText(action.reason));
+      if (action.kind === "importImages") return void importPastedImages(images, { x: action.at[0], y: action.at[1] });
+      const clip = clipboard; // 含节点标记却内存剪贴板为空的分支已被分派拦下，这里必有内容。
+      if (!clip?.nodes.length) return;
+      apply({ kind: "paste", clip });
+      // 连续粘贴逐次错开。
+      clipboard = { ...clip, nodes: clip.nodes.map((n) => ({ ...n, pos: [n.pos[0] + PASTE_OFFSET, n.pos[1] + PASTE_OFFSET] as [number, number] })) };
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [flow, centerPosition, readOnly, modalOpen, toast, apply, importPastedImages]);
 
   const toolbarModel = defaultTaskModel(table, discovery, board.last_model);
   return (

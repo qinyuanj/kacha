@@ -101,3 +101,22 @@ export async function dropFile(page: Page, file: DroppedFile, at: { x: number; y
     { file, at },
   );
 }
+
+/**
+ * 模拟把一张图片放进系统剪贴板后按 Ctrl+V：先把指针移到画布的页面坐标 (x, y)，
+ * 再在页面里合成一次 paste 事件——粘贴落点取「鼠标最后在画布内的位置」，所以先要一次指针移动。
+ *
+ * 为什么合成事件：页面跑在内网 HTTP 上不是安全上下文，navigator.clipboard 不存在，
+ * e2e 没法真的写系统剪贴板（与 dropFile 只能合成 drop 同一路数）。clipboardData 直接挂到
+ * 事件上而不走构造参数：有的浏览器不接受 ClipboardEvent 构造参数里的 clipboardData。
+ */
+export async function pasteImage(page: Page, file: DroppedFile, at: { x: number; y: number }): Promise<void> {
+  await page.mouse.move(at.x, at.y);
+  await page.evaluate((file) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([Uint8Array.from(atob(file.b64), (c) => c.charCodeAt(0))], file.name, { type: file.mimeType }));
+    const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: dt });
+    document.body.dispatchEvent(event);
+  }, file);
+}
