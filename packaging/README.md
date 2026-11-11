@@ -220,6 +220,6 @@ python packaging\verify.py --quality   # 全套验证加变异测试，合入集
 
 门禁其余前置：Rust 1.99.1 MSVC 工具链、git。crapper 缺 `cargo-llvm-cov` 时会自动装；如果 `%USERPROFILE%\.cargo\bin\cargo-llvm-cov.exe` 带 Low 完整性标签（被 Low 进程装上时会这样），它在 `server\target` 下建不了目录，Rust 覆盖率失败，门禁报「没有 CRAP 分」；用 `icacls <该 exe> /setintegritylevel M` 改回 Medium。
 
-变异测试要求二进制认 `--copy`：在 Windows 上 mutator 只为每个变异体复制被运行的那个包，包外的 `contracts/` 要靠 `--copy ../contracts` 补进副本（[#102](https://github.com/qinyuanj/kacha/issues/102)）。带 `--mutate` 时门禁先读 `uml-viewer mutate --help`，没有这个开关就明确失败并说明需要带它的构建。
+变异测试要求二进制认 `--copy`：在 Windows 上 mutator 只为每个变异体复制被运行的那个包，包外依赖要靠 `--copy` 补进副本（[#102](https://github.com/qinyuanj/kacha/issues/102)）——现在是 `../contracts`、`../docs/release`、`../server/Cargo.toml` 三条（见 `packaging/quality.py` 的 `MUTATION_COPIES`）。带 `--mutate` 时门禁先读 `uml-viewer mutate --help`，没有这个开关就明确失败并说明需要带它的构建。
 
 看架构图用 `uml-viewer ir examples/kacha.policy.edn` 生成 `examples/kacha.edn`；在 DSH 里也可以用 `uml_ir` 生成、`uml_display` 打开。policy 在 [examples/kacha.policy.edn](../examples/kacha.policy.edn)。

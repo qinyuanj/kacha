@@ -86,18 +86,21 @@ class MutationCommandTest(unittest.TestCase):
 
     scope = Scope(roots=("client/src", "server/src"), excludes=("client/src/**/*.test.ts",))
 
-    def test_the_mutator_command_copies_the_repository_contracts(self):
+    def test_the_mutator_command_copies_everything_outside_the_package(self):
         client = packages(self.scope)[0]
         self.assertEqual(mutation_command(BINARY, client, ["src/a.ts"]),
                          [str(BINARY), "mutate", "--root", "client", "-s", "src", "--exclude", "src/**/*.test.ts",
-                          "--copy", "../contracts", "src/a.ts"])
+                          "--copy", "../contracts", "--copy", "../docs/release", "--copy", "../server/Cargo.toml",
+                          "src/a.ts"])
 
     def test_both_packages_are_one_level_below_the_repository_root(self):
         client, server = packages(self.scope)
-        self.assertEqual(MUTATION_COPIES, ("../contracts",))
+        # 包外依赖：contracts/ 与 docs/release 是目录，server/Cargo.toml 是单个文件。
+        self.assertEqual(MUTATION_COPIES, ("../contracts", "../docs/release", "../server/Cargo.toml"))
         self.assertEqual(mutation_command(BINARY, client, [])[2:6], ["--root", "client", "-s", "src"])
         self.assertEqual(mutation_command(BINARY, server, [])[2:],
-                         ["--root", "server", "-s", "src", "--copy", "../contracts"])
+                         ["--root", "server", "-s", "src", "--copy", "../contracts", "--copy", "../docs/release",
+                          "--copy", "../server/Cargo.toml"])
 
     def test_only_the_mutator_gets_the_copy_flag(self):
         self.assertNotIn("--copy", tool_command(BINARY, "crap", []))

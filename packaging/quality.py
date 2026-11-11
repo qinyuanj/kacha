@@ -28,10 +28,12 @@ VIEWER_PLUGIN = "dsh-uml-viewer"
 VIEWER_PLUGIN_RECORD = "current.json"
 VIEWER_BINARY_NAME = "uml-viewer.exe" if os.name == "nt" else "uml-viewer"
 
-# 变异工作副本要额外复制进来的目录，相对包根；client、server 都是仓库根的直接子目录，
-# 所以两个包的取值都是 ../contracts。mutator 在 Windows 上只为每个变异体复制被运行的那个包，
-# 包外 contracts/ 里的 JSON 不在副本里，改动文件的基线测试一 import 就失败（见 docs/adr/0022、#102）。
-MUTATION_COPIES = ("../contracts",)
+# 变异工作副本要额外复制进来的路径，相对包根；client、server 都是仓库根的直接子目录，
+# 所以两个包的取值相同。mutator 在 Windows 上只为每个变异体复制被运行的那个包，包外依赖
+# 不在副本里，改动文件的基线测试一读就失败（见 docs/adr/0022、#102）：
+# contracts/ 放画板策略与网关实测夹具；docs/release 与 server/Cargo.toml 是 changelog 守护测试
+# 要读的更新说明与版本号（client/src/core/changelog.test.ts、ui/ChangelogDialog.tsx 的 ?raw import）。
+MUTATION_COPIES = ("../contracts", "../docs/release", "../server/Cargo.toml")
 
 
 class ViewerMissing(RuntimeError):
