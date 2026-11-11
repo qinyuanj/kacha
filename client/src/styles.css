@@ -25,6 +25,12 @@ body,
   margin: 0;
 }
 
+/* 页面输入接管（#97）：滚到边界时不出现回弹串动。 */
+html,
+body {
+  overscroll-behavior: none;
+}
+
 button,
 select,
 input,
