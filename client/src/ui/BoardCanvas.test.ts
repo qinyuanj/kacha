@@ -118,6 +118,7 @@ vi.mock("../shell/adapters", () => ({
 vi.mock("../shell/log", () => ({ logEvent: vi.fn() }));
 // 系统剪贴板写入是宿主能力（安全上下文 / 内网 HTTP 两套实现）：替身只记调用，回成功。
 vi.mock("../shell/clipboard", () => ({ copyTextToClipboard: vi.fn(async () => undefined) }));
+vi.mock("../shell/imageClipboard", () => ({ copyImageToClipboard: vi.fn(async () => null) }));
 vi.mock("../shell/saveFile", () => ({ saveCopyAs: vi.fn(async () => undefined) }));
 
 // ---- 画板夹具 ----

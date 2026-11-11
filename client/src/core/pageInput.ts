@@ -1,5 +1,16 @@
-// 页面输入接管：一个模块、两个部分——（1）粘贴分派（#96），（2）与画板冲突的浏览器默认行为判定（#97）。
+// 页面输入接管：复制模式（#98）、粘贴分派（#96）、与画板冲突的浏览器默认行为判定（#97）。
 // 这里只有纯逻辑，不碰 DOM；读事件与挂监听都在界面层：粘贴在 BoardCanvas 的 window paste，默认行为在 shell/pageInput。
+import type { Board, ReferenceNode, ResultNode } from "./board";
+
+// ---- 复制模式（#98） ----
+export type CopyTarget = { mode: "image"; node: ReferenceNode | ResultNode } | { mode: "nodes" };
+
+/** Ctrl+C 只看选区：恰好单选参考图 / 结果节点时返回待复制图片；其余选区保持节点复制。 */
+export function copyTarget(board: Board, selectedIds: readonly string[]): CopyTarget {
+  if (selectedIds.length !== 1) return { mode: "nodes" };
+  const node = board.nodes.find((n) => n.id === selectedIds[0]);
+  return node?.type === "reference" || node?.type === "result" ? { mode: "image", node } : { mode: "nodes" };
+}
 
 // ---- 粘贴分派（#96） ----
 /** 复制节点时写进系统剪贴板的标记前缀；计数接在后面（见 nodeMarker）。 */

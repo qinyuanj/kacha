@@ -12,6 +12,7 @@ import { useBoardKeyboard } from "./useBoardKeyboard";
 
 // 系统剪贴板写入换成替身：默认成功，个别用例让它失败。
 vi.mock("../shell/clipboard", () => ({ copyTextToClipboard: vi.fn(async () => undefined) }));
+vi.mock("../shell/imageClipboard", () => ({ copyImageToClipboard: vi.fn(async () => null) }));
 
 // React 19 的 act() 要在测试环境里显式打开。
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -68,6 +69,7 @@ beforeEach(async () => {
   opts = {
     wrapper: { current: canvasEl },
     boardRef: { current: board },
+    userRoot: "/~",
     selectedRef: { current: new Set(["p1"]) },
     dialogOpen: { current: false },
     onUndo,

@@ -258,7 +258,7 @@ export function BoardCanvas({
   performRef.current = (action, target, at) => commands[action]?.(target, at);
   performDragCreateRef.current = canvasDragCreate(commandDeps);
 
-  useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen: overlays.dialogOpenRef, onUndo, onRedo, toast });
+  useBoardKeyboard({ wrapper, boardRef, userRoot, selectedRef, dialogOpen: overlays.dialogOpenRef, onUndo, onRedo, toast });
   useCanvasDrop({ wrapper, boardRef, screenToFlowPosition: (client) => flow.screenToFlowPosition(client), apply, toast, userRoot, readOnly });
   // 页面级粘贴接管（#96）：分派在 core/pageInput（纯逻辑），这里只把落点、模态与图片导入接上。
   useCanvasPaste({

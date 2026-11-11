@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { newBoard } from "./board";
 import { MAX_CONTENT_BYTES } from "./boardPack";
-import { BLOCKED_MOD_KEYS, blocksFileDrag, blocksKey, blocksMouseButton, dispatchPaste, isNodeMarker, MAX_PASTE_BYTES, NODE_MARKER_PREFIX, nodeMarker, PASTE_NAME_PREFIX, pasteDisplayNames, type KeyShape, type PasteAction, type PasteContext, type PasteFacts } from "./pageInput";
+import { BLOCKED_MOD_KEYS, blocksFileDrag, blocksKey, blocksMouseButton, copyTarget, dispatchPaste, isNodeMarker, MAX_PASTE_BYTES, NODE_MARKER_PREFIX, nodeMarker, PASTE_NAME_PREFIX, pasteDisplayNames, type KeyShape, type PasteAction, type PasteContext, type PasteFacts } from "./pageInput";
 
-// ---- 粘贴分派（#96） ----
+// ---- 复制 / 粘贴分派（#98 / #96） ----
 /** 画布落点（默认）。 */
 const AT: [number, number] = [120, -40];
 
@@ -39,6 +40,38 @@ describe("节点标记", () => {
 
   it("粘贴上限与画板包的单份上限都跟着服务端的单请求上限走：改一处忘了另一处会在这里现形", () => {
     expect(MAX_PASTE_BYTES).toBe(MAX_CONTENT_BYTES);
+  });
+});
+
+describe("复制模式", () => {
+  it("单选参考图节点：复制图片", () => {
+    const board = newBoard();
+    board.nodes = [{ id: "r1", type: "reference", pos: [0, 0], size: [200, 200], extra: {}, path: "参考/cat.png", sha256: "a".repeat(64), display_name: "cat.png" }];
+    expect(copyTarget(board, ["r1"]).mode).toBe("image");
+  });
+
+  it("单选结果节点：复制底图，不复制图层或节点", () => {
+    const board = newBoard();
+    board.nodes = [{ id: "res1", type: "result", pos: [0, 0], size: [200, 200], extra: {}, task_id: "t1", file: "result.png", path: "任务/t1/result.png", layer_count: 1, record: { model: "m", prompt: "", negative_prompt: "", size_spec: { tier: null, ratio: null, width: null, height: null }, submitted_at: "2026-11-11T00:00:00Z", layers: [{ file: "layers/01.png", z_index: 1, bounding_box: [0, 0, 1, 1] }] } }];
+    expect(copyTarget(board, ["res1"]).mode).toBe("image");
+  });
+
+  it("多选即使含图片：仍复制节点，画板内复制粘贴手感不变", () => {
+    const board = newBoard();
+    board.nodes = [
+      { id: "r1", type: "reference", pos: [0, 0], size: [200, 200], extra: {}, path: "参考/cat.png", sha256: "a".repeat(64), display_name: "cat.png" },
+      { id: "p1", type: "prompt", pos: [300, 0], size: [240, 120], extra: {}, text: "一只猫" },
+    ];
+    expect(copyTarget(board, ["r1", "p1"]).mode).toBe("nodes");
+  });
+
+  it("提示词、任务、失效节点 id 与空选区：都不是图片复制", () => {
+    const board = newBoard();
+    board.nodes = [
+      { id: "p1", type: "prompt", pos: [0, 0], size: [240, 120], extra: {}, text: "一只猫" },
+      { id: "t1", type: "task", pos: [300, 0], size: [280, 260], extra: {}, model: "m", size_spec: { tier: null, ratio: null, width: null, height: null }, image_ports: 1, layer_decomposition: false, transparent_background: false, last_submitted: null },
+    ];
+    for (const ids of [["p1"], ["t1"], ["gone"], []]) expect(copyTarget(board, ids).mode).toBe("nodes");
   });
 });
 
