@@ -195,6 +195,16 @@ describe("节点变更", () => {
     expect(h.apply).not.toHaveBeenCalled();
   });
 
+  it("宽或高只有一项变化也更新测量，不保留旧对象", () => {
+    const h = harness();
+    flowHandlers(h.deps).onNodesChange([{ type: "dimensions", id: "t1", dimensions: { width: 120, height: 80 } }]);
+    const updater = h.setMeasured.mock.calls[0][0] as (m: Record<string, { width?: number; height?: number }>) => Record<string, { width?: number; height?: number }>;
+    const before = { t1: { width: 120, height: 70 } };
+    const next = updater(before);
+    expect(next).not.toBe(before);
+    expect(next).toEqual({ t1: { width: 120, height: 80 } });
+  });
+
   it("拖角缩放与同批位置一起写，位置不另算移动", () => {
     const h = harness();
     const changes: NodeChange[] = [
@@ -286,6 +296,16 @@ describe("拖线松手", () => {
     handlers.onConnectEnd(mouseUp, dropState({ isValid: true }));
     handlers.onConnectEnd(mouseUp, dropState({ fromHandle: null }));
     expect(h.apply).not.toHaveBeenCalled();
+    expect(h.toast).not.toHaveBeenCalled();
+  });
+
+  it("端口状态不完整时不按端口拒绝，仍按实际落点处理", () => {
+    const h = harness({ elementAt: paneElement });
+    flowHandlers(h.deps).onConnectEnd(
+      mouseUp,
+      dropState({ toHandle: { nodeId: "t1", id: "image:0" }, fromNode: xyNode("ref1"), toNode: null }),
+    );
+    expect(h.performDragCreate.current).toHaveBeenCalledWith("continueEditing", { nodeId: "ref1", handleId: "out", type: "source" }, { x: 24, y: 68 });
     expect(h.toast).not.toHaveBeenCalled();
   });
 

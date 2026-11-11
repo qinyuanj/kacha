@@ -67,6 +67,13 @@ describe("actionBarView", () => {
     expect(view(board, "r1", { selected: ["r2"] }).nodes).toEqual(["r1"]);
   });
 
+  it("过滤后恰好一个条目：仍显示动作条", () => {
+    const result = actionBarView({ hovered: "r1", nodes: board.nodes, menuOpen: false, menuView: (items) => items.slice(0, 1), facts: factsOf(board, new Set()) });
+    expect(result.present).toBe(true);
+    expect(result.items).toHaveLength(1);
+    expect(result.nodes).toEqual(["r1"]);
+  });
+
   it("过滤后没有条目：不显示，挂载节点照算", () => {
     const result = actionBarView({ hovered: "r1", nodes: board.nodes, menuOpen: false, menuView: () => [], facts: factsOf(board, new Set()) });
     expect(result.present).toBe(false);

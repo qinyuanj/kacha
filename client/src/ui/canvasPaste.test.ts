@@ -211,6 +211,16 @@ describe("粘贴节点", () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
+  it("节点标记对应的应用内快照没有节点：同样按失效剪贴板拒绝", () => {
+    // null 与空节点数组都不能让 hasNodeClip 成立；这个分支不能靠后面的防御性 return 才拒绝。
+    vi.mocked(readClipboard).mockReturnValueOnce({ nodes: [], edges: [] });
+    const event = paste({ text: nodeMarker(1) });
+    expect(event.defaultPrevented).toBe(true);
+    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.staleNodeClip);
+    expect(apply).not.toHaveBeenCalled();
+    expect(importPastedImages).not.toHaveBeenCalled();
+  });
+
   it("分派判为粘节点、读剪贴板时却空了：不崩也不落盘（防御分支，正常路径走不到）", () => {
     // 同一帧内没有 await，正常不会变；这里让两次读数不同，锁住防御分支的行为。
     vi.mocked(readClipboard).mockReturnValueOnce(clipOf("p1")).mockReturnValueOnce(null);

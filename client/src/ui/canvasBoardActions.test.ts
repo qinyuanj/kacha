@@ -192,6 +192,14 @@ describe("以此继续编辑", () => {
     expect(h.requestPromptFocus).not.toHaveBeenCalled();
   });
 
+  it("有建议选中但没有撤销步时也不聚焦、不展开", () => {
+    const h = harness();
+    h.apply.mockReturnValue(editResult(created, { step: null, selection: ["p2"] }));
+    canvasBoardActions(h.deps).continueEditing("ref1");
+    expect(h.setExpandOverrides).not.toHaveBeenCalled();
+    expect(h.requestPromptFocus).not.toHaveBeenCalled();
+  });
+
   it("选中的是别的节点（没有新建任务节点）时只聚焦", () => {
     const h = harness();
     h.apply.mockReturnValue(editResult(board([reference("ref1")]), { selection: ["p2"] }));
@@ -328,6 +336,14 @@ describe("生成变体", () => {
 
   it("父任务已删除（或节点不是结果）时提示", () => {
     const h = harness();
+    canvasBoardActions(h.deps).generateVariant("ref1");
+    expect(h.toast).toHaveBeenCalledWith(VARIANT_TEXT.parentGone);
+    expect(h.onRegenerate).not.toHaveBeenCalled();
+  });
+
+  it("非结果节点即使带来源任务连线也不重跑", () => {
+    const h = harness();
+    h.boardRef.current = board([reference("ref1"), task("t1")], [edge(["t1", "result"], ["ref1", "in"], { system: true })]);
     canvasBoardActions(h.deps).generateVariant("ref1");
     expect(h.toast).toHaveBeenCalledWith(VARIANT_TEXT.parentGone);
     expect(h.onRegenerate).not.toHaveBeenCalled();

@@ -268,6 +268,18 @@ describe("触控板双指平移", () => {
     expect(e.defaultPrevented).toBe(true);
   });
 
+  it("子元素上不冒泡的双指滚动也在捕获阶段平移", () => {
+    mount();
+    const child = document.createElement("div");
+    canvas.append(child);
+    const e = wheel({ deltaX: 4, deltaY: 0, bubbles: false });
+    act(() => {
+      child.dispatchEvent(e);
+    });
+    expect(flowStub.setViewport).toHaveBeenCalledWith({ x: 6, y: 20, zoom: 1.5 });
+    expect(e.defaultPrevented).toBe(true);
+  });
+
   it("鼠标滚轮交给 React Flow 缩放，不平移", () => {
     mount();
     const e = wheel({ deltaY: 100 });
@@ -297,6 +309,17 @@ describe("触控板双指平移", () => {
       child.dispatchEvent(wheel());
     });
     expect(flowStub.setViewport).toHaveBeenCalledTimes(1);
+  });
+
+  it("卸载后移除捕获阶段的滚轮监听", async () => {
+    mount();
+    await act(async () => root.unmount());
+    const e = wheel({ deltaX: 4, deltaY: 0 });
+    act(() => {
+      canvas.dispatchEvent(e);
+    });
+    expect(flowStub.setViewport).not.toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(false);
   });
 
   it("wrapper 还不存在时不挂监听，也不崩", () => {

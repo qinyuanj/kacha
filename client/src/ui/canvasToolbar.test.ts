@@ -124,6 +124,16 @@ describe("CanvasToolbar", () => {
     expect(button(TIDY_TEXT.enter)).toBeTruthy();
   });
 
+  it("可用列表只有当前模型：不补不可用占位项", async () => {
+    const current = SHELVED.find((m) => m.model_id === PREFERRED_TASK_MODEL)!;
+    await show(blankWith({ availableModels: [current] }));
+    expect(modelSelect().value).toBe(PREFERRED_TASK_MODEL);
+    expect(options()).toHaveLength(1);
+    expect(options()[0].value).toBe(PREFERRED_TASK_MODEL);
+    expect(options()[0].disabled).toBe(false);
+    expect(options()[0].textContent).not.toBe(FLASH_UNAVAILABLE_TEXT);
+  });
+
   it("默认模型不在可用列表：补一个置灰占位项，值仍是 Flash", async () => {
     await show(blankWith({ availableModels: [] }));
     expect(modelSelect().value).toBe(PREFERRED_TASK_MODEL);

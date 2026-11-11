@@ -76,6 +76,19 @@ describe("区域徽标与悬浮信息", () => {
       ],
     });
   });
+
+  it("系统图片线仍按一个区域显示徽标，同时保持不可删不可选且没有悬浮信息", () => {
+    const e = edge(["ref1", "out"], ["t1", "image:0"], {
+      system: true,
+      region: { rects: [[0.1, 0.1, 0.2, 0.2]], render: "highlight_overlay" },
+    });
+    const [out] = canvasEdges(input([e]));
+    expect(out.label).toBe(REGION_TEXT.edgeLabel(1));
+    expect(out.data).toEqual({ hover: [] });
+    expect(out.deletable).toBe(false);
+    expect(out.selectable).toBe(false);
+    expect(out.className).toBe("edge-system");
+  });
 });
 
 describe("选中、谱系高亮与去强调", () => {
