@@ -44,7 +44,3 @@ dist/
 
 # e2e 截图与 Playwright 输出（以仓库根为 cwd 运行时产生）
 test-results/
-# BEGIN UML-VIEWER
-.uml-viewer/
-uml-viewer-log.txt
-# END UML-VIEWER

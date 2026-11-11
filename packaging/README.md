@@ -186,13 +186,12 @@ git config core.hooksPath .githooks
 
 符号链接逃逸测试在无权创建符号链接时打印原因并跳过，其余断言照常运行。无权的原因可能有两种：当前账户既没开开发者模式，也不是管理员；或者测试程序以 Low 完整性级别运行。
 
-Windows 启动程序时，进程的完整性级别不会高于 exe 文件自身的标签；文件的标签从所在目录继承。仓库若放在带 Low 完整性标签的目录下（例如某些沙箱工具会这样标记 Desktop），编译出的测试程序和服务端都会以 Low 运行。这时它们不能写 `%TEMP%`（报错误 5，测试建临时目录失败、压测启动时报「数据根不可写」），也不能创建符号链接；`cargo build` 编译 ring 时 cl.exe 报 `D8050: 无法执行 c1.dll` 也是这个原因。新 clone 或新建 worktree 的目录同样继承标签，先跑 `python packaging\verify.py --preflight`，它只做这项预检。可以用 `icacls <目录>` 查看目录的标签。处理方法是把构建输出目录设为 Medium，其中已有的文件会随之继承（`client\target` 与 `.uml-viewer` 属于质量门禁，要在建 venv 前设好）：
+Windows 启动程序时，进程的完整性级别不会高于 exe 文件自身的标签；文件的标签从所在目录继承。仓库若放在带 Low 完整性标签的目录下（例如某些沙箱工具会这样标记 Desktop），编译出的测试程序和服务端都会以 Low 运行。这时它们不能写 `%TEMP%`（报错误 5，测试建临时目录失败、压测启动时报「数据根不可写」），也不能创建符号链接；`cargo build` 编译 ring 时 cl.exe 报 `D8050: 无法执行 c1.dll` 也是这个原因。新 clone 或新建 worktree 的目录同样继承标签，先跑 `python packaging\verify.py --preflight`，它只做这项预检。可以用 `icacls <目录>` 查看目录的标签。处理方法是把构建输出目录设为 Medium，其中已有的文件会随之继承（`client\target` 是质量门禁在前端包里的覆盖率与变异 worker 目录）：
 
 ```powershell
 icacls server\target /setintegritylevel '(OI)(CI)M'
 icacls release /setintegritylevel '(OI)(CI)M'
 icacls client\target /setintegritylevel '(OI)(CI)M'
-icacls .uml-viewer /setintegritylevel '(OI)(CI)M'
 ```
 
 `cargo clean` 会删掉整个 `target` 目录，标签也随之消失，之后需要重新设置；`verify.py` 的预检会在跑测试前发现这种情况，并打印上面的命令。部署时复制到 lzxsvn 的程序按目标目录的标签运行，不受影响。
@@ -214,10 +213,13 @@ python packaging\verify.py --quality   # 全套验证加变异测试，合入集
 
 工具按包运行（`--root client`、`--root server`），覆盖率与指标快照落在包内的 `target/`、`.metrics/`，都不提交。
 
-工具安装在主 checkout 的 `.uml-viewer/`，各 worktree 共用。每个 clone 装一次；升级时改 [install_quality_tools.py](install_quality_tools.py) 的 `PINS` 后重跑。`verify.py`（含 `--preflight`）发现没装或版本不符时会提示：
+三个工具都是 dsh-uml-viewer 那个单一 `uml-viewer` 二进制的子命令（`uml-viewer crap`、`dry`、`mutate`，见 [ADR 0022](../docs/adr/0022-quality-tools-from-dsh-uml-viewer-binary.md)）。二进制按顺序找两处，两处都没有时门禁直接报错，说明怎么装或怎么指，不猜路径：
 
-```powershell
-python packaging\install_quality_tools.py
-```
+- `UML_VIEWER_BIN`：二进制的绝对路径，优先；
+- 否则用 DSH 插件：`%USERPROFILE%\.dsh\dsh-uml-viewer\current.json` 记下的版本目录里的 `uml-viewer.exe`（`dsh plugin add dsh-uml-viewer` 装）。
 
-前置条件需要自己装：Rust 1.99.1 MSVC 工具链、git、Python 3.12+、Herdr ≥ 0.9.3（uml-viewer 安装器强制检查，门禁本身用不到）。crapper 缺 `cargo-llvm-cov` 时会自动装。如果 `%USERPROFILE%\.cargo\bin\cargo-llvm-cov.exe` 带 Low 完整性标签（被 Low 进程装上时会这样），它在 `server\target` 下建不了目录，Rust 覆盖率失败，门禁报「没有 CRAP 分」；用 `icacls <该 exe> /setintegritylevel M` 改回 Medium。看架构图用 `uml.cmd ir` 生成 `examples/kacha.edn`，再用 `uml.cmd` 打开；policy 在 [examples/kacha.policy.edn](../examples/kacha.policy.edn)。
+门禁其余前置：Rust 1.99.1 MSVC 工具链、git。crapper 缺 `cargo-llvm-cov` 时会自动装；如果 `%USERPROFILE%\.cargo\bin\cargo-llvm-cov.exe` 带 Low 完整性标签（被 Low 进程装上时会这样），它在 `server\target` 下建不了目录，Rust 覆盖率失败，门禁报「没有 CRAP 分」；用 `icacls <该 exe> /setintegritylevel M` 改回 Medium。
+
+变异测试要求二进制认 `--copy`：在 Windows 上 mutator 只为每个变异体复制被运行的那个包，包外依赖要靠 `--copy` 补进副本（[#102](https://github.com/qinyuanj/kacha/issues/102)）——现在是 `../contracts`、`../docs/release`、`../server/Cargo.toml` 三条（见 `packaging/quality.py` 的 `MUTATION_COPIES`）。带 `--mutate` 时门禁先读 `uml-viewer mutate --help`，没有这个开关就明确失败并说明需要带它的构建。
+
+看架构图用 `uml-viewer ir examples/kacha.policy.edn` 生成 `examples/kacha.edn`；在 DSH 里也可以用 `uml_ir` 生成、`uml_display` 打开。policy 在 [examples/kacha.policy.edn](../examples/kacha.policy.edn)。

@@ -12,15 +12,11 @@ import shutil
 import subprocess
 import sys
 
-from install_quality_tools import install_problems
-from quality import tools_home
-
 ROOT = Path(__file__).resolve().parent.parent
 
 # 编译和复制出来的程序放在这里，文件的完整性标签从目录继承。
-# client/target 是质量工具在前端包里的覆盖率与变异 worker 目录（服务端的落在 server/target），
-# .uml-viewer 是质量工具的安装与 venv（见 packaging/quality.py）。
-BUILD_OUTPUTS = (Path("server") / "target", Path("release"), Path("client") / "target", Path(".uml-viewer"))
+# client/target 是质量工具在前端包里的覆盖率与变异 worker 目录（服务端的落在 server/target）。
+BUILD_OUTPUTS = (Path("server") / "target", Path("release"), Path("client") / "target")
 
 E2E = ["npm", "--prefix", "client", "run", "test:e2e", "--", "--workers=4"]
 
@@ -86,10 +82,7 @@ def preflight(root: Path) -> int:
 
 def main(argv: list[str]) -> int:
     """用法：verify.py [--preflight] [--e2e]；--preflight 只做预检，不跑测试（新建 worktree 或 clone 后先跑一次）。"""
-    tools = install_problems(tools_home(ROOT))
-    for problem in tools:
-        print(problem, file=sys.stderr)
-    code = preflight(ROOT) or (2 if tools else 0)
+    code = preflight(ROOT)
     if code or "--preflight" in argv:
         return code
 
