@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { expect } from "@playwright/test";
+import { IMPORT_TEXT } from "../../src/ui/boardText";
 import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
 import { unzip } from "../common/zip";
 import { DIR, FLASH, flashResult, taskFiles, TASK_ID } from "../common/layers";
@@ -35,7 +36,7 @@ test("拖进页面：图片上传为参考图；非图片给出提示", async ({
   await expect(page.locator(".react-flow__node-reference")).toHaveCount(1);
   expect(readdirSync(`${rig.userRoot(GOOD_KEY)}/导入参考图`)).toEqual([`${sha(image)}.png`]);
   await dropFile(page, { name: "说明.txt", mimeType: "text/plain", b64: Buffer.from("{}").toString("base64") }, { x: 300, y: 300 });
-  await expect(page.locator(".toast")).toContainText("只支持拖入图片文件");
+  await expect(page.locator(".toast")).toContainText(IMPORT_TEXT.imageOnly);
   await expect(page.locator(".react-flow__node-reference")).toHaveCount(1);
   expect(errors).toEqual([]);
 });

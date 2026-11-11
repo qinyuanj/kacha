@@ -1,13 +1,16 @@
 // 画板选取、编辑键与导航：左键拖框选 / Shift 加选、右键 / 中键拖平移、平移缩放、Esc 清选区、
 // 方向键微移、Ctrl+J 原地偏移复制、Alt + 拖复制。React Flow 的相关配置与这些键位收在这里，BoardCanvas 只接线。
-// 撤销 / 重做、复制粘贴的 Ctrl 键仍在 BoardCanvas（#105），两边键位不重叠。
-import { SelectionMode, useReactFlow, useStoreApi, type Node, type ReactFlowProps } from "@xyflow/react";
+// 撤销 / 重做、复制的 Ctrl 键在 canvasKeyboard / useBoardKeyboard（粘贴走页面级 paste 接管，见 canvasPaste），两边键位不重叠。
+// 判定与状态推演都在 canvasKeys / canvasFlowProps / altDrag 里（各有单测），这里只接线：挂监听、调 apply、留 ref。
+import { useReactFlow, useStoreApi, type Node } from "@xyflow/react";
 import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from "react";
 import type { Board } from "../core/board";
 import type { BoardChange, EditResult } from "../core/edit";
-import { copySelection } from "../core/iterate";
-import { applySelection, isTrackpadPan, nudgeDelta, type SelectChange } from "../core/selection";
+import { applySelection, type SelectChange } from "../core/selection";
 import { isEditableTarget } from "../shell/pageInput";
+import { altDragPending, altDragSettle, altDragStart, type AltDrag } from "./altDrag";
+import { canvasFlowProps, ZOOM_DURATION_MS } from "./canvasFlowProps";
+import { canvasKeyCommand, pointerKeepsSelection, wheelPansCanvas, type CanvasKeyCommand, type KeyContext } from "./canvasKeys";
 
 type Ids = ReadonlySet<string>;
 
@@ -29,8 +32,63 @@ interface Options {
   apply: (change: BoardChange) => EditResult | null;
 }
 
-const ZOOM_DURATION = 200;
 const NONE: { nodes: Ids; edges: Ids } = { nodes: new Set(), edges: new Set() };
+
+type Flow = ReturnType<typeof useReactFlow>;
+
+/** 视图类命令落到 React Flow 上（动画时长与快捷键共用 ZOOM_DURATION_MS）。 */
+const ZOOM_ACTIONS: Record<"fitView" | "actualSize" | "zoomIn" | "zoomOut", (flow: Flow) => void> = {
+  fitView: (flow) => void flow.fitView({ duration: ZOOM_DURATION_MS }),
+  actualSize: (flow) => void flow.zoomTo(1, { duration: ZOOM_DURATION_MS }),
+  zoomIn: (flow) => void flow.zoomIn({ duration: ZOOM_DURATION_MS }),
+  zoomOut: (flow) => void flow.zoomOut({ duration: ZOOM_DURATION_MS }),
+};
+
+/** 键位命令的落点：视图类只动视口，微移 / 原地复制写画板，Esc 只清选区。 */
+interface KeyCommandDeps {
+  flow: Flow;
+  apply: (change: BoardChange) => EditResult | null;
+  selected: readonly string[];
+  setNodes: Dispatch<SetStateAction<Ids>>;
+  setEdges: Dispatch<SetStateAction<Ids>>;
+}
+
+/**
+ * 执行一条画布键位命令。除 Esc 外都 preventDefault：缩放键不吞掉会触发 WebView 自身的缩放，
+ * 微移不吞掉会滚动页面。Esc 的默认行为交给页面级 / 菜单的处理器（它们各自 preventDefault）。
+ */
+function runKeyCommand(cmd: NonNullable<CanvasKeyCommand>, e: KeyboardEvent, deps: KeyCommandDeps): void {
+  if (cmd.kind !== "clearSelection") e.preventDefault();
+  if (cmd.kind === "nudge") {
+    deps.apply({ kind: "nudge", ids: cmd.ids, delta: cmd.delta });
+    return;
+  }
+  if (cmd.kind === "duplicate") {
+    deps.apply({ kind: "duplicate", ids: [...deps.selected], drag: null });
+    return;
+  }
+  if (cmd.kind === "clearSelection") {
+    deps.setNodes(new Set());
+    deps.setEdges(new Set());
+    return;
+  }
+  ZOOM_ACTIONS[cmd.kind](deps.flow);
+}
+
+/** .nowheel 区域（任务参数、提示词文本等）自己处理滚轮：双指平移让给它们。 */
+function insideNoWheel(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(".nowheel") !== null;
+}
+
+/** 按下处是画布空白（React Flow 的 pane）：Shift 只在空白上按下时才算 Shift 框选加选。 */
+function onPane(target: EventTarget | null): boolean {
+  return target instanceof Element && target.classList.contains("react-flow__pane");
+}
+
+/** 有变更才写画板：不复制（change = null）时连 apply 都不调。 */
+function applyChange(apply: (change: BoardChange) => EditResult | null, change: BoardChange | null): EditResult | null {
+  return change ? apply(change) : null;
+}
 
 export function useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen, apply }: Options) {
   const flow = useReactFlow();
@@ -40,8 +98,7 @@ export function useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen,
   const keep = useRef(NONE);
   const onPointerDownCapture = useCallback(
     (e: React.PointerEvent) => {
-      const onPane = e.target instanceof Element && e.target.classList.contains("react-flow__pane");
-      keep.current = e.shiftKey && onPane ? { nodes: selection.nodes.current, edges: selection.edges.current } : NONE;
+      keep.current = pointerKeepsSelection(e.shiftKey, onPane(e.target)) ? { nodes: selection.nodes.current, edges: selection.edges.current } : NONE;
     },
     [selection],
   );
@@ -52,32 +109,25 @@ export function useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen,
   const selectEdges = useCallback((changes: SelectChange[]) => selection.setEdges((s) => applySelection(s, changes, keep.current.edges)), [selection]);
 
   // Alt + 拖：开始时在原处叠一份副本，松手时与原节点对调位置（被拖走的是副本）；复制、拖动、对调合为一步。
-  const altDrag = useRef<{ pairs: [string, string][]; starts: [string, [number, number]][] } | null>(null);
+  const altDrag = useRef<AltDrag | null>(null);
   /** 拖动开始；dragId = 这次拖动的编号（归并键）。返回 Alt + 拖复制出的节点数（非 Alt 复制为 0）。 */
   const startDrag = useCallback(
     (event: { altKey: boolean }, dragged: Node[], dragId: number): number => {
-      altDrag.current = null;
-      if (!event.altKey || !dragged.length) return 0;
       const before = boardRef.current;
-      const ids = dragged.map((n) => n.id);
-      // 副本按复制顺序追加在节点末尾，与 copySelection 选出的原节点一一对应。
-      const originals = copySelection(before, ids).nodes;
-      if (!originals.length) return 0;
-      const r = apply({ kind: "duplicate", ids, drag: { id: dragId, copies: originals.length } });
-      if (!r?.step) return 0;
-      const had = new Set(before.nodes.map((n) => n.id));
-      const copies = r.board.nodes.filter((n) => !had.has(n.id)).map((n) => n.id);
-      altDrag.current = { pairs: originals.map((n, i) => [n.id, copies[i]]), starts: originals.map((n) => [n.id, n.pos]) };
-      return originals.length;
+      const start = altDragStart(event.altKey, dragged.map((n) => n.id), before, dragId);
+      const r = applyChange(apply, start.change);
+      const pending = altDragPending(before, start.originals, r);
+      altDrag.current = pending;
+      // 副本没落账（apply 被拒 / 没有撤销步）时按普通拖动处理：copies 必须是 0。
+      return pending?.pairs.length ?? 0;
     },
     [boardRef, apply],
   );
   const stopDrag = useCallback(
     (dragId: number) => {
-      const pending = altDrag.current;
+      const change = altDragSettle(altDrag.current, dragId);
       altDrag.current = null;
-      if (!pending) return;
-      apply({ kind: "settleDrag", drag: { id: dragId, copies: pending.pairs.length }, pairs: pending.pairs, starts: pending.starts });
+      applyChange(apply, change);
     },
     [apply],
   );
@@ -87,7 +137,7 @@ export function useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen,
     const el = wrapper.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      if (!isTrackpadPan(e) || (e.target instanceof Element && e.target.closest(".nowheel"))) return;
+      if (!wheelPansCanvas(e, insideNoWheel(e.target))) return;
       e.preventDefault();
       e.stopPropagation();
       const vp = flow.getViewport();
@@ -98,60 +148,18 @@ export function useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen,
   }, [wrapper, flow]);
 
   useEffect(() => {
-    const duplicateSelection = () => {
-      apply({ kind: "duplicate", ids: [...selection.nodes.current], drag: null });
-    };
+    // 可编辑焦点、弹窗开着、wrapper 已卸载这三道前置不进 canvasKeyCommand：它们与键位语义无关，
+    // 只决定这次 keydown 归不归画布管。
     const onKey = (e: KeyboardEvent) => {
       if (isEditableTarget(e.target) || dialogOpen.current || !wrapper.current?.isConnected) return;
-      const mod = e.ctrlKey || e.metaKey;
-      // 方向键微移先于 defaultPrevented 判断：页面级接管（shell/pageInput）已经把方向键吞掉，
-      // 在这里早退会让「选中时微移」跟着失效。
-      const delta = mod || e.altKey ? null : nudgeDelta(e.key, e.shiftKey);
-      const ids = [...selection.nodes.current];
-      if (delta && ids.length) {
-        e.preventDefault();
-        apply({ kind: "nudge", ids, delta });
-        return;
-      }
-      // 上下文菜单开着时它在捕获阶段吞掉 Esc（只关菜单），这里收不到。
-      if (e.defaultPrevented) return;
-      if (mod && !e.altKey && !e.shiftKey) {
-        const key = e.key.toLowerCase();
-        if (key === "0") void flow.fitView({ duration: ZOOM_DURATION });
-        else if (key === "1") void flow.zoomTo(1, { duration: ZOOM_DURATION });
-        else if (key === "=" || key === "+") void flow.zoomIn({ duration: ZOOM_DURATION });
-        else if (key === "-") void flow.zoomOut({ duration: ZOOM_DURATION });
-        else if (key === "j") duplicateSelection();
-        else return;
-        e.preventDefault();
-        return;
-      }
-      if (mod || e.altKey) return;
-      if (e.key === "Escape" && !store.getState().connection.inProgress) {
-        selection.setNodes(new Set());
-        selection.setEdges(new Set());
-      }
+      const ctx: KeyContext = { selected: [...selection.nodes.current], connectionInProgress: store.getState().connection.inProgress };
+      const cmd = canvasKeyCommand(e, ctx);
+      if (!cmd) return;
+      runKeyCommand(cmd, e, { flow, apply, selected: ctx.selected, setNodes: selection.setNodes, setEdges: selection.setEdges });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [wrapper, flow, store, selection, dialogOpen, apply]);
 
-  const flowProps: Partial<ReactFlowProps> = {
-    selectionOnDrag: true,
-    selectionMode: SelectionMode.Partial,
-    // Shift 用于加选；框选靠左键拖空白，不另设框选键（按住框选键时 React Flow 在节点上也起框，Shift + 点节点会变成框选）。
-    selectionKeyCode: null,
-    multiSelectionKeyCode: "Shift",
-    // 右键 / 中键拖平移。右键没拖动时 React Flow 在松手时才触发空白处上下文菜单，拖动过则不弹。
-    panOnDrag: [1, 2],
-    panActivationKeyCode: "Space",
-    zoomOnScroll: true,
-    zoomOnPinch: true,
-    zoomOnDoubleClick: false,
-    deleteKeyCode: ["Delete", "Backspace"],
-    // 方向键微移由本模块处理（1 / 10px）；关掉 React Flow 自带的键盘移动（5px）。
-    disableKeyboardA11y: true,
-  };
-
-  return { flowProps, selectNodes, selectEdges, startDrag, stopDrag, onPointerDownCapture, onPointerUpCapture };
+  return { flowProps: canvasFlowProps, selectNodes, selectEdges, startDrag, stopDrag, onPointerDownCapture, onPointerUpCapture };
 }

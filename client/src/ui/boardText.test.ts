@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approxSizeText, ARCHIVE_TEXT, formatBytes, PASTE_TEXT, pasteRefusalText, sizeNoticeText, slotsRefusal, usageLimitText } from "./boardText";
+import { approxSizeText, ARCHIVE_TEXT, boardSlotsFullText, DELETE_TASK_TEXT, formatBytes, IMPORT_TEXT, isSlotsFullText, PACK_IMPORT_TEXT, PASTE_TEXT, pasteRefusalText, REGION_TEXT, RELOCATE_TEXT, SAVE_TEXT, sizeNoticeText, slotsRefusal, slotsUsageText, STAGE_TEXT, TIDY_TEXT, usageLimitText, VARIANT_TEXT } from "./boardText";
 
 // 期望文案照抄票面（#89 已确认的简洁版），独立于源码，防止同义反复。
 describe("画板位文案（#89）", () => {
@@ -65,5 +65,82 @@ describe("粘贴文案（#96）", () => {
 
   it("超限提示里的上限来自那个跨层常量，不另写一份数字", () => {
     expect(PASTE_TEXT.tooLarge).toBe("图片超过 64 MB 上限，先压缩再粘贴");
+  });
+});
+
+// 画布这层拆出来的文案（原先是散在各模块里的裸字面量）：这里照票面 / 拆分前的原文手写一份。
+// 手写的理由（CODING_STANDARDS 允许的例外）：这是定义处的测试，需要一份独立于被测代码的期望值来锁住
+// 「文案一字不改」；别处的测试一律导入这些常量，不再手抄。
+describe("画布动作文案", () => {
+  it("另存为：成功一句，失败带原因", () => {
+    expect(SAVE_TEXT.started).toBe("已开始下载（结果带图层时为 zip）");
+    expect(SAVE_TEXT.failed("磁盘满了")).toBe("另存失败：磁盘满了");
+  });
+
+  it("生成变体的父任务已删除", () => {
+    expect(VARIANT_TEXT.parentGone).toBe("父任务已删除，无法生成变体");
+  });
+
+  it("框选修改区域：拒绝原因、弹窗标题、目标标注与连线徽标", () => {
+    expect(REGION_TEXT.unsupported).toBe("当前模型不支持框选修改区域");
+    expect(REGION_TEXT.previewTitle("ref1.png")).toBe("框选修改区域 · ref1.png");
+    expect(REGION_TEXT.targetLabel("Seedream 5.0 Flash", 2)).toBe("Seedream 5.0 Flash 的图2");
+    expect(REGION_TEXT.edgeLabel(3)).toBe("3 区域");
+  });
+
+  it("删除排队 / 执行中的任务节点：确认框两行文案与三个按钮", () => {
+    expect(DELETE_TASK_TEXT.title).toBe("删除任务节点");
+    expect(DELETE_TASK_TEXT.ok).toBe("取消并删除");
+    expect(DELETE_TASK_TEXT.cancel).toBe("不删除");
+    expect(DELETE_TASK_TEXT.confirm(2)).toBe("2 个任务正在排队 / 执行。先取消再删除？\n已在执行的只停止本地等待，网关侧计算可能仍在继续。");
+  });
+
+  it("重新定位：没找到可改手动选文件，读不了带原因", () => {
+    expect(RELOCATE_TEXT.missing("res1.png")).toBe("在用户数据根内没有找到 res1.png，可改为手动选择文件");
+    expect(RELOCATE_TEXT.unreadable("坏.png", "网关拒绝")).toBe("无法读取 坏.png：网关拒绝");
+  });
+
+  it("本机图片导入：只收图片，逐张失败带原因", () => {
+    expect(IMPORT_TEXT.imageOnly).toBe("只支持拖入图片文件");
+    expect(IMPORT_TEXT.failed("a.png", "网络失败")).toBe("无法导入 a.png：网络失败");
+  });
+
+  it("整理模式的确认框取消按钮也在同一处", () => {
+    expect(TIDY_TEXT.cancelLabel).toBe("取消");
+  });
+});
+
+// 整理模式与画板包导入的既有文案：票面要求 boardText 全覆盖，这里把由 App / stages 调用的条目也锁住。
+describe("整理模式与画板包导入文案", () => {
+  it("整理条的体量对比、收掉张数与移出结局", () => {
+    expect(TIDY_TEXT.compare(1536, 0)).toBe("整理前约 1.5 KiB → 现在约 0 B");
+    expect(TIDY_TEXT.prune(3)).toBe("收掉未定稿（3）");
+    expect(TIDY_TEXT.pruneConfirm(2, 2048)).toBe("将收掉 2 张，画板约减少 2.0 KiB。\n定稿与已被下游使用的结果保留；可以撤销。");
+    expect(TIDY_TEXT.pruneConfirm(2, null)).toContain("画板体量暂时算不出");
+    expect(TIDY_TEXT.movedOut("新板")).toBe("已移出为新画板「新板」，可在画板列表里打开。撤销只恢复本画板，新画板保留。");
+    expect(TIDY_TEXT.movedOutKept("新板", "被拒")).toBe("新画板「新板」已建好，但本画板没有删去这些节点：被拒");
+    expect(TIDY_TEXT.movedOutKept("新板", null)).toBe("新画板「新板」已建好，但本画板没有删去这些节点");
+    expect(TIDY_TEXT.moveOutFailed("磁盘满了")).toBe("移出失败：磁盘满了");
+  });
+
+  it("画板包导入失败的两种说明", () => {
+    expect(PACK_IMPORT_TEXT.failed("包坏了")).toBe("导入画板包失败：包坏了");
+    expect(PACK_IMPORT_TEXT.openFailed("打不开")).toBe("画板已导入，但打开失败：打不开。可从画板列表打开。");
+  });
+});
+
+// 既有条目里此前没人调用的三条（阶段成员数、画板位满的识别、画板位用量）：补上，票面要求本文件全覆盖。
+describe("阶段与画板位的存量文案", () => {
+  it("阶段收起时写成员数", () => {
+    expect(STAGE_TEXT.count(2)).toBe("2 个节点");
+  });
+
+  it("按统一文案的开头认出「画板位满」：其它报错不算", () => {
+    expect(isSlotsFullText(boardSlotsFullText({ used: 9, total: 10 }))).toBe(true);
+    expect(isSlotsFullText("服务端返回 HTTP 500")).toBe(false);
+  });
+
+  it("画板位用量写 used/total", () => {
+    expect(slotsUsageText({ used: 3, total: 10 })).toBe("画板位 3/10");
   });
 });

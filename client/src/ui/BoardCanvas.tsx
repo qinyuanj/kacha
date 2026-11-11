@@ -1,83 +1,76 @@
 // 单个画板的画布：React Flow 视图完全由画板文件模型派生；选中、测量尺寸只在本地，不落盘。
+// 这里是接线层：状态、判定、渲染数据与浮层都在 canvas* / useCanvas* 模块里（各有单测），
+// 本文件只把它们的产物交给 React Flow 与各浮层，自己不做判定。
 import {
   Background,
   Controls,
   MiniMap,
-  NodeToolbar,
-  Position,
   ReactFlow,
   useConnection,
   useReactFlow,
-  type ConnectionState,
-  type Edge,
-  type EdgeChange,
-  type Node,
-  type NodeChange,
-  type OnConnectEnd,
-  type Viewport,
-} from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { stagesOf, type Board, type BoardEdge } from "../core/board";
-import { findModel, type CapabilityTable, type InputImageRule } from "../core/capabilities";
-import type { TaskStatus } from "../core/run";
-import { nodeCopyDetail, nodeStatus, nodeSummary, summaryTone, type NodeRunState } from "../core/runner";
-import { availableModels, defaultTaskModel, type Discovery } from "../core/settings";
-import {
-  canConnect,
-  firstRegionOfEdge,
-  hasDownstreamRecords,
-  imageEdges,
-  imagePortIndex,
-  imagePortSlots,
-  inputRuleModels,
-  nodeImages,
-  taskPorts,
-  workflowOf,
   type Connection,
-} from "../core/graph";
-import { menuItems, selectionForMenu, actionBarItems, type BoardAction, type MenuFacts, type MenuTarget } from "../core/contextMenu";
-import { createPortal } from "react-dom";
-import { expandedTasks, forgetOnSelectionChange, toggleExpanded, type ExpandOverrides } from "../core/expand";
-import { cardDropConnection, dragCreateItems } from "../core/dragCreate";
-import { BoardToolbar } from "./BoardToolbar";
-import { ARCHIVE_TEXT, FLASH_UNAVAILABLE_TEXT, PASTE_TEXT, pasteRefusalText } from "./boardText";
-import { isReadOnlyAction, readOnlyMenu } from "../core/archive";
-import { edgeHoverInfo, type HoverInfo } from "../core/hoverInfo";
-import { connectablePorts, dragKind, edgeClassName, nodeClassName, promptPortKind, type DragFrom, type DragState } from "../core/ports";
-import { continueEditingChange, type BoardChange, type EdgeRef, type EditResult, type ImportedImage } from "../core/edit";
-import { copySelection, lineage, LOCKED_HINT, PASTE_OFFSET, producerOf, type Clip } from "../core/iterate";
-import { dispatchPaste, MAX_PASTE_BYTES, nodeMarker, pasteDisplayNames } from "../core/pageInput";
-import { renderedImageSize } from "../core/nodeSize";
-import { basename, dirname, joinPath, resolveFromRoot, toRootRelative } from "../core/paths";
-import { coordinateRegionAvailable, effectiveRegionRender } from "../core/region";
-import { findReferenceFile, findResultFile, IMAGE_EXTENSIONS } from "../core/relocate";
-import type { SnapshotImage } from "../core/submission";
-import { taskView } from "../core/taskView";
-import { relocateFs } from "../shell/adapters";
-import { copyTextToClipboard } from "../shell/clipboard";
-import { browser, ipc, transfer } from "../shell/ipc";
-import { logEvent } from "../shell/log";
-import { blocksFileDrag } from "../core/pageInput";
-import { isEditableTarget } from "../shell/pageInput";
+  type Edge,
+  type Node,
+} from "@xyflow/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Board } from "../core/board";
+import type { CapabilityTable } from "../core/capabilities";
+import type { BoardAction, MenuFacts } from "../core/contextMenu";
+import type { BoardChange, EditResult, ImportedImage } from "../core/edit";
+import { toggleExpanded } from "../core/expand";
+import { lineage } from "../core/iterate";
+import { connectablePorts, type DragFrom, type DragState } from "../core/ports";
+import type { NodeRunState } from "../core/runner";
+import type { Discovery } from "../core/settings";
+import { transfer } from "../shell/ipc";
 import { saveCopyAs } from "../shell/saveFile";
-import { ActionBar } from "./ActionBar";
-import { ContextMenu } from "./ContextMenu";
-import { BoardContext, primeImageInfo, useImageInfos, useMissingImages, useStoredStatuses, type BoardActions } from "./context";
+import { canvasBoardActions } from "./canvasBoardActions";
+import { canvasCommands, canvasDragCreate, type CanvasCommandDeps } from "./canvasCommands";
+import { addImportedReferences, importImages, importPastedImages } from "./canvasDrop";
+import { canvasEdges } from "./canvasEdges";
+import { flowBookkeeping, flowHandlers } from "./canvasFlowHandlers";
+import {
+  blockNativeContextMenu,
+  connectionAllowed,
+  connectionLineStyle,
+  deleteKeyCodeFor,
+  dragFromOf,
+  edgeHoverMove,
+  hoveredActionBarOf,
+  menuEntriesOf,
+  menuViewFor,
+  openEdgeMenu,
+  openNodeContextMenu,
+  openPaneContextMenu,
+  openSelectionContextMenu,
+  pickActionBarAction,
+  pickMenuAction,
+  pickReferencesOf,
+  saveNodeAsOf,
+} from "./canvasFrame";
+import { canvasNodes } from "./canvasNodes";
+import { CanvasActionBar, CanvasOverlays } from "./canvasOverlays";
+import { useCanvasPaste } from "./canvasPaste";
+import { canvasClassName, posOf } from "./canvasPoint";
+import { CanvasToolbar } from "./canvasToolbar";
+import { BoardContext, primeImageInfo, type BoardActions } from "./context";
 import { edgeTypes } from "./edges";
 import { HoverProvider, useHoverLayer } from "./hoverInfo";
-import { ModelOptions, nodeTypes, type ImagePortInfo, type ImageSlotInfo, type PromptReferenceGuideTask } from "./nodes";
+import { nodeTypes } from "./nodes";
 import { DragContext } from "./ports";
-import { PreviewDialog, type PreviewRequest, type RegionTarget } from "./PreviewDialog";
-import { useCanvasInteraction, type Selection } from "./useCanvasInteraction";
-import { errorText } from "../core/errors";
-import { collapsedMembers, finalToggle, nextStageName, prunableResults, stageBoxes } from "../core/stages";
-import { nodesBytes, pruneSavings } from "../core/tidy";
-import { StageLayer, type StageTidy } from "./stages";
-import { TidyBar, useTidyMeasure } from "./tidy";
-import { TIDY_TEXT } from "./boardText";
+import { StageLayer } from "./stages";
+import { actionBarView, useActionBarHover } from "./useCanvasHover";
+import { useBoardKeyboard } from "./useBoardKeyboard";
+import { useCanvasApply } from "./useCanvasApply";
+import { useCanvasData } from "./useCanvasData";
+import { imageImportPorts, useCanvasDrop } from "./useCanvasDrop";
+import { useCanvasInteraction } from "./useCanvasInteraction";
+import { useCanvasOverlaysState } from "./useCanvasOverlaysState";
+import { useCanvasSelectionState } from "./useCanvasSelectionState";
+import { useCanvasStageView } from "./useCanvasStageView";
 
-/** 复制粘贴的剪贴板：应用内共享，可粘到另一个画板（只带节点之间的连线，不跨画板连线）。 */
-let clipboard: Clip | null = null;
+/** 拖线建节点的落点处理：松手处建哪类节点（见 core/dragCreate）。 */
+type DragCreate = (action: BoardAction, from: DragFrom, at: { x: number; y: number }) => void;
 
 interface Props {
   board: Board;
@@ -123,16 +116,9 @@ interface Props {
   onMoveOutStage: (stageId: string) => Promise<string>;
   /** 归档画板（#90）：能看、放大、下载结果，不能编辑（不拖动、不连线、不删、菜单只剩查看与下载）。 */
   readOnly?: boolean;
-  /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框）：粘贴放行给它们，不落到背后的画板。 */
+  /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框）：粘贴放行给它们，不落到背后的画板（#96）。 */
   modalOpen?: boolean;
 }
-
-const edgeId = (e: BoardEdge) => `${e.from.join(":")}->${e.to.join(":")}`;
-const dims = (w: number | undefined, h: number | undefined) => ({ width: w, height: h });
-/** 拖入 / 粘贴进来的图片：MIME 或扩展名认得（粘贴还要求真读到内容，资源管理器复制的文件只有名字，见 paste 接管）。 */
-const isImageFile = (f: File) => f.type.startsWith("image/") || IMAGE_EXTENSIONS.some((ext) => f.name.toLowerCase().endsWith(`.${ext}`));
-/** 尚未回传测量结果的节点：非空即可让 React Flow 保留内部已测得的 handleBounds（见 nodes 的 measured）。 */
-const NOT_MEASURED: { width?: number; height?: number } = {};
 
 export function BoardCanvas({
   board,
@@ -165,885 +151,152 @@ export function BoardCanvas({
 }: Props) {
   const flow = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
-  /** 粘贴落点：鼠标最后在画布内的窗口坐标；离开画布后仍记着最后那次，从没进过画布则为 null（取视口中心）。 */
-  const lastPointer = useRef<{ x: number; y: number } | null>(null);
-  const [selectedNodes, setSelectedNodes] = useState<ReadonlySet<string>>(new Set());
-  const [selectedEdges, setSelectedEdges] = useState<ReadonlySet<string>>(new Set());
   const [measured, setMeasured] = useState<Record<string, { width?: number; height?: number }>>({});
-
+  const boardRef = useRef(board);
+  boardRef.current = board;
   const lockedRef = useRef(locked);
   lockedRef.current = locked;
 
-  /** 应用一次画板变更：有话要说（被拒原因、删除后的撤销提示）就提示，有建议选中就照选。 */
-  const apply = useCallback(
-    (change: BoardChange) => {
-      // 归档画板：视口移动不提示，其余编辑说明只读。画板会话层同样拒绝写入。
-      if (readOnly) {
-        if (change.kind !== "viewport") toast(ARCHIVE_TEXT.readOnly);
-        return null;
-      }
-      const r = applyChange(change);
-      if (r?.hint) toast(r.hint);
-      if (r?.selection) {
-        setSelectedNodes(new Set(r.selection));
-        setSelectedEdges(new Set());
-      }
-      return r;
-    },
-    [applyChange, toast, readOnly],
-  );
-
-  const boardRef = useRef(board);
-  boardRef.current = board;
-  const selectedRef = useRef(selectedNodes);
-  selectedRef.current = selectedNodes;
-  // 撤销 / 重做会让选中的节点消失：丢掉不在画板上的选中，免得「运行选中」与复制落在空集上。
-  useEffect(() => {
-    const present = new Set(board.nodes.map((n) => n.id));
-    setSelectedNodes((s) => ([...s].every((id) => present.has(id)) ? s : new Set([...s].filter((id) => present.has(id)))));
-  }, [board.nodes]);
-  const selectedEdgesRef = useRef(selectedEdges);
-  selectedEdgesRef.current = selectedEdges;
-  /**
-   * 「以此继续编辑」新建提示词的一次性聚焦请求。两处显式清除，不依赖 xyflow 是否把还没测量的视口外节点强制渲染一次：
-   * 节点显示出来并取走请求时（takePromptFocus）；视口开始移动时（onMoveStart）——视口外的节点要等视口移动才会挂载，
-   * 请求活不到那时，日后进入视口不会抢焦点。ref 是权威值（同步清除）；state 只用来把 autoFocus 传给节点触发重渲染。
-   */
-  const [focusPrompt, setFocusPrompt] = useState<string | null>(null);
-  const focusPromptRef = useRef<string | null>(null);
-  const requestPromptFocus = useCallback((promptId: string | null) => {
-    focusPromptRef.current = promptId;
-    setFocusPrompt(promptId);
-  }, []);
-  /** 提示词等待三选一的未提交文本：存在画布而不是节点里，节点离开视口卸载再挂载时仍在。 */
-  const [promptDrafts, setPromptDrafts] = useState<ReadonlyMap<string, string>>(new Map());
-  // 撤销 / 删除后不在画板上的提示词不留未提交文本。
-  useEffect(() => {
-    const present = new Set(board.nodes.map((n) => n.id));
-    setPromptDrafts((d) => ([...d.keys()].every((id) => present.has(id)) ? d : new Map([...d].filter(([id]) => present.has(id)))));
-  }, [board.nodes]);
-  const missing = useMissingImages(board, userRoot);
-  // 悬浮动作条：光标在图片节点或动作条上时显示；从节点移到动作条之间留一点宽限。
-  const [hovered, setHovered] = useState<string | null>(null);
-  const unhoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** id = 显示该节点的动作条；null = 只取消待收起。 */
-  const showActionBar = (id: string | null) => {
-    if (unhoverTimer.current !== null) clearTimeout(unhoverTimer.current);
-    unhoverTimer.current = null;
-    if (id !== null) setHovered(id);
-  };
-  /** 节点卸载（离开视口、被删）时立即收起它的动作条：收不到 mouseleave，回到视口时不能无故弹出。 */
-  const unhoverNode = (id: string) => setHovered((h) => (h === id ? null : h));
-  const [preview, setPreview] = useState<{ req: PreviewRequest; nonce: number } | null>(null);
-  // 上下文菜单：client = 弹出处的窗口坐标，at = 同一点的画布坐标（新建节点落点）。
-  const [menu, setMenu] = useState<{ target: MenuTarget; client: { x: number; y: number }; at: { x: number; y: number } } | null>(null);
-  const closeMenu = useCallback(() => setMenu(null), []);
-  const onMoveStart = useCallback(() => {
-    closeMenu();
-    requestPromptFocus(null);
-  }, [closeMenu, requestPromptFocus]);
-  // 预览弹窗、上下文菜单开着时快捷键不作用于背后的画板（菜单自己处理 Esc）。
-  const dialogOpen = preview !== null || menu !== null;
-  const dialogOpenRef = useRef(false);
-  dialogOpenRef.current = dialogOpen;
-  /** 任务节点参数的原地展开：默认跟随选中，手动切换只在本地、不存盘（见 core/expand）。 */
-  const [expandOverrides, setExpandOverrides] = useState<ExpandOverrides>(new Map());
-  const expanded = useMemo(() => expandedTasks(expandOverrides, selectedNodes, board.nodes.map((n) => n.id)), [expandOverrides, selectedNodes, board.nodes]);
-  const expandSelection = useRef(selectedNodes);
-  useEffect(() => {
-    const before = expandSelection.current;
-    expandSelection.current = selectedNodes;
-    setExpandOverrides((o) => forgetOnSelectionChange(o, before, selectedNodes));
-  }, [selectedNodes]);
+  const canvasSelection = useCanvasSelectionState(board);
+  const {
+    selectedNodes, selectedEdges, setSelectedNodes, setSelectedEdges, selectedRef, selection,
+    expanded, setExpandOverrides, focusPrompt, focusPromptRef, requestPromptFocus, promptDrafts, setPromptDrafts,
+  } = canvasSelection;
+  const apply = useCanvasApply({ applyChange, toast, readOnly, setSelectedNodes, setSelectedEdges });
+  const canvasData = useCanvasData({ board, boardFile, userRoot, table, locked, handled, runNodes, applyChange });
+  const overlays = useCanvasOverlaysState({ flow, selectedRef, setSelectedNodes, clearPromptFocus: () => requestPromptFocus(null) });
+  const actionBar = useActionBarHover();
+  const stageView = useCanvasStageView({ board, boardRef, readOnly, measured, tidying, apply, toast, onMoveOutStage });
+  const nav = useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen: overlays.dialogOpenRef, apply });
   const hover = useHoverLayer();
-  // 撤销 / 删除后不在画板上的任务不留展开状态。
-  useEffect(() => {
-    const present = new Set(board.nodes.map((n) => n.id));
-    setExpandOverrides((o) => ([...o.keys()].every((id) => present.has(id)) ? o : new Map([...o].filter(([id]) => present.has(id)))));
-  }, [board.nodes]);
-  const selection = useMemo<Selection>(() => ({ nodes: selectedRef, edges: selectedEdgesRef, setNodes: setSelectedNodes, setEdges: setSelectedEdges }), []);
-  const nav = useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen: dialogOpenRef, apply });
-  const previewNonce = useRef(0);
-
-  // 每个图片源节点的透明通道（导入 / 定位时已有缓存，未读的批量补读）；未知不进入 Map。
-  const images = useMemo(() => board.nodes.flatMap((n) => nodeImages(n, userRoot)), [board.nodes, userRoot]);
-  const imageAbsPaths = useMemo(() => images.map((img) => img.absPath), [images]);
-  const imageInfos = useImageInfos(imageAbsPaths);
-  // 图片宽高晚于画板变更读到（刚打开画板、刚重新定位）、任务结束解除锁定、能力表或用户数据根变化时补算自动宽高比：
-  // 系统变更，不构成撤销步；环境经 apply 取最新，这里的依赖只决定何时补算。
-  useEffect(() => {
-    applyChange({ kind: "syncAutoRatios" });
-  }, [board, imageInfos, locked, table, userRoot, applyChange]);
-  const alphaByNode = useMemo(() => {
-    const map = new Map<string, boolean>();
-    for (const img of images) {
-      const info = imageInfos.get(img.absPath);
-      if (info) map.set(img.key, info.has_alpha);
-    }
-    return map;
-  }, [images, imageInfos]);
-
-  /** 参考图 / 结果节点扇出到「支持区域指示」任务的图片线，作为弹窗里可编辑区域的目标。 */
-  const regionTargetsOf = useCallback(
-    (nodeId: string): RegionTarget[] =>
-      boardRef.current.edges.flatMap((e) => {
-        if (e.from[0] !== nodeId || imagePortIndex(e.to[1]) === null) return [];
-        const task = boardRef.current.nodes.find((n) => n.id === e.to[0]);
-        if (task?.type !== "task") return [];
-        const model = findModel(table, task.model);
-        const render = effectiveRegionRender(model);
-        if (!render) return [];
-        const port = imagePortIndex(e.to[1])! + 1;
-        const modelName = model?.display_name ?? task.model;
-        const firstRegion = firstRegionOfEdge(boardRef.current, task.id, e.to[1]);
-        return [{ label: `${modelName} 的图${port}`, edgeRef: { from: e.from, to: e.to }, rects: e.region?.rects ?? [], render: e.region?.render ?? render, coordinateKind: e.region?.coordinate_kind, coordinateAvailable: coordinateRegionAvailable(model), firstRegion }];
-      }),
-    [table],
-  );
-
-  const openNodePreview = useCallback(
-    (nodeId: string) => {
-      const node = boardRef.current.nodes.find((n) => n.id === nodeId);
-      if (node?.type !== "reference" && node?.type !== "result") return;
-      const abs = resolveFromRoot(userRoot, node.path);
-      const recordLayers = node.type === "result" ? (node.record.layers ?? []) : [];
-      // 本次编辑用到的区域轮廓：产出任务的提交快照（任务已删 / 快照无区域 = 没有可回显的轮廓）。
-      const producer = node.type === "result" ? producerOf(boardRef.current, node.id) : undefined;
-      const snapshotImages = (producer?.last_submitted as { images?: SnapshotImage[] } | null)?.images ?? [];
-      const regionOutlines = snapshotImages.flatMap((img) => img.region?.rects ?? []);
-      const req: PreviewRequest = {
-        title: node.type === "reference" ? node.display_name : node.file,
-        absPath: abs,
-        layers: recordLayers.map((record) => ({ record, absPath: joinPath(dirname(abs), record.file) })),
-        resultId: node.type === "result" ? node.id : undefined,
-        regionTargets: regionTargetsOf(nodeId),
-        regionOutlines,
-      };
-      setPreview({ req, nonce: ++previewNonce.current });
-    },
-    [userRoot, regionTargetsOf],
-  );
-
-  const stored = useStoredStatuses(board, boardFile, userRoot, handled);
-  // 本次运行经手过的以运行器为准；否则按任务目录推导（重开后），两者同形、同样按节点聚合。
-  const runStateOf = useCallback((taskId: string): NodeRunState | undefined => runNodes.get(taskId) ?? stored.get(taskId), [runNodes, stored]);
-  const statusOf = useCallback((taskId: string): TaskStatus | null => nodeStatus(runStateOf(taskId)), [runStateOf]);
-
-  // perform 依赖每次渲染重建的新建类函数，经 ref 取最新一版，actions 保持稳定。
-  const performRef = useRef<BoardActions["perform"]>(() => {});
-  const actions = useMemo<BoardActions>(
-    () => ({
-      perform: (action, target, at) => performRef.current(action, target, at),
-      table,
-      userRoot,
-      availableModels: availableModels(table, discovery),
-      concurrency,
-      apply: (change) => void apply(change),
-      continueEditing: (nodeId, sourceLayer = null, at) => {
-        const r = apply(continueEditingChange(selectedRef.current, nodeId, sourceLayer, at ? posOf(at) : null));
-        const promptId = r?.step && r.selection?.[0];
-        if (!promptId) return;
-        // 选中的是新提示词；新建的任务节点（新提示词接的那个）也默认展开。
-        const taskId = r.board.edges.find((e) => e.from[0] === promptId && e.to[1] === "positive")?.to[0];
-        if (taskId) setExpandOverrides((o) => new Map([...o, [taskId, true]]));
-        requestPromptFocus(promptId);
-      },
-      setPromptDraft: (promptId, text) =>
-        setPromptDrafts((d) => {
-          if (text === null ? !d.has(promptId) : d.get(promptId) === text) return d;
-          const next = new Map(d);
-          if (text === null) next.delete(promptId);
-          else next.set(promptId, text);
-          return next;
-        }),
-      takePromptFocus: (promptId) => {
-        if (focusPromptRef.current !== promptId) return false;
-        requestPromptFocus(null);
-        return true;
-      },
-      nodeUnmounted: (nodeId) => unhoverNode(nodeId),
-      addAsReference: (resultId, sourceLayer = null) => void apply({ kind: "addAsReference", resultId, selected: [...selectedRef.current], sourceLayer }),
-      previewNode: openNodePreview,
-      editRegion: (taskId, ref) => {
-        if (lockedRef.current.has(taskId)) return toast(LOCKED_HINT);
-        const target = regionTargetsOf(ref.from[0]).find((t) => t.edgeRef.to[0] === taskId && t.edgeRef.to[1] === ref.to[1]);
-        if (!target) return toast("当前模型不支持框选修改区域");
-        const src = boardRef.current.nodes.find((n) => n.id === ref.from[0]);
-        if (src?.type !== "reference" && src?.type !== "result") return;
-        const name = src.type === "reference" ? src.display_name : src.file;
-        const req: PreviewRequest = {
-          title: `框选修改区域 · ${name}`,
-          absPath: resolveFromRoot(userRoot, src.path),
-          edit: target,
-          regionTargets: [target],
-        };
-        setPreview({ req, nonce: ++previewNonce.current });
-      },
-      generateVariant: (resultId) => {
-        const b = boardRef.current;
-        const result = b.nodes.find((n) => n.id === resultId);
-        const parent = producerOf(b, resultId);
-        if (result?.type !== "result" || !parent) return toast("父任务已删除，无法生成变体");
-        onRegenerate(parent.id, result.task_id);
-      },
-      relocate: (nodeId, mode) =>
-        void (async () => {
-          const node = boardRef.current.nodes.find((n) => n.id === nodeId);
-          if (node?.type !== "reference" && node?.type !== "result") return;
-          const logRelocate = (outcome: { ok: true } | { ok: false; reason: "not_found" | "unreadable" }) =>
-            logEvent("relocate", { board_file: boardFile, node_id: nodeId, node_type: node.type, mode, ...outcome });
-          if (mode === "pick") {
-            // 本机文件先上传到当前用户数据根，再更新节点引用。
-            const files = await transfer.pickLocalImages(false);
-            if (!files.length) return;
-            const file = files[0];
-            try {
-              const uploaded = await transfer.uploadReference(file);
-              const abs = resolveFromRoot(userRoot, uploaded.path);
-              const info = await ipc.inspectImage(abs);
-              primeImageInfo(abs, info);
-              apply({ kind: "relocate", nodeId, path: uploaded.path, sha256: info.sha256, fileName: file.name, picked: true });
-              logRelocate({ ok: true });
-            } catch (e) {
-              logRelocate({ ok: false, reason: "unreadable" });
-              toast(`无法读取 ${file.name}：${errorText(e)}`);
-            }
-            return;
-          }
-          const abs =
-            node.type === "result"
-              ? await findResultFile(relocateFs, userRoot, { task_id: node.task_id, file: node.file })
-              : await findReferenceFile(relocateFs, userRoot, { sha256: node.sha256, display_name: node.display_name });
-          if (!abs) {
-            logRelocate({ ok: false, reason: "not_found" });
-            return toast(`在用户数据根内没有找到 ${node.type === "result" ? node.file : node.display_name}，可改为手动选择文件`);
-          }
-          try {
-            const info = await ipc.inspectImage(abs);
-            primeImageInfo(abs, info);
-            apply({ kind: "relocate", nodeId, path: toRootRelative(userRoot, abs), sha256: info.sha256, fileName: basename(abs), picked: false });
-            logRelocate({ ok: true });
-          } catch (e) {
-            logRelocate({ ok: false, reason: "unreadable" });
-            toast(`无法读取 ${basename(abs)}：${errorText(e)}`);
-          }
-        })(),
-    }),
-    [table, boardFile, userRoot, discovery, concurrency, apply, onRegenerate, toast, openNodePreview, regionTargetsOf],
-  );
-
-  // 阶段：收起的成员不显示；框按成员的显示尺寸画。刚建的阶段标题直接进入改名。
-  const hidden = useMemo(() => collapsedMembers(board, readOnly), [board, readOnly]);
-  const boxes = useMemo(() => stageBoxes(board, (id) => measured[id], readOnly), [board, measured, readOnly]);
-  const [editingStage, setEditingStage] = useState<string | null>(null);
-  // 整理模式：各阶段体量、「收掉未定稿」的张数与预计减少的体量（按任务目录，服务端量）。
-  const tidyMeasure = useTidyMeasure(board, tidying);
-  const [movingOut, setMovingOut] = useState(false);
-  const stageTidy = useMemo((): StageTidy | null => {
-    if (!tidying) return null;
-    const { measure } = tidyMeasure;
-    const stageNodes = (id: string) => stagesOf(board).find((s) => s.id === id)?.nodes ?? [];
-    return {
-      bytes: (id) => (measure ? nodesBytes(measure, stageNodes(id)) : null),
-      prunable: (id) => prunableResults(board, [id]).length,
-      onPrune: (id) => {
-        const ids = prunableResults(boardRef.current, [id]);
-        if (!ids.length) return toast(TIDY_TEXT.nothingToPrune);
-        const saved = measure ? pruneSavings(measure, ids) : null;
-        void browser.ask(TIDY_TEXT.pruneConfirm(ids.length, saved), { title: TIDY_TEXT.pruneTitle, okLabel: TIDY_TEXT.pruneOk, cancelLabel: "取消" }).then((ok) => {
-          if (ok) apply({ kind: "pruneUnfinal", stageIds: [id] });
-        });
-      },
-      movingOut,
-      onMoveOut: (id) => {
-        setMovingOut(true);
-        void onMoveOutStage(id)
-          .then(toast, (e) => toast(TIDY_TEXT.moveOutFailed(errorText(e))))
-          .finally(() => setMovingOut(false));
-      },
-    };
-  }, [tidying, tidyMeasure, board, toast, apply, movingOut, onMoveOutStage]);
-  const newStage = (ids: string[]) => {
-    const before = new Set(stagesOf(boardRef.current).map((s) => s.id));
-    const r = apply({ kind: "newStage", name: nextStageName(boardRef.current), nodes: ids });
-    const created = r?.step && stagesOf(r.board).find((s) => !before.has(s.id));
-    if (created) setEditingStage(created.id);
-  };
 
   // 选中任一节点即高亮其谱系。
   const highlighted = useMemo(() => lineage(board, [...selectedNodes]), [board, selectedNodes]);
-
   const menuFacts = useCallback(
     (selected: ReadonlySet<string>): MenuFacts => ({ board, table, selected, locked, expanded, undoLabel, redoLabel }),
     [board, table, locked, expanded, undoLabel, redoLabel],
   );
-
-  const toConnection = (c: { source: string; sourceHandle?: string | null; target: string; targetHandle?: string | null }): Connection => ({
-    source: c.source,
-    sourceHandle: c.sourceHandle ?? "",
-    target: c.target,
-    targetHandle: c.targetHandle ?? "",
-  });
-
-  const isValidConnection = useCallback(
-    (c: Edge | { source: string; sourceHandle?: string | null; target: string; targetHandle?: string | null }) =>
-      !locked.has(c.target) && canConnect(board, table, toConnection(c)).ok,
-    [board, table, locked],
-  );
-
   // 拖线态：起点来自 useConnection，合法落点与 isValidConnection 同一判定。
+  const isValidConnection = useCallback((c: Edge | Connection) => connectionAllowed(board, table, locked, c), [board, table, locked]);
   const dragFrom = useConnection(dragFromOf);
   const drag = useMemo<DragState | null>(() => (dragFrom ? { from: dragFrom, ports: connectablePorts(board, dragFrom, isValidConnection) } : null), [dragFrom, board, isValidConnection]);
-
-  const nodes = useMemo<Node[]>(() => {
-    const labelOf = (id: string): ImagePortInfo => {
-      const src = board.nodes.find((n) => n.id === id);
-      if (src?.type === "reference") return { label: src.display_name, absPath: resolveFromRoot(userRoot, src.path) };
-      if (src?.type === "result") return { label: src.file, absPath: resolveFromRoot(userRoot, src.path) };
-      return { label: "?", absPath: null };
-    };
-    const promptGuidesOf = (promptId: string): PromptReferenceGuideTask[] => {
-      const groups: PromptReferenceGuideTask[] = [];
-      const taskIds = new Set<string>();
-      for (const promptEdge of board.edges) {
-        if (promptEdge.from[0] !== promptId || (promptEdge.to[1] !== "positive" && promptEdge.to[1] !== "negative")) continue;
-        const task = board.nodes.find((n) => n.id === promptEdge.to[0]);
-        if (task?.type !== "task" || taskIds.has(task.id)) continue;
-        taskIds.add(task.id);
-        const modelName = findModel(table, task.model)?.display_name ?? task.model;
-        const images = imageEdges(board, task.id).flatMap((imageEdge, index) => {
-          const info = labelOf(imageEdge.from[0]);
-          return info.absPath ? [{ port: index + 1, label: info.label, absPath: info.absPath, rects: imageEdge.region?.rects ?? [] }] : [];
-        });
-        if (images.length > 0) groups.push({ taskId: task.id, label: modelName, images });
-      }
-      return groups;
-    };
-    const fallbackModel = defaultTaskModel(table, discovery, board.last_model);
-    const rulesOf = (id: string): InputImageRule[] => inputRuleModels(board, id, fallbackModel).flatMap((m) => findModel(table, m)?.input_image_rule ?? []);
-    return board.nodes.flatMap((n): Node[] => {
-      if (n.type === "unknown") return [];
-      const base = {
-        id: n.id,
-        position: { x: n.pos[0], y: n.pos[1] },
-        selected: selectedNodes.has(n.id),
-        // 收起的阶段里的节点：React Flow 连同其连线一起隐藏。
-        hidden: hidden.has(n.id),
-        // 承重逻辑（xyflow#3816）：开启 onlyRenderVisibleElements 后，React Flow 只强制渲染还没有 handleBounds（未测量）的节点。
-        // 重建的节点不带 measured 时，adoptUserNodes 会清空已测得的 handleBounds，节点（含视口外的）被重新强制渲染、连线闪断；
-        // 还没回传到这里的（刚测完、setMeasured 未提交）也要带一个空对象，否则这次重建清空后不会再测，节点永远留在 DOM 中。
-        measured: measured[n.id] ?? NOT_MEASURED,
-        className: nodeClassName(n.id, { lineage: highlighted.nodes.has(n.id), selecting: selectedNodes.size > 0, drag }) || undefined,
-      };
-      // 图片节点按存的宽度与图片比例显示（不回写 size）；缺图时高度随占位内容。
-      const imageBox = (path: string) => {
-        const [width, height] = renderedImageSize(n.size, imageInfos.get(resolveFromRoot(userRoot, path)));
-        return missing.has(n.id) ? { width } : { width, height };
-      };
-      switch (n.type) {
-        case "prompt":
-          return [{ ...base, type: "prompt", data: { node: n, recorded: hasDownstreamRecords(board, n.id), autoFocus: focusPrompt === n.id, draft: promptDrafts.get(n.id) ?? null, portKind: promptPortKind(board, n.id), guides: promptGuidesOf(n.id) } }];
-        case "result":
-          // 结果回灌到任务上才按下游模型规则提示；没接任务不提示。
-          return [{ ...base, ...imageBox(n.path), type: "result", data: { node: n, rules: rulesOf(n.id), missing: missing.has(n.id) } }];
-        case "reference":
-          // 没接任务时按新建任务会用的默认模型提示。
-          return [{ ...base, ...imageBox(n.path), type: "reference", data: { node: n, rules: rulesOf(n.id), missing: missing.has(n.id) } }];
-        case "task": {
-          // 节点用缓存事实；运行前 App 逐张重新探测，同样的事实得出同样的原因。
-          const view = taskView(board, table, n.id, { missingNodes: missing, alphaByNode, discovery, concurrency })!;
-          const render = effectiveRegionRender(findModel(table, n.model));
-          const runState = runStateOf(n.id);
-          const summary = nodeSummary(runState);
-          const slots: ImageSlotInfo[] = imagePortSlots(board, table, n.id).map((s) => {
-            const src = labelOf(s.edge.from[0]);
-            return s.kind === "overlay"
-              ? { kind: "overlay" as const, port: s.port, userPort: s.userPort, label: src.label, absPath: null, handleIndex: null, rects: [], firstRegion: 0, edgeRef: null }
-              : {
-                  kind: "image" as const,
-                  port: s.port,
-                  userPort: s.userPort,
-                  label: src.label,
-                  absPath: src.absPath,
-                  handleIndex: imagePortIndex(s.edge.to[1]),
-                  rects: s.edge.region?.rects ?? [],
-                  firstRegion: firstRegionOfEdge(board, n.id, s.edge.to[1]),
-                  edgeRef: { from: s.edge.from, to: s.edge.to },
-                };
-          });
-          return [
-            {
-              ...base,
-              type: "task",
-              data: {
-                node: n,
-                ports: taskPorts(board, table, n.id),
-                view,
-                locked: locked.has(n.id),
-                workflow: workflowOf(board, n.id),
-                slots,
-                regionRender: render,
-                hasPositive: board.edges.some((e) => e.to[0] === n.id && e.to[1] === "positive"),
-                status: statusOf(n.id),
-                summary: summary && runState ? { text: summary, detail: nodeCopyDetail(runState), tone: summaryTone(runState.counts) } : null,
-                expanded: expanded.has(n.id),
-                run: menuItems({ kind: "node", nodeId: n.id }, menuFacts(new Set([n.id]))).find((i) => i.action === "run")!,
-              },
-            },
-          ];
-        }
-      }
-    });
-  }, [board, table, userRoot, selectedNodes, measured, statusOf, runStateOf, locked, discovery, concurrency, highlighted, missing, focusPrompt, promptDrafts, alphaByNode, imageInfos, expanded, menuFacts, drag, hidden]);
-
   const dragging = drag !== null;
-  const edges = useMemo<Edge[]>(
+
+  const nodes = useMemo<Node[]>(
     () =>
-      board.edges.map((e) => ({
-        id: edgeId(e),
-        source: e.from[0],
-        sourceHandle: e.from[1],
-        target: e.to[0],
-        targetHandle: e.to[1],
-        selected: selectedEdges.has(edgeId(e)),
-        label: (e.region?.rects.length ?? 0) > 0 ? `${e.region!.rects.length} 区域` : undefined,
-        deletable: !e.system,
-        selectable: !e.system,
-        className: edgeClassName(e, { lineage: highlighted.edges.has(e), selecting: selectedNodes.size > 0, dragging: dragging }),
-        data: { hover: edgeHoverInfo(e) },
-      })),
+      canvasNodes({
+        board, table, userRoot, selected: selectedNodes, measured, hidden: stageView.hidden,
+        lineageNodes: highlighted.nodes, drag, focusPrompt, promptDrafts, missing: canvasData.missing,
+        imageInfos: canvasData.imageInfos, alphaByNode: canvasData.alphaByNode, discovery, concurrency, expanded, locked,
+        runStateOf: canvasData.runStateOf, statusOf: canvasData.statusOf, menuFacts,
+      }),
+    [board, table, userRoot, selectedNodes, measured, stageView.hidden, highlighted, drag, focusPrompt, promptDrafts, canvasData.missing, canvasData.imageInfos, canvasData.alphaByNode, discovery, concurrency, expanded, locked, canvasData.runStateOf, canvasData.statusOf, menuFacts],
+  );
+  const edges = useMemo<Edge[]>(
+    () => canvasEdges({ board, selectedEdges, selectedNodes, lineageEdges: highlighted.edges, dragging }),
     [board.edges, selectedEdges, selectedNodes, highlighted, dragging],
   );
 
-  /** 进行中的拖动编号（0 = 没在拖）；每次拖动一个新合并键。 */
-  const activeDrag = useRef(0);
-  const dragCounter = useRef(0);
-  /** Alt + 拖复制出的节点数（复制与移动合为一步）；0 = 普通拖动。 */
-  const dragCopies = useRef(0);
-  const onDragStart = useCallback(
-    (event: MouseEvent | TouchEvent | React.MouseEvent, ...rest: [Node, Node[]] | [Node[]]) => {
-      activeDrag.current = ++dragCounter.current;
-      dragCopies.current = nav.startDrag(event, rest.length === 2 ? rest[1] : rest[0], activeDrag.current);
-    },
-    [nav.startDrag],
-  );
-  const onDragStop = useCallback(() => {
-    nav.stopDrag(activeDrag.current);
-    activeDrag.current = 0;
-    dragCopies.current = 0;
-  }, [nav.stopDrag]);
+  // 跨渲染记账：拖动 / 缩放的合并编号与「先取消再删除」的确认（画布事件之间记住，见 canvasFlowHandlers）。
+  const bookkeeping = useRef(flowBookkeeping());
+  const performDragCreateRef = useRef<DragCreate>(() => {});
+  const handlers = flowHandlers({
+    board, table, locked, apply, check, toast, onCancelTask, nav, setMeasured, setSelectedNodes,
+    performDragCreate: performDragCreateRef,
+    screenToFlowPosition: (client) => flow.screenToFlowPosition(client),
+    setCenter: (x, y, options) => flow.setCenter(x, y, options),
+    getZoom: () => flow.getZoom(),
+    wrapper, measured, refs: bookkeeping.current,
+  });
 
-  /** 进行中的拖角缩放编号（0 = 没在缩放）；一次缩放从按下到松开合为一步。 */
-  const activeResize = useRef(0);
-  const resizeCounter = useRef(0);
-
-  const onNodesChange = useCallback(
-    (changes: NodeChange[]) => {
-      const moves = new Map<string, { x: number; y: number }>();
-      const resized = new Map<string, { width: number; height: number }>();
-      nav.selectNodes(changes.flatMap((c) => (c.type === "select" ? [c] : [])));
-      for (const c of changes) {
-        if (c.type === "position" && c.position) moves.set(c.id, c.position);
-        else if (c.type === "dimensions" && c.dimensions) {
-          const { width, height } = c.dimensions;
-          // 测量结果存下来、在重建节点时回传（见 nodes 的 measured）：只渲染可见节点的前提。
-          setMeasured((m) => (m[c.id]?.width === width && m[c.id]?.height === height ? m : { ...m, [c.id]: dims(width, height) }));
-          // NodeResizer 拖动中带 resizing: true，松开时报一次 resizing: false；普通测量不带 resizing。
-          if (c.resizing) resized.set(c.id, c.dimensions);
-          else if (c.resizing === false) activeResize.current = 0;
-        }
-        // remove 由 onBeforeDelete / onDelete 统一处理。
-      }
-      if (resized.size) {
-        // 从左 / 上角缩放时同一批带位置变更：与尺寸一起写，不另算移动。
-        activeResize.current ||= ++resizeCounter.current;
-        const at = new Map([...resized.keys()].flatMap((id) => (moves.has(id) ? [[id, moves.get(id)!] as const] : [])));
-        resized.forEach((_, id) => moves.delete(id));
-        const boxes = [...resized].map(([id, { width, height }]) => {
-          const p = at.get(id);
-          return { id, width, height, pos: p ? ([p.x, p.y] as [number, number]) : null };
-        });
-        apply({ kind: "resize", resize: activeResize.current, boxes });
-      }
-      if (moves.size) {
-        // 一次拖动（含多选、Alt + 拖复制）从开始到 onNodeDragStop 合为一步；方向键微移不经这里（useCanvasInteraction）。
-        const drag = activeDrag.current ? { id: activeDrag.current, copies: dragCopies.current } : null;
-        apply({ kind: "move", moves: [...moves].map(([id, p]) => [id, [p.x, p.y]]), drag });
-      }
-    },
-    [apply, nav.selectNodes],
+  // perform 依赖每次渲染重建的新建类函数，经 ref 取最新一版，actions 保持稳定。
+  const performRef = useRef<BoardActions["perform"]>(() => {});
+  const actions = useMemo(
+    () =>
+      canvasBoardActions({
+        table, boardFile, userRoot, discovery, concurrency, apply, boardRef, selectedRef, lockedRef,
+        focusPromptRef, requestPromptFocus, setPromptDrafts, setExpandOverrides,
+        unhoverNode: actionBar.unhoverNode, showPreview: overlays.openPreview, primeImageInfo, onRegenerate, toast, performRef,
+      }),
+    [table, boardFile, userRoot, discovery, concurrency, apply, requestPromptFocus, setPromptDrafts, setExpandOverrides, actionBar.unhoverNode, overlays.openPreview, onRegenerate, toast],
   );
 
-  const onEdgesChange = useCallback(
-    (changes: EdgeChange[]) => nav.selectEdges(changes.flatMap((c) => (c.type === "select" ? [c] : []))),
-    [nav.selectEdges],
-  );
-
-  const onConnect = useCallback(
-    (c: { source: string; sourceHandle: string | null; target: string; targetHandle: string | null }) => {
-      apply({ kind: "connect", connection: toConnection(c) });
-    },
-    [apply],
-  );
-
-  const performDragCreateRef = useRef<(action: BoardAction, from: DragFrom, at: { x: number; y: number }) => void>(() => {});
-
-  // 松手：落在端口上却不合法时告诉原因；落在任务卡片上（非端口）接到下一个空端口；落在空白处建节点（拖线建节点）。
-  const onConnectEnd = useCallback<OnConnectEnd>(
-    (event, state) => {
-      if (state.isValid || !state.fromHandle) return;
-      if (state.toHandle && state.fromNode && state.toNode) {
-        const [src, dst] = state.fromHandle.type === "source" ? [state.fromHandle, state.toHandle] : [state.toHandle, state.fromHandle];
-        if (locked.has(dst.nodeId)) return toast(LOCKED_HINT);
-        const verdict = canConnect(board, table, { source: src.nodeId, sourceHandle: src.id ?? "", target: dst.nodeId, targetHandle: dst.id ?? "" });
-        if (!verdict.ok) toast(verdict.reason);
-        return;
-      }
-      const from: DragFrom = { nodeId: state.fromHandle.nodeId, handleId: state.fromHandle.id ?? "", type: state.fromHandle.type };
-      const client = clientPointOf(event);
-      const hit = dropTargetAt(client);
-      if (hit?.kind === "node") {
-        const r = cardDropConnection(board, table, from, hit.nodeId, locked);
-        if (!r) return;
-        if (!r.ok) return toast(r.reason);
-        return onConnect(r.connection);
-      }
-      if (hit?.kind !== "pane") return;
-      const [item] = dragCreateItems(board, from);
-      if (item) performDragCreateRef.current(item.action, from, flow.screenToFlowPosition(client));
-    },
-    [board, table, toast, locked, flow, onConnect],
-  );
-
-  /** onBeforeDelete 确认过「先取消再删除」的任务，交给紧随的 onDelete 豁免锁定。 */
-  const cancelledRef = useRef<string[]>([]);
-  /** React Flow 报来的连线 → 画板连线端点（系统连线也在内，画板编辑只断开用户连线）。 */
-  const edgeRefsOf = useCallback((es: Edge[]): EdgeRef[] => {
-    const ids = new Set(es.map((e) => e.id));
-    return boardRef.current.edges.filter((e) => ids.has(edgeId(e))).map((e) => ({ from: e.from, to: e.to }));
-  }, []);
-
-  const onBeforeDelete = useCallback(
-    async ({ nodes: ns, edges: es }: { nodes: Node[]; edges: Edge[] }) => {
-      const ids = ns.map((n) => n.id);
-      // 删除不设禁删、一般不弹确认（靠撤销兜底），只有删排队 / 执行中的任务节点要确认先取消。
-      const running = ids.filter((id) => locked.has(id));
-      // 先按「连同取消」试算：动到其余锁定任务（断开其输入连线，级联断开的也算）就整体拒绝，不必再问。
-      const trial = check({ kind: "delete", nodes: ids, edges: edgeRefsOf(es), cancelled: running });
-      if (trial && !trial.step && trial.hint) {
-        toast(trial.hint);
-        return false;
-      }
-      if (running.length) {
-        const confirmed = await browser.ask(`${running.length} 个任务正在排队 / 执行。先取消再删除？\n已在执行的只停止本地等待，网关侧计算可能仍在继续。`, {
-          title: "删除任务节点",
-          kind: "warning",
-          okLabel: "取消并删除",
-          cancelLabel: "不删除",
-        });
-        if (!confirmed) return false;
-        running.forEach(onCancelTask);
-      }
-      cancelledRef.current = running;
-      return { nodes: ns, edges: es };
-    },
-    [check, edgeRefsOf, toast, locked, onCancelTask],
-  );
-
-  const onDelete = useCallback(
-    ({ nodes: ns, edges: es }: { nodes: Node[]; edges: Edge[] }) => {
-      const cancelled = cancelledRef.current;
-      cancelledRef.current = [];
-      apply({ kind: "delete", nodes: ns.map((n) => n.id), edges: edgeRefsOf(es), cancelled });
-    },
-    [apply, edgeRefsOf],
-  );
-
-  const onMoveEnd = useCallback(
-    (_: unknown, vp: Viewport) => {
-      apply({ kind: "viewport", viewport: { x: vp.x, y: vp.y, zoom: vp.zoom } });
-    },
-    [apply],
-  );
-
-  useEffect(() => {
-    if (!focus) return;
-    const node = board.nodes.find((n) => n.id === focus.nodeId);
-    if (!node || node.type === "unknown") return;
-    const size = measured[node.id];
-    void flow.setCenter(node.pos[0] + (size?.width ?? node.size[0]) / 2, node.pos[1] + (size?.height ?? node.size[1]) / 2, { zoom: Math.max(flow.getZoom(), 0.8), duration: 300 });
-    setSelectedNodes(new Set([node.id]));
-    // 只在跳转请求变化时执行。
-  }, [focus]);
-
-  const centerPosition = useCallback(() => {
-    const rect = wrapper.current?.getBoundingClientRect();
-    if (!rect) return { x: 0, y: 0 };
-    return flow.screenToFlowPosition({ x: rect.left + rect.width / 2 - 120, y: rect.top + rect.height / 2 - 80 });
-  }, [flow]);
-
-  // 新建类动作：at = 节点左上角的画布坐标（上下文菜单的点击处）；缺省 = 视口中央（工具栏）。
-  const addPrompt = (at = centerPosition()) => void apply({ kind: "newPrompt", at: posOf(at) });
-
-  /** promptId = 从该提示词拖出（拖线建节点），接新任务的正向端口，与建节点同一步。 */
-  const addTask = (at = centerPosition(), promptId?: string) => void apply({ kind: "newTask", at: posOf(at), promptId: promptId ?? null });
-
-  /**
-   * 本机图片先上传到用户数据根的 导入参考图/，再按服务端给出的路径导入。
-   * displayNames = 整批上传后统一合成显示名（粘贴的图按「粘贴-…」命名，扩展名取落盘路径而不是剪贴板里的类型声明）；缺省用本机文件名。
-   */
+  // 本机图片先上传到用户数据根的 导入参考图/，再按服务端给出的路径导入（端口见 canvasDrop 的 ImagePorts）。
   const importLocalFiles = useCallback(
-    async (files: File[], at: { x: number; y: number }, attach?: { taskId: string; place: "asIs" | "left" }, displayNames?: (uploadedPaths: string[]) => string[]) => {
-      const done: { file: File; path: string; sha256: string; width: number; height: number }[] = [];
-      for (const file of files) {
-        try {
-          const uploaded = await transfer.uploadReference(file);
-          const abs = resolveFromRoot(userRoot, uploaded.path);
-          const info = await ipc.inspectImage(abs);
-          primeImageInfo(abs, info);
-          done.push({ file, path: uploaded.path, sha256: info.sha256, width: info.width, height: info.height });
-        } catch (e) {
-          toast(`无法导入 ${file.name}：${errorText(e)}`);
-        }
-      }
-      if (!done.length) return;
-      const names = displayNames?.(done.map((u) => u.path));
-      const images: ImportedImage[] = done.map((u, i) => ({ path: u.path, sha256: u.sha256, display_name: names?.[i] ?? u.file.name, width: u.width, height: u.height }));
-      apply({ kind: "addReferences", images, at: [at.x, at.y], attach: attach ?? null });
+    async (files: File[], at: { x: number; y: number }, attach?: { taskId: string; place: "asIs" | "left" }) => {
+      const images: ImportedImage[] = await importImages(files, { userRoot, toast, ports: imageImportPorts });
+      addImportedReferences(images, at, attach, apply);
     },
     [apply, userRoot, toast],
   );
-
-  /** 粘贴进来的图片：超限的当场提示、不发请求；其余与「添加参考图」同一条链路，一次粘多张仍算一个撤销步。 */
-  const importPastedImages = useCallback(
-    async (files: File[], at: { x: number; y: number }) => {
-      const usable = files.filter((file) => {
-        if (file.size <= MAX_PASTE_BYTES) return true;
-        toast(PASTE_TEXT.tooLarge);
-        return false;
-      });
-      if (!usable.length) return;
-      const now = new Date();
-      // 显示名整批一起算：同一分钟的第二张自动 -2，与画板里已有的名字也不撞。
-      const taken = new Set(boardRef.current.nodes.flatMap((n) => (n.type === "reference" ? [n.display_name] : [])));
-      await importLocalFiles(usable, at, undefined, (paths) => pasteDisplayNames(now, paths, taken));
-    },
-    [importLocalFiles, toast],
+  // 粘贴进来的图片（#96）：超限的当场提示、不发请求；显示名按「粘贴-年月日-时分」算，一次粘多张仍算一个撤销步。
+  const pasteImages = useCallback(
+    (files: File[], at: { x: number; y: number }) =>
+      void importPastedImages(files, at, { board: boardRef.current, userRoot, toast, ports: imageImportPorts, apply }),
+    [apply, userRoot, toast],
   );
 
+  const center = handlers.centerPosition;
+  // 新建类动作：at = 节点左上角的画布坐标（上下文菜单的点击处）；缺省 = 视口中央（工具栏）。
+  const addPrompt = useCallback((at = center()) => void apply({ kind: "newPrompt", at: posOf(at) }), [apply, center]);
+  /** promptId = 从该提示词拖出（拖线建节点），接新任务的正向端口，与建节点同一步。 */
+  const addTask = useCallback((at = center(), promptId?: string) => void apply({ kind: "newTask", at: posOf(at), promptId: promptId ?? null }), [apply, center]);
   /** attachTo = 任务节点 id：只选一张，接到该任务的空图片端口（从图片端口反向拖线建节点）。 */
-  const pickReferences = async (at?: { x: number; y: number }, attachTo?: string) => {
-    const files = await transfer.pickLocalImages(!attachTo);
-    if (!files.length) return;
-    await importLocalFiles(files, at ?? centerPosition(), attachTo ? { taskId: attachTo, place: "asIs" } : undefined);
+  const pickReferences = useCallback(
+    (at?: { x: number; y: number }, attachTo?: string) =>
+      void pickReferencesOf({ pickLocalImages: (multiple) => transfer.pickLocalImages(multiple), importFiles: importLocalFiles, centerPosition: center }, at, attachTo),
+    [center, importLocalFiles],
+  );
+  const saveNodeAs = useCallback((nodeId: string) => saveNodeAsOf(nodeId, { board: boardRef.current, userRoot, toast, save: saveCopyAs }), [userRoot, toast]);
+
+  const commandDeps: CanvasCommandDeps = {
+    apply, flow, boardRef, selectedRef, lockedRef, actions, onUndo, onRedo, onRun, onCancelTask, onRegenerate, onViewSendText,
+    addPrompt, addTask, pickReferences, saveNodeAs, newStage: stageView.newStage, toast, readOnly,
+    toggleExpand: (nodeId) => setExpandOverrides((o) => toggleExpanded(o, selectedRef.current, nodeId)),
   };
+  const commands = canvasCommands(commandDeps);
+  performRef.current = (action, target, at) => commands[action]?.(target, at);
+  performDragCreateRef.current = canvasDragCreate(commandDeps);
 
-  // 通用复制：Ctrl/⌘+C 复制选中节点。粘贴不在键盘事件里做——键盘事件拦截默认行为会把 paste 事件一起压掉（见下面的页面级 paste 接管）。
-  // Ctrl/⌘+Z 撤销，Ctrl/⌘+Shift+Z、Ctrl/⌘+Y 重做；文本框聚焦时交给原生撤销。
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || isEditableTarget(e.target) || !wrapper.current?.isConnected) return;
-      const key = e.key.toLowerCase();
-      if (key === "z" || (key === "y" && !e.shiftKey)) {
-        e.preventDefault();
-        if (dialogOpenRef.current) return;
-        if (key === "z" && !e.shiftKey) onUndo();
-        else onRedo();
-        return;
-      }
-      if (e.shiftKey || dialogOpenRef.current) return;
-      if (key === "c" && selectedRef.current.size) {
-        const clip = copySelection(boardRef.current, [...selectedRef.current]);
-        clipboard = clip;
-        if (clip.nodes.length) {
-          // 先拦掉浏览器的原生复制：默认复制动作在本处理器之后才写剪贴板，会把刚写好的标记冲掉。
-          e.preventDefault();
-          // 同时向系统剪贴板写一段节点标记（#96）：Ctrl+V 靠它分辨该粘节点还是该落一张剪贴板里的图。
-          // 写不进去时粘贴节点会失效，所以给一句话和一条可用的替代动作，而不是静默失败。
-          void copyTextToClipboard(nodeMarker(clip.nodes.length)).catch(() => toast(PASTE_TEXT.markerUnwritable));
-        }
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [apply, onUndo, onRedo]);
+  useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen: overlays.dialogOpenRef, onUndo, onRedo, toast });
+  useCanvasDrop({ wrapper, boardRef, screenToFlowPosition: (client) => flow.screenToFlowPosition(client), apply, toast, userRoot, readOnly });
+  // 页面级粘贴接管（#96）：分派在 core/pageInput（纯逻辑），这里只把落点、模态与图片导入接上。
+  useCanvasPaste({
+    wrapper,
+    dialogOpen: overlays.dialogOpenRef,
+    modalOpen,
+    readOnly,
+    screenToFlowPosition: (client) => flow.screenToFlowPosition(client),
+    centerPosition: center,
+    apply,
+    toast,
+    importPastedImages: pasteImages,
+  });
+  useEffect(() => handlers.focusNode(focus), [focus]);
 
-  const openMenu = (e: ReactMouseEvent | MouseEvent, target: MenuTarget) => {
-    e.preventDefault();
-    if (target.kind === "node") {
-      const next = selectionForMenu(selectedRef.current, target.nodeId);
-      if (next !== selectedRef.current) setSelectedNodes(new Set(next));
-    }
-    const client = { x: e.clientX, y: e.clientY };
-    setMenu({ target, client, at: flow.screenToFlowPosition(client) });
-  };
+  const menuView = menuViewFor(readOnly);
+  const barView = actionBarView({ hovered: actionBar.hovered, nodes: board.nodes, menuOpen: overlays.menu !== null, menuView, facts: menuFacts(selectedNodes) });
 
-  /** 按 action 执行：与工具栏 / 节点按钮同一套逻辑（删除、断开走 React Flow 删除流程，规则同 Delete 键）。 */
-  const saveNodeAs = async (nodeId: string) => {
-    const node = boardRef.current.nodes.find((n) => n.id === nodeId);
-    if (node?.type !== "reference" && node?.type !== "result") return;
-    try {
-      await saveCopyAs(resolveFromRoot(userRoot, node.path));
-      toast("已开始下载（结果带图层时为 zip）");
-    } catch (e) {
-      toast(`另存失败：${errorText(e)}`);
-    }
-  };
-
-  const performAction = (action: BoardAction, target: MenuTarget, at?: { x: number; y: number }) => {
-    if (readOnly && !isReadOnlyAction(action)) return toast(ARCHIVE_TEXT.readOnly);
-    if (action === "newPrompt") addPrompt(at);
-    else if (action === "newTask") addTask(at);
-    else if (action === "addReferences") void pickReferences(at);
-    else if (action === "undo") onUndo();
-    else if (action === "redo") onRedo();
-    else if (target.kind === "node") {
-      const id = target.nodeId;
-      if (action === "preview") actions.previewNode(id);
-      else if (action === "saveAs") void saveNodeAs(id);
-      else if (action === "continueEditing") actions.continueEditing(id);
-      else if (action === "addAsReference") actions.addAsReference(id);
-      else if (action === "generateVariant") actions.generateVariant(id);
-      else if (action === "run") onRun([id]);
-      else if (action === "cancel") onCancelTask(id);
-      else if (action === "regenerate") onRegenerate(id);
-      else if (action === "viewSendText") onViewSendText(id);
-      else if (action === "toggleSettings") setExpandOverrides((o) => toggleExpanded(o, selectedRef.current, id));
-      else if (action === "delete") void flow.deleteElements({ nodes: [...selectionForMenu(selectedRef.current, id)].map((n) => ({ id: n })) });
-      else if (action === "newStage") newStage([...selectionForMenu(selectedRef.current, id)]);
-      else if (action === "removeFromStage") apply({ kind: "removeFromStage", nodes: [...selectionForMenu(selectedRef.current, id)] });
-      else if (action === "toggleFinal") {
-        const toggle = finalToggle(boardRef.current, selectionForMenu(selectedRef.current, id));
-        if (toggle) apply({ kind: "setFinal", ...toggle });
-      }
-    } else if (target.kind === "edge") {
-      const { edge } = target;
-      if (action === "disconnect") void flow.deleteElements({ edges: [{ id: edgeId(edge) }] });
-      else if (action === "editRegion") actions.editRegion(edge.to[0], { from: edge.from, to: edge.to });
-    }
-  };
-
-  performRef.current = performAction;
-
-  /** 拖线建节点：at = 松手处的画布坐标，新节点左上角落在这里。 */
-  performDragCreateRef.current = (action, from, at) => {
-    if (action === "continueEditing") actions.continueEditing(from.nodeId, null, at);
-    else if (action === "newTask") addTask(at, from.nodeId);
-    else if (action === "addReferences") {
-      if (lockedRef.current.has(from.nodeId)) return toast(LOCKED_HINT);
-      void pickReferences(at, from.nodeId);
-    }
-  };
-
-  const menuView = readOnly ? readOnlyMenu : (items: ReturnType<typeof menuItems>) => items;
-  const menuEntries = menu ? menuView(menuItems(menu.target, menuFacts(menu.target.kind === "node" ? selectionForMenu(selectedNodes, menu.target.nodeId) : selectedNodes))) : [];
-
-  const hideActionBarSoon = () => {
-    showActionBar(null);
-    unhoverTimer.current = setTimeout(() => setHovered(null), 150);
-  };
-  useEffect(() => () => showActionBar(null), []);
-  const hoveredPresent = hovered !== null && board.nodes.some((n) => n.id === hovered);
-  const barItems = hoveredPresent && !menu ? menuView(actionBarItems(hovered, menuFacts(selectedNodes))) : [];
-  // 悬浮在多选内的节点上：选区上方只出一条。
-  const barNodes = hoveredPresent ? (selectedNodes.size > 1 && selectedNodes.has(hovered) ? [...selectedNodes] : [hovered]) : [];
-
-  // HTML5 拖放。只接受图片（画板 .ugcboard.json 由画板包导入承担，不解析本机路径）。
-  useEffect(() => {
-    const el = wrapper.current;
-    if (!el) return;
-    const over = (e: DragEvent) => {
-      if (blocksFileDrag(e.dataTransfer)) e.preventDefault();
-    };
-    const drop = (e: DragEvent) => {
-      if (!e.dataTransfer?.files.length) return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (readOnly) return toast(ARCHIVE_TEXT.readOnly);
-      const at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      const files = [...e.dataTransfer.files].filter(isImageFile);
-      if (!files.length) return toast("只支持拖入图片文件");
-      const hit = dropTargetAt({ x: e.clientX, y: e.clientY });
-      const card = hit?.kind === "node" ? boardRef.current.nodes.find((n) => n.id === hit.nodeId) : undefined;
-      void importLocalFiles(files, at, card?.type === "task" ? { taskId: card.id, place: "left" } : undefined);
-    };
-    el.addEventListener("dragover", over);
-    // 捕获阶段接 drop：先于页面级接管（shell/pageInput）跑并阻断冒泡，拖进画板的图片仍落成参考图节点。
-    el.addEventListener("drop", drop, true);
-    return () => {
-      el.removeEventListener("dragover", over);
-      el.removeEventListener("drop", drop, true);
-    };
-  }, [flow, importLocalFiles, toast, readOnly]);
-
-  // 粘贴落点跟着鼠标：记下最后在画布内的位置（没有则取视口中心，见 lastPointer）。
-  useEffect(() => {
-    const el = wrapper.current;
-    if (!el) return;
-    const move = (e: PointerEvent) => {
-      lastPointer.current = { x: e.clientX, y: e.clientY };
-    };
-    el.addEventListener("pointermove", move);
-    return () => el.removeEventListener("pointermove", move);
-  }, [wrapper]);
-
-  // 页面级粘贴接管（#96）：分派是纯逻辑（core/pageInput），这里只做事件读数、上传与画板写入。
-  // 监听挂在 window 上而不是画布元素：焦点在工具栏、标签栏时粘贴也落图；没有画板时这个组件不挂载，登录页粘贴不受影响。
-  useEffect(() => {
-    const onPaste = (event: ClipboardEvent) => {
-      const data = event.clipboardData;
-      const files = [...(data?.files ?? [])];
-      // 读得到内容才算图片；资源管理器里复制的文件只有名字没有内容，归到 opaqueFiles 里提示改为拖入。
-      const images = files.filter((f) => isImageFile(f) && f.size > 0);
-      const at = posOf(lastPointer.current ? flow.screenToFlowPosition(lastPointer.current) : centerPosition());
-      const action = dispatchPaste(
-        { text: data?.getData("text/plain") || null, images: images.length, opaqueFiles: files.length - images.length },
-        // board 恒为 true：这个组件只在有画板时挂载，「没有画板就放行」由登录页 / 空工作台不挂载兑现。
-        { board: true, readOnly, modal: modalOpen || dialogOpenRef.current, textFocus: isEditableTarget(document.activeElement), hasNodeClip: (clipboard?.nodes.length ?? 0) > 0, at },
-      );
-      if (action.kind === "pass") return;
-      // 落到这一步都是本应用要处理 / 要拒绝的粘贴：吞掉，免得浏览器再往别处塞一份。
-      event.preventDefault();
-      if (action.kind === "refuse") return toast(pasteRefusalText(action.reason));
-      if (action.kind === "importImages") return void importPastedImages(images, { x: action.at[0], y: action.at[1] });
-      const clip = clipboard; // 含节点标记却内存剪贴板为空的分支已被分派拦下，这里必有内容。
-      if (!clip?.nodes.length) return;
-      apply({ kind: "paste", clip });
-      // 连续粘贴逐次错开。
-      clipboard = { ...clip, nodes: clip.nodes.map((n) => ({ ...n, pos: [n.pos[0] + PASTE_OFFSET, n.pos[1] + PASTE_OFFSET] as [number, number] })) };
-    };
-    window.addEventListener("paste", onPaste);
-    return () => window.removeEventListener("paste", onPaste);
-  }, [flow, centerPosition, readOnly, modalOpen, toast, apply, importPastedImages]);
-
-  const toolbarModel = defaultTaskModel(table, discovery, board.last_model);
   return (
     <BoardContext.Provider value={actions}>
       <HoverProvider value={hover.controller}>
-      <DragContext.Provider value={drag}>
-      {/* 画布内屏蔽 WebView 默认右键菜单；可编辑元素保留原生菜单（复制粘贴）。 */}
-      <div
-        className={["canvas", drag ? "connecting" : "", tidying ? "tidying" : ""].join(" ").trim()}
-        ref={wrapper}
-        onContextMenu={(e) => !isEditableTarget(e.target) && e.preventDefault()}
-        onPointerDownCapture={nav.onPointerDownCapture}
-        onPointerUpCapture={nav.onPointerUpCapture}
-      >
-        {toolbarSlot &&
-          createPortal(
-            readOnly ? <BoardToolbar disabled /> : <BoardToolbar
-              modelSelect={
-                // 新建生成任务用的模型（board.last_model）：是偏好不是画板编辑，不进撤销。
-                <select
-                  className="toolbar-model"
-                  value={toolbarModel ?? ""}
-                  onChange={(e) => apply({ kind: "lastModel", model: e.target.value })}
-                  aria-label="新建任务模型"
-                >
-                  {!actions.availableModels.some((m) => m.model_id === toolbarModel) && <option disabled value={toolbarModel ?? ""}>{FLASH_UNAVAILABLE_TEXT}</option>}
-                  <ModelOptions table={table} available={actions.availableModels} />
-                </select>
-              }
+        <DragContext.Provider value={drag}>
+          {/* 画布内屏蔽 WebView 默认右键菜单；可编辑元素保留原生菜单（复制粘贴）。 */}
+          <div
+            className={canvasClassName(dragging, tidying)}
+            ref={wrapper}
+            onContextMenu={blockNativeContextMenu}
+            onPointerDownCapture={nav.onPointerDownCapture}
+            onPointerUpCapture={nav.onPointerUpCapture}
+          >
+            <CanvasToolbar
+              toolbarSlot={toolbarSlot}
+              readOnly={readOnly}
+              board={board}
+              table={table}
+              discovery={discovery}
+              availableModels={actions.availableModels}
+              apply={apply}
               onNewPrompt={() => addPrompt()}
               onAddReferences={() => void pickReferences()}
               onNewTask={() => addTask()}
@@ -1054,105 +307,82 @@ export function BoardCanvas({
               selectedCount={selectedNodes.size}
               onRun={() => onRun([...selectedNodes])}
               tidying={tidying}
-              onTidy={() => onTidyChange(!tidying)}
-            />,
-            toolbarSlot,
-          )}
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          proOptions={{ hideAttribution: true }}
-          // 只渲染视口内的节点与连线：DOM、布局与解码开销随视口而不随画板总量（#66）。依赖上面 measured 的回传。
-          onlyRenderVisibleElements
-          edgeTypes={edgeTypes}
-          {...nav.flowProps}
-          deleteKeyCode={dialogOpen || readOnly ? null : nav.flowProps.deleteKeyCode}
-          nodesDraggable={!readOnly}
-          nodesConnectable={!readOnly}
-          defaultViewport={board.viewport}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          isValidConnection={isValidConnection}
-          connectionLineStyle={drag ? { stroke: `var(--port-${dragKind(board, drag.from)})` } : undefined}
-          onConnect={onConnect}
-          onConnectEnd={onConnectEnd}
-          onBeforeDelete={onBeforeDelete}
-          onDelete={onDelete}
-          onMoveStart={onMoveStart}
-          onMoveEnd={onMoveEnd}
-          onPaneContextMenu={(e) => openMenu(e, { kind: "pane" })}
-          onNodeContextMenu={(e, n) => !isEditableTarget(e.target) && openMenu(e, { kind: "node", nodeId: n.id })}
-          onSelectionContextMenu={(e, ns) => ns[0] && openMenu(e, { kind: "node", nodeId: ns[0].id })}
-          onEdgeContextMenu={(e, fe) => {
-            const target = board.edges.find((be) => edgeId(be) === fe.id);
-            if (target) openMenu(e, { kind: "edge", edge: target });
-          }}
-          onNodeMouseEnter={(_, n) => (n.type === "reference" || n.type === "result" ? showActionBar(n.id) : undefined)}
-          onNodeMouseLeave={hideActionBarSoon}
-          onEdgeMouseMove={(e, fe) => {
-            if (fe.data && e.buttons === 0) hover.controller.move(`edge:${fe.id}`, fe.data.hover as HoverInfo, e.clientX, e.clientY);
-          }}
-          onEdgeMouseLeave={(_, fe) => hover.controller.leave(`edge:${fe.id}`)}
-          onNodeDragStart={onDragStart}
-          onNodeDragStop={onDragStop}
-          onSelectionDragStart={onDragStart}
-          onSelectionDragStop={onDragStop}
-          minZoom={0.1}
-        >
-          <Background />
-          <StageLayer readOnly={readOnly} boxes={boxes} selected={selectedNodes} apply={(c) => void apply(c)} editing={editingStage} onEditingDone={() => setEditingStage(null)} tidy={stageTidy} />
-          <Controls />
-          <MiniMap pannable zoomable />
-          {barItems.length > 0 && (
-            <NodeToolbar nodeId={barNodes} isVisible position={Position.Top}>
-              <ActionBar
-                items={barItems}
-                onPick={(action) => performAction(action, { kind: "node", nodeId: hovered! })}
-                onPointerEnter={() => showActionBar(hovered)}
-                onPointerLeave={hideActionBarSoon}
+              onTidyChange={onTidyChange}
+            />
+            <ReactFlow
+              {...nav.flowProps}
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              proOptions={{ hideAttribution: true }}
+              // 只渲染视口内的节点与连线：DOM、布局与解码开销随视口而不随画板总量（#66）。依赖 measured 的回传。
+              onlyRenderVisibleElements
+              deleteKeyCode={deleteKeyCodeFor(overlays.dialogOpen, readOnly)}
+              nodesDraggable={!readOnly}
+              nodesConnectable={!readOnly}
+              defaultViewport={board.viewport}
+              isValidConnection={isValidConnection}
+              connectionLineStyle={connectionLineStyle(board, drag)}
+              onNodesChange={handlers.onNodesChange}
+              onEdgesChange={handlers.onEdgesChange}
+              onConnect={handlers.onConnect}
+              onConnectEnd={handlers.onConnectEnd}
+              onBeforeDelete={handlers.onBeforeDelete}
+              onDelete={handlers.onDelete}
+              onMoveEnd={handlers.onMoveEnd}
+              onNodeDragStart={handlers.onNodeDragStart}
+              onNodeDragStop={handlers.onNodeDragStop}
+              onSelectionDragStart={handlers.onNodeDragStart}
+              onSelectionDragStop={handlers.onNodeDragStop}
+              onMoveStart={overlays.onMoveStart}
+              onPaneContextMenu={(e) => openPaneContextMenu(overlays.openMenu, e)}
+              onNodeContextMenu={(e, n) => openNodeContextMenu(overlays.openMenu, e, n.id)}
+              onSelectionContextMenu={(e, ns) => openSelectionContextMenu(overlays.openMenu, e, ns)}
+              onEdgeContextMenu={(e, fe) => openEdgeMenu(overlays.openMenu, board, e, fe.id)}
+              onNodeMouseEnter={(_, n) => hoveredActionBarOf(actionBar.showActionBar, n)}
+              onNodeMouseLeave={actionBar.hideActionBarSoon}
+              onEdgeMouseMove={(e, fe) => edgeHoverMove(e, fe, hover.controller)}
+              onEdgeMouseLeave={(_, fe) => hover.controller.leave(`edge:${fe.id}`)}
+              minZoom={0.1}
+            >
+              <Background />
+              <StageLayer
+                readOnly={readOnly}
+                boxes={stageView.boxes}
+                selected={selectedNodes}
+                apply={(c) => void apply(c)}
+                editing={stageView.editingStage}
+                onEditingDone={stageView.onEditingDone}
+                tidy={stageView.stageTidy}
               />
-            </NodeToolbar>
-          )}
-        </ReactFlow>
-        {tidying && <TidyBar {...tidyMeasure} onDone={() => onTidyChange(false)} />}
-        {menu && menuEntries.length > 0 && (
-          <ContextMenu at={menu.client} items={menuEntries} onPick={(action) => performAction(action, menu.target, menu.at)} onClose={closeMenu} />
-        )}
-        {preview && <PreviewDialog key={preview.nonce} req={preview.req} toast={toast} onClose={() => setPreview(null)} />}
-        {hover.layer}
-      </div>
-      </DragContext.Provider>
+              <Controls />
+              <MiniMap pannable zoomable />
+              <CanvasActionBar
+                present={barView.present}
+                nodes={barView.nodes}
+                items={barView.items}
+                onPick={(action) => pickActionBarAction(action, actionBar.hovered, commands)}
+                onPointerEnter={() => actionBar.showActionBar(actionBar.hovered)}
+                onPointerLeave={actionBar.hideActionBarSoon}
+              />
+            </ReactFlow>
+            <CanvasOverlays
+              menu={overlays.menu}
+              menuEntries={menuEntriesOf(overlays.menu, menuFacts, selectedNodes, menuView)}
+              onPickMenu={(action) => pickMenuAction(action, overlays.menu, commands)}
+              onCloseMenu={overlays.closeMenu}
+              preview={overlays.preview}
+              onClosePreview={overlays.closePreview}
+              toast={toast}
+              tidying={tidying}
+              tidyMeasure={stageView.tidyMeasure}
+              onTidyDone={() => onTidyChange(false)}
+              hoverLayer={hover.layer}
+            />
+          </div>
+        </DragContext.Provider>
       </HoverProvider>
     </BoardContext.Provider>
   );
-}
-
-/** useConnection 选择器：只取拖线起点，指针移动不触发重渲染（浅比较）。 */
-function dragFromOf(c: ConnectionState): DragFrom | null {
-  if (!c.inProgress) return null;
-  return { nodeId: c.fromHandle.nodeId, handleId: c.fromHandle.id ?? "", type: c.fromHandle.type };
-}
-
-/** 指针事件的窗口坐标（鼠标或触控）。 */
-function clientPointOf(event: MouseEvent | TouchEvent): { x: number; y: number } {
-  if ("changedTouches" in event) {
-    const t = event.changedTouches[0];
-    return { x: t?.clientX ?? 0, y: t?.clientY ?? 0 };
-  }
-  return { x: event.clientX, y: event.clientY };
-}
-
-/** 窗口坐标处的落点：节点卡片、画布空白（含连线），其余（工具栏、小地图、控件、动作条等）为 null。 */
-function dropTargetAt(client: { x: number; y: number }): { kind: "node"; nodeId: string } | { kind: "pane" } | null {
-  const el = document.elementFromPoint(client.x, client.y);
-  const node = el?.closest(".react-flow__node");
-  const nodeId = node?.getAttribute("data-id");
-  if (nodeId) return { kind: "node", nodeId };
-  if (!el?.closest(".react-flow") || el.closest(".react-flow__panel, .react-flow__node-toolbar")) return null;
-  return { kind: "pane" };
-}
-
-function posOf(p: { x: number; y: number }): [number, number] {
-  return [Math.round(p.x), Math.round(p.y)];
 }

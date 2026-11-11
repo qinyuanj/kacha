@@ -128,6 +128,8 @@ export const TIDY_TEXT = {
   movedOutKept: (title: string, reason: string | null) => `新画板「${title}」已建好，但本画板没有删去这些节点${reason ? `：${reason}` : ""}`,
   moveOutFailed: (reason: string) => `移出失败：${reason}`,
   moveOutBusy: "正在移出另一个阶段，请稍候",
+  /** 「收掉未定稿」确认框的取消按钮（确认框见 canvasStageView）。 */
+  cancelLabel: "取消",
 } as const;
 
 /** 粘贴（#96）：被拒时的原因文案与超限提示。只读归档沿用共享的 ARCHIVE_TEXT.readOnly。 */
@@ -146,3 +148,47 @@ export const PASTE_TEXT = {
 
 /** 粘贴被拒时给用户的话：拒绝原因到文案的映射只在这里，界面不各自写一份。 */
 export const pasteRefusalText = (reason: PasteRefusal): string => (reason === "readOnly" ? ARCHIVE_TEXT.readOnly : PASTE_TEXT[reason]);
+
+/** 「另存为」（参考图 / 结果节点）的提示：结果带图层时服务端打的是 zip。 */
+export const SAVE_TEXT = {
+  started: "已开始下载（结果带图层时为 zip）",
+  failed: (reason: string) => `另存失败：${reason}`,
+} as const;
+
+/** 「生成变体」：父任务已不在画板上（菜单置灰规则之外，这里可能刚被撤销掉）。 */
+export const VARIANT_TEXT = {
+  parentGone: "父任务已删除，无法生成变体",
+} as const;
+
+/** 框选修改区域：拒绝原因、放大预览弹窗的标题、弹窗里的目标标注与画布连线上的区域数徽标。 */
+export const REGION_TEXT = {
+  /** 模型不支持框选修改区域时给用户的原因。 */
+  unsupported: "当前模型不支持框选修改区域",
+  /** 弹窗标题：源节点名（参考图用显示名，结果用文件名）。 */
+  previewTitle: (name: string) => `框选修改区域 · ${name}`,
+  /** 弹窗里的一条可编辑区域线：模型显示名 + 图序号（1 起）。 */
+  targetLabel: (modelName: string, port: number) => `${modelName} 的图${port}`,
+  /** 连线上的区域数徽标。 */
+  edgeLabel: (count: number) => `${count} 区域`,
+} as const;
+
+/** 删除排队 / 执行中的任务节点前的确认框（「先取消再删除」）。 */
+export const DELETE_TASK_TEXT = {
+  title: "删除任务节点",
+  ok: "取消并删除",
+  cancel: "不删除",
+  /** running = 要删的排队 / 执行中任务数；第二行说明网关侧计算可能仍在继续。 */
+  confirm: (running: number) => `${running} 个任务正在排队 / 执行。先取消再删除？\n已在执行的只停止本地等待，网关侧计算可能仍在继续。`,
+} as const;
+
+/** 缺图节点重新定位的提示：根目录内没找到（可改手动选文件）、找到了却读不了。 */
+export const RELOCATE_TEXT = {
+  missing: (name: string) => `在用户数据根内没有找到 ${name}，可改为手动选择文件`,
+  unreadable: (name: string, reason: string) => `无法读取 ${name}：${reason}`,
+} as const;
+
+/** 本机图片导入（文件选择器 / 拖入 / 粘贴）：不是图片文件时的提示，与逐张失败的原因。 */
+export const IMPORT_TEXT = {
+  imageOnly: "只支持拖入图片文件",
+  failed: (name: string, reason: string) => `无法导入 ${name}：${reason}`,
+} as const;
