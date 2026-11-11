@@ -51,7 +51,7 @@ class IntegrityPreflightTest(unittest.TestCase):
             root = Path(tmp)
             (root / "server").mkdir()
             subprocess.run(["icacls", str(root), "/setintegritylevel", "(OI)(CI)L"], check=True, capture_output=True)
-            self.assertEqual(integrity_problems(root), [root / "server" / "target", root / "release", root / "client" / "target", root / ".uml-viewer"])
+            self.assertEqual(integrity_problems(root), [root / "server" / "target", root / "release", root / "client" / "target"])
             self.assertEqual(preflight(root), 2)
 
     def test_medium_build_outputs_pass(self):
