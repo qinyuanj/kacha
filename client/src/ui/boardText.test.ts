@@ -32,6 +32,15 @@ describe("体量换算", () => {
     expect(formatBytes(5 * 1024 ** 4)).toBe("5.0 TiB");
   });
 
+  it("单位切换与取整在边界值上保持稳定", () => {
+    // 还差 1 B 到 MiB：循环不能把这一档提前写成 MiB，显示时仍按 KiB 取整。
+    expect(formatBytes(1024 ** 2 - 1)).toBe("1024 KiB");
+    expect(formatBytes(1024 ** 4)).toBe("1.0 TiB");
+    // 99.999... KiB 先保留一位，100 KiB 起才改为整数。
+    expect(formatBytes(100 * 1024 - 1)).toBe("100.0 KiB");
+    expect(formatBytes(100 * 1024)).toBe("100 KiB");
+  });
+
   it("满 100 起不再留小数：提醒里读的是量级而不是精度", () => {
     expect(formatBytes(150 * 1024 ** 2)).toBe("150 MiB");
   });

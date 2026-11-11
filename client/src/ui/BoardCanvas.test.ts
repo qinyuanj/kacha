@@ -1064,6 +1064,19 @@ describe("画布结构", () => {
 });
 
 describe("React Flow 回调接线", () => {
+  it("提示词端口拖到空白处：新建任务并带上来源 promptId", async () => {
+    const { apply } = await renderCanvas();
+    elementAt.mockReturnValue(container.querySelector(".react-flow__pane"));
+    await act(async () => {
+      flowProps().onConnectEnd!(
+        new MouseEvent("mouseup", { clientX: 70, clientY: 90 }),
+        { isValid: false, fromHandle: { nodeId: "p1", id: "out", type: "source" } } as never,
+      );
+    });
+    // 工具栏新建走 promptId 缺省为 null；拖线建任务则必须保留来源提示词。
+    expect(apply).toHaveBeenCalledWith({ kind: "newTask", at: [70, 90], promptId: "p1" });
+  });
+
   it("选中 / 移动 / 测量 / 连线 / 视口都走画板写入", async () => {
     const { apply } = await renderCanvas();
     await act(async () => flowProps().onNodesChange!([{ type: "position", id: "p1", position: { x: 5, y: 6 } }]));

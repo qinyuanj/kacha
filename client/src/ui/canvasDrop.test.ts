@@ -176,6 +176,18 @@ describe("importPastedImages", () => {
     expect(change.attach).toBeNull();
   });
 
+  it("恰好等于单张上限：仍照常导入，不提示超限", async () => {
+    const ports = portsOf();
+    const apply = vi.fn();
+    const toast = vi.fn();
+
+    await importPastedImages([fileOf("limit.png", "image/png", MAX_PASTE_BYTES)], { x: 0, y: 0 }, { board: boardOf(), userRoot: USER_ROOT, toast, ports, apply });
+
+    expect(toast).not.toHaveBeenCalled();
+    expect(ports.upload).toHaveBeenCalledTimes(1);
+    expect(apply).toHaveBeenCalledTimes(1);
+  });
+
   it("超过单张上限：当场提示，不发请求也不落盘", async () => {
     const ports = portsOf();
     const apply = vi.fn();

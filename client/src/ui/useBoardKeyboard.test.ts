@@ -113,6 +113,18 @@ describe("撤销 / 重做", () => {
     expect(onUndo).not.toHaveBeenCalled();
   });
 
+  it("画布根存在但已脱离文档时不响应，重新接入后恢复", () => {
+    canvasEl.remove();
+    expect(canvasEl.isConnected).toBe(false);
+    expect(press({ key: "z", ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(onUndo).not.toHaveBeenCalled();
+
+    document.body.append(canvasEl);
+    expect(canvasEl.isConnected).toBe(true);
+    expect(press({ key: "z", ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(onUndo).toHaveBeenCalledTimes(1);
+  });
+
   it("弹窗开着：吞掉原生撤销，但不作用于背后的画板", () => {
     opts.dialogOpen.current = true;
     expect(press({ key: "z", ctrlKey: true }).defaultPrevented).toBe(true);

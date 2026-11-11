@@ -147,6 +147,14 @@ describe("放大预览的请求", () => {
     expect(nodePreviewRequest(previewBoard(), table, ROOT, "t1")).toBeNull();
     expect(nodePreviewRequest(previewBoard(), table, ROOT, "没有这个节点")).toBeNull();
   });
+
+  it("标题按参考图显示名 / 结果文件名分流，只有结果请求带 resultId", () => {
+    const b = board([reference("ref1", { display_name: "参考图显示名.png" }), result("res1", { file: "结果文件名.png" })], []);
+    const refRequest = nodePreviewRequest(b, table, ROOT, "ref1")!;
+    const resultRequest = nodePreviewRequest(b, table, ROOT, "res1")!;
+    expect([refRequest.title, refRequest.resultId]).toEqual(["参考图显示名.png", undefined]);
+    expect([resultRequest.title, resultRequest.resultId]).toEqual(["结果文件名.png", "res1"]);
+  });
 });
 
 /** 只接受 preview 结果：别的形态直接让断言失败（调用方只有 preview 才弹窗）。 */

@@ -177,6 +177,22 @@ describe("提示词节点", () => {
     const data = dataOf<PromptFlowNode["data"]>(canvasNodes(makeInput({ board: b }))[0]);
     expect(data.guides).toEqual([]);
   });
+
+  it("负向连接单独生成引导，且不混入其他提示词的正向连接", () => {
+    const b = board(
+      [prompt("p1"), prompt("p2"), task("negative-task"), task("other-task"), reference("ref1"), reference("ref2")],
+      [
+        edge(["p1", "out"], ["negative-task", "negative"]),
+        edge(["ref1", "out"], ["negative-task", "image:0"]),
+        edge(["p2", "out"], ["other-task", "positive"]),
+        edge(["ref2", "out"], ["other-task", "image:0"]),
+      ],
+    );
+    const data = dataOf<PromptFlowNode["data"]>(nodeById(canvasNodes(makeInput({ board: b })), "p1"));
+    expect(data.guides).toEqual([
+      { taskId: "negative-task", label: "qwen-image-3.0", images: [{ port: 1, label: "ref1.png", absPath: "/root/ref1.png", rects: [] }] },
+    ]);
+  });
 });
 
 describe("参考图与结果节点", () => {
@@ -315,6 +331,16 @@ describe("生成任务节点", () => {
     const one: NodeRunState = { copies: [{ taskId: "a", status: { kind: "cancelled", gatewayMayContinue: false } }], counts: { cancelled: 1 }, total: 1 };
     const data = dataOf<TaskFlowNode["data"]>(canvasNodes(makeInput({ board: taskBoard(), runStateOf: () => one }))[2]);
     expect(data.summary).toBeNull();
+  });
+
+  it("hasPositive 只认当前任务的正向线，不认负向线或其他任务的正向线", () => {
+    const b = board(
+      [prompt("p1"), prompt("p2"), task("negative-task"), task("positive-task")],
+      [edge(["p1", "out"], ["negative-task", "negative"]), edge(["p2", "out"], ["positive-task", "positive"])],
+    );
+    const nodes = canvasNodes(makeInput({ board: b }));
+    expect(dataOf<TaskFlowNode["data"]>(nodeById(nodes, "negative-task")).hasPositive).toBe(false);
+    expect(dataOf<TaskFlowNode["data"]>(nodeById(nodes, "positive-task")).hasPositive).toBe(true);
   });
 });
 
