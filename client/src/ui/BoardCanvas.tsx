@@ -55,6 +55,8 @@ import { taskView } from "../core/taskView";
 import { relocateFs } from "../shell/adapters";
 import { browser, ipc, transfer } from "../shell/ipc";
 import { logEvent } from "../shell/log";
+import { blocksFileDrag } from "../core/pageInput";
+import { isEditableTarget } from "../shell/pageInput";
 import { saveCopyAs } from "../shell/saveFile";
 import { ActionBar } from "./ActionBar";
 import { ContextMenu } from "./ContextMenu";
@@ -64,7 +66,7 @@ import { HoverProvider, useHoverLayer } from "./hoverInfo";
 import { ModelOptions, nodeTypes, type ImagePortInfo, type ImageSlotInfo, type PromptReferenceGuideTask } from "./nodes";
 import { DragContext } from "./ports";
 import { PreviewDialog, type PreviewRequest, type RegionTarget } from "./PreviewDialog";
-import { isTyping, useCanvasInteraction, type Selection } from "./useCanvasInteraction";
+import { useCanvasInteraction, type Selection } from "./useCanvasInteraction";
 import { errorText } from "../core/errors";
 import { collapsedMembers, finalToggle, nextStageName, prunableResults, stageBoxes } from "../core/stages";
 import { nodesBytes, pruneSavings } from "../core/tidy";
@@ -808,7 +810,7 @@ export function BoardCanvas({
   // Ctrl/⌘+Z 撤销，Ctrl/⌘+Shift+Z、Ctrl/⌘+Y 重做；文本框聚焦时交给原生撤销。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || isTyping(e.target) || !wrapper.current?.isConnected) return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || isEditableTarget(e.target) || !wrapper.current?.isConnected) return;
       const key = e.key.toLowerCase();
       if (key === "z" || (key === "y" && !e.shiftKey)) {
         e.preventDefault();
@@ -917,7 +919,7 @@ export function BoardCanvas({
     const el = wrapper.current;
     if (!el) return;
     const over = (e: DragEvent) => {
-      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+      if (blocksFileDrag(e.dataTransfer)) e.preventDefault();
     };
     const drop = (e: DragEvent) => {
       if (!e.dataTransfer?.files.length) return;
@@ -932,10 +934,11 @@ export function BoardCanvas({
       void importLocalFiles(files, at, card?.type === "task" ? { taskId: card.id, place: "left" } : undefined);
     };
     el.addEventListener("dragover", over);
-    el.addEventListener("drop", drop);
+    // 捕获阶段接 drop：先于页面级接管（shell/pageInput）跑并阻断冒泡，拖进画板的图片仍落成参考图节点。
+    el.addEventListener("drop", drop, true);
     return () => {
       el.removeEventListener("dragover", over);
-      el.removeEventListener("drop", drop);
+      el.removeEventListener("drop", drop, true);
     };
   }, [flow, importLocalFiles, toast, readOnly]);
 
@@ -948,7 +951,7 @@ export function BoardCanvas({
       <div
         className={["canvas", drag ? "connecting" : "", tidying ? "tidying" : ""].join(" ").trim()}
         ref={wrapper}
-        onContextMenu={(e) => !isTyping(e.target) && e.preventDefault()}
+        onContextMenu={(e) => !isEditableTarget(e.target) && e.preventDefault()}
         onPointerDownCapture={nav.onPointerDownCapture}
         onPointerUpCapture={nav.onPointerUpCapture}
       >
@@ -1005,7 +1008,7 @@ export function BoardCanvas({
           onMoveStart={onMoveStart}
           onMoveEnd={onMoveEnd}
           onPaneContextMenu={(e) => openMenu(e, { kind: "pane" })}
-          onNodeContextMenu={(e, n) => !isTyping(e.target) && openMenu(e, { kind: "node", nodeId: n.id })}
+          onNodeContextMenu={(e, n) => !isEditableTarget(e.target) && openMenu(e, { kind: "node", nodeId: n.id })}
           onSelectionContextMenu={(e, ns) => ns[0] && openMenu(e, { kind: "node", nodeId: ns[0].id })}
           onEdgeContextMenu={(e, fe) => {
             const target = board.edges.find((be) => edgeId(be) === fe.id);

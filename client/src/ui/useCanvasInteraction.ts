@@ -7,9 +7,7 @@ import type { Board } from "../core/board";
 import type { BoardChange, EditResult } from "../core/edit";
 import { copySelection } from "../core/iterate";
 import { applySelection, isTrackpadPan, nudgeDelta, type SelectChange } from "../core/selection";
-
-export const isTyping = (target: EventTarget | null) =>
-  target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+import { isEditableTarget } from "../shell/pageInput";
 
 type Ids = ReadonlySet<string>;
 
@@ -104,9 +102,19 @@ export function useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen,
       apply({ kind: "duplicate", ids: [...selection.nodes.current], drag: null });
     };
     const onKey = (e: KeyboardEvent) => {
-      // 上下文菜单开着时它在捕获阶段吞掉 Esc（只关菜单），这里收不到。
-      if (e.defaultPrevented || isTyping(e.target) || dialogOpen.current || !wrapper.current?.isConnected) return;
+      if (isEditableTarget(e.target) || dialogOpen.current || !wrapper.current?.isConnected) return;
       const mod = e.ctrlKey || e.metaKey;
+      // 方向键微移先于 defaultPrevented 判断：页面级接管（shell/pageInput）已经把方向键吞掉，
+      // 在这里早退会让「选中时微移」跟着失效。
+      const delta = mod || e.altKey ? null : nudgeDelta(e.key, e.shiftKey);
+      const ids = [...selection.nodes.current];
+      if (delta && ids.length) {
+        e.preventDefault();
+        apply({ kind: "nudge", ids, delta });
+        return;
+      }
+      // 上下文菜单开着时它在捕获阶段吞掉 Esc（只关菜单），这里收不到。
+      if (e.defaultPrevented) return;
       if (mod && !e.altKey && !e.shiftKey) {
         const key = e.key.toLowerCase();
         if (key === "0") void flow.fitView({ duration: ZOOM_DURATION });
@@ -119,17 +127,10 @@ export function useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen,
         return;
       }
       if (mod || e.altKey) return;
-      if (e.key === "Escape") {
-        if (store.getState().connection.inProgress) return;
+      if (e.key === "Escape" && !store.getState().connection.inProgress) {
         selection.setNodes(new Set());
         selection.setEdges(new Set());
-        return;
       }
-      const delta = nudgeDelta(e.key, e.shiftKey);
-      const ids = [...selection.nodes.current];
-      if (!delta || !ids.length) return;
-      e.preventDefault();
-      apply({ kind: "nudge", ids, delta });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
