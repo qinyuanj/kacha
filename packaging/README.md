@@ -199,16 +199,17 @@ icacls client\target /setintegritylevel '(OI)(CI)M'
 
 ## 质量门禁
 
-决定与理由见 [ADR 0020](../docs/adr/0020-quality-gate-with-crapper-dryer-and-mutator.md)。门禁只查自 `origin/main` 分叉以来改动过的 `client/src`、`server/src` 源码（含未提交与未跟踪文件），范围与排除只在 [uml-quality.json](../uml-quality.json) 声明：
+决定与理由见 [ADR 0020](../docs/adr/0020-quality-gate-with-crapper-dryer-and-mutator.md)。门禁默认只查自 `origin/main` 分叉以来改动过的 `client/src`、`server/src` 源码（含未提交与未跟踪文件），范围与排除只在 [uml-quality.json](../uml-quality.json) 声明。需要按其他目标分支比较时，给 `quality.py` 或 `verify.py` 传 `--base <Git 引用>`；同一个引用同时用于求 merge-base 与 changed-files。引用缺失、历史不足或没有共同祖先会明确失败，不会跳过门禁。质量判定保持：
 
 - CRAP 超过 10，或没有 CRAP 分（覆盖率缺失）失败（crapper）；
 - 至少一边在改动文件里的重复配对，相似度不低于 0.8 即失败（dryer）；
 - 有存活变异体或未覆盖变异点失败（mutator，只在 `--quality` 时跑）。
 
 ```powershell
-python packaging\quality.py            # 只跑 CRAP 与重复，verify.py 默认流程里就有
-python packaging\quality.py --mutate   # 连变异测试一起跑
-python packaging\verify.py --quality   # 全套验证加变异测试，合入集成分支前必须跑
+python packaging\quality.py                       # 只跑 CRAP 与重复，verify.py 默认流程里就有
+python packaging\quality.py --base origin/target  # 显式选择比较基线
+python packaging\quality.py --mutate              # 连变异测试一起跑
+python packaging\verify.py --quality              # 全套验证加变异测试，合入集成分支前必须跑
 ```
 
 工具按包运行（`--root client`、`--root server`），覆盖率与指标快照落在包内的 `target/`、`.metrics/`，都不提交。

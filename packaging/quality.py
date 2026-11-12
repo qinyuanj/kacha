@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """质量门禁：对本次改动的业务源码跑 crapper、dryer，带 --mutate 时再跑 mutator（见 docs/adr/0020、0022）。
 
-改动集 = merge-base(HEAD, origin/main)..HEAD 的新增 / 修改 / 重命名文件，加上未提交与未跟踪的文件。
+改动集 = merge-base(HEAD, --base 指定引用)..HEAD 的新增 / 修改 / 重命名文件，加上未提交与未跟踪的文件；默认基线为 origin/main。
 范围（源码根与排除）只在 uml-quality.json 一处声明；三个工具都是 dsh-uml-viewer 那个单一二进制的
 子命令（uml-viewer crap / dry / mutate），二进制从哪儿来找看 viewer_binary()。
-只依赖 Python 标准库。用法：python packaging\\quality.py [--mutate]
+只依赖 Python 标准库。用法：python packaging\\quality.py [--mutate] [--base <Git 引用>]
 """
 
+import argparse
 from collections.abc import Mapping
 from dataclasses import dataclass
 import json
@@ -34,6 +35,10 @@ VIEWER_BINARY_NAME = "uml-viewer.exe" if os.name == "nt" else "uml-viewer"
 # contracts/ 放画板策略与网关实测夹具；docs/release 与 server/Cargo.toml 是 changelog 守护测试
 # 要读的更新说明与版本号（client/src/core/changelog.test.ts、ui/ChangelogDialog.tsx 的 ?raw import）。
 MUTATION_COPIES = ("../contracts", "../docs/release", "../server/Cargo.toml")
+
+
+class BaseRefError(RuntimeError):
+    """比较基线缺失、历史不足或没有共同祖先。"""
 
 
 class ViewerMissing(RuntimeError):
@@ -92,6 +97,16 @@ def _git_lines(root: Path, *args: str) -> list[str]:
     run = subprocess.run(["git", "-c", "core.quotepath=false", *args], cwd=root, capture_output=True, text=True,
                          encoding="utf-8", check=True)
     return [line for line in run.stdout.splitlines() if line]
+
+
+def merge_base(root: Path, base_ref: str) -> str:
+    """HEAD 与指定基线的共同祖先；任何 Git 失败都不能被当成空改动集跳过。"""
+    try:
+        return _git_lines(root, "merge-base", "HEAD", base_ref)[0]
+    except (subprocess.CalledProcessError, IndexError) as error:
+        raise BaseRefError(
+            f"无法求 HEAD 与比较基线 {base_ref} 的 merge-base；请确认基线引用存在且 Git 历史完整（能访问共同祖先）"
+        ) from error
 
 
 def changed_files(root: Path, base: str) -> list[str]:
@@ -255,19 +270,27 @@ def _check_package(binary: Path, package: Package, changed: list[str], mutate: b
 
 
 def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base", default=BASE_REF, help="比较基线引用（默认：origin/main）")
+    parser.add_argument("--mutate", action="store_true", help="同时运行 mutator")
+    args = parser.parse_args(argv)
     scope = Scope.load(ROOT)
-    base = _git_lines(ROOT, "merge-base", "HEAD", BASE_REF)[0]
+    try:
+        base = merge_base(ROOT, args.base)
+    except BaseRefError as error:
+        print(f"质量门禁失败：{error}", file=sys.stderr)
+        return 1
     changed = in_scope(scope, changed_files(ROOT, base))
     if not changed:
-        print(f"质量门禁：自 {BASE_REF}（{base[:8]}）以来没有改动业务源码，跳过")
+        print(f"质量门禁：自 {args.base}（{base[:8]}）以来没有改动业务源码，跳过")
         return 0
-    print(f"质量门禁：自 {BASE_REF}（{base[:8]}）以来改动 {len(changed)} 个业务源码文件", flush=True)
+    print(f"质量门禁：自 {args.base}（{base[:8]}）以来改动 {len(changed)} 个业务源码文件", flush=True)
     try:
         binary = viewer_binary(os.environ)
     except ViewerMissing as error:
         print(f"质量门禁失败：{error}", file=sys.stderr)
         return 1
-    mutate = "--mutate" in argv
+    mutate = args.mutate
     if mutate and not copy_supported(tool_help(binary, "mutate")):
         print(f"质量门禁失败：{binary} 的 mutator 不支持 --copy，变异副本里没有仓库的 contracts/。"
               "请换用带 --copy 的 dsh-uml-viewer 构建（见 docs/adr/0022、#102）", file=sys.stderr)
