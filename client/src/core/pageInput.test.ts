@@ -8,7 +8,7 @@ import { BLOCKED_MOD_KEYS, blocksFileDrag, blocksKey, blocksMouseButton, copyTar
 const AT: [number, number] = [120, -40];
 
 function facts(patch: Partial<PasteFacts> = {}): PasteFacts {
-  return { text: null, images: 0, opaqueFiles: 0, ...patch };
+  return { text: null, images: 0, opaqueFiles: 0, content: "none", remote: 0, textIsDataUrl: false, failures: { invalid: 0, unsupported: 0, tooLarge: 0 }, ...patch };
 }
 
 function context(patch: Partial<PasteContext> = {}): PasteContext {
@@ -99,6 +99,24 @@ describe("粘贴分派", () => {
     // 读不到内容的文件：浏览器不给页面读文件本身，只能提示用户拖进来，吞掉以免浏览器把当前页导航走。
     { name: "只有读不到内容的文件：拒绝并提示拖入", facts: { opaqueFiles: 1 }, context: {}, expected: { kind: "refuse", reason: "filesNotReadable" } },
     { name: "空剪贴板：放行", facts: {}, context: {}, expected: PASS },
+    // #114：内嵌 data URL 解出来的图片与文件、图片条目同路——落成参考图。
+    { name: "解出来的内嵌图片：落成参考图", facts: { images: 1, content: "html" }, context: {}, expected: { kind: "importImages", at: [120, -40] } },
+    { name: "内嵌图片 + 读不到的文件：有可读图片就落图，不为非图片文件另建节点", facts: { images: 1, opaqueFiles: 1, content: "file" }, context: {}, expected: { kind: "importImages", at: [120, -40] } },
+    { name: "输入框里粘一串图片 data URL：按粘图片处理，仍落图", facts: { images: 1, text: "data:image/png;base64,AAAA", textIsDataUrl: true, content: "text" }, context: { textFocus: true }, expected: { kind: "importImages", at: [120, -40] } },
+    { name: "输入框里粘普通文字：照旧放行", facts: { text: "一只猫", content: "text" }, context: { textFocus: true }, expected: PASS },
+    // 只有远程地址：不抓、不当成导入成功，给一个可操作的原因。
+    { name: "只有远程图片地址：拒绝并提示先保存到本机", facts: { remote: 1, content: "html" }, context: {}, expected: { kind: "refuse", reason: "remoteImage" } },
+    { name: "远程地址 + 可读图片：有图就落图", facts: { images: 1, remote: 1, content: "html" }, context: {}, expected: { kind: "importImages", at: [120, -40] } },
+    // 文件 / HTML / URI 类内容里没有受支持图片：明确提示，不静默。
+    { name: "HTML 内容里没有图片：拒绝并提示改用文件", facts: { content: "html" }, context: {}, expected: { kind: "refuse", reason: "noSupportedImage" } },
+    { name: "URI 内容里没有图片：拒绝并提示改用文件", facts: { content: "uri" }, context: {}, expected: { kind: "refuse", reason: "noSupportedImage" } },
+    { name: "文件类内容里没有可读图片：拒绝并提示改用文件", facts: { content: "file", opaqueFiles: 0 }, context: {}, expected: { kind: "refuse", reason: "noSupportedImage" } },
+    { name: "普通纯文本不在输入框里：仍放行，不被误拦", facts: { text: "一段说明", content: "text" }, context: {}, expected: PASS },
+    // 解码失败：作为失败项反馈。
+    { name: "内嵌图片解不开：拒绝并说明原因", facts: { content: "text", failures: { invalid: 1, unsupported: 0, tooLarge: 0 } }, context: {}, expected: { kind: "refuse", reason: "imageFailed" } },
+    { name: "内嵌图片格式不受支持：拒绝并说明原因", facts: { content: "text", failures: { invalid: 0, unsupported: 1, tooLarge: 0 } }, context: {}, expected: { kind: "refuse", reason: "imageFailed" } },
+    { name: "内嵌图片超限：拒绝并说明原因", facts: { content: "text", failures: { invalid: 0, unsupported: 0, tooLarge: 1 } }, context: {}, expected: { kind: "refuse", reason: "imageFailed" } },
+    { name: "有可读图片、另有一张解不开：照样落图（失败项另给原因）", facts: { images: 1, content: "text", failures: { invalid: 1, unsupported: 0, tooLarge: 0 } }, context: {}, expected: { kind: "importImages", at: [120, -40] } },
   ];
 
   for (const c of CASES) it(c.name, () => expect(dispatchPaste(facts(c.facts), context(c.context))).toEqual(c.expected));

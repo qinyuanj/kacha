@@ -1,6 +1,6 @@
 // 画板相关的用户可见提示文案；跨语言的值由共享契约定义。
 import policy from "../../../contracts/board-policy.json" with { type: "json" };
-import { MAX_PASTE_BYTES, type PasteRefusal } from "../core/pageInput";
+import { MAX_PASTE_BYTES, type PasteFailures, type PasteRefusal } from "../core/pageInput";
 
 /** 画板已不存在（另一页面删除或改名）。 */
 export const BOARD_MISSING_TEXT = "该画板已不存在，可能已在别处改名或删除";
@@ -140,6 +140,12 @@ export const PASTE_TEXT = {
   filesNotReadable: "剪贴板里是文件，浏览器读不到内容：请把文件拖进画板",
   /** 单张图片超过服务端单请求上限：不发请求，先提示压缩。 */
   tooLarge: `图片超过 ${MAX_PASTE_BYTES / (1024 * 1024)} MB 上限，先压缩再粘贴`,
+  /** 剪贴板里是文件 / HTML / URI 类内容，其中却没有受支持图片：告诉用户改用哪种做法。 */
+  noSupportedImage: "剪贴板里没有可用的图片：请把图片文件拖进画板，或用工具栏的「＋ 参考图…」选择图片",
+  /** 剪贴板里只有网络图片地址：应用不主动抓，也不代为下载。 */
+  remoteImage: "剪贴板里是网络图片地址，Kacha 不会去下载：请先把图片保存到本机，再拖进画板",
+  /** 内嵌图片（data URL）没读出来：具体原因见 pasteImageFailureText。 */
+  imageFailed: "内嵌图片读不出来，请改用图片文件拖进画板",
   /** 节点标记写不进系统剪贴板：Ctrl+V 粘节点会失效，给一条不等粘贴的替代动作。 */
   markerUnwritable: "无法写入系统剪贴板：Ctrl+V 粘贴节点可能不生效，可用 Ctrl+J 原地复制",
   /** 工具栏「＋ 参考图…」的悬浮提示：粘贴没有按钮入口（内网 HTTP 下页面读不到剪贴板），只能用文案告诉用户。 */
@@ -148,6 +154,19 @@ export const PASTE_TEXT = {
 
 /** 粘贴被拒时给用户的话：拒绝原因到文案的映射只在这里，界面不各自写一份。 */
 export const pasteRefusalText = (reason: PasteRefusal): string => (reason === "readOnly" ? ARCHIVE_TEXT.readOnly : PASTE_TEXT[reason]);
+
+/**
+ * 内嵌图片（data URL）失败的具体原因：按分类给一句话。
+ * 同批其它图片仍会照常导入，这里只说明失败的那几张为什么没进来。
+ * 文案里不带任何来源地址或鉴权信息。
+ */
+export const pasteImageFailureText = (failures: PasteFailures): string => {
+  const parts: string[] = [];
+  if (failures.invalid > 0) parts.push(`${failures.invalid} 张内嵌图片无法解码`);
+  if (failures.unsupported > 0) parts.push(`${failures.unsupported} 张内嵌图片格式不受支持`);
+  if (failures.tooLarge > 0) parts.push(`${failures.tooLarge} 张内嵌图片超过 ${MAX_PASTE_BYTES / (1024 * 1024)} MB 上限`);
+  return parts.length ? `${parts.join("；")}，已跳过` : PASTE_TEXT.imageFailed;
+};
 
 /** 「另存为」（参考图 / 结果节点）的提示：结果带图层时服务端打的是 zip。 */
 export const SAVE_TEXT = {

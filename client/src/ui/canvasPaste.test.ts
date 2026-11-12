@@ -30,6 +30,10 @@ const opaque = (name = "报表.pdf") => fileOf(name, "application/pdf");
 const fileItem = (file: File | null, type = file?.type ?? "image/png") => ({ kind: "file", type, getAsFile: () => file });
 /** 文本条目替身：kind 不是 file，粘贴逻辑不理它。 */
 const textItem = { kind: "string", type: "text/plain", getAsFile: () => null };
+/** 1×1 的 PNG（真字节，base64）。 */
+const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+/** 图片 data URL。 */
+const pngUrl = (b64 = PNG_B64): string => `data:image/png;base64,${b64}`;
 
 let container: HTMLDivElement;
 let canvasEl: HTMLDivElement;
@@ -55,6 +59,8 @@ interface Clipboard {
   files?: File[];
   items?: unknown[];
   text?: string | null;
+  html?: string | null;
+  uri?: string | null;
 }
 
 /** 剪贴板事件替身：jsdom 的 Event 上补一个 clipboardData（files / items / getData 三样够用）。 */
@@ -64,7 +70,12 @@ function pasteEvent(clipboard: Clipboard): Event {
     value: {
       files: clipboard.files ?? [],
       items: clipboard.items ?? [],
-      getData: (type: string) => (type === "text/plain" ? (clipboard.text ?? "") : ""),
+      getData: (type: string) => {
+        if (type === "text/plain") return clipboard.text ?? "";
+        if (type === "text/html") return clipboard.html ?? "";
+        if (type === "text/uri-list") return clipboard.uri ?? "";
+        return "";
+      },
     },
   });
   return event;
@@ -276,6 +287,105 @@ describe("剪贴板图片归一化", () => {
     expect(paste({ items: [fileItem(image())] }).defaultPrevented).toBe(true);
     expect(toast).toHaveBeenCalledWith(ARCHIVE_TEXT.readOnly);
     expect(importPastedImages).not.toHaveBeenCalled();
+  });
+});
+
+describe("内嵌图片 data URL（#114）", () => {
+  /** 交给落图链路的那批文件（按调用顺序）。 */
+  const imported = (): File[] => (importPastedImages.mock.calls[0]?.[0] ?? []) as File[];
+
+  it("文本里就是一段图片 data URL：解出真实字节落成参考图", () => {
+    const event = paste({ text: pngUrl() });
+    expect(event.defaultPrevented).toBe(true);
+    expect(imported()).toHaveLength(1);
+    expect(imported()[0].type).toBe("image/png");
+    expect(imported()[0].size).toBeGreaterThan(0);
+  });
+
+  it("HTML 里 img 的 src 是 data URL：同样落成参考图", () => {
+    paste({ html: `<img src="${pngUrl()}">` });
+    expect(imported()).toHaveLength(1);
+  });
+
+  it("输入框里粘一串图片 data URL：仍落图（照旧粘图片，不当文字放行）", () => {
+    const input = document.createElement("input");
+    document.body.append(input);
+    input.focus();
+    paste({ text: pngUrl() });
+    expect(imported()).toHaveLength(1);
+    input.remove();
+  });
+
+  it("data URL 解不开：提示原因，不落图", () => {
+    const event = paste({ text: "data:image/png;base64,!!!!" });
+    expect(event.defaultPrevented).toBe(true);
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("内嵌图片"));
+    expect(imported()).toHaveLength(0);
+  });
+
+  it("data URL 格式不受支持：提示原因，不落图", () => {
+    paste({ text: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=" });
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("格式不受支持"));
+    expect(imported()).toHaveLength(0);
+  });
+
+  it("同批里有一张解不开、另一张可读：可读的那张照旧落图", () => {
+    paste({ text: `data:image/png;base64,!!!!
+${pngUrl()}` });
+    expect(imported()).toHaveLength(1);
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("内嵌图片"));
+  });
+
+  it("远程图片地址：提示改用本机文件，不当成图片导入，也不去抓", () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const event = paste({ html: '<img src="https://example.com/a.png?token=secret">' });
+    expect(event.defaultPrevented).toBe(true);
+    expect(imported()).toHaveLength(0);
+    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.remoteImage);
+    // 不泄漏来源地址与鉴权信息。
+    expect(toast.mock.calls[0][0]).not.toContain("example.com");
+    expect(toast.mock.calls[0][0]).not.toContain("secret");
+    // 应用绝不主动去抓远程图片。
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("文本就是一张远程图片地址：提示先保存到本机，不导入", () => {
+    const event = paste({ text: "https://example.com/a.png" });
+    expect(event.defaultPrevented).toBe(true);
+    expect(imported()).toHaveLength(0);
+    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.remoteImage);
+  });
+
+  it("HTML 里没有图片：明确提示改用文件，不静默", () => {
+    const event = paste({ html: "<p>一段网页文字</p>" });
+    expect(event.defaultPrevented).toBe(true);
+    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.noSupportedImage);
+    expect(imported()).toHaveLength(0);
+  });
+
+  it("URI 类内容里没有图片：明确提示改用文件", () => {
+    const event = paste({ uri: "https://example.com/page" });
+    expect(event.defaultPrevented).toBe(true);
+    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.noSupportedImage);
+    expect(imported()).toHaveLength(0);
+  });
+
+  it("空剪贴板：照旧放行给浏览器，不提示", () => {
+    expect(paste({}).defaultPrevented).toBe(false);
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("普通纯文本：照旧放行，不被误拦", () => {
+    expect(paste({ text: "一段普通文字" }).defaultPrevented).toBe(false);
+    expect(toast).not.toHaveBeenCalled();
+    expect(imported()).toHaveLength(0);
+  });
+
+  it("混合内容：可读图片照旧落图，不为非图片文件另建节点", () => {
+    paste({ files: [image(), opaque()], text: "顺带复制到的文字" });
+    expect(imported()).toHaveLength(1);
+    expect(imported()[0].name).toBe("shot.png");
   });
 });
 
