@@ -6,11 +6,11 @@ import { expect } from "@playwright/test";
 import { board, png } from "../common/boards";
 import { PASTE_NAME_PREFIX } from "../../src/core/pageInput";
 import { GOOD_KEY, test, type Rig } from "./rig";
-import { boardRelPath, openApp, pasteImage, readJson } from "./kit";
+import { boardRelPath, openApp, pasteImage, pasteImageItem, readJson } from "./kit";
 
 const sha = (b64: string) => createHash("sha256").update(Buffer.from(b64, "base64")).digest("hex");
-const savedBoard = (rig: Rig) => readJson(`${rig.userRoot(GOOD_KEY)}/${boardRelPath("粘贴")}`);
-const savedRef = (rig: Rig) => savedBoard(rig).nodes.find((n: any) => n.type === "reference");
+const savedBoard = (rig: Rig, title = "粘贴") => readJson(`${rig.userRoot(GOOD_KEY)}/${boardRelPath(title)}`);
+const savedRef = (rig: Rig, title = "粘贴") => savedBoard(rig, title).nodes.find((n: any) => n.type === "reference");
 
 test("粘贴剪贴板里的截图：落成参考图节点，落点跟鼠标，撤销一步回退", async ({ page, rig }) => {
   const image = png(1024, 1024, { rgb: [30, 90, 200] });
@@ -37,5 +37,21 @@ test("粘贴剪贴板里的截图：落成参考图节点，落点跟鼠标，�
   // 一次粘贴（含上传）只算一个撤销步。
   await page.keyboard.press("Control+z");
   await expect(node).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("剪贴板只给图片条目（没有文件列表）：照样落成参考图节点", async ({ page, rig }) => {
+  const image = png(512, 512, { rgb: [200, 40, 90] });
+  const errors = await openApp(page, rig, { title: "粘贴条目", boardText: board("粘贴条目", [], []) });
+
+  await pasteImageItem(page, { name: "entry.png", mimeType: "image/png", b64: image }, { x: 420, y: 320 });
+  const node = page.locator(".react-flow__node-reference");
+  await expect(node).toHaveCount(1);
+  await expect(node.locator("img.thumb")).toBeVisible();
+
+  // 内容同样落盘成用户数据根里的哈希文件，画板引用它。
+  const rel = `导入参考图/${sha(image)}.png`;
+  expect(existsSync(`${rig.userRoot(GOOD_KEY)}/${rel}`)).toBe(true);
+  await expect.poll(() => savedRef(rig, "粘贴条目")?.path).toBe(rel);
   expect(errors).toEqual([]);
 });

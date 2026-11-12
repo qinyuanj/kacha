@@ -5,7 +5,7 @@ import type { BoardChange } from "../core/edit";
 import { dispatchPaste } from "../core/pageInput";
 import { isEditableTarget } from "../shell/pageInput";
 import { pasteRefusalText } from "./boardText";
-import { isImageFile } from "./canvasDrop";
+import { clipboardImageFiles, normalizeClipboardImages } from "./clipboardImages";
 import { nextPasteClip, readClipboard, writeClipboard } from "./canvasKeyboard";
 import { posOf } from "./canvasPoint";
 
@@ -59,12 +59,12 @@ export function useCanvasPaste({
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const data = event.clipboardData;
-      const files = [...(data?.files ?? [])];
-      // 读得到内容才算图片；资源管理器里复制的文件只有名字没有内容，归到 opaqueFiles 里提示改为拖入。
-      const images = files.filter((f) => isImageFile(f) && f.size > 0);
+      // 统一读法：文件列表与图片条目都进来，出一份有序、去重的图片集合（见 clipboardImages）。
+      const normalized = normalizeClipboardImages({ files: data?.files ?? null, items: data?.items ?? null });
+      const images = clipboardImageFiles(normalized.images);
       const at = posOf(lastPointer.current ? positionOf.current(lastPointer.current) : centerPosition());
       const action = dispatchPaste(
-        { text: data?.getData("text/plain") || null, images: images.length, opaqueFiles: files.length - images.length },
+        { text: data?.getData("text/plain") || null, images: images.length, opaqueFiles: normalized.opaque },
         // board 恒为 true：画布只在有画板时挂载，「没有画板就放行」由登录页 / 空工作台不挂载兑现。
         { board: true, readOnly, modal: modalOpen || dialogOpen.current, textFocus: isEditableTarget(document.activeElement), hasNodeClip: (readClipboard()?.nodes.length ?? 0) > 0, at },
       );
