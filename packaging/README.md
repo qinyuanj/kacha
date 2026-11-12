@@ -168,7 +168,7 @@ python packaging\load_users.py --users 12 --output release\memory-12-users.json
 
 ## 验证
 
-提交前在仓库根目录执行：
+需要本地检查时，在仓库根目录手动执行：
 
 ```powershell
 python packaging\verify.py
@@ -176,13 +176,7 @@ python packaging\verify.py
 
 脚本先预检构建输出目录的完整性标签（见下文），再依次跑打包脚本单测、前端单测、类型检查、e2e（4 个 worker）、服务端测试（`--no-fail-fast`）与质量门禁（见下文「质量门禁」）。每一项都会跑完，最后汇总；任一失败即以非 0 退出。只需重跑其中一项时，命令见 [verify.py](verify.py) 的 `COMMANDS`。
 
-e2e 很慢，只在集成分支（`main`、`integration/*`）上跑：各票合完后，推送集成分支时由 pre-push 跑一次全套。其他分支（`impl/*`、`spec/*` 等）和分离 HEAD 跳过 e2e，汇总里记为「跳过」；需要时加 `--e2e` 强制跑。
-
-仓库自带 pre-push 钩子 [.githooks/pre-push](../.githooks/pre-push)，推送前自动跑这套验证，失败即拒绝推送。每个 clone 启用一次（同一 clone 的 worktree 共用）：
-
-```powershell
-git config core.hooksPath .githooks
-```
+e2e 很慢，本地默认只在集成分支（`main`、`integration/*`）上跑：各票合完后手动跑一次全套。其他分支（`impl/*`、`spec/*` 等）和分离 HEAD 跳过 e2e，汇总里记为「跳过」；需要时加 `--e2e` 强制跑。
 
 符号链接逃逸测试在无权创建符号链接时打印原因并跳过，其余断言照常运行。无权的原因可能有两种：当前账户既没开开发者模式，也不是管理员；或者测试程序以 Low 完整性级别运行。
 
