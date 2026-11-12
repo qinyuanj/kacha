@@ -98,3 +98,52 @@ describe("图片复制的结果判定", () => {
     expect(selection.toString()).toBe("操作前选中的文字");
   });
 });
+
+describe("原生 copy 事件是否算「本次复制」的证据", () => {
+  /** 复制命令执行期间派发的 copy 事件：迟一点派发也算本次操作的证据。 */
+  let copyEventDelayMs = 0;
+  /** 复制命令执行前，用户已经把选区换到别处（模拟同时复制了别的内容）。 */
+  let selectionMovedAway = false;
+
+  beforeEach(() => {
+    copyEventDelayMs = 0;
+    selectionMovedAway = false;
+    Object.defineProperty(HTMLImageElement.prototype, "decode", { configurable: true, writable: true, value: vi.fn(() => Promise.resolve()) });
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      writable: true,
+      value: vi.fn((command: string) => {
+        if (command !== "copy") return false;
+        if (selectionMovedAway) {
+          const other = document.createElement("p");
+          other.textContent = "别处";
+          document.body.append(other);
+          const selection = document.getSelection()!;
+          selection.removeAllRanges();
+          const range = document.createRange();
+          range.selectNodeContents(other);
+          selection.addRange(range);
+        }
+        setTimeout(() => document.dispatchEvent(new Event("copy", { bubbles: true, cancelable: true })), copyEventDelayMs);
+        return true;
+      }),
+    });
+  });
+
+  afterEach(() => {
+    delete (document as unknown as { execCommand?: unknown }).execCommand;
+    delete (HTMLImageElement.prototype as unknown as { decode?: unknown }).decode;
+    document.body.innerHTML = "";
+    document.getSelection()?.removeAllRanges();
+  });
+
+  it("事件晚一点才派发：仍算本次操作的证据，不误报「没观察到事件」", async () => {
+    copyEventDelayMs = 20;
+    expect(await copyImageToClipboard(SRC)).toBeNull();
+  });
+
+  it("选区已被换到别处：那个 copy 事件不算本次复制的证据", async () => {
+    selectionMovedAway = true;
+    expect(await copyImageToClipboard(SRC)).toEqual({ kind: "noEvent" });
+  });
+});

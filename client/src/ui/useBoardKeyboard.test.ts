@@ -202,6 +202,12 @@ describe("卸载", () => {
 /** 参考图节点：单选它时 Ctrl+C 走图片复制。 */
 const reference = (id: string): BoardNode => ({ id, type: "reference", pos: [0, 0], size: [200, 200], extra: {}, path: `参考/${id}.png`, sha256: "a".repeat(64), display_name: `${id}.png` });
 
+/** 结果节点：单选它时 Ctrl+C 复制底图。 */
+const result = (id: string): BoardNode => ({
+  id, type: "result", pos: [0, 0], size: [200, 200], extra: {}, task_id: "t1", file: "result.png", path: `任务/t1/${id}.png`, layer_count: 1,
+  record: { model: "m", prompt: "", negative_prompt: "", size_spec: { tier: null, ratio: null, width: null, height: null }, submitted_at: "2026-11-11T00:00:00Z", layers: [{ file: "layers/01.png", z_index: 1, bounding_box: [0, 0, 1, 1] }] },
+});
+
 describe("复制图片", () => {
   beforeEach(async () => {
     vi.mocked(copyImageToClipboard).mockReset();
@@ -237,6 +243,17 @@ describe("复制图片", () => {
       expect(message).toContain("另存为");
       expect(message).toBe(COPY_TEXT.imageFailed(COPY_TEXT.imageFailureReason(failure)));
     }
+  });
+
+  it("单选结果节点：同样走图片复制（复制的是底图）", async () => {
+    board = { ...newBoard("画板"), nodes: [result("res1"), prompt("p1")] };
+    opts = { ...opts, boardRef: { current: board }, selectedRef: { current: new Set(["res1"]) } };
+    await show();
+    const event = press({ key: "c", ctrlKey: true });
+    expect(event.defaultPrevented).toBe(true);
+    await settle();
+    expect(copyImageToClipboard).toHaveBeenCalledTimes(1);
+    expect(copyTextToClipboard).not.toHaveBeenCalled();
   });
 
   it("复制失败也不写节点标记、不动应用内剪贴板", async () => {

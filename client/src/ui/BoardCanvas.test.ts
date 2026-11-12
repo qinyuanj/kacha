@@ -21,6 +21,7 @@ import { MAX_PASTE_BYTES, nodeMarker, PASTE_NAME_PREFIX } from "../core/pageInpu
 import type { BoardMeasure } from "../core/tidy";
 import { browser, ipc, transfer } from "../shell/ipc";
 import { copyTextToClipboard } from "../shell/clipboard";
+import { copyImageToClipboard } from "../shell/imageClipboard";
 import { saveCopyAs } from "../shell/saveFile";
 import { BoardCanvas } from "./BoardCanvas";
 import { ARCHIVE_TEXT, DELETE_TASK_TEXT, IMPORT_TEXT, PASTE_TEXT, SAVE_TEXT, STAGE_TEXT, TIDY_TEXT } from "./boardText";
@@ -690,6 +691,16 @@ describe("键盘快捷键", () => {
     await press("c", { ctrlKey: true });
     await flush();
     expect(toast).toHaveBeenCalledWith(PASTE_TEXT.markerUnwritable);
+  });
+
+  it("归档只读画板 + 单选参考图：仍然走图片复制（只读不妨碍取材）", async () => {
+    const harness = await renderCanvas({ readOnly: true });
+    await selectNodes(["r1"]);
+    await press("c", { ctrlKey: true });
+    await flush();
+    expect(copyImageToClipboard).toHaveBeenCalledTimes(1);
+    // 只读画板照样不改内容：复制图片不产生任何画板变更。
+    expect(appliedChanges(harness.apply).flatMap((c) => (c.kind === "addReferences" ? [c] : []))).toEqual([]);
   });
 
   it("Ctrl+V 不再由 keydown 管（粘贴走页面级 paste 事件）", async () => {

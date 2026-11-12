@@ -2,8 +2,9 @@
 import { mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
-import { enterWithKey, expect, GOOD_KEY, type Rig } from "./rig";
+import { enterWithKey, expect, type Rig } from "./rig";
 import { MODELS, task } from "../common/boards";
+import { GOOD_KEY } from "./rig";
 
 export { task };
 
@@ -141,3 +142,38 @@ export async function pasteImageItem(page: Page, file: DroppedFile, at: { x: num
     document.body.dispatchEvent(event);
   }, file);
 }
+/**
+ * 模拟把一段内嵌图片 data URL 放进系统剪贴板后按 Ctrl+V：剪贴板里没有文件列表，只有文本或 HTML。
+ * 与 pasteImage / pasteImageItem 同居一处：三种剪贴板形状的合成方式放在一起，别处不再各写一份。
+ */
+export async function pasteDataUrl(page: Page, dataUrl: string, at: { x: number; y: number }, as: "text" | "html"): Promise<void> {
+  await page.mouse.move(at.x, at.y);
+  await page.evaluate(
+    ({ dataUrl, as }) => {
+      const clipboard = {
+        files: [],
+        items: [],
+        getData: (type: string) => {
+          if (as === "text" && type === "text/plain") return dataUrl;
+          if (as === "html" && type === "text/html") return `<img src="${dataUrl}">`;
+          return "";
+        },
+      };
+      const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", { value: clipboard });
+      document.body.dispatchEvent(event);
+    },
+    { dataUrl, as },
+  );
+}
+
+/** 已落盘画板的内容（按画板标题读）。 */
+export function savedBoard(rig: Rig, title: string, key = GOOD_KEY): any {
+  return readJson(path.join(rig.userRoot(key), boardRelPath(title)));
+}
+
+/** 已落盘画板里的参考图节点（第一个）。 */
+export function savedRef(rig: Rig, title: string, key = GOOD_KEY): any {
+  return savedBoard(rig, title, key).nodes.find((n: any) => n.type === "reference");
+}
+
