@@ -106,6 +106,31 @@ function markerPaste(context: PasteContext): PasteAction {
   return context.hasNodeClip ? { kind: "pasteNodes" } : { kind: "refuse", reason: "staleNodeClip" };
 }
 
+/** 输入框里粘非空文本：任何非空文本（包括一串图片 data URL）都交给输入框自己，不改判成粘图片（#98）。 */
+function textInputPaste(facts: PasteFacts, context: PasteContext): PasteAction | null {
+  return context.textFocus && facts.text !== null ? { kind: "pass" } : null;
+}
+
+/** 剪贴板里有受支持图片：落成参考图节点；只读画板拒绝。 */
+function imagePaste(facts: PasteFacts, context: PasteContext): PasteAction | null {
+  if (facts.images <= 0) return null;
+  if (context.readOnly) return { kind: "refuse", reason: "readOnly" };
+  return { kind: "importImages", at: context.at };
+}
+
+/** 内容看似是文件 / 图片 / HTML / URI 却拿不到受支持图片：给一条可操作的原因，不静默。 */
+function noImagePaste(facts: PasteFacts): PasteAction | null {
+  // 远程地址：应用不去抓，也不把地址写进提示，只给用户一条可操作的原因。
+  if (facts.remote > 0) return { kind: "refuse", reason: "remoteImage" };
+  // 读不到内容的文件：浏览器不给页面读文件本身，只能提示用户拖进来。
+  if (facts.opaqueFiles > 0) return { kind: "refuse", reason: "filesNotReadable" };
+  // 内嵌图片解不开：按失败分类给原因。
+  if (hasFailures(facts.failures)) return { kind: "refuse", reason: "imageFailed" };
+  // 文件 / HTML / URI 类内容里没有受支持图片：提示改用文件。
+  if (facts.content === "file" || facts.content === "html" || facts.content === "uri") return { kind: "refuse", reason: "noSupportedImage" };
+  return null;
+}
+
 /**
  * 一个 Ctrl+V 落在哪条路上：先看有没有画板与模态，再看剪贴板里是什么。
  * 顺序照 ADR 0021：标记优先于图片，避免复制节点后立刻粘贴粘出几小时前的旧截图。
@@ -114,23 +139,9 @@ function markerPaste(context: PasteContext): PasteAction {
  * 只剩远程地址或没有受支持图片时给一个可操作的原因，空剪贴板与普通纯文本照旧放行。
  */
 export function dispatchPaste(facts: PasteFacts, context: PasteContext): PasteAction {
-  if (!context.board) return { kind: "pass" };
-  if (context.modal) return { kind: "pass" };
+  if (!context.board || context.modal) return { kind: "pass" };
   if (isNodeMarker(facts.text)) return markerPaste(context);
-  // 输入框里粘非空文本照旧：任何非空文本（包括一串图片 data URL）都交给输入框自己，
-  // 这里不改判成粘图片（#98：输入框中的非空纯文本保持原生行为）。
-  if (context.textFocus && facts.text !== null) return { kind: "pass" };
-  if (facts.images > 0) {
-    if (context.readOnly) return { kind: "refuse", reason: "readOnly" };
-    return { kind: "importImages", at: context.at };
-  }
-  // 远程图片地址：应用不去抓，也不把地址写进提示，只给用户一条可操作的原因。
-  if (facts.remote > 0) return { kind: "refuse", reason: "remoteImage" };
-  if (facts.opaqueFiles > 0) return { kind: "refuse", reason: "filesNotReadable" };
-  if (hasFailures(facts.failures)) return { kind: "refuse", reason: "imageFailed" };
-  // 文件 / HTML / URI 类内容却拿不到受支持图片：提示改用文件，不再静默。
-  if (facts.content === "file" || facts.content === "html" || facts.content === "uri") return { kind: "refuse", reason: "noSupportedImage" };
-  return { kind: "pass" };
+  return textInputPaste(facts, context) ?? imagePaste(facts, context) ?? noImagePaste(facts) ?? { kind: "pass" };
 }
 
 const pad2 = (n: number): string => String(n).padStart(2, "0");

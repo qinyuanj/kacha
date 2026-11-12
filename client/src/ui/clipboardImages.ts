@@ -125,24 +125,87 @@ function remoteImageAddresses(html: string): number {
   return n;
 }
 
+/** uri-list 里的第一条地址：跳过注释行（以 # 开头）与空行。 */
+function firstUriAddress(uri: string | null | undefined): string {
+  return (uri ?? "").trim().split(/\r?\n/).map((s) => s.trim()).find((s) => s && !s.startsWith("#")) ?? "";
+}
+
+/**
+ * 剪贴板里的网络地址个数：HTML 的 img src、uri-list 的第一条、整段纯文本就是一个地址。
+ * 认不认得出它是不是图片无所谓：应用分不清「没扩展名的图片地址」与「普通链接」，一律不去碰，
+ * 但要给用户一个可操作的原因（远程地址 ≠ 没有受支持图片）。
+ * 纯文本里夹着一个地址（散文中间夹一个链接）不算——那种是普通文本，放行。
+ */
+function remoteCount(contents: ClipboardContents): number {
+  let remote = remoteImageAddresses(contents.html ?? "");
+  if (HTTP_URL.test(firstUriAddress(contents.uri))) remote += 1;
+  if (WHOLE_URL.test((contents.text ?? "").trim())) remote += 1;
+  return remote;
+}
+
+/** 文件列表 → 图片来源：读不到内容的（不是图片、零字节）计入 opaqueFiles。 */
+function imagesFromFiles(files: ArrayLike<File> | null | undefined): { images: ClipboardImage[]; opaqueFiles: number } {
+  const images: ClipboardImage[] = [];
+  let opaqueFiles = 0;
+  for (let i = 0; files && i < files.length; i++) {
+    const file = files[i];
+    if (file && isImageFile(file) && file.size > 0) images.push({ source: "file", file });
+    else opaqueFiles += 1;
+  }
+  return { images, opaqueFiles };
+}
+
+/** 图片条目 → 图片来源：只认真实字节，条目自己声明的 MIME 不作数，取不到内容就是读不到。 */
+function imagesFromItems(items: ArrayLike<ClipboardItemLike> | null | undefined): { images: ClipboardImage[]; opaqueFiles: number } {
+  const images: ClipboardImage[] = [];
+  let opaqueFiles = 0;
+  for (let i = 0; items && i < items.length; i++) {
+    const item = items[i];
+    if (!item || item.kind !== "file") continue;
+    const file = item.getAsFile();
+    if (!file || !isImageFile(file) || file.size <= 0) {
+      opaqueFiles += 1;
+      continue;
+    }
+    images.push({ source: "item", file });
+  }
+  return { images, opaqueFiles };
+}
+
+/** 文本 / HTML 里内嵌的图片 data URL：同一串只收一次，解码留到下一步（见 decodeClipboardDataUrls）。 */
+function dataUrlImages(...texts: (string | null | undefined)[]): ClipboardImage[] {
+  const seen = new Set<string>();
+  const images: ClipboardImage[] = [];
+  for (const text of texts) {
+    for (const url of dataUrlsIn(text ?? "")) {
+      if (seen.has(url)) continue;
+      seen.add(url);
+      images.push({ source: "dataUrl", dataUrl: url, file: null });
+    }
+  }
+  return images;
+}
+
+/** 剪贴板里有没有文件：文件列表给了文件，或有 kind === "file" 的条目。 */
+function hasFiles(contents: ClipboardContents): boolean {
+  if ((contents.files?.length ?? 0) > 0) return true;
+  const items = contents.items;
+  for (let i = 0; items && i < items.length; i++) if (items[i]?.kind === "file") return true;
+  return false;
+}
+
 /**
  * 剪贴板内容的样子：文件 → URI → HTML → 文本 → 空。
  * 有 HTML 内容就算 HTML 类：即使同时带着纯文本，也不是「纯文本」这一种内容类别
  * （#98：内容看似是 HTML 却拿不到受支持图片时要给明确提示，而不是放行）。
  */
 function contentKind(contents: ClipboardContents): PasteContent {
-  const files = contents.files;
-  if (files && files.length > 0) return "file";
-  const items = contents.items;
-  if (items) {
-    for (let i = 0; i < items.length; i++) if (items[i]?.kind === "file") return "file";
-  }
+  if (hasFiles(contents)) return "file";
   if ((contents.uri ?? "").trim()) return "uri";
-  const html = (contents.html ?? "").trim();
   const text = (contents.text ?? "").trim();
   // 整段文本就是一个网络地址：算 URI 类内容（地址栏复制的链接），不是散文。
   if (WHOLE_URL.test(text)) return "uri";
-  if (html) return "html";
+  if ((contents.html ?? "").trim()) return "html";
   if (text) return "text";
   return "none";
 }
@@ -155,54 +218,14 @@ function contentKind(contents: ClipboardContents): PasteContent {
  * 同一张图经两条途径重复暴露的判定不在这里做：内容比较要读字节，放在 uniqueClipboardImages 里。
  */
 export function normalizeClipboardImages(contents: ClipboardContents): ClipboardImages {
-  const images: ClipboardImage[] = [];
-  let opaqueFiles = 0;
-
-  const files = contents.files;
-  for (let i = 0; files && i < files.length; i++) {
-    const file = files[i];
-    if (file && isImageFile(file) && file.size > 0) {
-      images.push({ source: "file", file });
-    } else {
-      opaqueFiles += 1;
-    }
-  }
-
-  const items = contents.items;
-  for (let i = 0; items && i < items.length; i++) {
-    const item = items[i];
-    if (!item || item.kind !== "file") continue;
-    // 只认真实字节：条目自己声明的 MIME 不作数，取不到内容就是读不到。
-    const file = item.getAsFile();
-    if (!file || !isImageFile(file) || file.size <= 0) {
-      opaqueFiles += 1;
-      continue;
-    }
-    images.push({ source: "item", file });
-  }
-
-  // 内嵌 data URL（#114）：HTML 的 img src 与纯文本里的裸 data URL 都算；解码在下一步做。
-  const html = contents.html ?? "";
-  const text = contents.text ?? "";
-  const seenUrls = new Set<string>();
-  for (const url of [...dataUrlsIn(html), ...dataUrlsIn(text)]) {
-    if (seenUrls.has(url)) continue;
-    seenUrls.add(url);
-    images.push({ source: "dataUrl", dataUrl: url, file: null });
-  }
-
-  // 网络地址：只记个数，应用不去抓，也不把地址写进任何用户可见文案。
-  // 认不认得出它是不是图片无所谓：应用分不清「没扩展名的图片地址」与「普通链接」，一律不去碰，
-  // 但要给用户一个可操作的原因（远程地址 ≠ 没有受支持图片）。
-  let remote = remoteImageAddresses(html);
-  const uri = (contents.uri ?? "").trim().split(/\r?\n/).map((s) => s.trim()).find((s) => s && !s.startsWith("#")) ?? "";
-  if (HTTP_URL.test(uri)) remote += 1;
-  const plain = text.trim();
-  // 纯文本里嵌着一个地址（散文中间夹一个链接）不算「剪贴板里是地址」：那种是普通文本，放行。
-  if (WHOLE_URL.test(plain)) remote += 1;
-
-  const content = contentKind(contents);
-  return { images, opaqueFiles, remote, content };
+  const fromFiles = imagesFromFiles(contents.files);
+  const fromItems = imagesFromItems(contents.items);
+  return {
+    images: [...fromFiles.images, ...fromItems.images, ...dataUrlImages(contents.html, contents.text)],
+    opaqueFiles: fromFiles.opaqueFiles + fromItems.opaqueFiles,
+    remote: remoteCount(contents),
+    content: contentKind(contents),
+  };
 }
 
 /**
@@ -215,6 +238,18 @@ async function contentDigest(file: File): Promise<string> {
   } catch {
     return `meta:${file.name}\u0000${file.type}\u0000${file.size}`;
   }
+}
+
+/** 一组候选里重复的下标：摘要相同的只留第一个。 */
+async function duplicateIndices(indices: readonly number[], images: readonly ClipboardImage[]): Promise<Set<number>> {
+  const digests = await Promise.all(indices.map((index) => contentDigest(images[index].file!)));
+  const firstOf = new Map<string, number>();
+  const duplicates = new Set<number>();
+  digests.forEach((digest, k) => {
+    if (firstOf.has(digest)) duplicates.add(indices[k]);
+    else firstOf.set(digest, indices[k]);
+  });
+  return duplicates;
 }
 
 /**
@@ -233,14 +268,9 @@ export async function uniqueClipboardImages(images: readonly ClipboardImage[]): 
   });
   const duplicates = new Set<number>();
   for (const indices of bySize.values()) {
+    // 大小不同必然不是同一张；只有同大小的候选才值得读字节比内容。
     if (indices.length < 2) continue;
-    const digests = await Promise.all(indices.map((index) => contentDigest(images[index].file!)));
-    const firstOf = new Map<string, number>();
-    digests.forEach((digest, k) => {
-      const index = indices[k];
-      if (firstOf.has(digest)) duplicates.add(index);
-      else firstOf.set(digest, index);
-    });
+    for (const index of await duplicateIndices(indices, images)) duplicates.add(index);
   }
   return images.filter((_, index) => !duplicates.has(index));
 }
@@ -250,6 +280,9 @@ export interface DataUrlOutcome {
   images: ClipboardImage[];
   failures: PasteFailures;
 }
+
+/** 单条 data URL 的解码结局：解出真实字节，或一个失败分类。 */
+type DataUrlDecode = { kind: "ok"; file: File } | { kind: "failed"; failure: keyof PasteFailures };
 
 /** base64 载荷解出来的字节数：先按长度估，超限就不必真去解。 */
 function base64Size(length: number): number {
@@ -299,6 +332,28 @@ function percentBytes(payload: string): Uint8Array<ArrayBuffer> | null {
   return bytes;
 }
 
+/** 载荷按编码方式解成字节。 */
+function payloadBytes(parts: DataUrlParts, payload: string): Uint8Array<ArrayBuffer> | null {
+  return parts.base64 ? base64Bytes(payload) : percentBytes(payload);
+}
+
+/**
+ * 解一条内嵌 data URL：形状、格式、上限逐关过，全过就给出带真实字节的 file。
+ * seq 是这一批里第几张成功的图，只用来给 file 起个不重名的名字。
+ */
+function decodeOneDataUrl(dataUrl: string, seq: number): DataUrlDecode {
+  const parts = parseDataUrl(dataUrl);
+  if (!parts) return { kind: "failed", failure: "invalid" };
+  const ext = extensionOf(parts.mime);
+  if (!ext) return { kind: "failed", failure: "unsupported" };
+  const size = parts.base64 ? base64Size(parts.length) : percentSize(parts.length);
+  if (size > MAX_PASTE_BYTES) return { kind: "failed", failure: "tooLarge" };
+  const payload = dataUrl.trim().slice(parts.start, parts.start + parts.length);
+  const bytes = payloadBytes(parts, payload);
+  if (!bytes || bytes.length === 0) return { kind: "failed", failure: "invalid" };
+  return { kind: "ok", file: new File([bytes], `image-${seq}.${ext}`, { type: parts.mime }) };
+}
+
 /**
  * 把内嵌 data URL 解成真实字节：能解的补上 file，解不开的分类计数，同批其它图片照旧能进链路。
  * 超过单张上限（MAX_PASTE_BYTES）的先按载荷长度拒掉，不去解那么长的 base64，也不把载荷拷出来。
@@ -312,29 +367,13 @@ export function decodeClipboardDataUrls(images: readonly ClipboardImage[]): Data
       out.push(image);
       continue;
     }
-    const parts = parseDataUrl(image.dataUrl);
-    if (!parts) {
-      failures.invalid += 1;
-      continue;
-    }
-    const ext = extensionOf(parts.mime);
-    if (!ext) {
-      failures.unsupported += 1;
-      continue;
-    }
-    const size = parts.base64 ? base64Size(parts.length) : percentSize(parts.length);
-    if (size > MAX_PASTE_BYTES) {
-      failures.tooLarge += 1;
-      continue;
-    }
-    const payload = image.dataUrl.trim().slice(parts.start, parts.start + parts.length);
-    const bytes = parts.base64 ? base64Bytes(payload) : percentBytes(payload);
-    if (!bytes || bytes.length === 0) {
-      failures.invalid += 1;
+    const decoded = decodeOneDataUrl(image.dataUrl, seq + 1);
+    if (decoded.kind === "failed") {
+      failures[decoded.failure] += 1;
       continue;
     }
     seq += 1;
-    out.push({ source: "dataUrl", dataUrl: image.dataUrl, file: new File([bytes], `image-${seq}.${ext}`, { type: parts.mime }) });
+    out.push({ source: "dataUrl", dataUrl: image.dataUrl, file: decoded.file });
   }
   return { images: out, failures };
 }
