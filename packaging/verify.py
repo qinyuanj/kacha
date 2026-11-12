@@ -3,7 +3,7 @@
 
 只依赖 Python 标准库。每条命令都跑完再汇总（cargo 带 --no-fail-fast），任一失败即以非 0 退出。
 e2e 很慢，只在集成分支（main、integration/*）上跑；其他分支跳过，--e2e 强制跑（须经用户授权）。
-用法：python packaging\\verify.py [--preflight] [--e2e]
+用法：python packaging\\verify.py [--preflight] [--e2e] [--quality] [--base <Git 引用>]
 """
 
 import os
@@ -34,8 +34,14 @@ COMMANDS = (
 
 
 def commands(argv: list[str]) -> list[list[str]]:
-    """--quality 时质量门禁连变异测试一起跑（合入集成分支前必须跑，见 docs/adr/0020）。"""
-    return [[*command, "--mutate"] if command is QUALITY and "--quality" in argv else command for command in COMMANDS]
+    """--quality 加 mutator；--base 显式选择比较基线（默认仍由质量门禁使用 origin/main）。"""
+    quality = [*QUALITY, *(["--mutate"] if "--quality" in argv else [])]
+    if "--base" in argv:
+        index = argv.index("--base")
+        if index + 1 >= len(argv) or argv[index + 1].startswith("--"):
+            raise ValueError("--base 需要一个 Git 引用，例如 --base origin/main")
+        quality += ["--base", argv[index + 1]]
+    return [quality if command is QUALITY else command for command in COMMANDS]
 
 
 def runs_e2e(branch: str, argv: list[str]) -> bool:
@@ -81,7 +87,7 @@ def preflight(root: Path) -> int:
 
 
 def main(argv: list[str]) -> int:
-    """用法：verify.py [--preflight] [--e2e]；--preflight 只做预检，不跑测试（新建 worktree 或 clone 后先跑一次）。"""
+    """--preflight 只做预检；--base 传给质量门禁选择比较基线，其余验证步骤不变。"""
     code = preflight(ROOT)
     if code or "--preflight" in argv:
         return code
