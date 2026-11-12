@@ -2,7 +2,6 @@
 // 粘贴不在这里：键盘事件里拦默认行为会连 paste 事件一起压掉，粘贴改由 canvasPaste 的页面级 paste 接管（#96）。
 import { useEffect, type RefObject } from "react";
 import type { Board } from "../core/board";
-import { errorText } from "../core/errors";
 import { copySelection } from "../core/iterate";
 import { copyTarget, nodeMarker } from "../core/pageInput";
 import { resolveFromRoot } from "../core/paths";
@@ -60,11 +59,11 @@ function copyShortcut(e: KeyboardEvent, opts: Options): void {
     // 立即拦掉原生复制，避免默认动作在异步解码完成后覆盖图片；不改画板，也不写节点标记或内存剪贴板。
     e.preventDefault();
     const src = fileUrl(resolveFromRoot(userRoot, target.node.path));
-    void copyImageToClipboard(src)
-      .then((failure) => {
-        if (failure) opts.toast(COPY_TEXT.imageFailed(COPY_TEXT.imageReason[failure]));
-      })
-      .catch((error) => opts.toast(COPY_TEXT.imageFailed(errorText(error))));
+    // copyImageToClipboard 不抛异常：意外异常也收成失败结果，这里不必再兜一层。
+    void copyImageToClipboard(src).then((failure) => {
+      // 失败按类别给明确提示，都指向同一节点的「另存为…」下载；不自动下载，也不宣称已读回系统剪贴板。
+      if (failure) opts.toast(COPY_TEXT.imageFailed(COPY_TEXT.imageFailureReason(failure)));
+    });
     return;
   }
   const clip = copySelection(board, selected);

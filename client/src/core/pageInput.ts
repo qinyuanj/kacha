@@ -44,6 +44,25 @@ export const PASTE_NAME_PREFIX = "粘贴";
 /** 画布坐标。 */
 export type PastePos = [number, number];
 
+/** 剪贴板内容的样子：决定「没有受支持图片」时给用户哪一句可操作的原因。 */
+export type PasteContent = "file" | "uri" | "html" | "text" | "none";
+
+/** 内嵌 data URL 解码失败的分类（#114）：每一类对应一句用户可见原因。 */
+export interface PasteFailures {
+  /** 载荷解不出来，或不是一个完整的图片 data URL。 */
+  invalid: number;
+  /** 媒体类型不在既有格式清单里（例如 svg）。 */
+  unsupported: number;
+  /** 单张超过粘贴上限。 */
+  tooLarge: number;
+}
+
+/**
+ * 有没有失败项：invalid + unsupported + tooLarge 的求和只在这里做一次。
+ * 分派与界面层都问它，别各写一遍求和。
+ */
+export const hasFailures = (failures: PasteFailures): boolean => failures.invalid + failures.unsupported + failures.tooLarge > 0;
+
 /** 剪贴板快照：由界面层从 paste 事件里读出来（这里不碰 ClipboardEvent）。 */
 export interface PasteFacts {
   /** 剪贴板里的纯文本；没有为 null。 */
@@ -52,6 +71,12 @@ export interface PasteFacts {
   images: number;
   /** 读不到内容的文件个数（例如资源管理器里复制的文件）。 */
   opaqueFiles: number;
+  /** 剪贴板内容的样子：文件 / URI / HTML / 纯文本 / 空。 */
+  content: PasteContent;
+  /** 远程图片地址的个数：应用不抓，只用来给一个可操作的原因。 */
+  remote: number;
+  /** 解码失败的内嵌图片分类计数。 */
+  failures: PasteFailures;
 }
 
 /** 粘贴时的界面状态：判定只看这些，不看画板内容。 */
@@ -70,7 +95,7 @@ export interface PasteContext {
   at: PastePos;
 }
 
-export type PasteRefusal = "readOnly" | "staleNodeClip" | "filesNotReadable";
+export type PasteRefusal = "readOnly" | "staleNodeClip" | "filesNotReadable" | "noSupportedImage" | "remoteImage" | "imageFailed";
 
 /** 粘贴的分派结果：放行给浏览器 / 粘节点 / 把图片落成参考图 / 吞掉并提示。 */
 export type PasteAction = { kind: "pass" } | { kind: "pasteNodes" } | { kind: "importImages"; at: PastePos } | { kind: "refuse"; reason: PasteRefusal };
@@ -81,22 +106,42 @@ function markerPaste(context: PasteContext): PasteAction {
   return context.hasNodeClip ? { kind: "pasteNodes" } : { kind: "refuse", reason: "staleNodeClip" };
 }
 
+/** 输入框里粘非空文本：任何非空文本（包括一串图片 data URL）都交给输入框自己，不改判成粘图片（#98）。 */
+function textInputPaste(facts: PasteFacts, context: PasteContext): PasteAction | null {
+  return context.textFocus && facts.text !== null ? { kind: "pass" } : null;
+}
+
+/** 剪贴板里有受支持图片：落成参考图节点；只读画板拒绝。 */
+function imagePaste(facts: PasteFacts, context: PasteContext): PasteAction | null {
+  if (facts.images <= 0) return null;
+  if (context.readOnly) return { kind: "refuse", reason: "readOnly" };
+  return { kind: "importImages", at: context.at };
+}
+
+/** 内容看似是文件 / 图片 / HTML / URI 却拿不到受支持图片：给一条可操作的原因，不静默。 */
+function noImagePaste(facts: PasteFacts): PasteAction | null {
+  // 远程地址：应用不去抓，也不把地址写进提示，只给用户一条可操作的原因。
+  if (facts.remote > 0) return { kind: "refuse", reason: "remoteImage" };
+  // 读不到内容的文件：浏览器不给页面读文件本身，只能提示用户拖进来。
+  if (facts.opaqueFiles > 0) return { kind: "refuse", reason: "filesNotReadable" };
+  // 内嵌图片解不开：按失败分类给原因。
+  if (hasFailures(facts.failures)) return { kind: "refuse", reason: "imageFailed" };
+  // 文件 / HTML / URI 类内容里没有受支持图片：提示改用文件。
+  if (facts.content === "file" || facts.content === "html" || facts.content === "uri") return { kind: "refuse", reason: "noSupportedImage" };
+  return null;
+}
+
 /**
  * 一个 Ctrl+V 落在哪条路上：先看有没有画板与模态，再看剪贴板里是什么。
  * 顺序照 ADR 0021：标记优先于图片，避免复制节点后立刻粘贴粘出几小时前的旧截图。
+ *
+ * #114 补：内嵌 data URL 解出来的图片与文件、图片条目同路；有受支持图片就导入，
+ * 只剩远程地址或没有受支持图片时给一个可操作的原因，空剪贴板与普通纯文本照旧放行。
  */
 export function dispatchPaste(facts: PasteFacts, context: PasteContext): PasteAction {
-  if (!context.board) return { kind: "pass" };
-  if (context.modal) return { kind: "pass" };
+  if (!context.board || context.modal) return { kind: "pass" };
   if (isNodeMarker(facts.text)) return markerPaste(context);
-  // 输入框里粘文本照旧：只有「没有文本」（纯图片或文件）时才轮到下面的分支。
-  if (context.textFocus && facts.text !== null) return { kind: "pass" };
-  if (facts.images > 0) {
-    if (context.readOnly) return { kind: "refuse", reason: "readOnly" };
-    return { kind: "importImages", at: context.at };
-  }
-  if (facts.opaqueFiles > 0) return { kind: "refuse", reason: "filesNotReadable" };
-  return { kind: "pass" };
+  return textInputPaste(facts, context) ?? imagePaste(facts, context) ?? noImagePaste(facts) ?? { kind: "pass" };
 }
 
 const pad2 = (n: number): string => String(n).padStart(2, "0");
