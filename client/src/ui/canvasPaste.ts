@@ -1,11 +1,12 @@
 // 页面级粘贴接管（#96）：分派是纯逻辑（core/pageInput 的 dispatchPaste），这里只做事件读数、粘贴落点与画板写入。
 // 监听挂在 window 上而不是画布元素：焦点在工具栏、标签栏时粘贴也落图；没有画板时画布不挂载，登录页粘贴不受影响。
+// #114：文件列表、图片条目与内嵌图片 data URL 都汇成同一份图片集合，远程图片地址只用来给原因、绝不主动去抓。
 import { useEffect, useRef, type RefObject } from "react";
 import type { BoardChange } from "../core/edit";
-import { dispatchPaste } from "../core/pageInput";
+import { dispatchPaste, type PasteFailures } from "../core/pageInput";
 import { isEditableTarget } from "../shell/pageInput";
-import { pasteRefusalText } from "./boardText";
-import { clipboardImageFiles, normalizeClipboardImages } from "./clipboardImages";
+import { pasteImageFailureText, pasteRefusalText } from "./boardText";
+import { clipboardImageFiles, decodeClipboardDataUrls, isDataUrlText, normalizeClipboardImages } from "./clipboardImages";
 import { nextPasteClip, readClipboard, writeClipboard } from "./canvasKeyboard";
 import { posOf } from "./canvasPoint";
 
@@ -41,7 +42,7 @@ export function useCanvasPaste({
   toast,
   importPastedImages,
 }: Options): void {
-  // 粘贴落点跟着鼠标：记下最后在画布内的位置（没有则取视口中心）。
+  // 粘贴落点跟着鼠标：记下最后在画布内的位置（没有则取视口中央）。
   const lastPointer = useRef<{ x: number; y: number } | null>(null);
   // 坐标换算只在粘贴那一刻用（不必随它重挂监听）：调用方常写成箭头包装，每次渲染都是新函数，经 ref 取最新一版。
   const positionOf = useRef(screenToFlowPosition);
@@ -59,19 +60,42 @@ export function useCanvasPaste({
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const data = event.clipboardData;
-      // 统一读法：文件列表与图片条目都进来，出一份有序、去重的图片集合（见 clipboardImages）。
-      const normalized = normalizeClipboardImages({ files: data?.files ?? null, items: data?.items ?? null });
-      const images = clipboardImageFiles(normalized.images);
+      const text = data?.getData("text/plain") || null;
+      // 统一读法：文件列表、图片条目与内嵌 data URL 都进来，出一份有序、去重的图片集合（见 clipboardImages）。
+      const normalized = normalizeClipboardImages({
+        files: data?.files ?? null,
+        items: data?.items ?? null,
+        text,
+        html: data?.getData("text/html") || null,
+        uri: data?.getData("text/uri-list") || null,
+      });
+      // 内嵌 data URL 在这一步解成真实字节：解不开的分类计数，同批其它图片照旧能进链路。
+      const decoded = decodeClipboardDataUrls(normalized.images);
+      const failures: PasteFailures = decoded.failures;
+      const images = clipboardImageFiles(decoded.images);
       const at = posOf(lastPointer.current ? positionOf.current(lastPointer.current) : centerPosition());
       const action = dispatchPaste(
-        { text: data?.getData("text/plain") || null, images: images.length, opaqueFiles: normalized.opaque },
+        {
+          text,
+          images: images.length,
+          opaqueFiles: normalized.opaque,
+          content: normalized.content,
+          remote: normalized.remote,
+          textIsDataUrl: isDataUrlText(text),
+          failures,
+        },
         // board 恒为 true：画布只在有画板时挂载，「没有画板就放行」由登录页 / 空工作台不挂载兑现。
         { board: true, readOnly, modal: modalOpen || dialogOpen.current, textFocus: isEditableTarget(document.activeElement), hasNodeClip: (readClipboard()?.nodes.length ?? 0) > 0, at },
       );
       if (action.kind === "pass") return;
       // 落到这一步都是本应用要处理 / 要拒绝的粘贴：吞掉，免得浏览器再往别处塞一份。
       event.preventDefault();
-      if (action.kind === "refuse") return toast(pasteRefusalText(action.reason));
+      if (action.kind === "refuse") {
+        // 解码失败的原因逐类说明（不带任何来源地址）；其它拒绝原因各有固定文案。
+        return toast(action.reason === "imageFailed" ? pasteImageFailureText(failures) : pasteRefusalText(action.reason));
+      }
+      // 混合内容里只要有可读图片就导入：解不开的那几张单独说明，不影响其余图片落盘。
+      if (failures.invalid + failures.unsupported + failures.tooLarge > 0) toast(pasteImageFailureText(failures));
       if (action.kind === "importImages") return void importPastedImages(images, { x: action.at[0], y: action.at[1] });
       // 含节点标记却内存剪贴板为空的分支已被分派拦下，这里必有内容。
       const clip = readClipboard();
