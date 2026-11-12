@@ -1,0 +1,83 @@
+{
+  "startedAt": "2026-11-12T07:32:47.866Z",
+  "os": "Windows 11 Pro",
+  "origin": "http://198.18.0.1:18221",
+  "httpsOrigin": "https://198.18.0.1:6360",
+  "runs": [
+    {
+      "browser": "edge",
+      "mode": "policy",
+      "executablePath": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+      "args": [
+        "--no-first-run"
+      ],
+      "origin": "http://198.18.0.1:18221",
+      "actualVersion": "158.0.4370.16",
+      "policyPage": "策略\n重新加载策略\n导出到 JSON\n显示没有值的策略\n状态\nMicrosoft Edge 更新\n版本:\nMicrosoft Edge Policies\n\n策略名称\n\n策略值\n\n来源\n\n应用于\n\n等级\n\n状态\n\n显示更多\n\nAlternateErrorPagesEnabled\nfalse\n平台\n设备\n强制\n确定\nDefaultBrowserSettingEnabled\nfalse\n平台\n设备\n强制\n确定\nDefaultBrowserSettingsCampaignEnabled\nfalse\n平台\n设备\n强制\n确定\nDiagnosticData\n0\n平台\n设备\n强制\n确定\nEdgeShoppingAssistantEnabled\nfalse\n平台\n设备\n强制\n确定\nHideFirstRunExperience\nfalse\n平台\n设备\n强制\n确定\nNewTabPageContentEnabled\nfalse\n平台\n设备\n强制\n确定\nNewTabPageHideDefaultTopSites\ntrue\n平台\n设备\n强制\n确定\nPersonalizationReportingEnabled\nfalse\n平台\n设备\n强制\n确定\nShowAcrobatSubscriptionButton\nfalse\n平台\n设备\n强制\n确定\nShowRecommendationsEnabled\nfalse\n平台\n设备\n强制\n确定\nSpotlightExperiencesAndRecommendationsEnabled\nfalse\n平台\n设备\n强制\n确定\nTabServicesEnabled\nfalse\n平台\n设备\n强制\n确定\nUserFeedbackAllowed\nfalse\n平台\n设备\n强制\n确定\nWalletDonationEnabled\nfalse\n平台\n设备\n强制\n确定\nInsecureOriginsTreatedAsSecure\n{\"1\":\"http://198.18.0.1:18221\"}\n平台\n当前用户\n强制\n错误\nPolicy Precedence\n\n策略名称\n\n策略值\n\n来源\n\n应用于\n\n等级\n\n状态\n\n显示更多\n\n未设置策略\n已重新加载策略",
+      "candidate": "async-write",
+      "before": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [],
+        "dropEvents": []
+      },
+      "operationError": null,
+      "after": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [
+          {
+            "kind": "async-write",
+            "api": {
+              "isSecureContext": false,
+              "clipboardType": "undefined",
+              "clipboardWriteType": "undefined",
+              "clipboardItemType": "undefined",
+              "execCommandType": "function",
+              "dataTransferType": "function",
+              "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+            },
+            "copyEvent": false,
+            "error": {
+              "name": "Error",
+              "message": "ASYNC_CLIPBOARD_API_UNAVAILABLE",
+              "String": "Error: ASYNC_CLIPBOARD_API_UNAVAILABLE"
+            }
+          }
+        ],
+        "dropEvents": []
+      },
+      "clipboard": {
+        "formats": [],
+        "nativeFormats": [],
+        "hasImage": false,
+        "hasBitmapFormat": false
+      },
+      "protectedRequests": [
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        }
+      ]
+    }
+  ],
+  "finishedAt": "2026-11-12T07:32:56.701Z"
+}

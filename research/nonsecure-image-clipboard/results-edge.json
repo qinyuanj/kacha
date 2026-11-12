@@ -1,0 +1,1327 @@
+{
+  "startedAt": "2026-11-12T07:39:52.088Z",
+  "os": "Windows 11 Pro",
+  "origin": "http://198.18.0.1:3621",
+  "httpsOrigin": "https://198.18.0.1:3622",
+  "runs": [
+    {
+      "browser": "edge",
+      "mode": "http",
+      "executablePath": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+      "args": [
+        "--no-first-run"
+      ],
+      "origin": "http://198.18.0.1:3621",
+      "actualVersion": "158.0.4370.16",
+      "candidate": "exec-img",
+      "before": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [],
+        "dropEvents": []
+      },
+      "operationError": null,
+      "after": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [
+          {
+            "kind": "exec-img",
+            "api": {
+              "isSecureContext": false,
+              "clipboardType": "undefined",
+              "clipboardWriteType": "undefined",
+              "clipboardItemType": "undefined",
+              "execCommandType": "function",
+              "dataTransferType": "function",
+              "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+            },
+            "copyEvent": true,
+            "copyTypesBefore": [],
+            "returnValue": true
+          }
+        ],
+        "dropEvents": []
+      },
+      "clipboard": {
+        "formats": [
+          "Chromium internal source RFH token",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard"
+        ],
+        "nativeFormats": [
+          "Chromium internal source RFH token",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard"
+        ],
+        "hasImage": false,
+        "hasBitmapFormat": false,
+        "hasVerifiedImage": false
+      },
+      "protectedRequests": [
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "mode": "http",
+      "executablePath": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+      "args": [
+        "--no-first-run"
+      ],
+      "origin": "http://198.18.0.1:3621",
+      "actualVersion": "158.0.4370.16",
+      "candidate": "exec-canvas",
+      "before": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [],
+        "dropEvents": []
+      },
+      "operationError": null,
+      "after": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [
+          {
+            "kind": "exec-canvas",
+            "api": {
+              "isSecureContext": false,
+              "clipboardType": "undefined",
+              "clipboardWriteType": "undefined",
+              "clipboardItemType": "undefined",
+              "execCommandType": "function",
+              "dataTransferType": "function",
+              "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+            },
+            "copyEvent": true,
+            "copyTypesBefore": [],
+            "returnValue": true
+          }
+        ],
+        "dropEvents": []
+      },
+      "clipboard": {
+        "formats": [
+          "HTML Format",
+          "System.String",
+          "UnicodeText",
+          "Text",
+          "Chromium internal source RFH token",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard",
+          "Locale",
+          "OEMText"
+        ],
+        "nativeFormats": [
+          "HTML Format",
+          "UnicodeText",
+          "Chromium internal source RFH token",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard",
+          "Locale",
+          "Text",
+          "OEMText"
+        ],
+        "hasImage": false,
+        "HTML Format": {
+          "length": 250,
+          "hasImg": false,
+          "hasDataUrl": false,
+          "excerpt": "Version:0.9\r\nStartHTML:0000000140\r\nEndHTML:0000000250\r\nStartFragment:0000000176\r\nEndFragment:0000000214\r\nSourceURL:http://198.18.0.1:3621/\r\n<html>\r\n<body>\r\n<!--StartFragment--><br class=\"Apple-interchange-newline\"><!--EndFragment-->\r\n</body>\r\n</html>"
+        },
+        "hasBitmapFormat": false,
+        "hasVerifiedImage": false
+      },
+      "protectedRequests": [
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "mode": "http",
+      "executablePath": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+      "args": [
+        "--no-first-run"
+      ],
+      "origin": "http://198.18.0.1:3621",
+      "actualVersion": "158.0.4370.16",
+      "candidate": "copy-event",
+      "before": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [],
+        "dropEvents": []
+      },
+      "operationError": null,
+      "after": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [
+          {
+            "kind": "copy-event",
+            "api": {
+              "isSecureContext": false,
+              "clipboardType": "undefined",
+              "clipboardWriteType": "undefined",
+              "clipboardItemType": "undefined",
+              "execCommandType": "function",
+              "dataTransferType": "function",
+              "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+            },
+            "copyEvent": true,
+            "setData": {
+              "type": "image/png",
+              "ok": true
+            },
+            "copyTypesAfter": [
+              "image/png",
+              "text/plain"
+            ],
+            "copyTypesBefore": [
+              "image/png",
+              "text/plain"
+            ],
+            "returnValue": true
+          }
+        ],
+        "dropEvents": []
+      },
+      "clipboard": {
+        "formats": [
+          "System.String",
+          "UnicodeText",
+          "Text",
+          "Chromium internal source RFH token",
+          "Chromium Web Custom MIME Data Format",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard",
+          "Locale",
+          "OEMText"
+        ],
+        "nativeFormats": [
+          "UnicodeText",
+          "Chromium internal source RFH token",
+          "Chromium Web Custom MIME Data Format",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard",
+          "Locale",
+          "Text",
+          "OEMText"
+        ],
+        "hasImage": false,
+        "hasBitmapFormat": false,
+        "hasVerifiedImage": false
+      },
+      "protectedRequests": [
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "mode": "http",
+      "executablePath": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+      "args": [
+        "--no-first-run"
+      ],
+      "origin": "http://198.18.0.1:3621",
+      "actualVersion": "158.0.4370.16",
+      "candidate": "copy-event-web",
+      "before": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [],
+        "dropEvents": []
+      },
+      "operationError": null,
+      "after": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [
+          {
+            "kind": "copy-event-web",
+            "api": {
+              "isSecureContext": false,
+              "clipboardType": "undefined",
+              "clipboardWriteType": "undefined",
+              "clipboardItemType": "undefined",
+              "execCommandType": "function",
+              "dataTransferType": "function",
+              "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+            },
+            "copyEvent": true,
+            "setData": {
+              "type": "web image/png",
+              "ok": true
+            },
+            "copyTypesAfter": [
+              "web image/png",
+              "text/plain"
+            ],
+            "copyTypesBefore": [
+              "web image/png",
+              "text/plain"
+            ],
+            "returnValue": true
+          }
+        ],
+        "dropEvents": []
+      },
+      "clipboard": {
+        "formats": [
+          "System.String",
+          "UnicodeText",
+          "Text",
+          "Chromium internal source RFH token",
+          "Chromium Web Custom MIME Data Format",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard",
+          "Locale",
+          "OEMText"
+        ],
+        "nativeFormats": [
+          "UnicodeText",
+          "Chromium internal source RFH token",
+          "Chromium Web Custom MIME Data Format",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard",
+          "Locale",
+          "Text",
+          "OEMText"
+        ],
+        "hasImage": false,
+        "hasBitmapFormat": false,
+        "hasVerifiedImage": false
+      },
+      "protectedRequests": [
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "mode": "http",
+      "executablePath": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+      "args": [
+        "--no-first-run"
+      ],
+      "origin": "http://198.18.0.1:3621",
+      "actualVersion": "158.0.4370.16",
+      "candidate": "async-write",
+      "before": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [],
+        "dropEvents": []
+      },
+      "operationError": null,
+      "after": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [
+          {
+            "kind": "async-write",
+            "api": {
+              "isSecureContext": false,
+              "clipboardType": "undefined",
+              "clipboardWriteType": "undefined",
+              "clipboardItemType": "undefined",
+              "execCommandType": "function",
+              "dataTransferType": "function",
+              "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+            },
+            "copyEvent": false,
+            "error": {
+              "name": "Error",
+              "message": "ASYNC_CLIPBOARD_API_UNAVAILABLE",
+              "String": "Error: ASYNC_CLIPBOARD_API_UNAVAILABLE"
+            }
+          }
+        ],
+        "dropEvents": []
+      },
+      "clipboard": {
+        "formats": [],
+        "nativeFormats": [],
+        "hasImage": false,
+        "hasBitmapFormat": false,
+        "hasVerifiedImage": false
+      },
+      "protectedRequests": [
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "mode": "http",
+      "executablePath": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+      "args": [
+        "--no-first-run"
+      ],
+      "origin": "http://198.18.0.1:3621",
+      "actualVersion": "158.0.4370.16",
+      "candidate": "data-transfer",
+      "before": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [],
+        "dropEvents": []
+      },
+      "operationError": null,
+      "after": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [
+          {
+            "kind": "data-transfer",
+            "api": {
+              "isSecureContext": false,
+              "clipboardType": "undefined",
+              "clipboardWriteType": "undefined",
+              "clipboardItemType": "undefined",
+              "execCommandType": "function",
+              "dataTransferType": "function",
+              "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+            },
+            "copyEvent": false,
+            "dataTransfer": {
+              "types": [
+                "Files"
+              ],
+              "files": 1,
+              "eventDispatched": true
+            }
+          }
+        ],
+        "dropEvents": []
+      },
+      "clipboard": {
+        "formats": [],
+        "nativeFormats": [],
+        "hasImage": false,
+        "hasBitmapFormat": false,
+        "hasVerifiedImage": false
+      },
+      "protectedRequests": [
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "mode": "http",
+      "executablePath": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+      "args": [
+        "--no-first-run"
+      ],
+      "origin": "http://198.18.0.1:3621",
+      "actualVersion": "158.0.4370.16",
+      "candidate": "native-drag-canvas",
+      "before": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [],
+        "dropEvents": []
+      },
+      "operationError": null,
+      "after": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [],
+        "dropEvents": [
+          {
+            "type": "dragstart",
+            "source": "canvas",
+            "types": [
+              "image/png",
+              "Files"
+            ],
+            "files": 1
+          },
+          {
+            "type": "drop",
+            "types": [
+              "text/plain",
+              "image/png"
+            ],
+            "files": 0
+          }
+        ]
+      },
+      "clipboard": {
+        "formats": [],
+        "nativeFormats": [],
+        "hasImage": false,
+        "hasBitmapFormat": false,
+        "hasVerifiedImage": false
+      },
+      "protectedRequests": [
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "mode": "http",
+      "executablePath": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+      "args": [
+        "--no-first-run"
+      ],
+      "origin": "http://198.18.0.1:3621",
+      "actualVersion": "158.0.4370.16",
+      "menu": {
+        "invoked": true,
+        "name": "复制图像(Y)",
+        "menuNames": [
+          "在新标签页中打开图像(O)",
+          "将图像另存为(V)",
+          "复制图像(Y)"
+        ]
+      },
+      "candidate": "native-context-menu-copy-image",
+      "before": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [],
+        "dropEvents": []
+      },
+      "operationError": null,
+      "after": {
+        "api": {
+          "isSecureContext": false,
+          "clipboardType": "undefined",
+          "clipboardWriteType": "undefined",
+          "clipboardItemType": "undefined",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [],
+        "dropEvents": []
+      },
+      "clipboard": {
+        "formats": [
+          "PNG",
+          "Format17",
+          "HTML Format",
+          "UniformResourceLocatorW",
+          "Chromium internal source RFH token",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard",
+          "System.Drawing.Bitmap",
+          "Bitmap",
+          "DeviceIndependentBitmap"
+        ],
+        "nativeFormats": [
+          "PNG",
+          "Format17",
+          "HTML Format",
+          "UniformResourceLocatorW",
+          "Chromium internal source RFH token",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard",
+          "Bitmap",
+          "DeviceIndependentBitmap"
+        ],
+        "hasImage": true,
+        "PNG": {
+          "length": 87,
+          "sha256": "01be51919bebc1925950d68c80527e8e2450f6bc8deeab326be1a5fc8ab73ad4",
+          "signatureValid": true
+        },
+        "DeviceIndependentBitmap": {
+          "length": 44,
+          "sha256": "471e14d7b4f7e876596956850541b901edeff6b5551eff4f7c8657fc15478aaf",
+          "headerSize": 40,
+          "width": 1,
+          "height": 1,
+          "bitCount": 32
+        },
+        "Bitmap": {
+          "width": 1,
+          "height": 1,
+          "pixelFormat": "Format32bppRgb",
+          "pngLength": 120,
+          "pngSha256": "a0eeb0b41efbbde3e908531c016bab32d70a63f6c2baa892ea508a6a25ed5ec2"
+        },
+        "HTML Format": {
+          "length": 226,
+          "hasImg": true,
+          "hasDataUrl": false,
+          "excerpt": "Version:0.9\r\nStartHTML:0000000105\r\nEndHTML:0000000226\r\nStartFragment:0000000141\r\nEndFragment:0000000190\r\n<html>\r\n<body>\r\n<!--StartFragment--><img src=\"http://198.18.0.1:3621/protected.png\"/><!--EndFragment-->\r\n</body>\r\n</html>"
+        },
+        "hasBitmapFormat": true,
+        "hasVerifiedImage": true
+      },
+      "protectedRequests": [
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "mode": "flag",
+      "executablePath": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+      "args": [
+        "--no-first-run",
+        "--unsafely-treat-insecure-origin-as-secure=http://198.18.0.1:3621"
+      ],
+      "origin": "http://198.18.0.1:3621",
+      "actualVersion": "158.0.4370.16",
+      "candidate": "async-write",
+      "before": {
+        "api": {
+          "isSecureContext": true,
+          "clipboardType": "object",
+          "clipboardWriteType": "function",
+          "clipboardItemType": "function",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [],
+        "dropEvents": []
+      },
+      "operationError": null,
+      "after": {
+        "api": {
+          "isSecureContext": true,
+          "clipboardType": "object",
+          "clipboardWriteType": "function",
+          "clipboardItemType": "function",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [
+          {
+            "kind": "async-write",
+            "api": {
+              "isSecureContext": true,
+              "clipboardType": "object",
+              "clipboardWriteType": "function",
+              "clipboardItemType": "function",
+              "execCommandType": "function",
+              "dataTransferType": "function",
+              "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+            },
+            "copyEvent": false,
+            "write": "resolved"
+          }
+        ],
+        "dropEvents": []
+      },
+      "clipboard": {
+        "formats": [
+          "PNG",
+          "Format17",
+          "Chromium internal source RFH token",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard",
+          "System.Drawing.Bitmap",
+          "Bitmap",
+          "DeviceIndependentBitmap"
+        ],
+        "nativeFormats": [
+          "PNG",
+          "Format17",
+          "Chromium internal source RFH token",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard",
+          "Bitmap",
+          "DeviceIndependentBitmap"
+        ],
+        "hasImage": true,
+        "PNG": {
+          "length": 87,
+          "sha256": "01be51919bebc1925950d68c80527e8e2450f6bc8deeab326be1a5fc8ab73ad4",
+          "signatureValid": true
+        },
+        "DeviceIndependentBitmap": {
+          "length": 44,
+          "sha256": "471e14d7b4f7e876596956850541b901edeff6b5551eff4f7c8657fc15478aaf",
+          "headerSize": 40,
+          "width": 1,
+          "height": 1,
+          "bitCount": 32
+        },
+        "Bitmap": {
+          "width": 1,
+          "height": 1,
+          "pixelFormat": "Format32bppRgb",
+          "pngLength": 120,
+          "pngSha256": "a0eeb0b41efbbde3e908531c016bab32d70a63f6c2baa892ea508a6a25ed5ec2"
+        },
+        "hasBitmapFormat": true,
+        "hasVerifiedImage": true
+      },
+      "protectedRequests": [
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "mode": "https-untrusted",
+      "executablePath": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+      "args": [
+        "--no-first-run"
+      ],
+      "origin": "https://198.18.0.1:3622",
+      "actualVersion": "158.0.4370.16",
+      "navigation": "Error: page.goto: net::ERR_CERT_AUTHORITY_INVALID at https://198.18.0.1:3622/\nCall log:\n\u001b[2m  - navigating to \"https://198.18.0.1:3622/\", waiting until \"load\"\u001b[22m\n",
+      "clipboard": {
+        "formats": [],
+        "nativeFormats": [],
+        "hasImage": false,
+        "hasBitmapFormat": false,
+        "hasVerifiedImage": false
+      }
+    },
+    {
+      "browser": "edge",
+      "mode": "https",
+      "executablePath": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+      "args": [
+        "--no-first-run"
+      ],
+      "origin": "https://198.18.0.1:3622",
+      "actualVersion": "158.0.4370.16",
+      "candidate": "async-write",
+      "before": {
+        "api": {
+          "isSecureContext": true,
+          "clipboardType": "object",
+          "clipboardWriteType": "function",
+          "clipboardItemType": "function",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [],
+        "dropEvents": []
+      },
+      "operationError": null,
+      "after": {
+        "api": {
+          "isSecureContext": true,
+          "clipboardType": "object",
+          "clipboardWriteType": "function",
+          "clipboardItemType": "function",
+          "execCommandType": "function",
+          "dataTransferType": "function",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+        },
+        "events": [
+          {
+            "kind": "async-write",
+            "api": {
+              "isSecureContext": true,
+              "clipboardType": "object",
+              "clipboardWriteType": "function",
+              "clipboardItemType": "function",
+              "execCommandType": "function",
+              "dataTransferType": "function",
+              "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0"
+            },
+            "copyEvent": false,
+            "write": "resolved"
+          }
+        ],
+        "dropEvents": []
+      },
+      "clipboard": {
+        "formats": [
+          "PNG",
+          "Format17",
+          "Chromium internal source RFH token",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard",
+          "System.Drawing.Bitmap",
+          "Bitmap",
+          "DeviceIndependentBitmap"
+        ],
+        "nativeFormats": [
+          "PNG",
+          "Format17",
+          "Chromium internal source RFH token",
+          "Chromium internal source URL",
+          "CanIncludeInClipboardHistory",
+          "CanUploadToCloudClipboard",
+          "Bitmap",
+          "DeviceIndependentBitmap"
+        ],
+        "hasImage": true,
+        "PNG": {
+          "length": 87,
+          "sha256": "01be51919bebc1925950d68c80527e8e2450f6bc8deeab326be1a5fc8ab73ad4",
+          "signatureValid": true
+        },
+        "DeviceIndependentBitmap": {
+          "length": 44,
+          "sha256": "471e14d7b4f7e876596956850541b901edeff6b5551eff4f7c8657fc15478aaf",
+          "headerSize": 40,
+          "width": 1,
+          "height": 1,
+          "bitCount": 32
+        },
+        "Bitmap": {
+          "width": 1,
+          "height": 1,
+          "pixelFormat": "Format32bppRgb",
+          "pngLength": 120,
+          "pngSha256": "a0eeb0b41efbbde3e908531c016bab32d70a63f6c2baa892ea508a6a25ed5ec2"
+        },
+        "hasBitmapFormat": true,
+        "hasVerifiedImage": true
+      },
+      "protectedRequests": [
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        },
+        {
+          "url": "/protected.png",
+          "cookie": "kacha_probe=valid"
+        }
+      ]
+    }
+  ],
+  "finishedAt": "2026-11-12T07:40:27.817Z"
+}
