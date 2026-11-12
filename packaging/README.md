@@ -176,7 +176,7 @@ python packaging\verify.py
 
 脚本先预检构建输出目录的完整性标签（见下文），再依次跑打包脚本单测、前端单测、类型检查、e2e（4 个 worker）、服务端测试（`--no-fail-fast`）与质量门禁（见下文「质量门禁」）。每一项都会跑完，最后汇总；任一失败即以非 0 退出。只需重跑其中一项时，命令见 [verify.py](verify.py) 的 `COMMANDS`。
 
-非 Draft PR 会自动在 Windows CI 中运行常规 PR 验证，复用这里的默认验证入口，并把 PR 的实际目标分支显式传给质量门禁。目标分支引用缺失、历史不足或无法求 merge-base 都会使验证失败。PR 更新会取消同一 PR 的过期运行；直接 push 不触发 CI。CI 不运行 mutator，合入集成分支前仍须按下文手动运行增强质量验证。
+非 Draft PR 会自动在 Windows CI 中运行常规 PR 验证，复用这里的默认验证入口，并把 PR 的实际目标分支显式传给质量门禁。目标分支引用缺失、历史不足或无法求 merge-base 都会使验证失败。目标为 `main` 或 `integration/*` 时，同一个 PR Verify check 会先用 lockfile 内的 Playwright CLI 安装 Chromium，再通过现有 `--e2e` 强制开关运行全套 e2e（4 个 worker、真实服务端）；其他目标分支不安装 Chromium，也不运行 e2e。修改 PR 目标分支会重新触发验证并按新目标调整范围。PR 更新会取消同一 PR 的过期运行；直接 push 不触发 CI。CI 不运行 mutator，合入集成分支前仍须按下文手动运行增强质量验证。
 
 e2e 很慢，本地默认只在集成分支（`main`、`integration/*`）上跑：各票合完后手动跑一次全套。其他分支（`impl/*`、`spec/*` 等）和分离 HEAD 跳过 e2e，汇总里记为「跳过」；需要时加 `--e2e` 强制跑，并遵守仓库的授权规则。
 
