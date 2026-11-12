@@ -143,7 +143,7 @@ function recycledBoards(rig: Rig): string[] {
   });
 }
 
-// 本 smoke 随集成分支 pre-push 首次运行；实现分支只写测试，不运行 e2e。
+// 本 smoke 随集成分支验证首次运行；实现分支只写测试，不运行 e2e。
 test("整理可进入退出，收起阶段的画板归档后默认展开并保持只读", async ({ page, rig }) => {
   await enterWithKey(page, rig.baseURL, GOOD_KEY);
   await expect(page.locator(".tab").first()).toBeVisible();
