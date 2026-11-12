@@ -1,0 +1,116 @@
+name: PR Verification
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-verify-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: PR Verify
+    if: github.event.pull_request.draft == false
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+      PR_BASE: origin/${{ github.event.pull_request.base.ref }}
+    steps:
+      - name: Check out PR and full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 24 LTS
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          architecture: x64
+
+      - name: Set up Rust 1.99.1 MSVC
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
+        with:
+          toolchain: 1.99.1-x86_64-pc-windows-msvc
+
+      - name: Fetch the explicit PR base
+        shell: pwsh
+        run: git fetch --no-tags origin "+refs/heads/$($env:PR_BASE_REF):refs/remotes/origin/$($env:PR_BASE_REF)"
+
+      - name: Install locked client dependencies
+        run: npm --prefix client ci
+
+      - name: Install the integrity-checked quality tool
+        shell: python
+        env:
+          EXPECTED_INTEGRITY: sha512-5y3aGhMJOQoB1BJe1g07X6Kh+Q299/sn5cEH+uAbijri0j/q1IuYEohnAJsZWkn/QGrpnC9bWXeAK6hhKwJ/eA==
+        run: |
+          import base64
+          import hashlib
+          import hmac
+          import io
+          import json
+          import os
+          from pathlib import Path
+          import tarfile
+          from urllib.parse import urlsplit
+          from urllib.request import Request, urlopen
+
+          PACKAGE = "@dsh-uml-viewer/win32-x64"
+          VERSION = "1.0.0"
+          METADATA_URL = "https://registry.npmjs.org/@dsh-uml-viewer%2Fwin32-x64/1.0.0"
+          TARBALL_URL = "https://registry.npmjs.org/@dsh-uml-viewer/win32-x64/-/win32-x64-1.0.0.tgz"
+          MEMBER_NAME = "package/bin/uml-viewer.exe"
+
+          def download(url):
+              request = Request(url, headers={"User-Agent": "kacha-pr-verification"})
+              with urlopen(request, timeout=60) as response:
+                  return response.read()
+
+          metadata = json.loads(download(METADATA_URL))
+          if metadata.get("name") != PACKAGE or metadata.get("version") != VERSION:
+              raise RuntimeError("npm registry returned metadata for an unexpected package")
+          distribution = metadata.get("dist") or {}
+          integrity = distribution.get("integrity", "")
+          expected_integrity = os.environ["EXPECTED_INTEGRITY"]
+          if not integrity.startswith("sha512-") or not hmac.compare_digest(integrity, expected_integrity):
+              raise RuntimeError("npm registry integrity does not match the reviewed SHA-512 SRI")
+          if distribution.get("tarball") != TARBALL_URL:
+              raise RuntimeError("npm registry returned an unexpected tarball URL")
+          parsed = urlsplit(TARBALL_URL)
+          if parsed.scheme != "https" or parsed.netloc != "registry.npmjs.org":
+              raise RuntimeError("quality tool tarball must come from the official npm registry over HTTPS")
+
+          archive_bytes = download(TARBALL_URL)
+          actual_integrity = "sha512-" + base64.b64encode(hashlib.sha512(archive_bytes).digest()).decode("ascii")
+          if not hmac.compare_digest(actual_integrity, integrity):
+              raise RuntimeError("quality tool tarball failed SHA-512 integrity verification")
+
+          with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as archive:
+              members = [member for member in archive.getmembers() if member.name == MEMBER_NAME]
+              if len(members) != 1 or not members[0].isreg():
+                  raise RuntimeError("quality tool archive does not contain exactly one regular uml-viewer.exe")
+              extracted = archive.extractfile(members[0])
+              if extracted is None:
+                  raise RuntimeError("quality tool binary could not be read from its archive")
+              binary_bytes = extracted.read()
+
+          binary = Path(os.environ["RUNNER_TEMP"]) / "kacha-quality-tools" / "uml-viewer.exe"
+          binary.parent.mkdir(parents=True, exist_ok=True)
+          binary.write_bytes(binary_bytes)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8", newline="") as environment:
+              environment.write(f"UML_VIEWER_BIN={binary.resolve()}\n")
+          print(f"Verified {PACKAGE}@{VERSION}: {integrity}")
+
+      - name: Run PR verification against its actual base
+        shell: pwsh
+        run: python packaging/verify.py --base "$env:PR_BASE"
