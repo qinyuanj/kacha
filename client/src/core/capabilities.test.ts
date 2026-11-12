@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { imageRuleViolations } from "./graph";
 import {
   BUILTIN_TABLE,
+  effectiveTable,
   isSupported,
   mergeOverride,
   modelsByTier,
@@ -70,6 +71,35 @@ describe("解析与校验", () => {
   it("拒绝更新版本的表", () => {
     const result = parseCapabilityTable({ format_version: 2, models: [] });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("读入覆盖文件", () => {
+  it("没有覆盖文件：直接用内置表，不给错误", () => {
+    expect(effectiveTable(null)).toEqual({ table: BUILTIN_TABLE, error: null });
+  });
+
+  it("覆盖文件不是有效 JSON：整份忽略并说明原因", () => {
+    const result = effectiveTable("{ 这不是 JSON");
+    expect(result.table).toBe(BUILTIN_TABLE);
+    expect(result.error).toBe("能力表覆盖文件不是有效 JSON，已忽略");
+  });
+
+  it("覆盖文件不合 schema：整份忽略并带出字段原因", () => {
+    const bad = structuredClone(BUILTIN_TABLE) as unknown as { models: Record<string, unknown>[] };
+    bad.models[0].native_mask = "maybe";
+    const result = effectiveTable(JSON.stringify(bad));
+    expect(result.table).toBe(BUILTIN_TABLE);
+    expect(result.error).toContain("能力表覆盖文件已忽略");
+    expect(result.error).toContain("native_mask");
+  });
+
+  it("覆盖文件有效：与内置表按 model_id 合并，不给错误", () => {
+    const override = structuredClone(qwenPro());
+    override.workflows.image_edit.max_references = 5;
+    const result = effectiveTable(JSON.stringify({ format_version: 1, models: [override] }));
+    expect(result.error).toBeNull();
+    expect(result.table.models.find((m) => m.model_id === "qwen-image-3.0-pro")!.workflows.image_edit.max_references).toBe(5);
   });
 });
 
