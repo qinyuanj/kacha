@@ -36,6 +36,11 @@ class QualityGateTest(unittest.TestCase):
         self.assertIn([*QUALITY, "--mutate"], commands(["--quality"]))
         self.assertNotIn(QUALITY, commands(["--quality"]))
 
+    def test_an_explicit_base_is_forwarded_to_the_gate(self):
+        self.assertIn([*QUALITY, "--base", "origin/pr-base"], commands(["--base", "origin/pr-base"]))
+        selected = commands(["--quality", "--base", "origin/pr-base"])
+        self.assertIn([*QUALITY, "--mutate", "--base", "origin/pr-base"], selected)
+
 
 class PreflightOnlyTest(unittest.TestCase):
     def test_preflight_flag_checks_without_running_the_suite(self):
