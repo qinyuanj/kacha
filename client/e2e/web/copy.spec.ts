@@ -48,8 +48,9 @@ test("复制图片后回贴：形成新的参考图节点，画板原节点不�
   await page.keyboard.press("Control+c");
   await expect.poll(() => page.evaluate(() => (window as any).__kachaCopy.commands)).toBeGreaterThan(0);
   await expect.poll(() => page.evaluate(() => (window as any).__kachaCopy.events)).toBeGreaterThan(0);
-  // 交给浏览器的是这张图片本身，不是图片地址之外的东西。
-  expect(await page.evaluate(() => (window as any).__kachaCopy.src)).toContain(encodeURIComponent("导入参考图"));
+  // 交给浏览器的是这张参考图的地址（不是别的东西，也不是节点标记文本）。
+  // 地址形如 /api/fs/file?path=<用户数据根内的相对路径>：根前缀由客户端剥掉。
+  expect(await page.evaluate(() => (window as any).__kachaCopy.src)).toBe(`/api/fs/file?path=${encodeURIComponent(REF)}`);
   // 无论浏览器这条链成没成，复制都不该改画板。
   await expect.poll(() => refsOf().map((n: any) => n.id)).toEqual(["r1"]);
   await expect(page.locator(".react-flow__node-reference")).toHaveCount(1);
