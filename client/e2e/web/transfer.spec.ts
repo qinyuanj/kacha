@@ -1,15 +1,15 @@
 // 本机图片上传为参考图（文件选择器 / HTML5 拖入）、缺图重新定位、单张与整板结果下载（#28 新增场景）。
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { expect } from "@playwright/test";
 import { IMPORT_TEXT } from "../../src/ui/boardText";
 import { board, edge, png, promptNode, referenceNode, taskNode } from "../common/boards";
+import { importedReferencePath, sha256OfBase64 } from "../common/clipboard";
 import { unzip } from "../common/zip";
 import { DIR, FLASH, flashResult, taskFiles, TASK_ID } from "../common/layers";
 import { GOOD_KEY, test, type Rig } from "./rig";
 import { boardRelPath, dropFile, openApp, task } from "./kit";
 
-const sha = (b64: string) => createHash("sha256").update(Buffer.from(b64, "base64")).digest("hex");
+const sha = sha256OfBase64;
 const dropPng = (b64: string) => ({ name: "拖入.png", mimeType: "image/png", b64 });
 const savedBoard = (rig: Rig, title: string) => JSON.parse(readFileSync(`${rig.userRoot(GOOD_KEY)}/${boardRelPath(title)}`, "utf8"));
 
@@ -21,7 +21,7 @@ test("浏览器选择本机图片：上传进 导入参考图/，画板引用它
   await (await chooser).setFiles({ name: "本机猫.png", mimeType: "image/png", buffer: Buffer.from(image, "base64") });
   await expect(page.locator(".react-flow__node-reference")).toHaveCount(1);
   await expect(page.locator(".react-flow__node-reference img.thumb")).toBeVisible();
-  const rel = `导入参考图/${sha(image)}.png`;
+  const rel = importedReferencePath(sha(image));
   expect(existsSync(`${rig.userRoot(GOOD_KEY)}/${rel}`)).toBe(true);
   await expect.poll(() => savedBoard(rig, "上传").nodes.find((n: any) => n.type === "reference")?.path).toBe(rel);
   // 显示名保留本机文件名，而路径是用户数据根内的哈希文件。
@@ -86,7 +86,7 @@ test.describe("重新定位：缺图节点保留占位，可在用户数据根�
     await task(page, "r1").getByRole("button", { name: "选文件…" }).click();
     await (await chooser).setFiles({ name: "手选.png", mimeType: "image/png", buffer: Buffer.from(image, "base64") });
     await expect(task(page, "r1").locator("img.thumb")).toBeVisible();
-    await expect.poll(() => savedRefPath(rig)).toBe(`导入参考图/${sha(image)}.png`);
+    await expect.poll(() => savedRefPath(rig)).toBe(importedReferencePath(sha(image)));
   });
 });
 

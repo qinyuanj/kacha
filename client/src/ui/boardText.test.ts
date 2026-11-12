@@ -75,6 +75,16 @@ describe("粘贴文案（#96）", () => {
   it("超限提示里的上限来自那个跨层常量，不另写一份数字", () => {
     expect(PASTE_TEXT.tooLarge).toBe("图片超过 64 MB 上限，先压缩再粘贴");
   });
+
+  it("网络地址与「没有受支持图片」是两类原因，文案各自说清", () => {
+    // 网络地址：应用不抓，给一条「先保存到本机」的动作。
+    expect(PASTE_TEXT.remoteImage).toBe("剪贴板里是网络地址，Kacha 不会去下载它：请先把图片保存到本机，再拖进画板");
+    // 没有受支持图片：给「改用文件拖入 / 工具栏选择」的动作。
+    expect(PASTE_TEXT.noSupportedImage).toBe("剪贴板里没有可用的图片：请把图片文件拖进画板，或用工具栏的「＋ 参考图…」选择图片");
+    // 两句不能互相包含：用户要能分辨「是地址」与「是没图片」。
+    expect(PASTE_TEXT.remoteImage).not.toContain(PASTE_TEXT.noSupportedImage);
+    expect(PASTE_TEXT.noSupportedImage).not.toContain(PASTE_TEXT.remoteImage);
+  });
 });
 
 // 画布这层拆出来的文案（原先是散在各模块里的裸字面量）：这里照票面 / 拆分前的原文手写一份。

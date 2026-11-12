@@ -198,7 +198,8 @@ export function normalizeClipboardImages(contents: ClipboardContents): Clipboard
   const uri = (contents.uri ?? "").trim().split(/\r?\n/).map((s) => s.trim()).find((s) => s && !s.startsWith("#")) ?? "";
   if (HTTP_URL.test(uri)) remote += 1;
   const plain = text.trim();
-  if (HTTP_URL.test(plain) && !plain.includes(" ")) remote += 1;
+  // 纯文本里嵌着一个地址（散文中间夹一个链接）不算「剪贴板里是地址」：那种是普通文本，放行。
+  if (WHOLE_URL.test(plain)) remote += 1;
 
   const content = contentKind(contents);
   return { images, opaqueFiles, remote, content };
