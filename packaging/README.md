@@ -158,7 +158,7 @@ C:\kacha\kacha-server.exe cleanup restore --data-root D:\kacha-data "<批次>/us
 
 ## 设计规模内存实测
 
-设计规模是 12 人（见 `CONTEXT.md`）：它是容量与内存预算依据的规模假设，不是强制上限。压测脚本用真实 release 服务端和本地网关桩，按 `--users` 开同样多的线程，分别执行写结果、读图、上传并导入 v0.3.2 画板包、导出画板包；结束后、服务端退出前读一次操作系统记录的进程峰值内存（Windows：峰值工作集 `PeakWorkingSetSize`；Linux：`/proc/<pid>/status` 的 `VmHWM`），不受采样间隔影响。读不到峰值或超过预算（`--budget-mib`，默认 512）时以非 0 退出。
+设计规模是 12 人（见 `GLOSSARY.md`）：它是容量与内存预算依据的规模假设，不是强制上限。压测脚本用真实 release 服务端和本地网关桩，按 `--users` 开同样多的线程，分别执行写结果、读图、上传并导入 v0.3.2 画板包、导出画板包；结束后、服务端退出前读一次操作系统记录的进程峰值内存（Windows：峰值工作集 `PeakWorkingSetSize`；Linux：`/proc/<pid>/status` 的 `VmHWM`），不受采样间隔影响。读不到峰值或超过预算（`--budget-mib`，默认 512）时以非 0 退出。
 
 ```powershell
 python packaging\load_users.py --users 12 --output release\memory-12-users.json
