@@ -1,7 +1,7 @@
 // 模型能力表：模型决定能力，能力决定生成任务节点上露出的端口、开关与分辨率档。
 // 内置 JSON + 同 schema 覆盖文件，按 model_id 整条合并；不按模型名猜能力。
 import type { RegionRender } from "./board";
-import builtinJson from "./capabilities.builtin.json";
+import builtinJson from "./capabilities.builtin.json" with { type: "json" };
 
 export const CAPABILITY_FORMAT_VERSION = 1;
 
