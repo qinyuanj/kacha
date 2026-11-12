@@ -1,9 +1,10 @@
 // 剪贴板图片归一化（#113）与内嵌图片 data URL 解码（#114）：把原生 paste 事件里的文件列表、图片条目与
-// 内嵌图片 data URL 汇成一份有序、去重的图片集合，并给「看着像内容却拿不到受支持图片」一个可操作的原因。
-// 同一张图经多条途径重复暴露时只取一次；图片条目只认 getAsFile() 给出的真实字节，不凭 MIME 声明认定成功。
-// 远程图片地址只用来给原因：应用绝不主动去抓，也不出现在任何用户可见文案里。
+// 内嵌图片 data URL 汇成一份有序的图片集合，并给「看着像内容却拿不到受支持图片」一个可操作的原因。
+// 同一张图经多条途径重复暴露时只取一次（按内容判定，不按名字与大小）；图片条目只认 getAsFile() 给出的真实字节，
+// 不凭 MIME 声明认定成功。远程地址只用来给原因：应用绝不主动去抓，也不出现在任何用户可见文案里。
 import { MAX_PASTE_BYTES, type PasteContent, type PasteFailures } from "../core/pageInput";
 import { IMAGE_EXTENSIONS } from "../core/relocate";
+import { sha256Hex } from "../core/sha256";
 import { isImageFile } from "./canvasDrop";
 
 /** 剪贴板条目：只取粘贴逻辑用得到的部分（真浏览器里就是 DataTransferItem）。 */
@@ -34,56 +35,37 @@ export type ClipboardImage =
   | { source: "item"; file: File }
   | { source: "dataUrl"; dataUrl: string; file: File | null };
 
-/** 归一化结果：图片按事件里可确定的顺序排好；opaque 是「看着像内容却读不到受支持图片」的个数。 */
+/** 归一化结果：图片按事件里可确定的顺序排好；opaqueFiles 是「看着像内容却读不到受支持图片」的个数。 */
 export interface ClipboardImages {
   images: ClipboardImage[];
-  opaque: number;
-  /** 剪贴板里只是远程图片地址的个数：应用不抓，只用来给用户一个原因。 */
+  /** 读不到受支持图片的文件个数（资源管理器里复制的文件、取不到字节的图片条目）。 */
+  opaqueFiles: number;
+  /** 剪贴板里的网络地址个数：应用不抓，只用来给用户一个原因。 */
   remote: number;
   /** 剪贴板内容的样子：决定「没有受支持图片」时给哪句提示。 */
   content: PasteContent;
 }
 
 /**
- * 图片指纹：同一张图经文件列表与图片条目暴露时，名字、类型、大小一致，据此去重。
- * 两条途径给的是不同 File 实例，只能靠内容特征判断是不是同一张。
+ * 媒体类型 → 扩展名：只认既有格式清单（core/relocate 的 IMAGE_EXTENSIONS）里的那些，不另维护一份 MIME 表。
+ * 媒体类型的子类型本身就在清单里（png / jpg / jpeg / webp / gif / bmp / tif / tiff / heic / heif）；
+ * 带 x- 前缀的老写法（image/x-tiff）去掉前缀再认一次。
  */
-function fingerprint(file: File): string {
-  return `${file.name}\u0000${file.type}\u0000${file.size}`;
-}
-
-/** 媒体类型 → 扩展名：只认既有格式清单里的那些；svg 之类不在其中，算不受支持。 */
-const MIME_EXTENSIONS: Record<string, string> = {
-  png: "png",
-  jpeg: "jpg",
-  jpg: "jpg",
-  webp: "webp",
-  bmp: "bmp",
-  gif: "gif",
-  tif: "tif",
-  "x-tiff": "tif",
-  tiff: "tif",
-  heic: "heic",
-  heif: "heif",
-};
-
-/** 这个媒体类型受支持吗：能落到既有格式清单的扩展名才算。 */
 function extensionOf(mime: string): string | null {
-  const ext = MIME_EXTENSIONS[mime.slice("image/".length).toLowerCase()];
-  return ext && IMAGE_EXTENSIONS.includes(ext) ? ext : null;
-}
-
-/** 远程地址看起来是不是一张图片：只看路径后缀，绝不访问地址本身。 */
-function looksLikeImageUrl(url: string): boolean {
-  try {
-    const path = new URL(url).pathname.toLowerCase();
-    return IMAGE_EXTENSIONS.some((ext) => path.endsWith(`.${ext}`));
-  } catch {
-    return false;
+  const subtype = mime.slice(mime.indexOf("/") + 1).toLowerCase();
+  for (const candidate of [subtype, subtype.replace(/^x-/, "")]) {
+    if (IMAGE_EXTENSIONS.includes(candidate)) return candidate;
   }
+  return null;
 }
 
-/** HTML 里的 img 标签：远程图片地址藏在这里（只用来给原因，不去抓）。 */
+/** 一个网络地址：只看形状，绝不访问它。 */
+const HTTP_URL = /^https?:\/\//i;
+
+/** 整段文本就是一个网络地址（地址栏复制的链接）：算 URI 类内容，不是散文。 */
+const WHOLE_URL = /^https?:\/\/\S+$/;
+
+/** HTML 里的 img 标签：网络图片地址藏在这里（只用来给原因，不去抓）。 */
 const IMG_SRC = /<img\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
 
 /**
@@ -94,7 +76,8 @@ const DATA_URL_START = /data:image\/[a-z0-9][a-z0-9!#$&^_.+-]*[;,][^\s"'<>]*/gi;
 
 /**
  * 从一段文本里取出内嵌的图片 data URL（HTML 的 img src 与纯文本里的裸 data URL 都算）。
- * base64 载荷只吃 base64 字符，百分号编码的载荷吃到空白或引号为止，免得把后面的正文一起吞进来。
+ * 载荷吃到空白 / 引号 / 尖括号为止：不按 base64 字符集收，坏掉的载荷也要收进来，
+ * 否则「解不开」会被当成「没有这张图」，用户拿不到任何原因。
  */
 function dataUrlsIn(text: string): string[] {
   const out: string[] = [];
@@ -104,8 +87,6 @@ function dataUrlsIn(text: string): string[] {
     if (comma < 0) continue;
     const meta = raw.slice(0, comma);
     const body = raw.slice(comma + 1);
-    // 载荷吃到空白 / 引号 / 尖括号为止：不按 base64 字符集收，坏掉的载荷也要收进来，
-    // 否则「解不开」会被当成「没有这张图」，用户拿不到任何原因。
     const payload = /^[^\s"'<>]*/.exec(body)?.[0] ?? "";
     if (!payload) continue;
     out.push(`${meta},${payload}`);
@@ -113,43 +94,43 @@ function dataUrlsIn(text: string): string[] {
   return out;
 }
 
-/** 文本本身是不是一串图片 data URL（不是散文）：输入框里粘它按粘图片处理。 */
-export function isDataUrlText(text: string | null | undefined): boolean {
-  const trimmed = (text ?? "").trim();
-  if (!/^data:image\//i.test(trimmed)) return false;
-  const urls = dataUrlsIn(trimmed);
-  return urls.length === 1 && urls[0].length === trimmed.length;
-}
-
 /** data URL 的三段：媒体类型、是否 base64、载荷。 */
 interface DataUrlParts {
   mime: string;
   base64: boolean;
-  payload: string;
+  /** 载荷在原串里的起点与长度：超限的载荷不必真拷出来。 */
+  start: number;
+  length: number;
 }
 
-/** 解析一个完整的 data URL；不是图片 data URL 或形状不对时给 null。 */
+/**
+ * 解析一个 data URL 的形状：不是图片 data URL 或形状不对时给 null。
+ * 只给载荷的位置与长度，不拷载荷——超限的载荷有几百 MB，拷出来本身就白费内存。
+ */
 function parseDataUrl(url: string): DataUrlParts | null {
-  const m = /^data:(image\/[a-z0-9][a-z0-9!#$&^_.+-]*)(;[^,]*)?,([\s\S]*)$/i.exec(url.trim());
-  if (!m) return null;
-  return { mime: m[1].toLowerCase(), base64: /;base64(;|$)/i.test(m[2] ?? ""), payload: m[3] };
+  const trimmed = url.trim();
+  if (!/^data:image\/[a-z0-9][a-z0-9!#$&^_.+-]*(;[^,]*)?,/i.test(trimmed)) return null;
+  const comma = trimmed.indexOf(",");
+  const meta = trimmed.slice(0, comma);
+  return { mime: meta.slice(5, meta.indexOf(";") < 0 ? undefined : meta.indexOf(";")).toLowerCase(), base64: /;base64(;|$)/i.test(meta), start: comma + 1, length: trimmed.length - comma - 1 };
 }
 
-/** HTML 里指向远程的图片地址有几个：只记个数。 */
+/** HTML 里指向网络地址的图片有几个：只记个数。 */
 function remoteImageAddresses(html: string): number {
   let n = 0;
   for (const m of html.matchAll(IMG_SRC)) {
     const src = (m[1] ?? m[2] ?? m[3] ?? "").trim();
-    if (/^https?:\/\//i.test(src)) n += 1;
+    if (HTTP_URL.test(src)) n += 1;
   }
   return n;
 }
 
 /**
  * 剪贴板内容的样子：文件 → URI → HTML → 文本 → 空。
- * HTML 只有在带 img 标签（或没有纯文本可依）时才算 HTML 类，免得复制一段网页文字就被当成图片内容。
+ * 有 HTML 内容就算 HTML 类：即使同时带着纯文本，也不是「纯文本」这一种内容类别
+ * （#98：内容看似是 HTML 却拿不到受支持图片时要给明确提示，而不是放行）。
  */
-function contentKind(contents: ClipboardContents, htmlHasImage: boolean): PasteContent {
+function contentKind(contents: ClipboardContents): PasteContent {
   const files = contents.files;
   if (files && files.length > 0) return "file";
   const items = contents.items;
@@ -159,33 +140,31 @@ function contentKind(contents: ClipboardContents, htmlHasImage: boolean): PasteC
   if ((contents.uri ?? "").trim()) return "uri";
   const html = (contents.html ?? "").trim();
   const text = (contents.text ?? "").trim();
-  // 整段文本就是一个 http(s) 地址：算 URI 类内容（地址栏复制的链接），不是散文。
-  if (/^https?:\/\/\S+$/.test(text)) return "uri";
-  if (html && (htmlHasImage || !text)) return "html";
+  // 整段文本就是一个网络地址：算 URI 类内容（地址栏复制的链接），不是散文。
+  if (WHOLE_URL.test(text)) return "uri";
+  if (html) return "html";
   if (text) return "text";
   return "none";
 }
 
 /**
- * 把剪贴板里的图片读成一份有序、去重的集合。
+ * 把剪贴板里的图片读成一份有序的候选集合。
  *
  * 顺序：先文件列表（按列表原序），再图片条目（按条目原序），最后是内嵌 data URL——事件里能确定的顺序就这么多。
- * 去重：条目里已经由文件列表给出的那张不再算一份；同一条目重复出现也只算一份；同一串 data URL 也只算一份。
- * 读不到内容的（零字节、取不到文件、不是图片）计入 opaque，交给既有的失败反馈提示。
+ * 读不到内容的（零字节、取不到文件、不是图片）计入 opaqueFiles，交给既有的失败反馈提示。
+ * 同一张图经两条途径重复暴露的判定不在这里做：内容比较要读字节，放在 uniqueClipboardImages 里。
  */
 export function normalizeClipboardImages(contents: ClipboardContents): ClipboardImages {
   const images: ClipboardImage[] = [];
-  let opaque = 0;
-  const seen = new Set<string>();
+  let opaqueFiles = 0;
 
   const files = contents.files;
   for (let i = 0; files && i < files.length; i++) {
     const file = files[i];
     if (file && isImageFile(file) && file.size > 0) {
       images.push({ source: "file", file });
-      seen.add(fingerprint(file));
     } else {
-      opaque += 1;
+      opaqueFiles += 1;
     }
   }
 
@@ -196,33 +175,74 @@ export function normalizeClipboardImages(contents: ClipboardContents): Clipboard
     // 只认真实字节：条目自己声明的 MIME 不作数，取不到内容就是读不到。
     const file = item.getAsFile();
     if (!file || !isImageFile(file) || file.size <= 0) {
-      opaque += 1;
+      opaqueFiles += 1;
       continue;
     }
-    const key = fingerprint(file);
-    if (seen.has(key)) continue;
-    seen.add(key);
     images.push({ source: "item", file });
   }
 
   // 内嵌 data URL（#114）：HTML 的 img src 与纯文本里的裸 data URL 都算；解码在下一步做。
   const html = contents.html ?? "";
   const text = contents.text ?? "";
+  const seenUrls = new Set<string>();
   for (const url of [...dataUrlsIn(html), ...dataUrlsIn(text)]) {
-    if (seen.has(url)) continue;
-    seen.add(url);
+    if (seenUrls.has(url)) continue;
+    seenUrls.add(url);
     images.push({ source: "dataUrl", dataUrl: url, file: null });
   }
 
-  // 远程图片地址：只记个数，应用不去抓，也不把地址写进任何用户可见文案。
+  // 网络地址：只记个数，应用不去抓，也不把地址写进任何用户可见文案。
+  // 认不认得出它是不是图片无所谓：应用分不清「没扩展名的图片地址」与「普通链接」，一律不去碰，
+  // 但要给用户一个可操作的原因（远程地址 ≠ 没有受支持图片）。
   let remote = remoteImageAddresses(html);
   const uri = (contents.uri ?? "").trim().split(/\r?\n/).map((s) => s.trim()).find((s) => s && !s.startsWith("#")) ?? "";
-  if (/^https?:\/\//i.test(uri) && looksLikeImageUrl(uri)) remote += 1;
-  const plain = (contents.text ?? "").trim();
-  if (/^https?:\/\//i.test(plain) && looksLikeImageUrl(plain)) remote += 1;
+  if (HTTP_URL.test(uri)) remote += 1;
+  const plain = text.trim();
+  // 纯文本里嵌着一个地址（散文中间夹一个链接）不算「剪贴板里是地址」：那种是普通文本，放行。
+  if (WHOLE_URL.test(plain)) remote += 1;
 
-  const content = contentKind(contents, /<img\b/i.test(html));
-  return { images, opaque, remote, content };
+  const content = contentKind(contents);
+  return { images, opaqueFiles, remote, content };
+}
+
+/**
+ * 文件内容的摘要：读得出字节就用内容摘要，读不出（替身文件没有 arrayBuffer）时退回名字 / 类型 / 大小。
+ */
+async function contentDigest(file: File): Promise<string> {
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return `sha256:${await sha256Hex(bytes)}`;
+  } catch {
+    return `meta:${file.name}\u0000${file.type}\u0000${file.size}`;
+  }
+}
+
+/**
+ * 按内容去重：同一张图经文件列表与图片条目暴露时字节必然相同，用内容摘要判定是不是同一张。
+ * 名字、类型、大小相同但内容不同的两张截图不会被误并成一张。
+ * 只给「大小相同的候选」算摘要：大小不同必然不是同一张，大文件也不必白算一遍。
+ */
+export async function uniqueClipboardImages(images: readonly ClipboardImage[]): Promise<ClipboardImage[]> {
+  const bySize = new Map<number, number[]>();
+  images.forEach((image, index) => {
+    const size = image.file?.size;
+    if (size === undefined) return;
+    const group = bySize.get(size);
+    if (group) group.push(index);
+    else bySize.set(size, [index]);
+  });
+  const duplicates = new Set<number>();
+  for (const indices of bySize.values()) {
+    if (indices.length < 2) continue;
+    const digests = await Promise.all(indices.map((index) => contentDigest(images[index].file!)));
+    const firstOf = new Map<string, number>();
+    digests.forEach((digest, k) => {
+      const index = indices[k];
+      if (firstOf.has(digest)) duplicates.add(index);
+      else firstOf.set(digest, index);
+    });
+  }
+  return images.filter((_, index) => !duplicates.has(index));
 }
 
 /** 解码后的图片集合与失败分类。 */
@@ -232,9 +252,16 @@ export interface DataUrlOutcome {
 }
 
 /** base64 载荷解出来的字节数：先按长度估，超限就不必真去解。 */
-function base64Size(payload: string): number {
-  const pad = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
-  return Math.floor((payload.length * 3) / 4) - pad;
+function base64Size(length: number): number {
+  return Math.floor((length * 3) / 4);
+}
+
+/**
+ * 百分号编码载荷的字节数上界：按字符数算（百分号转义 3 个字符还原 1 个字节，
+ * 其余字符按 UTF-8 最多 3 字节），只会高估不会低估——宁可早一步拒掉超限的载荷。
+ */
+function percentSize(length: number): number {
+  return length * 3;
 }
 
 /** base64 载荷 → 字节；解不了给 null（算失败项）。 */
@@ -274,10 +301,9 @@ function percentBytes(payload: string): Uint8Array<ArrayBuffer> | null {
 
 /**
  * 把内嵌 data URL 解成真实字节：能解的补上 file，解不开的分类计数，同批其它图片照旧能进链路。
- * 超过单张上限的先按载荷长度拒掉，不去解那么长的 base64。
- * 上限按参数给（默认单张 64 MiB），测试用小上限就能覆盖超限分支。
+ * 超过单张上限（MAX_PASTE_BYTES）的先按载荷长度拒掉，不去解那么长的 base64，也不把载荷拷出来。
  */
-export function decodeClipboardDataUrls(images: readonly ClipboardImage[], maxBytes = MAX_PASTE_BYTES): DataUrlOutcome {
+export function decodeClipboardDataUrls(images: readonly ClipboardImage[]): DataUrlOutcome {
   const failures: PasteFailures = { invalid: 0, unsupported: 0, tooLarge: 0 };
   const out: ClipboardImage[] = [];
   let seq = 0;
@@ -296,12 +322,13 @@ export function decodeClipboardDataUrls(images: readonly ClipboardImage[], maxBy
       failures.unsupported += 1;
       continue;
     }
-    const size = parts.base64 ? base64Size(parts.payload) : parts.payload.length;
-    if (size > maxBytes) {
+    const size = parts.base64 ? base64Size(parts.length) : percentSize(parts.length);
+    if (size > MAX_PASTE_BYTES) {
       failures.tooLarge += 1;
       continue;
     }
-    const bytes = parts.base64 ? base64Bytes(parts.payload) : percentBytes(parts.payload);
+    const payload = image.dataUrl.trim().slice(parts.start, parts.start + parts.length);
+    const bytes = parts.base64 ? base64Bytes(payload) : percentBytes(payload);
     if (!bytes || bytes.length === 0) {
       failures.invalid += 1;
       continue;

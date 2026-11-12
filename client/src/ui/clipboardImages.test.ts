@@ -1,13 +1,12 @@
 // 剪贴板图片归一化与内嵌 data URL 解码（#113 / #114）：
-// 文件、图片条目与内嵌 data URL 汇成同一份有序集合；解不开的分类计数；远程地址只记个数、不去抓。
+// 文件、图片条目与内嵌 data URL 汇成同一份有序集合；解不开的分类计数；网络地址只记个数、不去抓。
 import { describe, expect, it } from "vitest";
-import { decodeClipboardDataUrls, isDataUrlText, normalizeClipboardImages } from "./clipboardImages";
-
-/** 1×1 的 PNG（真字节，base64）。 */
-const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+import { MAX_PASTE_BYTES } from "../core/pageInput";
+import { PNG_1X1_BASE64 } from "../core/testing/png";
+import { decodeClipboardDataUrls, normalizeClipboardImages, uniqueClipboardImages } from "./clipboardImages";
 
 /** 图片 data URL。 */
-const pngUrl = (b64 = PNG_B64): string => `data:image/png;base64,${b64}`;
+const pngUrl = (b64 = PNG_1X1_BASE64): string => `data:image/png;base64,${b64}`;
 
 /** 文件替身：粘贴逻辑只经它看名字、MIME 与字节数。 */
 const fileOf = (name: string, type: string, size = 1024): File => ({ name, type, size }) as unknown as File;
@@ -35,13 +34,6 @@ describe("内嵌图片 data URL 的归一化", () => {
     const r = normalizeClipboardImages({ files: [fileOf("a.png", "image/png")], items: [fileItem(fileOf("b.png", "image/png"))], text: pngUrl() });
     expect(r.images.map((i) => i.source)).toEqual(["file", "item", "dataUrl"]);
   });
-
-  it("文本本身是一串图片 data URL：认出来（输入框里粘它按粘图片处理）", () => {
-    expect(isDataUrlText(pngUrl())).toBe(true);
-    expect(isDataUrlText(`看看这张图 ${pngUrl()}`)).toBe(false);
-    expect(isDataUrlText("一段普通文字")).toBe(false);
-    expect(isDataUrlText(null)).toBe(false);
-  });
 });
 
 describe("data URL 解码", () => {
@@ -58,7 +50,7 @@ describe("data URL 解码", () => {
   it("解出来的字节与原始载荷一致", async () => {
     const r = decodeClipboardDataUrls(normalizeClipboardImages({ text: pngUrl() }).images);
     const bytes = new Uint8Array(await r.images[0].file!.arrayBuffer());
-    expect([...bytes]).toEqual([...new Uint8Array(atob(PNG_B64).split("").map((c) => c.charCodeAt(0)))]);
+    expect([...bytes]).toEqual([...new Uint8Array(atob(PNG_1X1_BASE64).split("").map((c) => c.charCodeAt(0)))]);
   });
 
   it("百分号编码的载荷也能解", () => {
@@ -86,23 +78,23 @@ describe("data URL 解码", () => {
   }
 
   it("超过单张上限：算超限，不去解那么长的载荷", () => {
-    // 上限按参数给：1 字节，PNG 载荷解出来远大于 1。
-    const r = decodeClipboardDataUrls([{ source: "dataUrl", dataUrl: pngUrl(), file: null }], 1);
+    // 载荷长度按单张 64 MiB 上限估：造一个明显超限的 base64 载荷。
+    const huge = "A".repeat(MAX_PASTE_BYTES + 1);
+    const r = decodeClipboardDataUrls([{ source: "dataUrl", dataUrl: `data:image/png,${huge}`, file: null }]);
     expect(r.failures.tooLarge).toBe(1);
     expect(r.images).toHaveLength(0);
   });
 
   it("同批里解不开的那张不影响其它图片：可读的那张照旧进链路", () => {
-    const images = normalizeClipboardImages({ text: `data:image/png;base64,!!!!
-${pngUrl()}` }).images;
+    const images = normalizeClipboardImages({ text: `data:image/png;base64,!!!!\n${pngUrl()}` }).images;
     const r = decodeClipboardDataUrls(images);
     expect(r.failures.invalid).toBe(1);
     expect(r.images.filter((i) => i.file)).toHaveLength(1);
   });
 });
 
-describe("远程图片地址", () => {
-  it("HTML 里的远程图片：只记个数，不当成图片", () => {
+describe("网络图片地址", () => {
+  it("HTML 里的网络图片：只记个数，不当成图片", () => {
     const r = normalizeClipboardImages({ html: '<img src="https://example.com/a.png">' });
     expect(r.images).toHaveLength(0);
     expect(r.remote).toBe(1);
@@ -115,16 +107,22 @@ describe("远程图片地址", () => {
     expect(JSON.stringify(r)).not.toContain("secret");
   });
 
-  it("文本就是一张远程图片地址：算 URI 类内容，不是图片，也记成远程", () => {
+  it("文本就是一张网络图片地址：算 URI 类内容，不是图片，也记成远程", () => {
     const r = normalizeClipboardImages({ text: "https://example.com/a.png" });
     expect(r.images).toHaveLength(0);
     expect(r.content).toBe("uri");
     expect(r.remote).toBe(1);
   });
 
-  it("远程地址没有受支持图片：内容归类为 HTML / URI，而不是文本", () => {
+  it("网络地址没有受支持图片：内容归类为 HTML / URI，而不是文本", () => {
     expect(normalizeClipboardImages({ html: '<img src="https://example.com/a.png">' }).content).toBe("html");
     expect(normalizeClipboardImages({ uri: "https://example.com/a.png" }).content).toBe("uri");
+  });
+
+  it("没有扩展名的网络地址也记成远程：分派据此给「远程地址」而不是「没有受支持图片」", () => {
+    const r = normalizeClipboardImages({ uri: "https://example.com/image" });
+    expect(r.remote).toBe(1);
+    expect(r.images).toHaveLength(0);
   });
 });
 
@@ -145,7 +143,39 @@ describe("内容归类", () => {
     expect(normalizeClipboardImages({ text: "一段说明" }).content).toBe("text");
   });
 
-  it("HTML 里没有图片、也有一段纯文本：算文本（别把复制的网页文字当成图片内容）", () => {
-    expect(normalizeClipboardImages({ html: "<p>一段说明</p>", text: "一段说明" }).content).toBe("text");
+  it("HTML 内容即使带着纯文本：也算 HTML 类（内容类别事实，不是纯文本那一类）", () => {
+    expect(normalizeClipboardImages({ html: "<p>一段说明</p>", text: "一段说明" }).content).toBe("html");
+  });
+});
+
+describe("按内容去重（#113：同一张图经两条途径重复暴露时只导入一次）", () => {
+  /** 真字节的 File 替身：内容摘要要读到 arrayBuffer，替身得给真字节。 */
+  const realFile = (name: string, bytes: number[]): File =>
+    ({ name, type: "image/png", size: bytes.length, arrayBuffer: async () => new Uint8Array(bytes).buffer }) as unknown as File;
+
+  it("文件列表与图片条目给的是同一张图（字节相同）：只算一张", async () => {
+    const a = realFile("shot.png", [1, 2, 3]);
+    const b = realFile("shot.png", [1, 2, 3]);
+    const r = await uniqueClipboardImages([
+      { source: "file", file: a },
+      { source: "item", file: b },
+    ]);
+    expect(r).toHaveLength(1);
+  });
+
+  it("两张同名同类型同大小但内容不同的截图：算两张，不误并", async () => {
+    const r = await uniqueClipboardImages([
+      { source: "file", file: realFile("shot.png", [1, 2, 3]) },
+      { source: "item", file: realFile("shot.png", [9, 9, 9]) },
+    ]);
+    expect(r).toHaveLength(2);
+  });
+
+  it("大小不同的两张：不必比内容也算两张", async () => {
+    const r = await uniqueClipboardImages([
+      { source: "file", file: realFile("a.png", [1, 2, 3]) },
+      { source: "item", file: realFile("b.png", [1, 2]) },
+    ]);
+    expect(r).toHaveLength(2);
   });
 });

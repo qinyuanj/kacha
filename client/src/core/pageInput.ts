@@ -57,6 +57,12 @@ export interface PasteFailures {
   tooLarge: number;
 }
 
+/**
+ * 有没有失败项：invalid + unsupported + tooLarge 的求和只在这里做一次。
+ * 分派与界面层都问它，别各写一遍求和。
+ */
+export const hasFailures = (failures: PasteFailures): boolean => failures.invalid + failures.unsupported + failures.tooLarge > 0;
+
 /** 剪贴板快照：由界面层从 paste 事件里读出来（这里不碰 ClipboardEvent）。 */
 export interface PasteFacts {
   /** 剪贴板里的纯文本；没有为 null。 */
@@ -69,8 +75,6 @@ export interface PasteFacts {
   content: PasteContent;
   /** 远程图片地址的个数：应用不抓，只用来给一个可操作的原因。 */
   remote: number;
-  /** 文本本身就是一串图片 data URL（不是散文）：输入框里粘它按粘图片处理。 */
-  textIsDataUrl: boolean;
   /** 解码失败的内嵌图片分类计数。 */
   failures: PasteFailures;
 }
@@ -113,9 +117,9 @@ export function dispatchPaste(facts: PasteFacts, context: PasteContext): PasteAc
   if (!context.board) return { kind: "pass" };
   if (context.modal) return { kind: "pass" };
   if (isNodeMarker(facts.text)) return markerPaste(context);
-  // 输入框里粘文本照旧：只有「没有文本」（纯图片或文件）时才轮到下面的分支。
-  // 一串图片 data URL 也算「没有散文」：粘它就是粘图片，照旧导入。
-  if (context.textFocus && facts.text !== null && !facts.textIsDataUrl) return { kind: "pass" };
+  // 输入框里粘非空文本照旧：任何非空文本（包括一串图片 data URL）都交给输入框自己，
+  // 这里不改判成粘图片（#98：输入框中的非空纯文本保持原生行为）。
+  if (context.textFocus && facts.text !== null) return { kind: "pass" };
   if (facts.images > 0) {
     if (context.readOnly) return { kind: "refuse", reason: "readOnly" };
     return { kind: "importImages", at: context.at };
@@ -123,8 +127,7 @@ export function dispatchPaste(facts: PasteFacts, context: PasteContext): PasteAc
   // 远程图片地址：应用不去抓，也不把地址写进提示，只给用户一条可操作的原因。
   if (facts.remote > 0) return { kind: "refuse", reason: "remoteImage" };
   if (facts.opaqueFiles > 0) return { kind: "refuse", reason: "filesNotReadable" };
-  const failed = facts.failures.invalid + facts.failures.unsupported + facts.failures.tooLarge;
-  if (failed > 0) return { kind: "refuse", reason: "imageFailed" };
+  if (hasFailures(facts.failures)) return { kind: "refuse", reason: "imageFailed" };
   // 文件 / HTML / URI 类内容却拿不到受支持图片：提示改用文件，不再静默。
   if (facts.content === "file" || facts.content === "html" || facts.content === "uri") return { kind: "refuse", reason: "noSupportedImage" };
   return { kind: "pass" };
