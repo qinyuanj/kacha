@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import { newBoard, type Board, type BoardNode } from "../core/board";
 import { nodeMarker } from "../core/pageInput";
 import { copyTextToClipboard } from "../shell/clipboard";
+import { copyImageToClipboard, type ImageCopyFailure } from "../shell/imageClipboard";
 import { PASTE_TEXT } from "./boardText";
+import { COPY_TEXT } from "./copyText";
 import { readClipboard, writeClipboard } from "./canvasKeyboard";
 import { useBoardKeyboard } from "./useBoardKeyboard";
 
@@ -193,5 +195,55 @@ describe("卸载", () => {
     press({ key: "c", ctrlKey: true });
     expect(onUndo).not.toHaveBeenCalled();
     expect(readClipboard()).toBeNull();
+  });
+});
+// ---- 图片复制（#115） ----
+
+/** 参考图节点：单选它时 Ctrl+C 走图片复制。 */
+const reference = (id: string): BoardNode => ({ id, type: "reference", pos: [0, 0], size: [200, 200], extra: {}, path: `参考/${id}.png`, sha256: "a".repeat(64), display_name: `${id}.png` });
+
+describe("复制图片", () => {
+  beforeEach(async () => {
+    vi.mocked(copyImageToClipboard).mockReset();
+    vi.mocked(copyImageToClipboard).mockResolvedValue(null);
+    board = { ...newBoard("画板"), nodes: [reference("r1"), prompt("p1")] };
+    opts = { ...opts, boardRef: { current: board }, selectedRef: { current: new Set(["r1"]) } };
+    await show();
+  });
+
+  it("单选参考图：立刻拦掉原生复制，不写节点标记也不动应用内剪贴板", async () => {
+    const event = press({ key: "c", ctrlKey: true });
+    expect(event.defaultPrevented).toBe(true);
+    await settle();
+    expect(copyImageToClipboard).toHaveBeenCalledTimes(1);
+    expect(readClipboard()).toBeNull();
+    expect(copyTextToClipboard).not.toHaveBeenCalled();
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("复制失败：按类别提示并指向「另存为…」下载，不自动下载", async () => {
+    const failures: ImageCopyFailure[] = [
+      { kind: "decode" },
+      { kind: "rejected" },
+      { kind: "noEvent" },
+      { kind: "exception", detail: "浏览器炸了" },
+    ];
+    for (const failure of failures) {
+      vi.mocked(copyImageToClipboard).mockResolvedValueOnce(failure);
+      press({ key: "c", ctrlKey: true });
+      await settle();
+      const message = String(toast.mock.calls.at(-1)?.[0] ?? "");
+      expect(message).toContain("复制图片失败");
+      expect(message).toContain("另存为");
+      expect(message).toBe(COPY_TEXT.imageFailed(COPY_TEXT.imageFailureReason(failure)));
+    }
+  });
+
+  it("复制失败也不写节点标记、不动应用内剪贴板", async () => {
+    vi.mocked(copyImageToClipboard).mockResolvedValueOnce({ kind: "noEvent" });
+    press({ key: "c", ctrlKey: true });
+    await settle();
+    expect(readClipboard()).toBeNull();
+    expect(copyTextToClipboard).not.toHaveBeenCalled();
   });
 });
