@@ -23,8 +23,13 @@ test("复制图片后回贴：形成新的参考图节点，画板原节点不�
     document.execCommand = ((command: string, ...rest: unknown[]) => {
       if (command === "copy") {
         w.__kachaCopy.commands += 1;
-        // 交给浏览器的就是那张临时图片：记下它的地址。
-        w.__kachaCopy.src = document.body.querySelector("img")?.getAttribute("src") ?? null;
+        // 交给浏览器的就是当前选区罩着的那张临时图片：记下它的地址。
+        // 不能按 document.body 里的第一个 img 取——那是画布上的缩略图，不是复制对象。
+        // 选区实际罩住的图片：selectNode 把 range 的容器设成父节点，所以要逐张问 intersectsNode，
+        // 不能取 body 里的第一个 img（那是画布上的缩略图）。
+        const range = document.getSelection()?.getRangeAt?.(0) ?? null;
+        const covered = range ? [...document.querySelectorAll("img")].filter((img) => range.intersectsNode(img)) : [];
+        w.__kachaCopy.src = covered[0]?.getAttribute("src") ?? null;
       }
       return original ? original(command, ...(rest as [])) : false;
     }) as typeof document.execCommand;
