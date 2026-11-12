@@ -62,7 +62,8 @@ function copyShortcut(e: KeyboardEvent, opts: Options): void {
     const src = fileUrl(resolveFromRoot(userRoot, target.node.path));
     void copyImageToClipboard(src)
       .then((failure) => {
-        if (failure) opts.toast(COPY_TEXT.imageFailed(COPY_TEXT.imageReason[failure]));
+        // 失败按类别给明确提示，都指向同一节点的「另存为…」下载；不自动下载，也不宣称已读回系统剪贴板。
+        if (failure) opts.toast(COPY_TEXT.imageFailed(COPY_TEXT.imageFailureReason(failure)));
       })
       .catch((error) => opts.toast(COPY_TEXT.imageFailed(errorText(error))));
     return;
