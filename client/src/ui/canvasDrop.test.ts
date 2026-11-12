@@ -221,6 +221,30 @@ describe("importPastedImages", () => {
     await importPastedImages([], { x: 0, y: 0 }, { board: boardOf(), userRoot: USER_ROOT, toast: vi.fn(), ports: portsOf(), apply });
     expect(apply).not.toHaveBeenCalled();
   });
+
+  // 归一化出来的图片（文件列表给的与图片条目给的混在一批）走的是同一条链路：
+  // 一张上传失败只提示，其余照常落盘，并且整批只算一个撤销步。
+  it("归一化出来的多张图：一张失败其余照常落盘，仍是一个撤销步", async () => {
+    const ports = {
+      upload: vi.fn(async (file: File) => {
+        if (file.name === "bad.png") throw new Error("上传失败");
+        return { path: `导入参考图/${file.name}` };
+      }),
+      inspect: vi.fn(async () => imageInfo()),
+      prime: vi.fn(),
+    };
+    const apply = vi.fn();
+    const toast = vi.fn();
+
+    await importPastedImages([fileOf("ok.png", "image/png"), fileOf("bad.png", "image/png")], { x: 8, y: 9 }, { board: boardOf(), userRoot: USER_ROOT, toast, ports, apply });
+
+    expect(toast).toHaveBeenCalledWith(IMPORT_TEXT.failed("bad.png", "上传失败"));
+    expect(apply).toHaveBeenCalledTimes(1);
+    const change = apply.mock.calls[0][0];
+    expect(change.kind).toBe("addReferences");
+    expect(change.images.map((img: { path: string }) => img.path)).toEqual(["导入参考图/ok.png"]);
+    expect(change.at).toEqual([8, 9]);
+  });
 });
 
 describe("addImportedReferences", () => {

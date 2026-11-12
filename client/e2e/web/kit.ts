@@ -120,3 +120,24 @@ export async function pasteImage(page: Page, file: DroppedFile, at: { x: number;
     document.body.dispatchEvent(event);
   }, file);
 }
+
+/**
+ * 模拟只经「图片条目」暴露的剪贴板：没有文件列表，只有 items 里的一条 kind==="file" 条目。
+ * 系统截图、网页「复制图片」给的就是这种形状（数据在条目里，不在文件列表里）。
+ * DataTransfer 加了文件后 files 与 items 会同时有它，所以这里自己拼一个只有条目的剪贴板。
+ */
+export async function pasteImageItem(page: Page, file: DroppedFile, at: { x: number; y: number }): Promise<void> {
+  await page.mouse.move(at.x, at.y);
+  await page.evaluate((file) => {
+    const bytes = Uint8Array.from(atob(file.b64), (c) => c.charCodeAt(0));
+    const real = new File([bytes], file.name, { type: file.mimeType });
+    const clipboard = {
+      files: [],
+      items: [{ kind: "file", type: file.mimeType, getAsFile: () => real }],
+      getData: () => "",
+    };
+    const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: clipboard });
+    document.body.dispatchEvent(event);
+  }, file);
+}

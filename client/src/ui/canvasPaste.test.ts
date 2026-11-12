@@ -26,6 +26,10 @@ const clipOf = (id: string): Clip => ({ nodes: [{ id, type: "prompt", pos: [100,
 const fileOf = (name: string, type: string, size = 1024): File => ({ name, type, size }) as unknown as File;
 const image = (name = "shot.png") => fileOf(name, "image/png");
 const opaque = (name = "报表.pdf") => fileOf(name, "application/pdf");
+/** kind === "file" 的图片条目替身：粘贴逻辑只经 getAsFile() 取真实字节，不看条目自己的 MIME 声明。 */
+const fileItem = (file: File | null, type = file?.type ?? "image/png") => ({ kind: "file", type, getAsFile: () => file });
+/** 文本条目替身：kind 不是 file，粘贴逻辑不理它。 */
+const textItem = { kind: "string", type: "text/plain", getAsFile: () => null };
 
 let container: HTMLDivElement;
 let canvasEl: HTMLDivElement;
@@ -46,19 +50,27 @@ async function show(): Promise<void> {
   await act(async () => root?.render(createElement(Probe)));
 }
 
-/** 剪贴板事件替身：jsdom 的 Event 上补一个 clipboardData。 */
-function pasteEvent(clipboard: { files?: File[]; text?: string | null }): Event {
+/** 合成剪贴板的形状：真浏览器里 files 与 items 常常同时有内容，这里可以只给一边。 */
+interface Clipboard {
+  files?: File[];
+  items?: unknown[];
+  text?: string | null;
+}
+
+/** 剪贴板事件替身：jsdom 的 Event 上补一个 clipboardData（files / items / getData 三样够用）。 */
+function pasteEvent(clipboard: Clipboard): Event {
   const event = new Event("paste", { bubbles: true, cancelable: true });
   Object.defineProperty(event, "clipboardData", {
     value: {
       files: clipboard.files ?? [],
+      items: clipboard.items ?? [],
       getData: (type: string) => (type === "text/plain" ? (clipboard.text ?? "") : ""),
     },
   });
   return event;
 }
 
-function paste(clipboard: { files?: File[]; text?: string | null }): Event {
+function paste(clipboard: Clipboard): Event {
   const event = pasteEvent(clipboard);
   window.dispatchEvent(event);
   return event;
@@ -189,6 +201,81 @@ describe("粘贴图片", () => {
   it("文本与图片一起粘：图片才落盘", () => {
     paste({ files: [image(), opaque()], text: "顺带复制到的文字" });
     expect(importPastedImages).toHaveBeenCalledWith([expect.objectContaining({ name: "shot.png" })], expect.anything());
+  });
+});
+
+describe("剪贴板图片归一化", () => {
+  /** 交给落图链路的那批文件（按调用顺序）。 */
+  const imported = (): File[] => (importPastedImages.mock.calls[0]?.[0] ?? []) as File[];
+  const importedNames = (): string[] => imported().map((f) => f.name);
+
+  it("只有图片条目、没有文件列表：照样落图（系统截图 / 网页「复制图片」可能只在 items 里给图）", () => {
+    const shot = image("shot.png");
+    const event = paste({ items: [fileItem(shot)] });
+    expect(event.defaultPrevented).toBe(true);
+    expect(imported()).toEqual([shot]);
+  });
+
+  it("同一张图同时经文件列表和图片条目暴露：只导入一份", () => {
+    // 真浏览器里两条途径给的是不同 File 实例，但名字、类型、大小一致。
+    paste({ files: [image("shot.png")], items: [fileItem(image("shot.png"))] });
+    expect(importPastedImages).toHaveBeenCalledTimes(1);
+    expect(importedNames()).toEqual(["shot.png"]);
+  });
+
+  it("多图保持事件里的顺序：文件列表按原序，只有条目暴露的接在后面", () => {
+    paste({ files: [image("a.png"), image("b.png")], items: [fileItem(image("a.png")), fileItem(image("c.png"))] });
+    expect(importedNames()).toEqual(["a.png", "b.png", "c.png"]);
+  });
+
+  it("条目取不到文件：进现有的「请把文件拖进画板」反馈，不落图", () => {
+    const event = paste({ items: [fileItem(null)] });
+    expect(event.defaultPrevented).toBe(true);
+    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.filesNotReadable);
+    expect(importPastedImages).not.toHaveBeenCalled();
+  });
+
+  it("零字节的图片条目：同样按读不到内容算", () => {
+    paste({ items: [fileItem(fileOf("empty.png", "image/png", 0))] });
+    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.filesNotReadable);
+    expect(importPastedImages).not.toHaveBeenCalled();
+  });
+
+  it("条目声明是图片、取到的却不是图片文件：按不受支持处理，不凭 MIME 声明认成功", () => {
+    paste({ items: [fileItem(opaque("报表.pdf"), "image/png")] });
+    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.filesNotReadable);
+    expect(importPastedImages).not.toHaveBeenCalled();
+  });
+
+  it("非图片条目（文本等）不改变分派：放行", () => {
+    expect(paste({ items: [textItem] }).defaultPrevented).toBe(false);
+    expect(toast).not.toHaveBeenCalled();
+    expect(importPastedImages).not.toHaveBeenCalled();
+  });
+
+  it("图片条目 + 节点标记：标记优先，粘节点而不是落图", () => {
+    const clip = clipOf("p1");
+    writeClipboard(clip);
+    paste({ text: nodeMarker(1), items: [fileItem(image())] });
+    expect(apply).toHaveBeenCalledWith({ kind: "paste", clip });
+    expect(importPastedImages).not.toHaveBeenCalled();
+  });
+
+  it("输入框里粘只有图片条目的内容：仍落图", () => {
+    const input = document.createElement("input");
+    document.body.append(input);
+    input.focus();
+    paste({ items: [fileItem(image())] });
+    expect(importPastedImages).toHaveBeenCalled();
+    input.remove();
+  });
+
+  it("只读画板 + 图片条目：只提示，不落盘", async () => {
+    opts = { ...opts, readOnly: true };
+    await show();
+    expect(paste({ items: [fileItem(image())] }).defaultPrevented).toBe(true);
+    expect(toast).toHaveBeenCalledWith(ARCHIVE_TEXT.readOnly);
+    expect(importPastedImages).not.toHaveBeenCalled();
   });
 });
 
