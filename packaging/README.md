@@ -168,7 +168,7 @@ python packaging\load_users.py --users 12 --output release\memory-12-users.json
 
 ## 验证
 
-提交前在仓库根目录执行：
+需要本地检查时，在仓库根目录手动执行：
 
 ```powershell
 python packaging\verify.py
@@ -176,13 +176,9 @@ python packaging\verify.py
 
 脚本先预检构建输出目录的完整性标签（见下文），再依次跑打包脚本单测、前端单测、类型检查、e2e（4 个 worker）、服务端测试（`--no-fail-fast`）与质量门禁（见下文「质量门禁」）。每一项都会跑完，最后汇总；任一失败即以非 0 退出。只需重跑其中一项时，命令见 [verify.py](verify.py) 的 `COMMANDS`。
 
-e2e 很慢，只在集成分支（`main`、`integration/*`）上跑：各票合完后，推送集成分支时由 pre-push 跑一次全套。其他分支（`impl/*`、`spec/*` 等）和分离 HEAD 跳过 e2e，汇总里记为「跳过」；需要时加 `--e2e` 强制跑。
+非 Draft PR 会自动在 Windows CI 中运行常规 PR 验证，复用这里的默认验证入口，并把 PR 的实际目标分支显式传给质量门禁。目标分支引用缺失、历史不足或无法求 merge-base 都会使验证失败。目标为 `main` 或 `integration/*` 时，同一个 PR Verify check 会先用 lockfile 内的 Playwright CLI 安装 Chromium，再通过现有 `--e2e` 强制开关运行全套 e2e（4 个 worker、真实服务端）；其他目标分支不安装 Chromium，也不运行 e2e。修改 PR 目标分支会重新触发验证并按新目标调整范围。PR 更新会取消同一 PR 的过期运行；直接 push 不触发 CI。CI 不运行 mutator，合入集成分支前仍须按下文手动运行增强质量验证。
 
-仓库自带 pre-push 钩子 [.githooks/pre-push](../.githooks/pre-push)，推送前自动跑这套验证，失败即拒绝推送。每个 clone 启用一次（同一 clone 的 worktree 共用）：
-
-```powershell
-git config core.hooksPath .githooks
-```
+e2e 很慢，本地默认只在集成分支（`main`、`integration/*`）上跑：各票合完后手动跑一次全套。其他分支（`impl/*`、`spec/*` 等）和分离 HEAD 跳过 e2e，汇总里记为「跳过」；需要时加 `--e2e` 强制跑，并遵守仓库的授权规则。
 
 符号链接逃逸测试在无权创建符号链接时打印原因并跳过，其余断言照常运行。无权的原因可能有两种：当前账户既没开开发者模式，也不是管理员；或者测试程序以 Low 完整性级别运行。
 
@@ -199,16 +195,17 @@ icacls client\target /setintegritylevel '(OI)(CI)M'
 
 ## 质量门禁
 
-决定与理由见 [ADR 0020](../docs/adr/0020-quality-gate-with-crapper-dryer-and-mutator.md)。门禁只查自 `origin/main` 分叉以来改动过的 `client/src`、`server/src` 源码（含未提交与未跟踪文件），范围与排除只在 [uml-quality.json](../uml-quality.json) 声明：
+决定与理由见 [ADR 0020](../docs/adr/0020-quality-gate-with-crapper-dryer-and-mutator.md)。门禁默认只查自 `origin/main` 分叉以来改动过的 `client/src`、`server/src` 源码（含未提交与未跟踪文件），范围与排除只在 [uml-quality.json](../uml-quality.json) 声明。需要按其他目标分支比较时，给 `quality.py` 或 `verify.py` 传 `--base <Git 引用>`；同一个引用同时用于求 merge-base 与 changed-files。引用缺失、历史不足或没有共同祖先会明确失败，不会跳过门禁。质量判定保持：
 
 - CRAP 超过 10，或没有 CRAP 分（覆盖率缺失）失败（crapper）；
 - 至少一边在改动文件里的重复配对，相似度不低于 0.8 即失败（dryer）；
 - 有存活变异体或未覆盖变异点失败（mutator，只在 `--quality` 时跑）。
 
 ```powershell
-python packaging\quality.py            # 只跑 CRAP 与重复，verify.py 默认流程里就有
-python packaging\quality.py --mutate   # 连变异测试一起跑
-python packaging\verify.py --quality   # 全套验证加变异测试，合入集成分支前必须跑
+python packaging\quality.py                       # 只跑 CRAP 与重复，verify.py 默认流程里就有
+python packaging\quality.py --base origin/target  # 显式选择比较基线
+python packaging\quality.py --mutate              # 连变异测试一起跑
+python packaging\verify.py --quality              # 全套验证加变异测试，合入集成分支前必须跑
 ```
 
 工具按包运行（`--root client`、`--root server`），覆盖率与指标快照落在包内的 `target/`、`.metrics/`，都不提交。
@@ -217,6 +214,8 @@ python packaging\verify.py --quality   # 全套验证加变异测试，合入集
 
 - `UML_VIEWER_BIN`：二进制的绝对路径，优先；
 - 否则用 DSH 插件：`%USERPROFILE%\.dsh\dsh-uml-viewer\current.json` 记下的版本目录里的 `uml-viewer.exe`（`dsh plugin add dsh-uml-viewer` 装）。
+
+PR CI 是本地工具发现规则的固定来源例外：从 npm 官方 registry 获取 `@dsh-uml-viewer/win32-x64@1.0.0`，核对 registry 的 SHA-512 完整性与仓库内固定值后，只解出 `uml-viewer.exe`，再通过 `UML_VIEWER_BIN` 的绝对路径交给默认 CRAP 与 dryer。完整性校验失败即失败，不安装完整 DSH；这个固定版本不支持 mutator 所需的 `--copy`，不得用于 `--quality`。本地工具发现与手动 mutator 约定不变（见 [ADR 0022](../docs/adr/0022-quality-tools-from-dsh-uml-viewer-binary.md)）。
 
 门禁其余前置：Rust 1.99.1 MSVC 工具链、git。crapper 缺 `cargo-llvm-cov` 时会自动装；如果 `%USERPROFILE%\.cargo\bin\cargo-llvm-cov.exe` 带 Low 完整性标签（被 Low 进程装上时会这样），它在 `server\target` 下建不了目录，Rust 覆盖率失败，门禁报「没有 CRAP 分」；用 `icacls <该 exe> /setintegritylevel M` 改回 Medium。
 
