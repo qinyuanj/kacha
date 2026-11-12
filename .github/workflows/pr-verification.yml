@@ -21,6 +21,7 @@ jobs:
       PYTHONUTF8: '1'
       PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
       PR_BASE: origin/${{ github.event.pull_request.base.ref }}
+      RUN_E2E: ${{ github.event.pull_request.base.ref == 'main' || startsWith(github.event.pull_request.base.ref, 'integration/') }}
     steps:
       - name: Check out PR and full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,6 +50,10 @@ jobs:
 
       - name: Install locked client dependencies
         run: npm --prefix client ci
+
+      - name: Install Chromium for integration PRs
+        if: env.RUN_E2E == 'true'
+        run: npm --prefix client exec -- playwright install chromium
 
       - name: Install the integrity-checked quality tool
         shell: python
@@ -114,4 +119,9 @@ jobs:
 
       - name: Run PR verification against its actual base
         shell: pwsh
-        run: python packaging/verify.py --base "$env:PR_BASE"
+        run: |
+          $arguments = @("packaging/verify.py", "--base", $env:PR_BASE)
+          if ($env:RUN_E2E -eq "true") {
+            $arguments += "--e2e"
+          }
+          python @arguments

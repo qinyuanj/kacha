@@ -12,6 +12,8 @@ status: accepted
 
 CRAP 和 dryer 进 `verify.py` 的默认流程，需要本地检查时手动运行。mutator 只在 `verify.py --quality` 时跑，合入集成分支前必须手动运行。工具本身出故障也算失败。范围只在 `uml-quality.json` 里声明一次。
 
+2026-11-12 补充（[#106](https://github.com/qinyuanj/kacha/issues/106)、[#110](https://github.com/qinyuanj/kacha/issues/110)）：非 Draft PR 在同一个稳定的 PR Verify check 中复用默认 `verify.py`，并把实际目标分支作为 `--base`。目标为 `main` 或 `integration/*` 时，同一 job 先安装 Chromium，再通过现有 `--e2e` 强制开关运行全套 e2e；其他目标分支不安装 Chromium，也不运行 e2e。修改 PR 目标分支会重新计算验证范围。e2e 因此从集成分支合入后提前到 PR 合入前，worker、真实服务端以及本地手动 `verify.py` 按当前分支判断的默认行为不变。mutator 仍只在维护者本地手动 `verify.py --quality` 中运行，是合入集成分支前的要求，不进入 CI。
+
 工具从哪儿来改过一次（2026-11-11，[#102](https://github.com/qinyuanj/kacha/issues/102)，见 [ADR 0022](0022-quality-tools-from-dsh-uml-viewer-binary.md)）：crapper、dryer、mutator 现在都编译在 dsh-uml-viewer 的单个 `uml-viewer` 二进制里，门禁调用 `uml-viewer crap|dry|mutate` 子命令，二进制来自 `UML_VIEWER_BIN` 或 DSH 插件；原来固定在 `PINS` 里、装在主 checkout `.uml-viewer/` 下的三个 Python 工具与安装器都已删除。上面这些判定规则不受影响。
 
 ## Considered Options
