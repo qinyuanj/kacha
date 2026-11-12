@@ -252,6 +252,8 @@ class ViewerBinaryTest(unittest.TestCase):
 
 
 class QualityBaseTest(unittest.TestCase):
+    """用户可见输出断言使用独立字面量，避免从被测实现复用文案而形成同义反复。"""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -261,13 +263,19 @@ class QualityBaseTest(unittest.TestCase):
         git(self.root, "config", "user.name", "t")
         (self.root / "uml-quality.json").write_text(json.dumps({"standardTools": {
             "sourceRoots": ["client/src", "server/src"]}}), encoding="utf-8")
-        git(self.root, "add", ".")
-        git(self.root, "commit", "-q", "-m", "base")
-        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
-        git(self.root, "update-ref", "refs/remotes/origin/pr-base", "HEAD")
+        self.commit_all("base")
+        self.update_ref("main")
+        self.update_ref("pr-base")
         patch = mock.patch.object(quality, "ROOT", self.root)
         patch.start()
         self.addCleanup(patch.stop)
+
+    def commit_all(self, message: str) -> None:
+        git(self.root, "add", ".")
+        git(self.root, "commit", "-q", "-m", message)
+
+    def update_ref(self, name: str) -> None:
+        git(self.root, "update-ref", f"refs/remotes/origin/{name}", "HEAD")
 
     def test_origin_main_remains_the_default_base(self):
         output = io.StringIO()
@@ -296,9 +304,8 @@ class QualityBaseTest(unittest.TestCase):
         git(self.root, "checkout", "-q", "--orphan", "unrelated")
         git(self.root, "rm", "-q", "-rf", ".")
         (self.root / "orphan.txt").write_text("unrelated\n", encoding="utf-8")
-        git(self.root, "add", ".")
-        git(self.root, "commit", "-q", "-m", "unrelated")
-        git(self.root, "update-ref", "refs/remotes/origin/unrelated", "HEAD")
+        self.commit_all("unrelated")
+        self.update_ref("unrelated")
         git(self.root, "checkout", "-q", "main")
         errors = io.StringIO()
         with redirect_stdout(io.StringIO()), redirect_stderr(errors):
@@ -311,14 +318,12 @@ class QualityBaseTest(unittest.TestCase):
         source = self.root / "client" / "src" / "change.ts"
         source.parent.mkdir(parents=True)
         source.write_text("export const change = 1;\n", encoding="utf-8")
-        git(self.root, "add", ".")
-        git(self.root, "commit", "-q", "-m", "source")
-        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.commit_all("source")
+        self.update_ref("main")
         docs = self.root / "docs" / "note.md"
         docs.parent.mkdir()
         docs.write_text("note\n", encoding="utf-8")
-        git(self.root, "add", ".")
-        git(self.root, "commit", "-q", "-m", "docs")
+        self.commit_all("docs")
         output = io.StringIO()
         with mock.patch.object(quality, "viewer_binary", side_effect=ViewerMissing("viewer stop")) as viewer:
             with redirect_stdout(output), redirect_stderr(io.StringIO()):
