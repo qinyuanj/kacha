@@ -4,6 +4,8 @@
 `.metrics/mutate/*.edn` 快照统计（见 docs/adr/0022）。
 """
 
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -15,6 +17,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import quality  # noqa: E402
 from quality import (MUTATION_COPIES, VIEWER_BINARY_NAME, ViewerMissing, Package, Scope, changed_files,  # noqa: E402
                      copy_supported, crap_unmeasured, dry_offenders, in_scope, mutation_command, mutation_uncovered,
                      packages, tool_command, uncovered_sites, viewer_binary)
@@ -248,6 +251,89 @@ class ViewerBinaryTest(unittest.TestCase):
         self.assertIn(str(missing), str(caught.exception))
 
 
+class QualityBaseTest(unittest.TestCase):
+    """用户可见输出断言使用独立字面量，避免从被测实现复用文案而形成同义反复。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        git(self.root, "init", "-q", "-b", "main")
+        git(self.root, "config", "user.email", "t@example.com")
+        git(self.root, "config", "user.name", "t")
+        (self.root / "uml-quality.json").write_text(json.dumps({"standardTools": {
+            "sourceRoots": ["client/src", "server/src"]}}), encoding="utf-8")
+        self.commit_all("base")
+        self.update_ref("main")
+        self.update_ref("pr-base")
+        patch = mock.patch.object(quality, "ROOT", self.root)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def commit_all(self, message: str) -> None:
+        git(self.root, "add", ".")
+        git(self.root, "commit", "-q", "-m", message)
+
+    def update_ref(self, name: str) -> None:
+        git(self.root, "update-ref", f"refs/remotes/origin/{name}", "HEAD")
+
+    def test_origin_main_remains_the_default_base(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            result = quality.main([])
+        self.assertEqual(result, 0)
+        self.assertIn("自 origin/main", output.getvalue())
+
+    def test_an_explicit_pr_base_is_used_for_the_comparison(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            result = quality.main(["--base", "origin/pr-base"])
+        self.assertEqual(result, 0)
+        self.assertIn("自 origin/pr-base", output.getvalue())
+
+    def test_a_missing_base_fails_clearly_instead_of_skipping_the_gate(self):
+        errors = io.StringIO()
+        with redirect_stdout(io.StringIO()), redirect_stderr(errors):
+            result = quality.main(["--base", "origin/missing"])
+        self.assertEqual(result, 1)
+        self.assertIn("origin/missing", errors.getvalue())
+        self.assertIn("merge-base", errors.getvalue())
+        self.assertIn("历史", errors.getvalue())
+
+    def test_unrelated_histories_fail_clearly_instead_of_skipping_the_gate(self):
+        git(self.root, "checkout", "-q", "--orphan", "unrelated")
+        git(self.root, "rm", "-q", "-rf", ".")
+        (self.root / "orphan.txt").write_text("unrelated\n", encoding="utf-8")
+        self.commit_all("unrelated")
+        self.update_ref("unrelated")
+        git(self.root, "checkout", "-q", "main")
+        errors = io.StringIO()
+        with redirect_stdout(io.StringIO()), redirect_stderr(errors):
+            result = quality.main(["--base", "origin/unrelated"])
+        self.assertEqual(result, 1)
+        self.assertIn("origin/unrelated", errors.getvalue())
+        self.assertIn("共同祖先", errors.getvalue())
+
+    def test_the_explicit_base_controls_the_changed_files(self):
+        source = self.root / "client" / "src" / "change.ts"
+        source.parent.mkdir(parents=True)
+        source.write_text("export const change = 1;\n", encoding="utf-8")
+        self.commit_all("source")
+        self.update_ref("main")
+        docs = self.root / "docs" / "note.md"
+        docs.parent.mkdir()
+        docs.write_text("note\n", encoding="utf-8")
+        self.commit_all("docs")
+        output = io.StringIO()
+        with mock.patch.object(quality, "viewer_binary", side_effect=ViewerMissing("viewer stop")) as viewer:
+            with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                result = quality.main(["--base", "origin/pr-base"])
+        self.assertEqual(result, 1)
+        self.assertIn("自 origin/pr-base", output.getvalue())
+        self.assertIn("改动 1 个业务源码文件", output.getvalue())
+        viewer.assert_called_once()
+
+
 class ChangedFilesTest(unittest.TestCase):
     def test_committed_since_base_and_uncommitted_changes_count_but_deletions_do_not(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -268,11 +354,12 @@ class ChangedFilesTest(unittest.TestCase):
                 (root / "edited.ts").write_text("y\n", encoding="utf-8")
                 (root / "gone.ts").unlink()
                 git(root, "commit", "-q", "-am", "work")
+                (root / "kept.ts").write_text("uncommitted\n", encoding="utf-8")
                 (root / "new dir").mkdir()
                 (root / "new dir" / "fresh.ts").write_text("z\n", encoding="utf-8")
                 # changed_files 的职责是读 root 指定的那个仓库，读的时候同样不能被套用别的 GIT_DIR。
                 with mock.patch.dict(os.environ, git_env(), clear=True):
-                    self.assertEqual(changed_files(root, base), ["edited.ts", "new dir/fresh.ts"])
+                    self.assertEqual(changed_files(root, base), ["edited.ts", "kept.ts", "new dir/fresh.ts"])
 
 
     def test_git_hook_environment_does_not_redirect_writes_out_of_the_temporary_repository(self):

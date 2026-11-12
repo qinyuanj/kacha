@@ -125,5 +125,5 @@ S7 提供 Lite 通过箭头、线框、涂鸦标记的旧有官方依据；Flash
 - **R6**：[能力表精确 ID 查找与 supported 判断](../../client/src/core/capabilities.ts)。
 - **R7**：[模型发现、缓存与默认选择](../../client/src/core/settings.ts)，`availableModels`、`defaultTaskModel`。
 - **R8**：[旧任务读取与重新生成](../../client/src/core/run.ts)，`prepareRegenerate`。
-- **R9**：[ADR 0010：任务目录不可变真源](../adr/0010-task-directory-is-the-source-of-truth-boards-are-views.md)、[壳侧只写一次存储](../../client/src-tauri/src/store.rs)、[领域语言](../../CONTEXT.md)。
+- **R9**：[ADR 0010：任务目录不可变真源](../adr/0010-task-directory-is-the-source-of-truth-boards-are-views.md)、[壳侧只写一次存储](../../client/src-tauri/src/store.rs)、[领域语言](../../GLOSSARY.md)。
 - **T**：通过 `tea --login qinyuanj --repo qinyuanj/kacha` 读取 [地图 #1](http://lzxsvn:3000/qinyuanj/kacha/issues/1)、[#2](http://lzxsvn:3000/qinyuanj/kacha/issues/2)、[#3](http://lzxsvn:3000/qinyuanj/kacha/issues/3)、[#4](http://lzxsvn:3000/qinyuanj/kacha/issues/4)、[#5](http://lzxsvn:3000/qinyuanj/kacha/issues/5)；创建并回读 #6/#7，以 `tea api` 写入并回读原生依赖。
