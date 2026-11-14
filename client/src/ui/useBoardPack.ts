@@ -1,14 +1,13 @@
 // 画板包界面流程：导出 = 可取消的 hash 阶段 → 确认（含预估大小）→ 可取消的打包阶段与浏览器下载；浏览器选包 → 可取消进度里上传、判定、导入 → 打开画板。
-// 导入结局的判定在 ui/boardPackImport.ts，导出的各步在 ui/boardPackExportOps.ts（#137），这里只留接线。
+// 各个步骤在 ui/boardPackOps.ts 与 ui/boardPackImport.ts（#137），这里只留接线。
 import { useCallback, useState } from "react";
 import { type Board } from "../core/board";
-import { buildExportSpec, exportSources, planExport, planPackContents, runCancellable } from "../core/boardPack";
 import type { PackDialogState } from "./BoardPackDialog";
 import { errorText } from "../core/errors";
 import { slotsRefusal } from "./boardText";
 import { useShell } from "./shell";
 import { IMPORT_PHASES, importOutcome } from "./boardPackImport";
-import { exportCancelledText, exportDoneText, exportFailedText, exportHashFailedText, exportLogFields, exportTargetOf, planFailedText } from "./boardPackExportOps";
+import { confirmDialog, exportPackStep, exportPlanStep, progressDialog } from "./boardPackOps";
 
 interface PackBoards {
   flushAll: () => Promise<void>;
@@ -21,7 +20,7 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
   const port = useShell();
   const [dialog, setDialog] = useState<PackDialogState | null>(null);
 
-  const progress = (title: string) => () => setDialog({ stage: "progress", title });
+  const progress = (title: string) => () => setDialog(progressDialog(title));
 
   const prepareExport = useCallback(
     async (key: string) => {
@@ -31,21 +30,25 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
       const board = boards.getBoard(key);
       const boardFile = boards.boardFileName(key);
       if (!board || !boardFile) return;
-      const { stem } = exportTargetOf(boardFile);
-      let plan;
-      try {
-        plan = await planExport(board, userRoot, port.core.packFs);
-      } catch (e) {
-        return toast(planFailedText(errorText(e)));
-      }
-      // hash 阶段：服务端给逐文件长度与 sha256，core 据此去重并算预估大小，再请用户确认（包格式 v2）。
-      const outcome = await runCancellable(port.pack.io, progress(`正在计算画板包大小：${stem}`), () => port.pack.facts(exportSources(plan)));
-      if (!outcome.ok) {
+      const step = await exportPlanStep(
+        {
+          packFs: port.core.packFs,
+          io: port.pack.io,
+          facts: (spec) => port.pack.facts(spec),
+          exportPack: (target, spec) => port.pack.exportPack(target, spec),
+          version: () => port.ui.version(),
+          log: (kind, fields) => port.ui.log(kind, fields),
+        },
+        board,
+        boardFile,
+        userRoot,
+        progress,
+      );
+      if (step.kind === "failed") {
         setDialog(null);
-        port.ui.log("board_pack", { action: "export", board_file: boardFile, stage: "hash", result: outcome.result });
-        return toast(outcome.result === "cancelled" ? exportCancelledText : exportHashFailedText(outcome.error));
+        return toast(step.text);
       }
-      setDialog({ stage: "confirmExport", boardFile, plan, contents: planPackContents(outcome.value) });
+      setDialog(confirmDialog(step.boardFile, step.plan, step.contents));
     },
     [userRoot, boards, toast],
   );
@@ -53,18 +56,22 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
   const confirmExport = useCallback(async () => {
     if (!userRoot || dialog?.stage !== "confirmExport") return;
     const { boardFile, plan, contents } = dialog;
-    const { stem, target } = exportTargetOf(boardFile);
-    const spec = buildExportSpec(await port.ui.version(), boardFile, plan, contents);
-    const fields = { ...exportLogFields(boardFile, plan, contents), duplicates: spec.omitted.length };
-    const outcome = await runCancellable(port.pack.io, progress(`正在导出画板包：${stem}`), () => port.pack.exportPack(target, spec));
+    const result = await exportPackStep(
+      {
+        packFs: port.core.packFs,
+        io: port.pack.io,
+        facts: (spec) => port.pack.facts(spec),
+        exportPack: (target, spec) => port.pack.exportPack(target, spec),
+        version: () => port.ui.version(),
+        log: (kind, fields) => port.ui.log(kind, fields),
+      },
+      boardFile,
+      plan,
+      contents,
+      progress,
+    );
     setDialog(null);
-    if (outcome.ok) {
-      port.ui.log("board_pack", { ...fields, task_dirs: outcome.value.task_dirs, bytes: outcome.value.bytes, result: "ok" });
-      toast(exportDoneText(target));
-    } else {
-      port.ui.log("board_pack", { ...fields, result: outcome.result });
-      toast(outcome.result === "cancelled" ? exportCancelledText : exportFailedText(outcome.error));
-    }
+    toast(result.text);
   }, [userRoot, dialog, toast]);
 
   const importPack = useCallback(async () => {

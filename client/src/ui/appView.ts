@@ -104,6 +104,42 @@ export function boardKeyOf(session: Session | undefined): string {
   return session?.status === "ok" ? session.key : "";
 }
 
+/** 缺省值：没有时给一个。 */
+export const orDefault = <T,>(value: T | null | undefined, fallback: T): T => (value === null || value === undefined ? fallback : value);
+
+/** 可选字符串：没有时给空串。 */
+export const orEmpty = (value: string | null | undefined): string => orDefault(value, "");
+
+/** 可选数字：没有时给 0。 */
+export const orZero = (value: number | null | undefined): number => orDefault(value, 0);
+
+/** 当前画板的锁定集（没有画板时为空集）。 */
+export function lockedOf(locked: ReadonlySet<string> | undefined): ReadonlySet<string> {
+  return locked ?? new Set<string>();
+}
+
+/** 当前画板的运行节点表（没有画板时为空表）。 */
+export function runNodesOf(nodes: ReadonlyMap<string, unknown> | undefined): ReadonlyMap<string, unknown> {
+  return nodes ?? new Map<string, unknown>();
+}
+
+/** 当前画板已经手过的任务（没有画板时为空集）。 */
+export function handledOf(handled: ReadonlySet<string> | undefined): ReadonlySet<string> {
+  return handled ?? new Set<string>();
+}
+
+/** 记录的版本号：没有版本时为 undefined。 */
+export const versionOrUndefined = (version: string | null | undefined): string | undefined => orDefault(version, undefined);
+
+/** 记录的版本号：没有版本时给空串（界面上显示用）。 */
+export const versionOrEmpty = (version: string | null | undefined): string => orEmpty(version);
+
+/** 设置面板能不能用（设置已载入且有用户数据根）。 */
+export const settingsEnabled = (loaded: boolean, userRoot: string | null): boolean => loaded && !!userRoot;
+
+/** 用量统计要不要开（界面状态就绪且有用户数据根）。 */
+export const usageEnabled = (metadataReady: boolean, userRoot: string | null): boolean => metadataReady && !!userRoot;
+
 /** 画板自己的提示按钮：关掉它。 */
 export function dismissBoardNotice(session: Session | undefined, dismiss: (key: string) => void): void {
   if (session?.status !== "ok") return;

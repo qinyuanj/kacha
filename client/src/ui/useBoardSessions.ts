@@ -144,18 +144,24 @@ export function useAutosave(
   return { flush, scheduleSave, flushAll, cancelTimer, savers, saverOf };
 }
 
-export function useBoardSessions(userRoot: string | null, envSource: EnvSource, onMoved: (from: string, to: string) => void = () => undefined) {
-  const port = useShell();
-  const movingSessions = useRef(new Set<string>());
-  const movingOut = useRef(false);
-  const onMovedRef = useRef(onMoved);
-  onMovedRef.current = onMoved;
+/** 当前会话的切换。 */
+export function useActiveSession() {
   const [activeKey, setActiveKeyState] = useState<string | null>(null);
   const activeKeyRef = useRef<string | null>(null);
   const setActiveKey = useCallback((next: string | null | ((prev: string | null) => string | null)) => {
     activeKeyRef.current = typeof next === "function" ? next(activeKeyRef.current) : next;
     setActiveKeyState(activeKeyRef.current);
   }, []);
+  return { activeKey, activeKeyRef, setActiveKey };
+}
+
+export function useBoardSessions(userRoot: string | null, envSource: EnvSource, onMoved: (from: string, to: string) => void = () => undefined) {
+  const port = useShell();
+  const movingSessions = useRef(new Set<string>());
+  const movingOut = useRef(false);
+  const onMovedRef = useRef(onMoved);
+  onMovedRef.current = onMoved;
+  const { activeKey, activeKeyRef, setActiveKey } = useActiveSession();
   const store = useSessionState();
   const userRootRef = useRef(userRoot);
   userRootRef.current = userRoot;
@@ -262,7 +268,7 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource, 
       if (current?.status === "ok" && current.saveError) return;
       dropSession(key);
     },
-    [flush, store, dropSession],
+    [flush, store, dropSession, saverOf],
   );
 
   /** 删除本页已打开的画板：先保存未保存的改动，再带最新版本删除（进回收区的是最新内容），成功后关闭标签页。 */

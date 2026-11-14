@@ -20,6 +20,13 @@ import { useAppState, useRestoreTabs, useStartupReads, useToastTimer, useUiState
 import {
   appView,
   archivedAction,
+  handledOf,
+  lockedOf,
+  orEmpty,
+  settingsEnabled,
+  usageEnabled,
+  versionOrEmpty,
+  versionOrUndefined,
   boardKeyOf,
   canvasBoard,
   createBoardOrExplain,
@@ -38,6 +45,7 @@ import {
 import {
   activateBoard,
   applyActive,
+  cancelTaskOn,
   checkActive,
   jumpToTask,
   openManageBoards,
@@ -187,7 +195,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
     [activeKey, userRoot, settings.apiKey, boards, confirmCtx, runner, targetOf, toast, store],
   );
 
-  const cancelTask = useCallback((taskNodeId: string) => (activeKey ? runner.cancel({ kind: "task", boardKey: activeKey, taskNodeId }) : undefined), [runner, activeKey]);
+  const cancelTask = useCallback((taskNodeId: string) => cancelTaskOn(runner, activeKey, taskNodeId), [runner, activeKey]);
 
   const closeOne = useCallback(
     async (key: string) => {
@@ -288,7 +296,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
   );
 
   const openChangelog = useCallback(() => {
-    if (version) store.setLastSeenVersion(version);
+    store.setLastSeenVersion(versionOrUndefined(version));
     store.setChangelogOpen(true);
   }, [version, store]);
 
@@ -311,7 +319,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
   const activeSize = useActiveBoardSize(sizeQuery?.path ?? null, sizeQuery?.version ?? null);
   const view = appView({ sessions, activeKey, userRoot, activeSize, sizeNotices: state.sizeNotices });
   // 用量上限提醒（#88）：只提醒，生成照常。
-  const usageLimit = useUsageLimit(state.metadataReady && !!userRoot);
+  const usageLimit = useUsageLimit(usageEnabled(state.metadataReady, userRoot));
   const usageNotice = usageNoticeOf(usageLimit.notice, state.usageDismissed);
   useEffect(() => {
     store.setSizeNotices((notices) => sizeNoticeUpdated(notices, view.sizeNotice));
@@ -319,7 +327,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
 
   if (state.fatal) return <div className="fatal">启动失败：{state.fatal}</div>;
 
-  const updateNotice = updateNoticeOf(ready, version ?? null, state.lastSeenVersion, shouldShowUpdateNotice);
+  const updateNotice = updateNoticeOf(ready, versionOrEmpty(version), state.lastSeenVersion, shouldShowUpdateNotice);
   /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框、会话失效遮罩）：粘贴放行给弹窗，不落到背后的画板（#96）。 */
   const modalOpen = modalOpenOf({
     settingsOpen: state.settingsOpen,
@@ -338,12 +346,12 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
         activeKey={activeKey}
         userRoot={userRoot}
         ready={ready}
-        version={version ?? null}
+        version={versionOrEmpty(version)}
         updateNotice={updateNotice}
         packMenu={state.packMenu}
         boardListOpen={state.boardListOpen}
         manageBoards={state.manageBoards}
-        settingsLoaded={settings.loaded && !!userRoot}
+        settingsLoaded={settingsEnabled(settings.loaded, userRoot)}
         tableError={state.tableError}
         settingsFileProblem={settings.fileProblem}
         settingsOpen={state.settingsOpen}
@@ -359,10 +367,10 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
           board: canvasBoard(view.active, EMPTY_BOARD),
           boardFile: basename(view.active?.path ?? ""),
           table,
-          userRoot: userRoot ?? "",
+          userRoot: orEmpty(userRoot),
           apply: (change: BoardChange) => applyActive(apply, activeKey, change) as ReturnType<typeof apply>,
           check: (change: BoardChange) => checkActive(check, activeKey, change) as ReturnType<typeof check>,
-          locked: runState.board(activeKey ?? "").locked,
+          locked: lockedOf(runState.board(orEmpty(activeKey)).locked),
           onUndo: () => undoOn(undoBoard, activeKey),
           onRedo: () => redoOn(redoBoard, activeKey),
           undoLabel: view.undoLabel,
@@ -370,8 +378,8 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
           toast,
           discovery: settings.discovery,
           concurrency: settings.settings.concurrency,
-          runNodes: runState.board(activeKey ?? "").nodes,
-          handled: runState.board(activeKey ?? "").handled,
+          runNodes: runState.board(orEmpty(activeKey)).nodes,
+          handled: handledOf(runState.board(orEmpty(activeKey)).handled),
           onRun: (ids) => void openRun(ids),
           onCancelTask: cancelTask,
           onRegenerate: doRegenerate,
@@ -391,7 +399,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
         onOpenList={() => void boards.flushAll().then(() => store.setBoardListOpen(true))}
         onExportPack={(key) => void pack.prepareExport(key)}
         onOpenChangelog={openChangelog}
-        onCloseUpdateNotice={() => store.setLastSeenVersion(version ?? undefined)}
+        onCloseUpdateNotice={() => store.setLastSeenVersion(versionOrUndefined(version))}
         onOpenListItem={(path) => openFromList(openPath, toast, path)}
         onCloseBoardList={() => {
           store.setBoardListOpen(false);
@@ -428,7 +436,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
         settingsOpen={state.settingsOpen}
         onSettingsClose={() => store.setSettingsOpen(false)}
         changelogOpen={state.changelogOpen}
-        version={version ?? ""}
+        version={versionOrEmpty(version)}
         onChangelogClose={() => store.setChangelogOpen(false)}
         confirm={state.confirm}
         onConfirmCancel={() => store.setConfirm(null)}

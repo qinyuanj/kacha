@@ -26,7 +26,12 @@ afterEach(async () => {
   container.remove();
 });
 
-function settings(overrides: Partial<SettingsState> = {}): ReturnType<typeof SettingsPanel>["settings"] {
+type PanelSettings = SettingsState & {
+  save(next: unknown, apiKey: string): Promise<string | null>;
+  testConnection(baseUrl: string, apiKey: string): Promise<{ ok: true; count: number } | { ok: false; message: string }>;
+};
+
+function settings(overrides: Partial<SettingsState> = {}): PanelSettings {
   return {
     loaded: true,
     file: "ok",
@@ -38,7 +43,7 @@ function settings(overrides: Partial<SettingsState> = {}): ReturnType<typeof Set
     save: vi.fn(async () => null),
     testConnection: vi.fn(async () => ({ ok: true as const, count: 3 })),
     ...overrides,
-  } as unknown as ReturnType<typeof SettingsPanel>["settings"];
+  } as unknown as PanelSettings;
 }
 
 async function show(port: FakePort, state = settings()): Promise<void> {

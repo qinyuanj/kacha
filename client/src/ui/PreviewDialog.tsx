@@ -3,16 +3,17 @@
 // 区域编辑与图层判定在 ui/previewRegion.ts、ui/previewLayers.ts、ui/previewState.ts（#137），这里只留接线与 DOM 摆放。
 import { useEffect, useRef, useState } from "react";
 import type { PortRef, RegionRender } from "../core/board";
-import { MAX_REGIONS, regionCss } from "../core/overlay";
+import { regionCss } from "../core/overlay";
 import { type LayerRecord } from "../core/taskDir";
 import type { ImageInfo } from "../shell/port";
 import { useBoardActions, useImageInfos } from "./context";
 import { useShell } from "./shell";
 import type { Point01, Rect01 } from "./rects";
 import { errorText } from "../core/errors";
-import { overRegionLimit, rectsAfterDrag, regionModeOf, regionSetting, shownRects, type Drag, type RegionMode } from "./previewRegion";
+import { rectsAfterDrag, regionModeOf, regionSetting, shownRects, type Drag, type RegionMode } from "./previewRegion";
 import { baseImageAlt, baseImagePath, layerIndexOf, layerName, layerStyleOf } from "./previewLayers";
 import { beginDrag, pointInStage, removeSelected, startEditState, toggleChecked, toggleSolo } from "./previewState";
+import { PreviewFooter, PreviewHeader } from "./previewViews";
 
 export interface PreviewLayer {
   record: LayerRecord;
@@ -142,8 +143,6 @@ function PreviewStage(props: {
   title: string;
   layers: PreviewLayer[];
   baseInfo: ImageInfo | null | undefined;
-  /** 图片地址（端口给）。 */
-  imageUrl(path: string): string;
   checked: ReadonlySet<number>;
   solo: number | null;
   showOutlines: boolean;
@@ -153,6 +152,8 @@ function PreviewStage(props: {
   shown: Rect01[];
   regionMode: RegionMode;
   first: number;
+  /** 图片地址（端口给）。 */
+  imageUrl(path: string): string;
   onPointerDown(e: React.PointerEvent): void;
 }) {
   const { layers, checked, solo, showOutlines, outlines, editing, selected, shown, regionMode, first } = props;
@@ -299,29 +300,17 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`modal modal-preview ${layers.length ? "modal-preview-wide" : ""}`} role="dialog" aria-label={req.title}>
-        <div className="modal-head">
-          <strong>{req.title}</strong>
-          {editing && <span className="badge">编辑区域：{editing.label}</span>}
-          {editing?.coordinateAvailable && (
-            <label className="small">区域表达
-              <select aria-label="区域表达" value={regionMode} onChange={(e) => setRegionMode(e.target.value as RegionMode)}>
-                <option value="overlay">高亮叠加</option>
-                <option value="bbox">坐标框</option>
-                <option value="point">坐标点（框中心）</option>
-              </select>
-            </label>
-          )}
-          {solo !== null && <span className="badge">单层：图层{solo + 1}</span>}
-          {outlines.length > 0 && !editing && (
-            <label className="small" title="本次编辑框选的修改区域（只读描边，来自产出任务的提交快照）">
-              <input type="checkbox" checked={showOutlines} onChange={(e) => setShowOutlines(e.target.checked)} />
-              区域轮廓
-            </label>
-          )}
-          <button className="link" onClick={onClose}>
-            关闭
-          </button>
-        </div>
+        <PreviewHeader
+          title={req.title}
+          editing={editing}
+          regionMode={regionMode}
+          onRegionMode={setRegionMode}
+          solo={solo}
+          showOutlines={showOutlines}
+          onShowOutlines={setShowOutlines}
+          outlineCount={outlines.length}
+          onClose={onClose}
+        />
         <div className="preview-body">
           <PreviewStage
             stageRef={stage}
@@ -361,42 +350,22 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
             />
           )}
         </div>
-        <div className="modal-foot">
-          {editing ? (
-            <>
-              <span className={overRegionLimit(first + rects.length) ? "region-limit-exceeded" : "muted"}>
-                拖拽空白处画新矩形；拖动矩形移动，拖动角柄缩放。提示词里写「区域N」指代对应区域，每个任务最多 {MAX_REGIONS} 个。{regionMode === "point" && "坐标点取每个框的中心，影响范围由模型判断。"}
-              </span>
-              <button disabled={selected === null} onClick={removeOne}>
-                删除选中
-              </button>
-              <button disabled={rects.length === 0} onClick={() => (setRects([]), setSelected(null))}>
-                清空
-              </button>
-              <button onClick={onClose}>取消</button>
-              <button className="primary" onClick={saveRegion}>
-                保存区域
-              </button>
-            </>
-          ) : (
-            <>
-              <span className="muted">
-                {targets.length > 0 && (
-                  <>
-                    框选修改区域：
-                    {targets.map((t) => (
-                      <button key={`${t.edgeRef.from.join(":")}->${t.edgeRef.to.join(":")}`} className="link" onClick={() => startEdit(t)}>
-                        {t.label}
-                        {t.rects.length > 0 ? `（${t.rects.length} 区域）` : ""}
-                      </button>
-                    ))}
-                  </>
-                )}
-              </span>
-              <button onClick={onClose}>关闭</button>
-            </>
-          )}
-        </div>
+        <PreviewFooter
+          editing={editing}
+          targets={targets}
+          rects={rects}
+          selected={selected}
+          regionMode={regionMode}
+          first={first}
+          onRemove={removeOne}
+          onClear={() => {
+            setRects([]);
+            setSelected(null);
+          }}
+          onSave={saveRegion}
+          onClose={onClose}
+          onStartEdit={startEdit}
+        />
       </div>
     </div>
   );
