@@ -64,42 +64,42 @@ export function PreviewFooter(props: {
   onStartEdit(target: RegionTarget): void;
 }) {
   const { editing, targets, rects, selected, regionMode, first } = props;
-  if (editing) {
-    const over = first + rects.length > MAX_REGIONS;
-    return (
-      <div className="modal-foot">
-        <span className={over ? "region-limit-exceeded" : "muted"}>
-          拖拽空白处画新矩形；拖动矩形移动，拖动角柄缩放。提示词里写「区域N」指代对应区域，每个任务最多 {MAX_REGIONS} 个。{regionMode === "point" && "坐标点取每个框的中心，影响范围由模型判断。"}
-        </span>
-        <button disabled={selected === null} onClick={props.onRemove}>
-          删除选中
-        </button>
-        <button disabled={rects.length === 0} onClick={props.onClear}>
-          清空
-        </button>
-        <button onClick={props.onClose}>取消</button>
-        <button className="primary" onClick={props.onSave}>
-          保存区域
-        </button>
-      </div>
-    );
-  }
   return (
     <div className="modal-foot">
-      <span className="muted">
-        {targets.length > 0 && (
-          <>
-            框选修改区域：
-            {targets.map((t) => (
-              <button key={`${t.edgeRef.from.join(":")}->${t.edgeRef.to.join(":")}`} className="link" onClick={() => props.onStartEdit(t)}>
-                {t.label}
-                {t.rects.length > 0 ? `（${t.rects.length} 区域）` : ""}
-              </button>
-            ))}
-          </>
-        )}
-      </span>
-      <button onClick={props.onClose}>关闭</button>
+      {editing ? (
+        <>
+          <span className={first + rects.length > MAX_REGIONS ? "region-limit-exceeded" : "muted"}>
+            拖拽空白处画新矩形；拖动矩形移动，拖动角柄缩放。提示词里写「区域N」指代对应区域，每个任务最多 {MAX_REGIONS} 个。{regionMode === "point" && "坐标点取每个框的中心，影响范围由模型判断。"}
+          </span>
+          <button disabled={selected === null} onClick={props.onRemove}>
+            删除选中
+          </button>
+          <button disabled={rects.length === 0} onClick={props.onClear}>
+            清空
+          </button>
+          <button onClick={props.onClose}>取消</button>
+          <button className="primary" onClick={props.onSave}>
+            保存区域
+          </button>
+        </>
+      ) : (
+        <>
+          <span className="muted">
+            {targets.length > 0 && (
+              <>
+                框选修改区域：
+                {targets.map((t) => (
+                  <button key={`${t.edgeRef.from.join(":")}->${t.edgeRef.to.join(":")}`} className="link" onClick={() => props.onStartEdit(t)}>
+                    {t.label}
+                    {t.rects.length > 0 ? `（${t.rects.length} 区域）` : ""}
+                  </button>
+                ))}
+              </>
+            )}
+          </span>
+          <button onClick={props.onClose}>关闭</button>
+        </>
+      )}
     </div>
   );
 }

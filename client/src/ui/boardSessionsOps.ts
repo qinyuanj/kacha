@@ -242,14 +242,26 @@ export async function archiveBoardSession(
   if (key) moving.add(key);
   try {
     if (key) await flush(key);
-    const session = key ? store.sessionOf(key) : undefined;
-    if (session?.status === "ok" && session.saveError) throw new Error(archiveBlockedText({ missing: session.missing, conflicted: session.conflicted, saveError: session.saveError }));
-    const to = await freePathIn(store, ports, archiveDir(userRoot), path);
-    await ports.board.archive(path, to, session?.status === "ok" ? (session.version ?? undefined) : undefined);
-    movedTo(path, to);
+    await archiveMove(store, ports, userRoot, movedTo, path, key);
   } finally {
     if (key) moving.delete(key);
   }
+}
+
+/** 归档的搬移那一步：查目标名、搬文件、通知调用方。 */
+async function archiveMove(
+  store: SessionStore,
+  ports: SessionPorts,
+  userRoot: string,
+  movedTo: (from: string, to: string) => void,
+  path: string,
+  key: string | undefined,
+): Promise<void> {
+  const session = key ? store.sessionOf(key) : undefined;
+  if (session?.status === "ok" && session.saveError) throw new Error(archiveBlockedText({ missing: session.missing, conflicted: session.conflicted, saveError: session.saveError }));
+  const to = await freePathIn(store, ports, archiveDir(userRoot), path);
+  await ports.board.archive(path, to, session?.status === "ok" ? (session.version ?? undefined) : undefined);
+  movedTo(path, to);
 }
 
 /** 取消归档：画板位满时返回统一文案（先按列表判定，抢位时由服务端 409 拒绝）；成功为 null。 */
@@ -394,20 +406,35 @@ export async function moveOutStageSession(
     const board = boardOf();
     return board ? editBoard(board, { kind: "moveOutStage", stageId }, env) : null;
   };
+  const blocked = moveOutBlockedReason(store, userRoot, readOnlyPath, moving, movingOut, key, tryRemove);
+  if (blocked) return blocked;
+  movingOut.current = true;
+  try {
+    return await moveOutWrite(store, ports, userRoot!, boardOf, tryRemove, stageId, apply, key);
+  } catch (e) {
+    return TIDY_TEXT.moveOutFailed(errorText(e));
+  } finally {
+    movingOut.current = false;
+  }
+}
+
+/** 移出前的各种拦：只读 / 搬不动 / 阶段没了 / 另一个移出在跑。 */
+function moveOutBlockedReason(
+  store: SessionStore,
+  userRoot: string | null,
+  readOnlyPath: (path: string) => boolean,
+  moving: ReadonlySet<string>,
+  movingOut: { current: boolean },
+  key: string,
+  tryRemove: () => EditResult | null,
+): string | null {
   const session = store.sessionOf(key);
   if (session && (readOnlyPath(session.path) || moving.has(key))) return moveOutBlockedText("readOnly");
   const dry = tryRemove();
   if (!userRoot || !dry) return moveOutBlockedText("notEditable");
   if (!dry.step) return moveOutBlockedText("stageGone", dry.hint);
   if (movingOut.current) return moveOutBlockedText("busy");
-  movingOut.current = true;
-  try {
-    return await moveOutWrite(store, ports, userRoot, boardOf, tryRemove, stageId, apply, key);
-  } catch (e) {
-    return TIDY_TEXT.moveOutFailed(errorText(e));
-  } finally {
-    movingOut.current = false;
-  }
+  return null;
 }
 
 /** 移出：查画板位、拆出新画板并写好，最后才在原画板删去这些节点。 */
@@ -431,13 +458,20 @@ async function moveOutWrite(
   const { source: latest, board: fresh } = prepared;
   const path = await freePathIn(store, ports, boardsDir(userRoot), "", fresh.title);
   if (boardOf() !== latest) return TIDY_TEXT.moveOutFailed("移出期间本画板有了新的改动，请重试");
-  try {
-    await ports.board.write(path, serializeBoard(fresh), { createOnly: true });
-  } catch (e) {
-    return isSlotsFull(e) ? errorText(e) : TIDY_TEXT.moveOutFailed(errorText(e));
-  }
+  const written = await writeMovedOut(ports, path, fresh);
+  if (written) return written;
   if (boardOf() !== latest) return TIDY_TEXT.movedOutKept(fresh.title, "移出期间本画板有了新的改动");
   const result = apply(key, { kind: "moveOutStage", stageId });
   // 写好之后才被拒（期间有任务开始运行）：新画板已在列表里，原画板不动。
   return result?.step ? TIDY_TEXT.movedOut(fresh.title) : TIDY_TEXT.movedOutKept(fresh.title, result?.hint ?? null);
+}
+
+/** 写新画板；写不进去时给一句说明（成功为 null）。 */
+async function writeMovedOut(ports: SessionPorts, path: string, fresh: Board): Promise<string | null> {
+  try {
+    await ports.board.write(path, serializeBoard(fresh), { createOnly: true });
+    return null;
+  } catch (e) {
+    return isSlotsFull(e) ? errorText(e) : TIDY_TEXT.moveOutFailed(errorText(e));
+  }
 }

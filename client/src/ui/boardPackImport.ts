@@ -10,31 +10,49 @@ export type ImportOutcome =
   /** 弹窗说明结局（服务端导入失败、打开画板失败、有冲突）。 */
   | { kind: "dialog"; state: PackDialogState };
 
+/** 一句话提示。 */
+const toast = (text: string): ImportOutcome => ({ kind: "toast", text });
+
+/** 弹窗说明结局。 */
+const dialog = (message: string, conflicts: string[], notice: string | null): ImportOutcome => ({
+  kind: "dialog",
+  state: { stage: "importDone", message, conflicts, notice },
+});
+
+/** 导入成功之后的反应：有冲突或打开失败就弹窗，否则一句话。 */
+export function doneOutcome(result: Extract<ImportResult, { kind: "done" }>): ImportOutcome {
+  const { summary, writeError } = result;
+  if (writeError || summary.conflicts.length) {
+    return dialog(summary.message, summary.conflicts, writeError ? PACK_IMPORT_TEXT.openFailed(writeError) : null);
+  }
+  return toast(summary.message);
+}
+
+/** 合并失败之后的反应：画板位满是一句话，其他情况弹窗。 */
+export function commitFailedOutcome(error: string): ImportOutcome {
+  if (isSlotsFullText(error)) return toast(error);
+  return dialog(PACK_IMPORT_TEXT.failed(error), [], PACK_IMPORT_TEXT.commitFailed);
+}
+
 /** 导入结局 → 界面的反应。 */
 export function importOutcome(result: ImportResult): ImportOutcome {
   switch (result.kind) {
     case "newer":
-      return { kind: "toast", text: result.message };
+      return toast(result.message);
     case "corrupt":
-      return { kind: "toast", text: `无法导入画板包：${result.reason}` };
+      return toast(`无法导入画板包：${result.reason}`);
     case "cancelled":
-      return { kind: "toast", text: PACK_IMPORT_TEXT.cancelled };
+      return toast(PACK_IMPORT_TEXT.cancelled);
     case "slotsFull":
-      return { kind: "toast", text: result.message };
+      return toast(result.message);
     case "failed":
       // 服务端合并前按画板位拒绝（两页抢最后的位）：它的报错就是统一文案，不加前缀，此时什么都没合并。
-      return { kind: "toast", text: isSlotsFullText(result.error) ? result.error : PACK_IMPORT_TEXT.failed(result.error) };
+      return toast(isSlotsFullText(result.error) ? result.error : PACK_IMPORT_TEXT.failed(result.error));
     case "commitFailed":
       // 导入请求失败时任务目录可能已移入一部分：用弹窗说明画板没有写入，而不是一闪而过的提示。
-      if (isSlotsFullText(result.error)) return { kind: "toast", text: result.error };
-      return { kind: "dialog", state: { stage: "importDone", message: PACK_IMPORT_TEXT.failed(result.error), conflicts: [], notice: PACK_IMPORT_TEXT.commitFailed } };
-    case "done": {
-      const { summary, writeError } = result;
-      if (writeError || summary.conflicts.length) {
-        return { kind: "dialog", state: { stage: "importDone", message: summary.message, conflicts: summary.conflicts, notice: writeError ? PACK_IMPORT_TEXT.openFailed(writeError) : null } };
-      }
-      return { kind: "toast", text: summary.message };
-    }
+      return commitFailedOutcome(result.error);
+    case "done":
+      return doneOutcome(result);
   }
 }
 
