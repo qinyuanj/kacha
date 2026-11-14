@@ -7,8 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Node } from "@xyflow/react";
 import type { Board, BoardNode } from "../core/board";
 import type { BoardChange, EditResult } from "../core/edit";
+import { webPort } from "../shell/webPort";
 import { canvasFlowProps } from "./canvasFlowProps";
 import { useCanvasInteraction, type Selection } from "./useCanvasInteraction";
+
+const isEditableTarget = webPort.ui.isEditableTarget;
 
 // React 19 的 act() 要在测试环境里显式打开。
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -60,7 +63,7 @@ const apply = (change: BoardChange): EditResult | null => {
 
 /** 探针组件：调 hook，把返回值挂到外面的 nav 上，并按 BoardCanvas 的方式接线（画布根元素 + 指针捕获）。 */
 function Probe(props: { wireRef: boolean }) {
-  nav = useCanvasInteraction({ wrapper: wrapperRef, boardRef, selection, dialogOpen, apply });
+  nav = useCanvasInteraction({ wrapper: wrapperRef, boardRef, selection, dialogOpen, apply, isEditableTarget });
   return createElement("div", {
     className: "canvas",
     ref: (el: HTMLDivElement | null) => {

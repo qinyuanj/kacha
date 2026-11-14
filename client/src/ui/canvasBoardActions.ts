@@ -11,9 +11,7 @@ import { LOCKED_HINT, producerOf } from "../core/iterate";
 import { basename, resolveFromRoot, toRootRelative } from "../core/paths";
 import { findReferenceFile, findResultFile } from "../core/relocate";
 import { availableModels, type Discovery } from "../core/settings";
-import { relocateFs } from "../shell/adapters";
-import { ipc, transfer, type ImageInfo } from "../shell/ipc";
-import { logEvent } from "../shell/log";
+import type { ImageInfo, ShellPort } from "../shell/port";
 import { RELOCATE_TEXT, REGION_TEXT, VARIANT_TEXT } from "./boardText";
 import { imageNodeOf, nodePreviewRequest, regionEditRequest, type ImageNode } from "./canvasPreview";
 import { posOf } from "./canvasPoint";
@@ -59,6 +57,8 @@ export interface CanvasBoardActionsDeps {
   toast: (message: string) => void;
   /** perform 依赖每次渲染重建的新建类函数，经 ref 取最新一版，动作对象因此可以稳定。 */
   performRef: MutableRefObject<BoardActions["perform"]>;
+  /** 壳端口：选文件、上传参考图、读图片信息、在用户数据根里找文件与日志。 */
+  port: ShellPort;
 }
 
 /** 「以此继续编辑」：新建的提示词选中并取一次性聚焦，新建的任务节点（新提示词接的那个）也默认展开。 */
@@ -130,7 +130,7 @@ function generateVariantAction(deps: CanvasBoardActionsDeps): BoardActions["gene
 
 /** 重新定位的日志：类别固定，字段与拆分前逐字一致（成功 / 未找到 / 读不了）。 */
 function relocateLog(deps: CanvasBoardActionsDeps, node: ImageNode, mode: RelocateMode) {
-  return (outcome: RelocateOutcome): void => logEvent("relocate", { board_file: deps.boardFile, node_id: node.id, node_type: node.type, mode, ...outcome });
+  return (outcome: RelocateOutcome): void => deps.port.ui.log("relocate", { board_file: deps.boardFile, node_id: node.id, node_type: node.type, mode, ...outcome });
 }
 
 /** 重新定位没找到时的提示：结果是文件名，参考图是显示名。 */
@@ -142,13 +142,13 @@ function relocateMissingText(node: ImageNode): string {
 /** 选文件重定位：本机文件先上传到当前用户数据根，再更新节点引用。 */
 async function relocateByPick(deps: CanvasBoardActionsDeps, node: ImageNode): Promise<void> {
   const logRelocate = relocateLog(deps, node, "pick");
-  const files = await transfer.pickLocalImages(false);
+  const files = await deps.port.media.pickImages(false);
   if (!files.length) return;
   const file = files[0];
   try {
-    const uploaded = await transfer.uploadReference(file);
+    const uploaded = await deps.port.media.uploadReference(file);
     const abs = resolveFromRoot(deps.userRoot, uploaded.path);
-    const info = await ipc.inspectImage(abs);
+    const info = await deps.port.files.inspectImage(abs);
     deps.primeImageInfo(abs, info);
     deps.apply({ kind: "relocate", nodeId: node.id, path: uploaded.path, sha256: info.sha256, fileName: file.name, picked: true });
     logRelocate({ ok: true });
@@ -163,14 +163,14 @@ async function relocateBySearch(deps: CanvasBoardActionsDeps, node: ImageNode): 
   const logRelocate = relocateLog(deps, node, "search");
   const abs =
     node.type === "result"
-      ? await findResultFile(relocateFs, deps.userRoot, { task_id: node.task_id, file: node.file })
-      : await findReferenceFile(relocateFs, deps.userRoot, { sha256: node.sha256, display_name: node.display_name });
+      ? await findResultFile(deps.port.core.relocateFs, deps.userRoot, { task_id: node.task_id, file: node.file })
+      : await findReferenceFile(deps.port.core.relocateFs, deps.userRoot, { sha256: node.sha256, display_name: node.display_name });
   if (!abs) {
     logRelocate({ ok: false, reason: "not_found" });
     return deps.toast(relocateMissingText(node));
   }
   try {
-    const info = await ipc.inspectImage(abs);
+    const info = await deps.port.files.inspectImage(abs);
     deps.primeImageInfo(abs, info);
     deps.apply({ kind: "relocate", nodeId: node.id, path: toRootRelative(deps.userRoot, abs), sha256: info.sha256, fileName: basename(abs), picked: false });
     logRelocate({ ok: true });

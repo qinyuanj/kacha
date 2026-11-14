@@ -11,7 +11,7 @@ import { canConnect, type Connection } from "../core/graph";
 import type { HoverInfo } from "../core/hoverInfo";
 import { resolveFromRoot } from "../core/paths";
 import { dragKind, type DragFrom, type DragState } from "../core/ports";
-import { isEditableTarget } from "../shell/pageInput";
+
 import type { CSSProperties } from "react";
 import { SAVE_TEXT } from "./boardText";
 import { canvasFlowProps } from "./canvasFlowProps";
@@ -25,8 +25,8 @@ export function dragFromOf(c: ConnectionState): DragFrom | null {
 }
 
 /** 画布内屏蔽 WebView 默认右键菜单；可编辑元素保留原生菜单（复制粘贴）。 */
-export function blockNativeContextMenu(e: { target: EventTarget | null; preventDefault: () => void }): void {
-  if (!isEditableTarget(e.target)) e.preventDefault();
+export function blockNativeContextMenu(isEditable: (target: EventTarget | null) => boolean, e: { target: EventTarget | null; preventDefault: () => void }): void {
+  if (!isEditable(e.target)) e.preventDefault();
 }
 
 /** 归档画板的菜单 / 动作条过滤：只读时把条目换成查看类，可编辑时原样返回。 */
@@ -97,11 +97,11 @@ export async function saveNodeAsOf(
 
 /** 选图加参考图：attachTo = 任务节点 id 时只选一张并接到该任务的空图片端口。 */
 export async function pickReferencesOf(
-  deps: { pickLocalImages: (multiple: boolean) => Promise<File[]>; importFiles: (files: File[], at: { x: number; y: number }, attach?: { taskId: string; place: "asIs" | "left" }) => Promise<void>; centerPosition: () => { x: number; y: number } },
+  deps: { pickImages: (multiple: boolean) => Promise<File[]>; importFiles: (files: File[], at: { x: number; y: number }, attach?: { taskId: string; place: "asIs" | "left" }) => Promise<void>; centerPosition: () => { x: number; y: number } },
   at?: { x: number; y: number },
   attachTo?: string,
 ): Promise<void> {
-  const files = await deps.pickLocalImages(!attachTo);
+  const files = await deps.pickImages(!attachTo);
   if (!files.length) return;
   await deps.importFiles(files, at ?? deps.centerPosition(), attachTo ? { taskId: attachTo, place: "asIs" } : undefined);
 }
@@ -134,8 +134,8 @@ export function openPaneContextMenu(openMenu: OpenMenu, e: MenuEvent): void {
 }
 
 /** 节点右键：落在可编辑元素（节点里的输入框）上时保留原生菜单。 */
-export function openNodeContextMenu(openMenu: OpenMenu, e: MenuEvent, nodeId: string): void {
-  if (isEditableTarget(e.target ?? null)) return;
+export function openNodeContextMenu(openMenu: OpenMenu, isEditable: (target: EventTarget | null) => boolean, e: MenuEvent, nodeId: string): void {
+  if (isEditable(e.target ?? null)) return;
   openMenu(e, { kind: "node", nodeId });
 }
 

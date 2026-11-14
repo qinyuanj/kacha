@@ -41,9 +41,6 @@ export const boardSlotsFullText = ({ used, total }: Slots) => policy.slots_full.
 /** 服务端合并前按画板位拒绝时，导入报错原文就是统一文案（错误码在 runCancellable 里变成了文本）。 */
 export const isSlotsFullText = (text: string) => text.startsWith(SLOTS_FULL_HEAD);
 
-/** 服务端画板位满的错误码（409）。 */
-export const BOARD_SLOTS_FULL = "board_slots_full";
-
 /** 要新增 adding 块画板时：放不下给出统一文案，放得下为 null。 */
 export const slotsRefusal = (slots: Slots, adding: number): string | null =>
   adding > 0 && slots.used + adding > slots.total ? boardSlotsFullText(slots) : null;

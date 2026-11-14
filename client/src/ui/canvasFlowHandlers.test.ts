@@ -6,11 +6,9 @@ import type { Board, BoardEdge, BoardNode, ReferenceNode, ResultNode, TaskNode }
 import { BUILTIN_TABLE } from "../core/capabilities";
 import type { BoardChange, EditResult } from "../core/edit";
 import { LOCKED_HINT } from "../core/iterate";
-import { browser } from "../shell/ipc";
+
 import { DELETE_TASK_TEXT } from "./boardText";
 import { flowBookkeeping, flowHandlers, type DropState, type FlowBookkeeping, type FlowHandlerDeps } from "./canvasFlowHandlers";
-
-vi.mock("../shell/ipc", () => ({ browser: { ask: vi.fn() } }));
 
 const SPEC = { tier: "1K", ratio: "1:1", width: null, height: null } as const;
 
@@ -64,6 +62,7 @@ interface Harness {
   apply: ReturnType<typeof vi.fn>;
   check: ReturnType<typeof vi.fn>;
   toast: ReturnType<typeof vi.fn>;
+  ask: ReturnType<typeof vi.fn>;
   onCancelTask: ReturnType<typeof vi.fn>;
   selectNodes: ReturnType<typeof vi.fn>;
   selectEdges: ReturnType<typeof vi.fn>;
@@ -82,6 +81,7 @@ function harness(patch: Partial<FlowHandlerDeps> = {}): Harness {
     apply: vi.fn(),
     check: vi.fn<(change: BoardChange) => EditResult | null>(() => null),
     toast: vi.fn(),
+    ask: vi.fn(async () => true),
     onCancelTask: vi.fn(),
     selectNodes: vi.fn(),
     selectEdges: vi.fn(),
@@ -102,6 +102,7 @@ function harness(patch: Partial<FlowHandlerDeps> = {}): Harness {
     apply: fns.apply,
     check: fns.check,
     toast: fns.toast,
+    ask: fns.ask,
     onCancelTask: fns.onCancelTask,
     nav: { selectNodes: fns.selectNodes, selectEdges: fns.selectEdges, startDrag: fns.startDrag, stopDrag: fns.stopDrag },
     setMeasured: fns.setMeasured,
@@ -412,15 +413,14 @@ describe("删除", () => {
     h.check.mockReturnValue({ board: emptyBoard(), step: null, hint: "t2 正在排队 / 执行，无法断开它的输入" });
     await expect(flowHandlers(h.deps).onBeforeDelete(runningDelete())).resolves.toBe(false);
     expect(h.toast).toHaveBeenCalledWith("t2 正在排队 / 执行，无法断开它的输入");
-    expect(browser.ask).not.toHaveBeenCalled();
+    expect(h.ask).not.toHaveBeenCalled();
   });
 
   it("删排队 / 执行中的任务节点：确认后逐个取消，并记下豁免给紧随的删除", async () => {
     const h = harness({ board: board([reference("ref1"), task("t1")], [edge(["ref1", "out"], ["t1", "image:0"])]), locked: new Set(["t1"]) });
-    vi.mocked(browser.ask).mockResolvedValue(true);
     const input = runningDelete();
     await expect(flowHandlers(h.deps).onBeforeDelete(input)).resolves.toStrictEqual(input);
-    expect(browser.ask).toHaveBeenCalledWith(DELETE_TASK_TEXT.confirm(1), {
+    expect(h.ask).toHaveBeenCalledWith(DELETE_TASK_TEXT.confirm(1), {
       title: DELETE_TASK_TEXT.title,
       kind: "warning",
       okLabel: DELETE_TASK_TEXT.ok,
@@ -433,7 +433,7 @@ describe("删除", () => {
 
   it("不确认就不删，也不取消任务", async () => {
     const h = harness({ locked: new Set(["t1"]) });
-    vi.mocked(browser.ask).mockResolvedValue(false);
+    h.ask.mockResolvedValue(false);
     await expect(flowHandlers(h.deps).onBeforeDelete(runningDelete())).resolves.toBe(false);
     expect(h.onCancelTask).not.toHaveBeenCalled();
     expect(h.refs.cancelled).toEqual([]);
@@ -443,7 +443,7 @@ describe("删除", () => {
     const h = harness();
     const input = { nodes: [xyNode("ref1")], edges: [] as Edge[] };
     await expect(flowHandlers(h.deps).onBeforeDelete(input)).resolves.toStrictEqual(input);
-    expect(browser.ask).not.toHaveBeenCalled();
+    expect(h.ask).not.toHaveBeenCalled();
     expect(h.refs.cancelled).toEqual([]);
   });
 

@@ -6,7 +6,7 @@ import type { SettingsPorts } from "../core/settings";
 import type { ImageProbe } from "../core/submission";
 import type { TaskFs } from "../core/taskDir";
 import { imageCodec } from "./imageCodec";
-import { browser, httpFetch, ipc, packContent, packUpload, relay, session } from "./ipc";
+import { httpFetch, ipc, packContent, packUpload, relay, session } from "./ipc";
 import { logEvent } from "./log";
 import { composeOverlay } from "./overlay";
 
@@ -69,5 +69,3 @@ export const settingsPorts: SettingsPorts = {
   now: () => new Date(),
   log: logEvent,
 };
-
-export const openExternal = browser.openExternal;
