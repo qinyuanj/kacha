@@ -19,13 +19,12 @@ import { edgeHoverInfo } from "../core/hoverInfo";
 import { LOCKED_HINT, PASTE_OFFSET, TASK_BUSY } from "../core/iterate";
 import { MAX_PASTE_BYTES, nodeMarker, PASTE_NAME_PREFIX } from "../core/pageInput";
 import type { BoardMeasure } from "../core/tidy";
-import { browser, ipc, transfer } from "../shell/ipc";
-import { copyTextToClipboard } from "../shell/clipboard";
-import { webPort } from "../shell/webPort";
+import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { BoardCanvas } from "./BoardCanvas";
 import { ARCHIVE_TEXT, DELETE_TASK_TEXT, IMPORT_TEXT, PASTE_TEXT, SAVE_TEXT, STAGE_TEXT, TIDY_TEXT } from "./boardText";
 import { writeClipboard } from "./canvasKeyboard";
 import { HOVER_DELAY_MS } from "./hoverInfo";
+import { ShellProvider } from "./shell";
 
 // React 19 的 act() 要在测试环境里显式打开。
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -91,33 +90,7 @@ vi.mock("@xyflow/react", async () => {
 });
 
 // 会碰宿主 / 网络的接线一律替身；core 逻辑保持真实（本测试锁的是它与界面的接线）。
-vi.mock("../shell/ipc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../shell/ipc")>()),
-  ipc: {
-    ...(await importOriginal<typeof import("../shell/ipc")>()).ipc,
-    inspectImage: vi.fn(),
-    measureBoard: vi.fn(),
-    readFileBytes: vi.fn(),
-    writeNewFile: vi.fn(),
-    listDir: vi.fn(),
-    isFile: vi.fn(),
-    fileSha256: vi.fn(),
-  },
-  browser: { ask: vi.fn(), message: vi.fn(), onPackProgress: vi.fn(), openExternal: vi.fn(), version: vi.fn() },
-  transfer: { pickLocalImages: vi.fn(), uploadReference: vi.fn(), downloadImage: vi.fn(), downloadBoardResults: vi.fn() },
-}));
-
-vi.mock("../shell/adapters", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../shell/adapters")>()),
-  relocateFs: { listDir: vi.fn(), isFile: vi.fn(), sha256: vi.fn() },
-  // 画板状态的读取在本次运行的测试里没有任务目录：一律读失败，画布按「没有结局记录」处理。
-  taskFs: { readFile: vi.fn(async () => Promise.reject(new Error("测试里没有任务目录"))), writeNewFile: vi.fn() },
-}));
-
-vi.mock("../shell/log", () => ({ logEvent: vi.fn() }));
-// 系统剪贴板写入是宿主能力（安全上下文 / 内网 HTTP 两套实现）：替身只记调用，回成功。
-vi.mock("../shell/clipboard", () => ({ copyTextToClipboard: vi.fn(async () => undefined) }));
-vi.mock("../shell/imageClipboard", () => ({ copyImageToClipboard: vi.fn(async () => null) }));
+// 壳端口是内存替身：上传、读图、度量、确认框与剪贴板都记在 port.calls 上，不发请求。
 
 
 // ---- 画板夹具 ----
@@ -173,18 +146,24 @@ let root: Root;
 /** 落点判定（dropTargetAt）用 document.elementFromPoint：jsdom 没有实现，由测试喂。 */
 let elementAt: Mock<() => Element | null>;
 /** 壳端口的另存为替身（每次 beforeEach 重新装）。 */
-let saveCopyAs: ReturnType<typeof vi.spyOn>;
+let port: FakePort;
+/** 「另存为」的替身（每次 beforeEach 重新装）。 */
+let saveCopyAs: (absPath: string) => Promise<void>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(ipc.inspectImage).mockResolvedValue(IMAGE_INFO);
-  vi.mocked(ipc.measureBoard).mockResolvedValue({ nodes: {}, dirs: {} } satisfies BoardMeasure);
-  vi.mocked(browser.ask).mockResolvedValue(true);
-  vi.mocked(transfer.pickLocalImages).mockResolvedValue([]);
-  vi.mocked(transfer.uploadReference).mockImplementation(async (file: File) => ({ path: `reference/${file.name}`, sha256: SHA_B }));
-  vi.mocked(copyTextToClipboard).mockResolvedValue(undefined);
-  // 「另存为」经壳端口的 media.saveCopyAs（Web 实现是下载附件）；这里只记调用。
-  saveCopyAs = vi.spyOn(webPort.media, "saveCopyAs").mockResolvedValue(undefined);
+  port = createFakePort();
+  port.files.inspectImage = vi.fn(async () => IMAGE_INFO);
+  port.board.measure = vi.fn(async () => ({ nodes: {}, dirs: {} } satisfies BoardMeasure));
+  port.ui.ask = vi.fn(async () => true);
+  port.media.pickImages = vi.fn(async () => [] as File[]);
+  port.media.uploadReference = vi.fn(async (file: File) => ({ path: `reference/${file.name}`, sha256: SHA_B }));
+  port.media.copyText = vi.fn(async () => undefined);
+  // 「另存为」经壳端口的 media.saveCopyAs；这里只记调用。
+  saveCopyAs = vi.fn(async () => undefined);
+  port.media.saveCopyAs = saveCopyAs;
+  // 画板状态的读取在本次运行的测试里没有任务目录：一律读失败，画布按「没有结局记录」处理。
+  port.core.taskFs = { readFile: vi.fn(async () => Promise.reject(new Error("测试里没有任务目录"))), writeNewFile: vi.fn() };
   // 应用内剪贴板是模块级状态（可跨画板粘贴），每条用例从「没复制过」开始。
   writeClipboard(null);
   xyflow.connection.current = { inProgress: false, fromHandle: null };
@@ -254,7 +233,7 @@ async function flush(): Promise<void> {
 
 async function renderCanvas(patch: Partial<Props> = {}): Promise<Harness> {
   const harness = makeProps(patch);
-  await act(async () => root.render(createElement(BoardCanvas, harness.props)));
+  await act(async () => root.render(createElement(ShellProvider, { port, children: createElement(BoardCanvas, harness.props) })));
   await flush();
   return harness;
 }
@@ -500,12 +479,12 @@ describe("工具栏（portal 进 toolbarSlot）", () => {
   it("「＋ 参考图…」选好文件后上传并落成参考图", async () => {
     const { apply } = await renderCanvas({ toolbarSlot: slot });
     const file = new File(["x"], "ref.png", { type: "image/png" });
-    vi.mocked(transfer.pickLocalImages).mockResolvedValueOnce([file]);
+    vi.mocked(port.media.pickImages).mockResolvedValueOnce([file]);
     // 文案在生产侧 BoardToolbar / PreviewDialog（本票未改动的既有组件），这里手抄同源字面量。
     await act(async () => buttonByText(slot, "＋ 参考图…").click());
     await flush();
-    expect(transfer.pickLocalImages).toHaveBeenCalledWith(true);
-    expect(transfer.uploadReference).toHaveBeenCalledWith(file);
+    expect(port.media.pickImages).toHaveBeenCalledWith(true);
+    expect(port.media.uploadReference).toHaveBeenCalledWith(file);
     expect(apply).toHaveBeenCalledWith({
       kind: "addReferences",
       images: [{ path: "reference/ref.png", sha256: SHA_A, display_name: "ref.png", width: 240, height: 160 }],
@@ -673,7 +652,7 @@ describe("键盘快捷键", () => {
     await flush();
     // 只有真复制到节点才拦默认行为（系统剪贴板里那段文本就是复制的产物）。
     expect(event.defaultPrevented).toBe(true);
-    expect(copyTextToClipboard).toHaveBeenCalledWith(nodeMarker(2));
+    expect(port.media.copyText).toHaveBeenCalledWith(nodeMarker(2));
     // 复制本身不写画板。
     expect(editChanges(apply)).toEqual([]);
   });
@@ -683,13 +662,13 @@ describe("键盘快捷键", () => {
     const event = await press("c", { ctrlKey: true });
     await flush();
     expect(event.defaultPrevented).toBe(false);
-    expect(copyTextToClipboard).not.toHaveBeenCalled();
+    expect(port.media.copyText).not.toHaveBeenCalled();
   });
 
   it("系统剪贴板写不进去时提示可以用 Ctrl+J 原地复制", async () => {
     const { toast } = await renderCanvas();
     await selectNodes(["p1"]);
-    vi.mocked(copyTextToClipboard).mockRejectedValueOnce(new Error("浏览器拒绝了复制操作"));
+    vi.mocked(port.media.copyText).mockRejectedValueOnce(new Error("浏览器拒绝了复制操作"));
     await press("c", { ctrlKey: true });
     await flush();
     expect(toast).toHaveBeenCalledWith(PASTE_TEXT.markerUnwritable);
@@ -722,7 +701,7 @@ describe("键盘快捷键", () => {
       expect(kinds).not.toContain("paste");
       expect(kinds).not.toContain("nudge");
       // Ctrl+C 也不能抢输入框里的复制。
-      expect(copyTextToClipboard).not.toHaveBeenCalled();
+      expect(port.media.copyText).not.toHaveBeenCalled();
     } finally {
       input.remove();
     }
@@ -736,8 +715,8 @@ describe("页面级粘贴（#96：从系统剪贴板粘图片 / 节点）", () =
     const file = new File(["x"], "shot.png", { type: "image/png" });
     const event = await paste({ files: [file] });
     expect(event.defaultPrevented).toBe(true);
-    expect(transfer.uploadReference).toHaveBeenCalledWith(file);
-    expect(ipc.inspectImage).toHaveBeenCalled();
+    expect(port.media.uploadReference).toHaveBeenCalledWith(file);
+    expect(port.files.inspectImage).toHaveBeenCalled();
     expect(apply).toHaveBeenCalledWith({
       kind: "addReferences",
       images: [{ path: "reference/shot.png", sha256: SHA_A, display_name: expect.stringMatching(new RegExp(`^${PASTE_NAME_PREFIX}-`)), width: 240, height: 160 }],
@@ -788,7 +767,7 @@ describe("页面级粘贴（#96：从系统剪贴板粘图片 / 节点）", () =
     const event = await paste({ files: [new File([], "report.bin", { type: "" })] });
     expect(event.defaultPrevented).toBe(true);
     expect(toast).toHaveBeenCalledWith(PASTE_TEXT.filesNotReadable);
-    expect(transfer.uploadReference).not.toHaveBeenCalled();
+    expect(port.media.uploadReference).not.toHaveBeenCalled();
   });
 
   it("只读归档画板粘图片：只提示只读，不上传不写画板", async () => {
@@ -796,7 +775,7 @@ describe("页面级粘贴（#96：从系统剪贴板粘图片 / 节点）", () =
     const event = await paste({ files: [new File(["x"], "shot.png", { type: "image/png" })] });
     expect(event.defaultPrevented).toBe(true);
     expect(harness.toast).toHaveBeenCalledWith(ARCHIVE_TEXT.readOnly);
-    expect(transfer.uploadReference).not.toHaveBeenCalled();
+    expect(port.media.uploadReference).not.toHaveBeenCalled();
     expect(editChanges(harness.apply)).toEqual([]);
   });
 
@@ -807,7 +786,7 @@ describe("页面级粘贴（#96：从系统剪贴板粘图片 / 节点）", () =
     const event = await paste({ files: [big] });
     expect(event.defaultPrevented).toBe(true);
     expect(toast).toHaveBeenCalledWith(PASTE_TEXT.tooLarge);
-    expect(transfer.uploadReference).not.toHaveBeenCalled();
+    expect(port.media.uploadReference).not.toHaveBeenCalled();
   });
 
   it("模态开着时粘贴放行给弹窗", async () => {
@@ -815,7 +794,7 @@ describe("页面级粘贴（#96：从系统剪贴板粘图片 / 节点）", () =
     const file = new File(["x"], "shot.png", { type: "image/png" });
     const event = await paste({ files: [file] });
     expect(event.defaultPrevented).toBe(false);
-    expect(transfer.uploadReference).not.toHaveBeenCalled();
+    expect(port.media.uploadReference).not.toHaveBeenCalled();
     expect(editChanges(harness.apply)).toEqual([]);
   });
 
@@ -827,7 +806,7 @@ describe("页面级粘贴（#96：从系统剪贴板粘图片 / 节点）", () =
       input.focus();
       const event = await paste({ text: "一段文字" }, input);
       expect(event.defaultPrevented).toBe(false);
-      expect(transfer.uploadReference).not.toHaveBeenCalled();
+      expect(port.media.uploadReference).not.toHaveBeenCalled();
       expect(editChanges(harness.apply)).toEqual([]);
     } finally {
       input.remove();
@@ -938,7 +917,7 @@ describe("HTML5 拖放", () => {
     const { apply } = await renderCanvas();
     const file = new File(["x"], "cat.png", { type: "image/png" });
     await dropFiles(canvasRoot(), [file], { x: 10, y: 20 });
-    expect(transfer.uploadReference).toHaveBeenCalledWith(file);
+    expect(port.media.uploadReference).toHaveBeenCalledWith(file);
     expect(apply).toHaveBeenCalledWith({
       kind: "addReferences",
       images: [{ path: "reference/cat.png", sha256: SHA_A, display_name: "cat.png", width: 240, height: 160 }],
@@ -958,7 +937,7 @@ describe("HTML5 拖放", () => {
     const file = new File(["x"], "notes.txt", { type: "text/plain" });
     await dropFiles(canvasRoot(), [file], { x: 10, y: 20 });
     expect(toast).toHaveBeenCalledWith(IMPORT_TEXT.imageOnly);
-    expect(transfer.uploadReference).not.toHaveBeenCalled();
+    expect(port.media.uploadReference).not.toHaveBeenCalled();
     expect(editChanges(apply)).toEqual([]);
   });
 });
@@ -984,7 +963,7 @@ describe("只读画板（归档）", () => {
     harness.toast.mockClear();
     await dropFiles(canvasRoot(), [new File(["x"], "a.png", { type: "image/png" })], { x: 1, y: 2 });
     expect(harness.toast).toHaveBeenCalledWith(ARCHIVE_TEXT.readOnly);
-    expect(transfer.uploadReference).not.toHaveBeenCalled();
+    expect(port.media.uploadReference).not.toHaveBeenCalled();
     // 粘贴同样被挡下（应用内剪贴板里的内容不落盘）。
     await selectNodes(["r1"]);
     await press("c", { ctrlKey: true });
@@ -1111,7 +1090,7 @@ describe("React Flow 回调接线", () => {
       allowed = await flowProps().onBeforeDelete!({ nodes: [flowNodeOf("t1")], edges: [] });
     });
     // 确认框的文案与按钮由 boardText 的 DELETE_TASK_TEXT 给（「先取消再删除」）。
-    expect(browser.ask).toHaveBeenCalledWith(DELETE_TASK_TEXT.confirm(1), {
+    expect(port.ui.ask).toHaveBeenCalledWith(DELETE_TASK_TEXT.confirm(1), {
       title: DELETE_TASK_TEXT.title,
       kind: "warning",
       okLabel: DELETE_TASK_TEXT.ok,
@@ -1124,7 +1103,7 @@ describe("React Flow 回调接线", () => {
 
     // 点「不删除」：不取消、不删。
     const declined = await renderCanvas({ locked: new Set(["t1"]) });
-    vi.mocked(browser.ask).mockResolvedValueOnce(false);
+    vi.mocked(port.ui.ask).mockResolvedValueOnce(false);
     await act(async () => {
       allowed = await flowProps().onBeforeDelete!({ nodes: [flowNodeOf("t1")], edges: [] });
     });

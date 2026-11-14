@@ -10,21 +10,18 @@ import { nextStageName, STAGE_PADDING } from "../core/stages";
 import { boardBytes, type BoardMeasure } from "../core/tidy";
 import { TIDY_TEXT } from "./boardText";
 import { useCanvasStageView, type CanvasStageView } from "./useCanvasStageView";
+import { createFakePort } from "../shell/testing/fakePort";
+import { ShellProvider } from "./shell";
 
 // React 19 的 act() 要在测试环境里显式打开。
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// 壳层替身：确认框与服务端度量（vi.mock 先于 import 执行，替身用 vi.hoisted 提前造好）。
-const shell = vi.hoisted(() => ({
+// 壳端口替身：确认框与度量都走内存端口（不发请求）。
+const shell = {
   ask: vi.fn(),
   measureBoard: vi.fn(),
-}));
-
-vi.mock("../shell/ipc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../shell/ipc")>()),
-  ipc: { ...(await importOriginal<typeof import("../shell/ipc")>()).ipc, measureBoard: shell.measureBoard },
-  browser: { ...(await importOriginal<typeof import("../shell/ipc")>()).browser, ask: shell.ask },
-}));
+};
+let port = createFakePort();
 
 // ---- 画板与渲染脚手架 ----
 
@@ -92,7 +89,7 @@ function Probe(props: ProbeProps) {
 }
 
 async function show(props: ProbeProps): Promise<void> {
-  await act(async () => root.render(createElement(Probe, props)));
+  await act(async () => root.render(createElement(ShellProvider, { port, children: createElement(Probe, props) })));
   await act(async () => {});
   await act(async () => {});
 }
@@ -127,6 +124,9 @@ beforeEach(() => {
   shell.ask.mockResolvedValue(true);
   shell.measureBoard.mockReset();
   shell.measureBoard.mockResolvedValue(MEASURE);
+  port = createFakePort();
+  port.ui.ask = shell.ask;
+  port.board.measure = shell.measureBoard;
 });
 
 afterEach(async () => {

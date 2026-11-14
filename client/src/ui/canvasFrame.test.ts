@@ -8,7 +8,9 @@ import { BUILTIN_TABLE } from "../core/capabilities";
 import { menuItems, type MenuFacts, type MenuItem } from "../core/contextMenu";
 import type { HoverInfo } from "../core/hoverInfo";
 import { SAVE_TEXT } from "./boardText";
-import { isEditableTarget } from "../shell/pageInput";
+
+const isEditableTarget = webPort.ui.isEditableTarget;
+import { webPort } from "../shell/webPort";
 import {
   blockNativeContextMenu,
   connectionAllowed,

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // useCanvasData 的接线：画板上的图片引用（含结果图层）、读到的图片信息与透明通道、读不到的图片、
-// 运行 / 任务状态，以及自动宽高比补算的触发时机。壳层（ipc / adapters）用替身：真实现要发 HTTP。
+// 运行 / 任务状态，以及自动宽高比补算的触发时机。壳端口用内存替身：真实现要发 HTTP。
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,27 +10,20 @@ import type { BoardChange, EditResult } from "../core/edit";
 import type { NodeRunState } from "../core/runner";
 import { OUTCOME_FILE, taskFilePath } from "../core/taskDir";
 import type { ImageInfo } from "../shell/port";
+import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { useCanvasData, type CanvasData } from "./useCanvasData";
+import { ShellProvider } from "./shell";
 
 // React 19 的 act() 要在测试环境里显式打开。
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// 壳层替身：图片探测、任务目录读取与日志（vi.mock 先于 import 执行，替身用 vi.hoisted 提前造好）。
-const shell = vi.hoisted(() => ({
+// 壳端口替身：图片探测、任务目录读取与日志都记在内存端口上。
+const shell = {
   inspectImage: vi.fn(),
   readFile: vi.fn(),
-  logEvent: vi.fn(async () => undefined),
-}));
-
-vi.mock("../shell/ipc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../shell/ipc")>()),
-  ipc: { inspectImage: shell.inspectImage, logEvent: shell.logEvent },
-}));
-
-vi.mock("../shell/adapters", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../shell/adapters")>()),
-  taskFs: { readFile: shell.readFile, writeNewFile: vi.fn(async () => undefined) },
-}));
+  logEvent: vi.fn((_kind: string, _fields: Record<string, unknown>) => undefined),
+};
+let port: FakePort;
 
 // ---- 画板与渲染脚手架 ----
 
@@ -115,7 +108,7 @@ function Probe(props: ProbeProps) {
 
 /** 渲染一次并让异步读取（图片信息、结局记录）落地。 */
 async function show(props: ProbeProps): Promise<void> {
-  await act(async () => root.render(createElement(Probe, props)));
+  await act(async () => root.render(createElement(ShellProvider, { port, children: createElement(Probe, props) })));
   await act(async () => {});
   await act(async () => {});
 }
@@ -135,6 +128,12 @@ beforeEach(() => {
     throw Object.assign(new Error("没有这个文件"), { status: 404 });
   });
   shell.logEvent.mockClear();
+  port = createFakePort();
+  port.files.inspectImage = shell.inspectImage;
+  port.core.taskFs = { readFile: shell.readFile, writeNewFile: vi.fn(async () => undefined) };
+  port.ui.log = (kind, fields) => {
+    void shell.logEvent(kind, fields);
+  };
 });
 
 afterEach(async () => {

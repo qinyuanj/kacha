@@ -7,9 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Node } from "@xyflow/react";
 import type { Board, BoardNode } from "../core/board";
 import type { BoardChange, EditResult } from "../core/edit";
-import { isEditableTarget } from "../shell/pageInput";
+import { webPort } from "../shell/webPort";
 import { canvasFlowProps } from "./canvasFlowProps";
 import { useCanvasInteraction, type Selection } from "./useCanvasInteraction";
+
+const isEditableTarget = webPort.ui.isEditableTarget;
 
 // React 19 的 act() 要在测试环境里显式打开。
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

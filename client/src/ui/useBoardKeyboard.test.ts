@@ -1,20 +1,17 @@
 // @vitest-environment jsdom
 // 画板快捷键的挂载点：window 上的 keydown 接到撤销 / 重做 / 复制；复制会写应用内剪贴板与系统剪贴板标记（#96）。
 import { act, createElement } from "react";
+import { ShellProvider } from "./shell";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { newBoard, type Board, type BoardNode } from "../core/board";
 import { nodeMarker } from "../core/pageInput";
-import { copyTextToClipboard } from "../shell/clipboard";
-import { webPort } from "../shell/webPort";
+import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { PASTE_TEXT } from "./boardText";
 import { readClipboard, writeClipboard } from "./canvasKeyboard";
 import { useBoardKeyboard } from "./useBoardKeyboard";
 
-// 系统剪贴板写入换成替身：默认成功，个别用例让它失败。
-vi.mock("../shell/clipboard", () => ({ copyTextToClipboard: vi.fn(async () => undefined) }));
-vi.mock("../shell/imageClipboard", () => ({ copyImageToClipboard: vi.fn(async () => null) }));
-
+// 系统剪贴板写入由壳端口替身记录：默认成功，个别用例让它失败。
 // React 19 的 act() 要在测试环境里显式打开。
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -30,6 +27,7 @@ let onUndo: Mock;
 let onRedo: Mock;
 let toast: Mock;
 let board: Board;
+let port: FakePort;
 
 function Probe(): null {
   useBoardKeyboard(opts);
@@ -37,10 +35,10 @@ function Probe(): null {
 }
 
 async function show(): Promise<void> {
-  await act(async () => root?.render(createElement(Probe)));
+  await act(async () => root?.render(createElement(ShellProvider, { port, children: createElement(Probe) })));
 }
 
-/** 等 copyTextToClipboard 的 catch 走完（写入失败那条提示是异步给的）。 */
+/** 等端口 copyText 的 catch 走完（写入失败那条提示是异步给的）。 */
 async function settle(): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -55,8 +53,7 @@ function press(init: KeyboardEventInit, target: EventTarget = window): KeyboardE
 }
 
 beforeEach(async () => {
-  vi.mocked(copyTextToClipboard).mockReset();
-  vi.mocked(copyTextToClipboard).mockResolvedValue(undefined);
+  port = createFakePort();
   container = document.createElement("div");
   document.body.append(container);
   canvasEl = document.createElement("div");
@@ -75,7 +72,7 @@ beforeEach(async () => {
     onUndo,
     onRedo,
     toast,
-    port: webPort,
+    port,
   };
   await show();
 });
@@ -150,7 +147,7 @@ describe("复制", () => {
     expect(readClipboard()?.nodes.map((n) => n.id)).toEqual(["p1"]);
     // 先拦原生复制，再把标记写进系统剪贴板：默认复制动作会把标记冲掉。
     expect(event.defaultPrevented).toBe(true);
-    expect(copyTextToClipboard).toHaveBeenCalledWith(nodeMarker(1));
+    expect(port.calls.copyText).toEqual([nodeMarker(1)]);
     await settle();
     expect(toast).not.toHaveBeenCalled();
   });
@@ -160,7 +157,7 @@ describe("复制", () => {
     const event = press({ key: "c", ctrlKey: true });
     expect(readClipboard()).toBeNull();
     expect(event.defaultPrevented).toBe(false);
-    expect(copyTextToClipboard).not.toHaveBeenCalled();
+    expect(port.calls.copyText).toEqual([]);
   });
 
   it("选区里没有可复制的节点（结果节点 / 已不在画板上）：写空快照，不拦原生复制也不写标记", () => {
@@ -168,11 +165,13 @@ describe("复制", () => {
     const event = press({ key: "c", ctrlKey: true });
     expect(readClipboard()).toEqual({ nodes: [], edges: [] });
     expect(event.defaultPrevented).toBe(false);
-    expect(copyTextToClipboard).not.toHaveBeenCalled();
+    expect(port.calls.copyText).toEqual([]);
   });
 
   it("标记写不进系统剪贴板：提示给替代动作，剪贴板本身照旧", async () => {
-    vi.mocked(copyTextToClipboard).mockRejectedValueOnce(new Error("浏览器拒绝了复制操作"));
+    port.media.copyText = async () => {
+      throw new Error("浏览器拒绝了复制操作");
+    };
     const event = press({ key: "c", ctrlKey: true });
     expect(event.defaultPrevented).toBe(true);
     expect(readClipboard()?.nodes.map((n) => n.id)).toEqual(["p1"]);
