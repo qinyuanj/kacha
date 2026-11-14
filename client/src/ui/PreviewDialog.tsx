@@ -3,22 +3,18 @@
 // 区域编辑与图层判定在 ui/previewRegion.ts、ui/previewLayers.ts、ui/previewState.ts（#137），这里只留接线与 DOM 摆放。
 import { useEffect, useRef, useState } from "react";
 import type { PortRef, RegionRender } from "../core/board";
-import { type LayerRecord } from "../core/taskDir";
 import { useBoardActions, useImageInfos } from "./context";
 import { useShell } from "./shell";
 import type { Rect01 } from "./rects";
-import { regionModeOf, regionSetting, shownRects, type Drag, type RegionMode } from "./previewRegion";
-import { layerIndexOf, layerName } from "./previewLayers";
-import { removeSelected, startEditState, toggleChecked, toggleSolo } from "./previewState";
+import { regionSetting, shownRects, type Drag, type RegionMode } from "./previewRegion";
+
+import { removeSelected, toggleChecked, toggleSolo } from "./previewState";
 import { PreviewFooter, PreviewHeader } from "./previewViews";
 import { PreviewStage } from "./previewStage";
+import { LayerSidebar, type PreviewLayer } from "./previewSidebar";
 import { exportAllImages, exportOneImage } from "./previewExport";
 import { dragPoint, editStateOf, pointAt, rectsAfter, startDragAt } from "./previewDrag";
-
-export interface PreviewLayer {
-  record: LayerRecord;
-  absPath: string;
-}
+import { initialEditTarget, previewLayers, previewOutlines, previewTargets } from "./previewHandlers";
 
 /** 弹窗里可编辑区域的一条目标连线（任务端口行单条，或参考图 / 结果扇出的多条）。 */
 export interface RegionTarget {
@@ -54,93 +50,13 @@ interface Props {
   onClose: () => void;
 }
 
-/** 图层侧栏：勾选叠加显示、点缩略图看单层、导出与继续编辑的入口。 */
-function LayerSidebar(props: {
-  layers: PreviewLayer[];
-  checked: ReadonlySet<number>;
-  solo: number | null;
-  pickSource: number;
-  busy: boolean;
-  resultId: string | undefined;
-  layerInfos: ReadonlyMap<string, { has_alpha: boolean } | null>;
-  onToggle(index: number): void;
-  onSolo(index: number): void;
-  onPickSource(value: number): void;
-  onExportOne(absPath: string): void;
-  onExportBase(): void;
-  onExportAll(): void;
-  onContinueEditing(resultId: string, layerIndex: number | null): void;
-  onAddAsReference(resultId: string, layerIndex: number | null): void;
-}) {
-  const { layers, checked, solo, pickSource, busy, resultId, layerInfos } = props;
-  const layerIndex = layerIndexOf(pickSource, layers.length);
-  return (
-    <div className="preview-side">
-      <div className="muted small">图层（点缩略图看单层，勾选叠加显示）</div>
-      <ul className="layer-list">
-        {layers.map((layer, i) => (
-          <li key={layer.record.file}>
-            <label>
-              <input type="checkbox" checked={checked.has(i)} onChange={() => props.onToggle(i)} />
-              <img
-                src={layer.absPath}
-                alt={layer.record.file}
-                draggable={false}
-                className={solo === i ? "layer-solo" : ""}
-                title="点选只显示该层（再点取消）"
-                onClick={(e) => {
-                  e.preventDefault();
-                  props.onSolo(i);
-                }}
-              />
-              <span title={layer.record.description}>
-                {layerName(layer.record, i)}
-                {layerInfos.get(layer.absPath)?.has_alpha && <span className="badge">透明</span>}
-              </span>
-            </label>
-            <button className="link small" disabled={busy} onClick={() => props.onExportOne(layer.absPath)}>
-              保存
-            </button>
-          </li>
-        ))}
-      </ul>
-      {resultId && (
-        <div className="preview-pick">
-          <select value={pickSource} onChange={(e) => props.onPickSource(Number(e.target.value))}>
-            <option value={0}>底图（合成结果）</option>
-            {layers.map((layer, i) => (
-              <option key={layer.record.file} value={i + 1}>
-                图层{i + 1}
-              </option>
-            ))}
-          </select>
-          <button disabled={busy} onClick={() => props.onContinueEditing(resultId, layerIndex)}>
-            以此继续编辑
-          </button>
-          <button disabled={busy} onClick={() => props.onAddAsReference(resultId, layerIndex)}>
-            加为参考图
-          </button>
-        </div>
-      )}
-      <div className="preview-export">
-        <button disabled={busy} onClick={props.onExportBase}>
-          保存底图
-        </button>
-        <button disabled={busy} onClick={props.onExportAll} title="选一个目录，写入底图、全部图层文件与 layers.json（重名自动加序号）">
-          保存全部图层 + layers.json
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function PreviewDialog({ req, toast, onClose }: Props) {
   const port = useShell();
   const { apply, addAsReference, continueEditing } = useBoardActions();
   const stage = useRef<HTMLImageElement>(null);
-  const initial = startEditState(req.edit ?? { label: "", edgeRef: { from: ["", ""], to: ["", ""] }, rects: [], render: "highlight_overlay", firstRegion: 0 });
-  const [editing, setEditing] = useState<RegionTarget | null>(req.edit ?? null);
-  const [regionMode, setRegionMode] = useState<RegionMode>(req.edit ? regionModeOf(req.edit) : "overlay");
+  const initial = initialEditTarget(req);
+  const [editing, setEditing] = useState<RegionTarget | null>(initial.editing);
+  const [regionMode, setRegionMode] = useState<RegionMode>(initial.regionMode);
   const [rects, setRects] = useState<Rect01[]>(initial.rects);
   const [selected, setSelected] = useState<number | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -149,10 +65,10 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
   const [showOutlines, setShowOutlines] = useState(false);
   const [pickSource, setPickSource] = useState(0);
   const [busy, setBusy] = useState(false);
-  const layers = req.layers ?? [];
+  const layers = previewLayers(req.layers);
   const baseInfo = useImageInfos([req.absPath]).get(req.absPath);
-  const targets = req.regionTargets ?? [];
-  const outlines = req.regionOutlines ?? [];
+  const targets = previewTargets(req.regionTargets);
+  const outlines = previewOutlines(req.regionOutlines);
   const first = editing?.firstRegion ?? 0;
   const layerInfos = useImageInfos(layers.map((l) => l.absPath));
 
