@@ -6,7 +6,6 @@
 // 调用时以 kind: "unavailable" 拒绝：界面据此标「尚不可用」，不失败得更晚，也不伪装成功。
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
-import { joinPath } from "../core/paths";
 import { PortError, type FeatureId, type ShellFeatures, type ShellPort } from "./port";
 import { copyTextToClipboard } from "./clipboard";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
@@ -14,6 +13,11 @@ import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, Image
 import type { DirEntry } from "../core/relocate";
 import type { PackIo } from "../core/boardPack";
 import type { LogKind } from "./log";
+import { base64Of, clipboardContentOf, extensionOf } from "./desktopClipboard";
+import { sha256Hex } from "../core/sha256";
+import { IMPORTED_REFERENCES_DIR } from "../core/boardPack";
+import { joinPath, toRootRelative } from "../core/paths";
+import { portFailureOf, type ClipboardContent } from "./port";
 
 /** Go 侧写操作的结局：成功时 kind 为空，失败时 kind 是类别（见 localservice.Outcome）。 */
 export interface DesktopOutcome {
@@ -48,6 +52,8 @@ export interface DesktopLocalBridge {
   deleteBoard(path: string, version?: string): Promise<DesktopOutcome>;
   readFile(path: string): Promise<string>;
   writeNewFile(path: string, bytes: Uint8Array): Promise<DesktopOutcome>;
+  /** 与 writeNewFile 相同，字节以 base64 传（Uint8Array 在 JSON 里解不进 Go 的 []byte）。 */
+  writeNewFileBase64(path: string, data: string): Promise<DesktopOutcome>;
   isFile(path: string): Promise<boolean>;
   listDir(path: string): Promise<{ name: string; is_dir: boolean }[]>;
   fileSha256(path: string): Promise<string>;
@@ -63,10 +69,27 @@ export interface DesktopLocalBridge {
   userDataRoot(): Promise<string>;
 }
 
+/** Go 侧剪贴板快照（Clipboard.Read）：类别与 desktop/internal/clipboard 的 Kind 一致。 */
+export interface DesktopClipboardSnapshot {
+  kind: string;
+  text: string;
+  /** base64 的 PNG，按剪贴板里的顺序。 */
+  images: string[];
+  reason: string;
+  formats: string[];
+}
+
+/** Go 侧剪贴板服务（Clipboard 服务）。 */
+export interface DesktopClipboardBridge {
+  read(): Promise<DesktopClipboardSnapshot>;
+}
+
 /** MyGo 桥：Go 侧绑定与测试替身都满足它。 */
 export interface DesktopBridge {
   info(): Promise<DesktopInfo>;
   local: DesktopLocalBridge;
+  /** 系统剪贴板（#129）；没有这一项的替身按读不到处理。 */
+  clipboard?: DesktopClipboardBridge;
 }
 
 /** 能力的中文名，用来写「尚不可用」的提示。 */
@@ -122,6 +145,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     packExport: info.features.pack_export,
     // 整理模式本切片还没实现（度量画板体量留给后续切片）。
     tidy: false,
+    // 桌面壳直接读系统剪贴板（#129）：粘贴截图不必先存成文件。
+    nativeClipboard: true,
   };
 
   /** 一次本地调用：Go 侧异常折成 failed（消息保持原文），结局失败折成类别化 PortError。 */
@@ -132,6 +157,39 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
       if (e instanceof PortError) throw e;
       throw new PortError({ kind: "failed", code: "local", message: e instanceof Error ? e.message : String(e), status: 0 });
     }
+  };
+
+
+  /** 导入参考图的目录（与 Web 服务端同一份布局，见 core/boardPack 的 IMPORTED_REFERENCES_DIR）。 */
+  const refDir = joinPath(info.user_data_root, IMPORTED_REFERENCES_DIR);
+
+  /**
+   * 本机图片进 导入参考图/：文件名是内容的 sha256，扩展名按图片格式（剪贴板里一律 PNG）。
+   * 同图重复上传时写新文件报 alreadyExists——那说明这个内容已经在盘上，按成功处理（去重）。
+   */
+  const uploadReference = async (file: File): Promise<{ path: string; sha256: string }> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const sha = await sha256Hex(bytes);
+    // 端口约定：返回相对用户数据根的路径（与 Web 上传一致），绝对路径只在本函数里用。
+    const abs = joinPath(refDir, sha + "." + extensionOf(file));
+    const path = toRootRelative(info.user_data_root, abs);
+    try {
+      checked(await local.writeNewFileBase64(abs, base64Of(bytes)));
+    } catch (e) {
+      const failure = portFailureOf(e);
+      if (failure.kind !== "alreadyExists") throw e;
+    }
+    return { path, sha256: sha };
+  };
+
+  /**
+   * 读一次系统剪贴板（#129）：Go 侧给类型化快照，这里把 base64 的 PNG 还原成 File。
+   * 桥里没有剪贴板（旧替身）时返回 null，调用方改用 paste 事件带的内容。
+   */
+  const readClipboardSnapshot = async (): Promise<ClipboardContent | null> => {
+    if (!bridge.clipboard) return null;
+    const snapshot = await run(() => bridge.clipboard!.read());
+    return clipboardContentOf(snapshot);
   };
 
   const board = {
@@ -187,10 +245,11 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     thumbUrl: (absPath: string): string => fileUrl(absPath),
     pickImages: async (): Promise<never> => unavailable("generation"),
     pickPackFile: async (): Promise<never> => unavailable("packExport"),
-    uploadReference: async (): Promise<never> => unavailable("generation"),
+    // 本机图片进 导入参考图/：文件名就是内容的 sha256，同图重复上传天然去重（写新文件只新建不覆盖）。
+    uploadReference: (file: File): Promise<{ path: string; sha256: string }> => uploadReference(file),
     copyText: (text: string): Promise<void> => copyTextToClipboard(text),
     copyImage: async (): Promise<never> => unavailable("generation"),
-    readClipboard: (): null => null,
+    readClipboard: (): Promise<ClipboardContent | null> => readClipboardSnapshot(),
     saveCopyAs: async (): Promise<never> => unavailable("generation"),
     downloadImage: (): void => {
       unavailable("generation");

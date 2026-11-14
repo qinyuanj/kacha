@@ -5,7 +5,7 @@
 import { buildZip, type FixtureEntry } from "../../core/testing/zipFixture";
 import type { ImportOptions, ImportResult, MergeReport, PackEntryFact } from "../../core/boardPack";
 import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, SessionPort, UsagePort } from "../types";
-import { PortError, type BoardStore, type ClipboardSnapshot, type CorePorts, type FeatureId, type FileStore, type ImageCopyResult, type MediaStore, type MetaStore, type PackStore, type PortFailureKind, type ShellPort, type UiStore } from "../port";
+import { PortError, type BoardStore, type ClipboardContent, type CorePorts, type FeatureId, type FileStore, type ImageCopyResult, type MediaStore, type MetaStore, type PackStore, type PortFailureKind, type ShellPort, type UiStore } from "../port";
 
 /** 造一个端口失败（界面按 kind 分支）。 */
 export const fakeFailure = (kind: PortFailureKind, message: string = kind, feature?: FeatureId): PortError =>
@@ -34,7 +34,7 @@ export interface FakePortOptions {
   userRoot?: string;
   boards?: FakeBoard[];
   /** 系统剪贴板内容：readClipboard 返回它（null = 读不到，按 paste 事件走）。 */
-  clipboard?: ClipboardSnapshot | null;
+  clipboard?: ClipboardContent | null;
   /** copyImage 的结局：默认成功。 */
   copyImage?: ImageCopyResult | ((absPath: string) => ImageCopyResult);
   /** pickImages / pickPackFile 依次返回的文件（空了返回空 / null）。 */
@@ -205,7 +205,7 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
       const result = typeof options.copyImage === "function" ? options.copyImage(absPath) : options.copyImage;
       return result ?? { ok: true };
     },
-    readClipboard: () => options.clipboard ?? null,
+    readClipboard: async () => options.clipboard ?? null,
     saveCopyAs: async (absPath) => {
       calls.saveCopyAs.push(absPath);
     },

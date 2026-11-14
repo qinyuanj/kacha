@@ -79,7 +79,8 @@ describe("粘贴分派（端口驱动）", () => {
       toast: (message) => toasts.push(message),
       importPastedImages: onImages,
       isEditableTarget,
-      readClipboard: () => null,
+      readClipboard: async () => null,
+      nativeClipboard: false,
     });
     return null;
   }

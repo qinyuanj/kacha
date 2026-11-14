@@ -285,6 +285,8 @@ export function BoardCanvas({
     importPastedImages: pasteImages,
     isEditableTarget: port.ui.isEditableTarget,
     readClipboard: port.media.readClipboard,
+    // 桌面壳能直接读系统剪贴板（#129）：粘贴先读原生快照，Web 仍用 paste 事件带的内容。
+    nativeClipboard: port.features.nativeClipboard ?? false,
   });
   useEffect(() => handlers.focusNode(focus), [focus]);
 

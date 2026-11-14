@@ -94,7 +94,8 @@ beforeEach(async () => {
     importPastedImages: importPastedImages as Options["importPastedImages"],
     isEditableTarget: (target) => target instanceof Element && target.closest("input, textarea, select, [contenteditable='true']") !== null,
     // Web 实现读不到系统剪贴板：粘贴内容由 paste 事件带。
-    readClipboard: () => null,
+    readClipboard: async () => null,
+    nativeClipboard: false,
   };
   await show();
 });

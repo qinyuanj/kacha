@@ -7,6 +7,7 @@ package localservice
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -173,6 +174,18 @@ func (s *Service) ReadFile(path string) (string, error) {
 func (s *Service) WriteNewFile(path string, data []byte) Outcome {
 	result := s.store.WriteNewFile(path, data)
 	return Outcome{OK: result.OK, Kind: result.Kind, Message: result.Message, Version: result.Version}
+}
+
+// WriteNewFileBase64 与 WriteNewFile 相同，字节以 base64 传进来。
+//
+// 页面侧把字节编成 base64 字符串：JSON 里 Uint8Array 会变成对象，Go 的 []byte 解不出来
+// （[]byte 在 JSON 里是 base64 字符串），所以跨 IPC 的字节一律走这条。
+func (s *Service) WriteNewFileBase64(path, data string) (Outcome, error) {
+	bytes, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return s.WriteNewFile(path, bytes), nil
 }
 
 // IsFile 报告路径是不是一个文件。
