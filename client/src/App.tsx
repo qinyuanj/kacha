@@ -1,69 +1,89 @@
-import { ReactFlowProvider } from "@xyflow/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Board } from "./core/board";
-import { BUILTIN_TABLE, effectiveTable, type CapabilityTable } from "./core/capabilities";
+import { BUILTIN_TABLE, type CapabilityTable } from "./core/capabilities";
 import type { BoardChange } from "./core/edit";
-import { redoLabel, undoLabel } from "./core/history";
-import { basename } from "./core/paths";
-import type { RegenerateRequest, Runner, RunTarget } from "./core/runner";
-import { copiesByNode, regenerateDispatch, runDispatch, runScope, buildConfirmItems, collectRunFacts, type ConfirmItem } from "./core/submission";
-import { moveSizeNotice, parseUiState, serializeUiState, type UiState } from "./core/uiState";
-import { sizeNotice, type SizeTier } from "./core/boardSize";
+import type { Runner, RunTarget } from "./core/runner";
 import { useActiveBoardSize } from "./ui/useBoardSize";
 import { shouldShowUpdateNotice } from "./core/changelog";
-import { ChangelogDialog } from "./ui/ChangelogDialog";
-import { isArchivedPath } from "./core/archive";
-import { ARCHIVE_TEXT, BACKUP_HINT_TEXT, MANAGE_BOARDS_TEXT, sizeNoticeText, TIDY_TEXT, usageLimitText } from "./ui/boardText";
 import { useUsageLimit } from "./ui/useUsageLimit";
-import { BoardPackDialog } from "./ui/BoardPackDialog";
-import { BoardListDialog } from "./ui/BoardListDialog";
-import { BoardToolbar } from "./ui/BoardToolbar";
-import { ContextMenu } from "./ui/ContextMenu";
-import { BoardCanvas } from "./ui/BoardCanvas";
-import { RunConfirmDialog } from "./ui/RunConfirmDialog";
-import { RunIndicator } from "./ui/RunIndicator";
-import { SendTextDialog } from "./ui/SendTextDialog";
-import { SettingsPanel } from "./ui/SettingsPanel";
 import { useRunner } from "./ui/useRunner";
 import { useSettings } from "./ui/useSettings";
-import { TabBar } from "./ui/TabBar";
 import { useBoardPack } from "./ui/useBoardPack";
+import { useRunCallbacks } from "./ui/appRunHooks";
 import { useBoardSessions } from "./ui/useBoardSessions";
 import { errorText } from "./core/errors";
 import { useShell } from "./ui/shell";
+import { modalOpenOf, noticesAfterMove, uiStateOf, uiStateText } from "./ui/appUiState";
+import { AppOverlays } from "./ui/appDialogs";
 import { downloadBoardResults } from "./ui/packMenu";
-import { packMenuEntries } from "./ui/packMenuEntries";
-import { unavailableMessage } from "./shell/port";
+import { AppShell } from "./ui/appShell";
+import { useAppState, useRestoreTabs, useStartupReads, useToastTimer, useUiStateWriter, useVersionNotice } from "./ui/useAppState";
+import {
+  appView,
+  archivedAction,
+  handledOf,
+  lockedOf,
+  orEmpty,
+  settingsEnabled,
+  usageEnabled,
+  versionOrEmpty,
+  versionOrUndefined,
+  boardKeyOf,
+  canvasBoard,
+  createBoardOrExplain,
+  dismissBoardNotice,
+  dismissSizeAction,
+  focusFor,
+  openFromList,
+  packMenuPick,
+  sizeQueryOf,
+  tidyAction,
+  tidyKeyAfter,
+  tidyingFor,
+  updateNoticeOf,
+  usageNoticeOf,
+} from "./ui/appView";
+import {
+  activateBoard,
+  boardFileOf,
+  closeBoardList,
+  applyActive,
+  cancelTaskOn,
+  checkActive,
+  jumpToTask,
+  openManageBoards,
+  redoOn,
+  sizeNoticeUpdated,
+  togglePackMenu,
+  undoOn,
+} from "./ui/appCallbacks";
+import {
+  applyGuarded,
+  archiveBoardAt as archiveBoardAction,
+  closeBoard as closeBoardAction,
+  deleteBoardAt as deleteBoardAction,
+  discardMissing as discardMissingAction,
+  exportBoardAt as exportBoardAction,
+} from "./ui/appActions";
 
-export function App({ onLogout, version, sessionExpired = false }: { onLogout?: () => void; version?: string | null; sessionExpired?: boolean } = {}) {
+/** 没有画板时的占位画板（工作区这时不渲染画布）。 */
+const EMPTY_BOARD: Board = { format_version: 2, title: "", viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges: [], extra: {} };
+
+/** 工作台的 props。 */
+export interface AppProps {
+  onLogout?: () => void;
+  version?: string | null;
+  sessionExpired?: boolean;
+}
+
+export function App({ onLogout, version, sessionExpired = false }: AppProps) {
   const port = useShell();
   const userRoot = port.userRoot;
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [changelogOpen, setChangelogOpen] = useState(false);
-  const [lastSeenVersion, setLastSeenVersion] = useState<string | undefined>();
-  /** 各画板越线提示已提醒到的档位，随界面状态保存（跨浏览器生效）。 */
-  const [sizeNotices, setSizeNotices] = useState<Record<string, SizeTier>>({});
-  const [boardListOpen, setBoardListOpen] = useState(false);
-  /** 处在整理模式的画板（会话 key）；整理模式是画布的界面状态，不落盘。 */
-  const [tidyKey, setTidyKey] = useState<string | null>(null);
-  /** 画板列表以「管理画板」方式打开（#88，用量提醒入口）：按体量从大到小。 */
-  const [manageBoards, setManageBoards] = useState(false);
-  /** 本页关掉的用量提醒档位：同档不再出现，升到红再提醒（不跨页面记，重开页面仍提醒）。 */
-  const [usageDismissed, setUsageDismissed] = useState<SizeTier | null>(null);
-  const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
-  const [packMenu, setPackMenu] = useState<{ x: number; y: number } | null>(null);
-  const [confirm, setConfirm] = useState<{ boardKey: string; board: Board; items: ConfirmItem[]; scope: "selection" | "board" } | null>(null);
-  const [sendText, setSendText] = useState<ConfirmItem | null>(null);
+  const store = useAppState();
+  const { state } = store;
   const settings = useSettings();
   const [table, setTable] = useState<CapabilityTable>(BUILTIN_TABLE);
-  const [tableError, setTableError] = useState<string | null>(null);
-  const [fatal, setFatal] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
-  const [metadataReady, setMetadataReady] = useState(false);
-  const [toastText, setToastText] = useState<string | null>(null);
-  const started = useRef(false);
-  const initialUi = useRef<UiState | null>(null);
-  const uiReadFailedRef = useRef(false);
+  const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
   // 编辑环境随渲染更新（能力表、网关发现），锁定集按画板现取运行器的最新快照；sessions 在每次画板变更时取。
   const envRef = useRef({ table, discovery: settings.discovery });
   envRef.current = { table, discovery: settings.discovery };
@@ -71,584 +91,313 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
   const boards = useBoardSessions(
     userRoot,
     useCallback((key: string) => ({ ...envRef.current, locked: runnerRef.current!.getSnapshot().board(key).locked }), []),
-    useCallback((from: string, to: string) => setSizeNotices((s) => moveSizeNotice(s, from, to)), []),
+    useCallback((from: string, to: string) => store.setSizeNotices((s) => noticesAfterMove(s, from, to)), []),
   );
   const { sessions, activeKey, openPath, createBoard } = boards;
 
   const { apply, check, undoBoard, redoBoard } = boards;
-  const applyGuarded = useCallback(
-    (key: string, change: BoardChange) => {
-      const result = apply(key, change);
-      // 提交与结果立即落盘，避免浏览器关页 / 刷新时丢失 last_submitted 或新结果节点。
-      if (result && (change.kind === "submitted" || change.kind === "runResult")) void boards.flushNow(key);
-      return result;
-    },
+  const applyOne = useCallback(
+    (key: string, change: BoardChange) => applyGuarded(apply, boards.flushNow, key, change),
     [apply, boards],
   );
-  const { runner, snapshot: runState } = useRunner(applyGuarded, settings.settings.concurrency);
+  const { runner, snapshot: runState } = useRunner(applyOne, settings.settings.concurrency);
   runnerRef.current = runner;
-  const [focus, setFocus] = useState<{ boardKey: string; nodeId: string; nonce: number } | null>(null);
-  const applyActive = useCallback((change: BoardChange) => activeKey ? apply(activeKey, change) : null, [activeKey, apply]);
-  const checkActive = useCallback((change: BoardChange) => (activeKey ? check(activeKey, change) : null), [activeKey, check]);
-  const undoActive = useCallback(() => activeKey && undoBoard(activeKey), [activeKey, undoBoard]);
-  const redoActive = useCallback(() => activeKey && redoBoard(activeKey), [activeKey, redoBoard]);
-  const toast = useCallback((message: string) => setToastText(message), []);
-  // 本切片还没做的能力（#127）：入口标「尚不可用」并置灰，不假装能跑。
+
+  const toast = useCallback((message: string) => store.setToastText(message), [store]);
+
   // 导入与导出是两项能力（#131）：桌面壳能导入、还不能导出。
-  const packExportOff = !port.features.packExport;
-  const packImportOff = port.features.packImport === false;
   const pack = useBoardPack(userRoot, boards, toast);
-  /** 新建画板；画板位满时提示统一文案（#89）。 */
-  const createBoardOrExplain = useCallback(async () => {
-    const refusal = await createBoard();
-    if (refusal) toast(refusal);
-  }, [createBoard, toast]);
-  useEffect(() => {
-    if (!toastText) return;
-    const timer = setTimeout(() => setToastText(null), 4000);
-    return () => clearTimeout(timer);
-  }, [toastText]);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const override = await port.meta.readCapabilityOverride().catch((e) => {
-          setTableError(`读取能力表覆盖文件失败：${e}`);
-          return null;
-        });
-        const effective = effectiveTable(override);
-        setTable(effective.table);
-        if (effective.error) setTableError(effective.error);
-        let uiReadFailed = false;
-        initialUi.current = parseUiState(await port.meta.readUiState().catch(() => ((uiReadFailed = true), null)));
-        setLastSeenVersion(initialUi.current.last_seen_version);
-        setSizeNotices(initialUi.current.size_notices ?? {});
-        uiReadFailedRef.current = uiReadFailed;
-        setMetadataReady(true);
-      } catch (e) {
-        setFatal(String(e));
-      }
-    })();
-  }, []);
+  useToastTimer(state.toastText, store.setToastText);
+  useStartupReads(
+    { capabilityOverride: () => port.meta.readCapabilityOverride(), uiState: () => port.meta.readUiState() },
+    store,
+    setTable,
+  );
+  useVersionNotice(state.metadataReady, version, state.lastSeenVersion, store.uiReadFailedRef.current, store.setLastSeenVersion);
 
-  /** 与运行时相同的上下文算确认项：逐张检测参考图（缺失 / 透明通道）。运行与查看发送文本共用。 */
-  const confirmItemsOf = useCallback(
-    async (board: Board, ids: string[], root: string) => {
-      const { missingNodes, alphaByNode } = await collectRunFacts(port.core.imageProbe, board, ids, root);
-      return buildConfirmItems(board, table, ids, { discovery: settings.discovery, concurrency: settings.settings.concurrency, missingNodes, alphaByNode });
-    },
-    [settings.discovery, settings.settings.concurrency, table],
+  const confirmCtx = useMemo(
+    () => ({ table, discovery: settings.discovery, concurrency: settings.settings.concurrency, probe: port.core.imageProbe }),
+    [table, settings.discovery, settings.settings.concurrency],
   );
 
-  const startRun = useCallback(
-    async (boardKey: string, board: Board, taskIds: string[]) => {
-      setConfirm(null);
-      if (!userRoot) return;
-      const target: RunTarget = { boardKey, boardFile: boards.boardFileName(boardKey), table, userRoot, baseUrl: settings.settings.base_url, apiKey: settings.apiKey };
-      // 实际份数按此刻的并发上限算出并随任务固化；之后改并发上限不影响已排队的任务数。
-      const problems = await runner.submit(target, board, taskIds, copiesByNode(board, taskIds, settings.settings.concurrency));
-      if (problems.length) toast(`${problems.length} 个任务提交失败：${problems[0]}`);
-    },
-    [userRoot, runner, boards, table, settings.settings.base_url, settings.settings.concurrency, settings.apiKey, toast],
+  const targetOf = useCallback(
+    (boardKey: string): RunTarget => ({ boardKey, boardFile: boards.boardFileName(boardKey), table, userRoot, baseUrl: settings.settings.base_url, apiKey: settings.apiKey }),
+    [boards, table, userRoot, settings.settings.base_url, settings.apiKey],
   );
 
-  // 单个干净任务直接提交，单个标红 / 没有任务只提示；其余弹二次确认（分派规则见 runDispatch）。
-  const openRunConfirm = useCallback(
-    async (selectedIds: string[]) => {
-      if (!activeKey || !userRoot) return;
-      await boards.flushAll();
-      const board = boards.getBoard(activeKey);
-      if (!board) return;
-      const busy = runner.getSnapshot().board(activeKey).locked;
-      const items = await confirmItemsOf(board, runScope(board, table, selectedIds, busy), userRoot);
-      const dispatch = runDispatch(items);
-      // 没有可提交的任务时先说明原因；真要提交或弹确认窗才需要密钥。
-      if (dispatch.kind === "toast") return toast(dispatch.message);
-      if (!settings.apiKey) {
-        toast("请先在高级设置中填写 API 密钥");
-        setSettingsOpen(true);
-        return;
-      }
-      if (dispatch.kind === "submit") void startRun(activeKey, board, [dispatch.taskId]);
-      else setConfirm({ boardKey: activeKey, board, items, scope: selectedIds.length ? "selection" : "board" });
-    },
-    [activeKey, userRoot, settings.apiKey, boards, runner, table, confirmItemsOf, startRun, toast],
-  );
+  const { openRun, viewSendText, copyText, doRegenerate, runNow } = useRunCallbacks({
+    activeKey,
+    userRoot,
+    apiKey: settings.apiKey,
+    boards,
+    runner,
+    runState,
+    ctx: confirmCtx,
+    targetOf,
+    toast,
+    openSettings: () => store.setSettingsOpen(true),
+    setConfirm: (c) => store.setConfirm(c),
+    setSendText: (item) => store.setSendText(item),
+    applyOne,
+  });
 
-  const viewSendText = useCallback(
-    async (taskNodeId: string) => {
-      if (!activeKey || !userRoot) return;
-      const board = boards.getBoard(activeKey);
-      if (!board) return;
-      const [item] = await confirmItemsOf(board, [taskNodeId], userRoot);
-      if (item) setSendText(item);
-    },
-    [activeKey, userRoot, boards, confirmItemsOf],
-  );
+  const cancelTask = useCallback((taskNodeId: string) => cancelTaskOn(runner, activeKey, taskNodeId), [runner, activeKey]);
 
-  const copyText = useCallback(
-    // 内网 HTTP 不是安全上下文，navigator.clipboard 不可用；壳层用 textarea 回退。
-    (text: string) => void port.media.copyText(text).then(() => toast("已复制发送文本"), (e) => toast(`复制失败：${e}`)),
-    [toast],
-  );
-
-  const regenerate = useCallback(
-    async (taskNodeId: string, fromTaskId?: string) => {
-      if (!activeKey || !userRoot) return;
-      if (!settings.apiKey) {
-        toast("请先在高级设置中填写 API 密钥");
-        setSettingsOpen(true);
-        return;
-      }
-      const board = boards.getBoard(activeKey);
-      if (!board) return;
-      const target: RunTarget = { boardKey: activeKey, boardFile: boards.boardFileName(activeKey), table, userRoot, baseUrl: settings.settings.base_url, apiKey: settings.apiKey };
-      // 重新生成按此刻的实际份数固化，多于一份先轻量确认，免得忘了份数多花钱；生成变体由运行器固定一份。
-      let request: RegenerateRequest;
-      if (fromTaskId === undefined) {
-        const dispatch = regenerateDispatch(board, table, taskNodeId, settings.settings.concurrency);
-        if (dispatch.kind === "confirm") {
-          const text = `将生成 ${dispatch.copies} 份，模型 ${dispatch.modelName}。${dispatch.note ? `\n${dispatch.note}。` : ""}`;
-          if (!(await port.ui.ask(text, { title: "确认重新生成", okLabel: `重新生成 ${dispatch.copies} 份`, cancelLabel: "取消" }))) return;
-        }
-        request = { kind: "regenerate", copies: dispatch.copies };
-      } else request = { kind: "variant", fromTaskId };
-      const problem = await runner.regenerate(target, board, taskNodeId, request);
-      if (problem) toast(`${fromTaskId ? "生成变体" : "重新生成"}失败：${problem}`);
-    },
-    [activeKey, userRoot, boards, runner, settings.apiKey, settings.settings.base_url, settings.settings.concurrency, table, toast],
-  );
-
-  const cancelTask = useCallback((taskNodeId: string) => activeKey && runner.cancel({ kind: "task", boardKey: activeKey, taskNodeId }), [activeKey, runner]);
-
-  /** 画板还有排队 / 执行中的任务时，关闭前阻断式二选一；不后台续跑。 */
-  const confirmStopTasks = (count: number) =>
-    port.ui.ask(`还有 ${count} 个任务在排队或执行。关闭后不会在后台继续；已在执行的只停止本地等待，网关侧计算可能仍在继续。`, {
-      title: "任务未完成",
-      kind: "warning",
-      okLabel: "取消全部并关闭",
-      cancelLabel: "留在画板",
-    });
-
-  const closeBoard = useCallback(
+  const closeOne = useCallback(
     async (key: string) => {
-      const count = runner.getSnapshot().pending(key);
-      if (count > 0 && !(await confirmStopTasks(count))) return;
-      // 取消并遗忘：重开后失败 / 已取消由任务目录的 outcome.json 给出。
-      runner.closeBoard(key);
-      await boards.closeBoard(key);
+      await closeBoardAction(
+        {
+          pending: (k) => runner.getSnapshot().pending(k),
+          ask: (text, options) => port.ui.ask(text, options),
+          closeRunner: (k) => runner.closeBoard(k),
+          closeSessions: (k) => boards.closeBoard(k),
+        },
+        key,
+      );
     },
-    [boards, runner],
+    [runner, boards],
   );
 
-  /** 从画板列表删除：本页开着的先保存再带版本删、成功后关标签页；没开的直接删（#68）。失败以错误抛回列表；
-   *  用户不肯停掉未完成的任务时什么都不做。 */
+  /**
+   * 从画板列表删除：本页开着的先保存再带版本删、成功后关标签页；没开的直接删（#68）。失败以错误抛回列表；
+   * 用户不肯停掉未完成的任务时什么都不做。
+   */
   const deleteBoardAt = useCallback(
     async (path: string) => {
-      const key = boards.keyOf(path);
-      if (!key) return port.board.remove(path);
-      const count = runner.getSnapshot().pending(key);
-      if (count > 0 && !(await confirmStopTasks(count))) return;
-      // 先停任务（与关闭标签页同序）再删，免得结果落进一块正在删除的画板；删除失败时停掉的任务不恢复。
-      runner.closeBoard(key);
-      await boards.deleteBoard(key);
+      await deleteBoardAction(
+        {
+          keyOf: (p) => boards.keyOf(p),
+          pending: (k) => runner.getSnapshot().pending(k),
+          ask: (text, options) => port.ui.ask(text, options),
+          closeRunner: (k) => runner.closeBoard(k),
+          deleteSessions: (k) => boards.deleteBoard(k),
+          removeDirect: (p) => port.board.remove(p),
+        },
+        path,
+      );
     },
     [boards, runner],
   );
 
   /** 归档（#90）：本页开着且有未完成的任务时先确认停掉（结果写不进只读画板），再保存、搬进归档子目录。 */
-  const archiveBoardAt = useCallback(
+  const archiveBoardAtPath = useCallback(
     async (path: string) => {
-      const key = boards.keyOf(path);
-      if (key) {
-        const count = runner.getSnapshot().pending(key);
-        if (count > 0 && !(await confirmStopTasks(count))) return;
-        runner.closeBoard(key);
-      }
-      await boards.archiveBoard(path);
+      await archiveBoardAction(
+        {
+          keyOf: (p) => boards.keyOf(p),
+          pending: (k) => runner.getSnapshot().pending(k),
+          ask: (text, options) => port.ui.ask(text, options),
+          closeRunner: (k) => runner.closeBoard(k),
+          archiveSessions: (p) => boards.archiveBoard(p),
+        },
+        path,
+      );
     },
     [boards, runner],
-  );
-
-  /** 取消归档 / 复制为新画板（归档画板顶部的按钮）：画板位满时提示统一文案。 */
-  const explainRefusal = useCallback(
-    (run: Promise<string | null>) => void run.then((refusal) => refusal && toast(refusal), (e) => toast(errorText(e))),
-    [toast],
   );
 
   /** 删除前导出画板包：没打开的先打开（导出流程以已打开的画板为准）。 */
   const exportBoardAt = useCallback(
     async (path: string) => {
-      if (!boards.keyOf(path) && !(await openPath(path, true))) return toast("画板不存在，可能已在别处改名或删除；请刷新列表");
-      const key = boards.keyOf(path);
-      if (key) await pack.prepareExport(key);
+      await exportBoardAction(
+        {
+          keyOf: (p) => boards.keyOf(p),
+          open: (p, activate) => openPath(p, activate),
+          prepareExport: (k) => pack.prepareExport(k),
+          toast,
+        },
+        path,
+      );
     },
     [boards, openPath, pack, toast],
   );
 
   /** 放弃一块服务端已不存在的画板：本页内容随之丢弃，先确认。 */
-  const discardMissing = useCallback(
+  const discardMissingBoard = useCallback(
     async (key: string) => {
-      const ok = await port.ui.ask("服务端已没有这块画板，关闭后本页内容将丢失。需要保留的话请先导出画板包。", {
-        title: "关闭画板",
-        kind: "warning",
-        okLabel: "关闭",
-        cancelLabel: "返回",
-      });
-      if (!ok) return;
-      runner.closeBoard(key);
-      boards.dropSession(key);
+      await discardMissingAction(
+        {
+          ask: (text, options) => port.ui.ask(text, options),
+          closeRunner: (k) => runner.closeBoard(k),
+          dropSession: (k) => boards.dropSession(k),
+        },
+        key,
+      );
     },
-    [boards, runner],
+    [runner, boards],
   );
 
-  // 设置与界面状态就绪后恢复标签页；一个都没有就新建。
-  useEffect(() => {
-    if (!metadataReady || !settings.loaded || started.current) return;
-    started.current = true;
-    void (async () => {
-      const ui = initialUi.current!;
-      const opened: string[] = [];
-      for (const p of ui.open_boards) {
-        try {
-          if (await openPath(p, false)) opened.push(p);
-          else toast(`找不到画板文件：${p}`);
-        } catch (e) {
-          toast(errorText(e));
-        }
-      }
-      let activated = false;
-      if (ui.active_board && opened.includes(ui.active_board)) activated = await openPath(ui.active_board, true);
-      if (!activated && opened.length) await openPath(opened[0], true);
-      else if (!activated) await createBoardOrExplain();
-      setReady(true);
-    })();
-  }, [metadataReady, settings.loaded, openPath, createBoardOrExplain, toast]);
+  /** 新建画板；画板位满时提示统一文案（#89）。 */
+  const createOne = useCallback(() => createBoardOrExplain(createBoard, toast), [createBoard, toast]);
 
-  useEffect(() => {
-    // 没有记录代表首次使用，不提示更新，直接随界面状态记下当前版本。
-    // 读界面状态失败时不知道是否新用户，不记，免得吞掉老用户这次的更新提示。
-    if (metadataReady && version && lastSeenVersion === undefined && !uiReadFailedRef.current) setLastSeenVersion(version);
-  }, [metadataReady, version, lastSeenVersion]);
+  useRestoreTabs(
+    {
+      metadataReady: state.metadataReady,
+      settingsLoaded: settings.loaded,
+      openPath,
+      createBoardOrExplain: createOne,
+      toast,
+    },
+    store,
+  );
 
-  const openChangelog = () => {
-    if (version) setLastSeenVersion(version);
-    setChangelogOpen(true);
-  };
+  const openChangelog = useCallback(() => {
+    store.setLastSeenVersion(versionOrUndefined(version));
+    store.setChangelogOpen(true);
+  }, [version, store]);
 
-  const uiWriteChain = useRef(Promise.resolve());
   const writeUi = useCallback(() => {
-    const { sessions: list, activeKey: key } = boards.snapshot();
-    const active = list.find((s) => s.key === key);
-    const text = serializeUiState({ open_boards: list.map((s) => s.path), active_board: active?.path ?? null, last_seen_version: lastSeenVersion, size_notices: sizeNotices });
-    const write = uiWriteChain.current.then(() => port.meta.writeUiState(text));
-    uiWriteChain.current = write.catch(() => undefined);
-    return write;
-  }, [boards, lastSeenVersion, sizeNotices]);
-  const persistUi = useCallback(() => writeUi().catch(() => undefined), [writeUi]);
+    const uiState = uiStateOf(boards.snapshot(), state.lastSeenVersion, state.sizeNotices);
+    const text = uiStateText(uiState);
+    return port.meta.writeUiState(text);
+  }, [boards, state.lastSeenVersion, state.sizeNotices, port]);
+  const persistUi = useUiStateWriter(writeUi);
+  const uiSignature = JSON.stringify([sessions.map((s) => s.path), sessions.find((s) => s.key === activeKey)?.path, state.lastSeenVersion, state.sizeNotices]);
   const persistRef = useRef(persistUi);
   persistRef.current = persistUi;
-
-  const uiSignature = JSON.stringify([sessions.map((s) => s.path), sessions.find((s) => s.key === activeKey)?.path, lastSeenVersion, sizeNotices]);
+  const ready = state.ready;
   useEffect(() => {
     if (ready) void persistRef.current();
   }, [ready, uiSignature]);
 
   // 当前画板越线提示（#87）：只提醒，不碰生成。体量回落时校正已提醒档位（清除回落那条线的记录）。
-  const active = sessions.find((s) => s.key === activeKey);
-  const okActive = active?.status === "ok" ? active : null;
-  /** 当前画板是归档画板（#90）：只读，能看、能放大、能下载结果与导出画板包。 */
-  const activeArchived = !!okActive && !!userRoot && isArchivedPath(userRoot, okActive.path);
-  /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框、会话失效遮罩）：粘贴放行给弹窗，不落到背后的画板（#96）。 */
-  const modalOpen = settingsOpen || changelogOpen || boardListOpen || confirm !== null || sendText !== null || pack.dialog !== null || sessionExpired;
-  const activeSize = useActiveBoardSize(okActive?.path ?? null, okActive?.version ?? null);
-  const notice = activeSize ? sizeNotice(activeSize.tier, sizeNotices[activeSize.path]) : null;
+  // 导入与导出是两项能力（#131）：桌面壳能导入、还不能导出。
+  const packImportOff = port.features.packImport === false;
+  const sizeQuery = sizeQueryOf(appView({ sessions, activeKey, userRoot, activeSize: null, sizeNotices: state.sizeNotices, packImportOff }).active);
+  const activeSize = useActiveBoardSize(sizeQuery?.path ?? null, sizeQuery?.version ?? null);
+  const view = appView({ sessions, activeKey, userRoot, activeSize, sizeNotices: state.sizeNotices, packImportOff });
   // 用量上限提醒（#88）：只提醒，生成照常。
-  const usageLimit = useUsageLimit(metadataReady && !!userRoot);
-  const usageNotice = usageLimit.notice && !(usageDismissed === "alert" || usageDismissed === usageLimit.notice.level) ? usageLimit.notice : null;
+  const usageLimit = useUsageLimit(usageEnabled(state.metadataReady, userRoot));
+  const usageNotice = usageNoticeOf(usageLimit.notice, state.usageDismissed);
   useEffect(() => {
-    if (!activeSize || !notice || notice.notified === sizeNotices[activeSize.path]) return;
-    const { path } = activeSize;
-    setSizeNotices(({ [path]: _dropped, ...rest }) => (notice.notified ? { ...rest, [path]: notice.notified } : rest));
-  }, [activeSize, notice, sizeNotices]);
+    store.setSizeNotices((notices) => sizeNoticeUpdated(notices, view.sizeNotice));
+  }, [view.sizeNotice, store]);
 
-  if (fatal) return <div className="fatal">启动失败：{fatal}</div>;
+  if (state.fatal) return <div className="fatal">启动失败：{state.fatal}</div>;
 
-  const failing = sessions.filter((s) => s.status === "ok" && s.saveError);
-
-  const canvasReady = active?.status === "ok" && !!userRoot;
+  const updateNotice = updateNoticeOf(ready, versionOrEmpty(version), state.lastSeenVersion, shouldShowUpdateNotice);
+  /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框、会话失效遮罩）：粘贴放行给弹窗，不落到背后的画板（#96）。 */
+  const modalOpen = modalOpenOf({
+    settingsOpen: state.settingsOpen,
+    changelogOpen: state.changelogOpen,
+    boardListOpen: state.boardListOpen,
+    confirmOpen: state.confirm !== null,
+    sendTextOpen: state.sendText !== null,
+    packDialogOpen: pack.dialog !== null,
+    sessionExpired,
+  });
   return (
-    <div className="app">
-      <div className="topbar">
-        <div className="muted small topbar-backup-hint">{BACKUP_HINT_TEXT}</div>
-        <TabBar
-          sessions={sessions}
-          activeKey={activeKey}
-          onActivate={(key) => {
-            setFocus(null);
-            boards.setActiveKey(key);
-          }}
-          onClose={(key) => void closeBoard(key)}
-          onRename={(key, title) => void boards.renameBoard(key, title)}
-          onCreate={() => void createBoardOrExplain()}
-          onOpenList={() => void boards.flushAll().then(() => setBoardListOpen(true))}
-          onExportPack={(key) => void pack.prepareExport(key)}
-        />
-      </div>
-      {ready && version && shouldShowUpdateNotice(version, lastSeenVersion) && (
-        <div className="bar update-notice" role="status">
-          <span>已更新到 {version}</span>
-          <button onClick={openChangelog}>看看改了什么</button>
-          <button className="link" onClick={() => setLastSeenVersion(version)} aria-label="关闭更新提示">关闭</button>
-        </div>
-      )}
-      {boardListOpen && userRoot && (
-        <BoardListDialog
-          openPaths={sessions.map((s) => s.path)}
-          onOpen={(path) => {
-            void openPath(path, true).then((opened) => {
-              if (!opened) toast("画板不存在，可能已在别处改名；请刷新列表");
-            }, (e) => toast(errorText(e)));
-          }}
-          onDelete={deleteBoardAt}
-          onArchive={archiveBoardAt}
-          onUnarchive={boards.unarchiveBoard}
-          onCopy={boards.copyAsNewBoard}
-          onExport={(path) => void exportBoardAt(path).catch((e) => toast(errorText(e)))}
-          onClose={() => {
-            setBoardListOpen(false);
-            setManageBoards(false);
-            usageLimit.refresh();
-          }}
-          manage={manageBoards}
-        />
-      )}
-      <div className="board-toolbar">
-        {/* 有画板时画布把工具栏 portal 进这个容器；没有时放置灰占位，布局不跳。 */}
-        <div ref={setToolbarSlot} className="board-toolbar-slot">
-          {!canvasReady && <BoardToolbar disabled />}
-        </div>
-        <div className="board-toolbar-right">
-          <RunIndicator
-            active={runState.active}
-            titleOf={(key) => {
-              const s = sessions.find((x) => x.key === key);
-              return s?.status === "ok" ? s.board.title : "（已关闭的画板）";
-            }}
-            onJump={(t) => {
-              boards.setActiveKey(t.boardKey);
-              setFocus((f) => ({ boardKey: t.boardKey, nodeId: t.taskNodeId, nonce: (f?.nonce ?? 0) + 1 }));
-            }}
-            onCancelCopy={(taskId) => runner.cancel({ kind: "copy", taskId })}
-            onCancelWaiting={() => runner.cancel({ kind: "waiting" })}
-          />
-          <button
-            className="topbar-button"
-            aria-haspopup="menu"
-            aria-expanded={packMenu !== null}
-            disabled={!userRoot}
-            onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              setPackMenu((m) => (m ? null : { x: r.left, y: r.bottom + 2 }));
-            }}
-          >
-            画板包 ▾
-          </button>
-          {version && <button className="topbar-button topbar-version" onClick={openChangelog} disabled={!ready} aria-haspopup="dialog" title="查看更新内容">Kacha {version}</button>}
-          <button className="topbar-button" onClick={() => setSettingsOpen(true)} disabled={!settings.loaded || !userRoot}>
-            ⚙ 高级设置
-          </button>
-          {onLogout && (
-            <button className="topbar-button" onClick={onLogout} title="退出当前会话；换密钥即视为新用户">
-              退出
-            </button>
-          )}
-        </div>
-      </div>
-      {packMenu && (
-        <ContextMenu
-          at={packMenu}
-          items={packMenuEntries(port, { open: active?.status === "ok", broken: !!active && active.status !== "ok" }).map((entry, index) => ({
-            action: (["importPack", "exportPack", "downloadResults"] as const)[index],
-            label: entry.label,
-            disabledReason: entry.disabledReason,
-          }))}
-          onPick={(action) => {
-            setPackMenu(null);
-            if (action === "importPack") void pack.importPack().catch((e) => toast(unavailableMessage(e) ?? `导入画板包失败：${errorText(e)}`));
-            else if (action === "exportPack" && active) void pack.prepareExport(active.key).catch((e) => toast(unavailableMessage(e) ?? `导出画板包失败：${errorText(e)}`));
-            else if (action === "downloadResults" && active) {
-              // 端口可能说这项能力还没有（桌面壳本切片没有结果下载）：说清「尚不可用」，
-              // 不能报成功，也不能让拒绝冒成未捕获异常。
-              downloadBoardResults(port, active.path, toast);
-            }
-          }}
-          onClose={() => setPackMenu(null)}
-        />
-      )}
-      {failing.map(
-        (s) =>
-          s.status === "ok" && (
-            <div key={s.key} className="bar bar-error">
-              <span>
-                「{s.board.title}」{s.saveError}
-                {s.missing ? "" : s.conflicted ? "（改动保留在本页，不会自动合并）" : "（之后每次修改都会重试）"}
-              </span>
-              {s.missing ? null : s.conflicted ? <button onClick={() => void boards.reload(s.key)}>重新载入</button> : <button onClick={() => void boards.retrySave(s.key)}>重试保存</button>}
-              <button onClick={() => void pack.prepareExport(s.key)} disabled={packExportOff}>导出画板包{packExportOff ? "（尚不可用）" : ""}</button>
-              {s.missing && <button onClick={() => void discardMissing(s.key)}>关闭</button>}
-            </div>
-          ),
-      )}
-      {tableError && (
-        <div className="bar bar-warn">
-          <span>{tableError}（已使用内置能力表）</span>
-          <button onClick={() => setTableError(null)}>知道了</button>
-        </div>
-      )}
-      {settings.fileProblem && !settingsOpen && (
-        <div className="bar bar-warn">
-          <span>{settings.fileProblem}</span>
-          <button onClick={() => setSettingsOpen(true)}>打开高级设置</button>
-        </div>
-      )}
-      {usageNotice && (
-        <div className={`bar ${usageNotice.level === "alert" ? "bar-alert" : "bar-warn"} usage-limit-notice`} role="status" data-usage-level={usageNotice.level}>
-          <span>{usageLimitText(usageNotice.level, usageNotice.total, usageNotice.limit)}</span>
-          <button
-            onClick={() =>
-              void boards.flushAll().then(() => {
-                setManageBoards(true);
-                setBoardListOpen(true);
-              })
-            }
-          >
-            {MANAGE_BOARDS_TEXT}
-          </button>
-          <button className="link" aria-label="关闭用量提醒" onClick={() => setUsageDismissed(usageNotice.level)}>
-            关闭
-          </button>
-        </div>
-      )}
-      {activeSize && notice?.show && (
-        <div className={`bar ${notice.show === "alert" ? "bar-alert" : "bar-warn"} size-notice`} role="status" data-size-tier={notice.show}>
-          <span>{sizeNoticeText(activeSize.bytes)}</span>
-          {/* 归档画板只读，不能整理（#90）。 */}
-          {!activeArchived && <button
-            onClick={() => {
-              // 进入整理模式即算用户已看到这条提醒。
-              const { path } = activeSize;
-              const tier = notice.show!;
-              setSizeNotices((m) => ({ ...m, [path]: tier }));
-              if (active) setTidyKey(active.key);
-            }}
-          >
-            {TIDY_TEXT.enter}
-          </button>}
-          <button
-            className="link"
-            aria-label="关闭体量提示"
-            onClick={() => {
-              const { path } = activeSize;
-              const tier = notice.show!;
-              setSizeNotices((m) => ({ ...m, [path]: tier }));
-            }}
-          >
-            关闭
-          </button>
-        </div>
-      )}
-      {activeArchived && okActive && (
-        <div className="bar bar-info archived-notice" role="status">
-          <span>{ARCHIVE_TEXT.banner}</span>
-          <button onClick={() => explainRefusal(boards.unarchiveBoard(okActive.path))}>{ARCHIVE_TEXT.unarchive}</button>
-          <button onClick={() => explainRefusal(boards.copyAsNewBoard(okActive.path))}>{ARCHIVE_TEXT.copy}</button>
-        </div>
-      )}
-      {active?.status === "ok" && active.notice && (
-        <div className="bar bar-warn">
-          <span>{active.notice}</span>
-          <button onClick={() => boards.dismissNotice(active.key)}>知道了</button>
-        </div>
-      )}
-      <main className="workspace">
-        {!active || !userRoot ? (
-          <div className="empty">
-            {ready ? (
-              <>
-                <div>没有打开的画板</div>
-                <div className="empty-actions">
-                  <button className="primary" onClick={() => void createBoardOrExplain()} disabled={!userRoot}>
-                    新建画板
-                  </button>
-                  <button onClick={() => void pack.importPack()} disabled={!userRoot || packImportOff}>
-                    导入画板包…{packImportOff ? "（尚不可用）" : ""}
-                  </button>
-                </div>
-              </>
-            ) : (
-              "正在加载…"
-            )}
-          </div>
-        ) : active.status === "newer" ? (
-          <div className="empty">
-            该画板由更新版本的工具保存（format_version {active.version}），本版本无法打开；文件未做任何改动。
-            <div className="mono muted">{active.path}</div>
-          </div>
-        ) : active.status === "corrupt" ? (
-          <div className="empty">
-            画板文件已损坏且没有可用备份：{active.reason}
-            <div className="mono muted">{active.path}</div>
-          </div>
-        ) : (
-          <ReactFlowProvider key={active.key}>
-            <BoardCanvas
-              board={active.board}
-              boardFile={basename(active.path)}
-              table={table}
-              userRoot={userRoot}
-              apply={applyActive}
-              check={checkActive}
-              locked={runState.board(active.key).locked}
-              onUndo={undoActive}
-              onRedo={redoActive}
-              undoLabel={undoLabel(active.history)}
-              redoLabel={redoLabel(active.history)}
-              toast={toast}
-              discovery={settings.discovery}
-              concurrency={settings.settings.concurrency}
-              runNodes={runState.board(active.key).nodes}
-              handled={runState.board(active.key).handled}
-              onRun={(ids) => void openRunConfirm(ids)}
-              onCancelTask={cancelTask}
-              onRegenerate={regenerate}
-              onViewSendText={(id) => void viewSendText(id)}
-              toolbarSlot={toolbarSlot}
-              readOnly={activeArchived}
-              modalOpen={modalOpen}
-              focus={focus?.boardKey === active.key ? focus : null}
-              tidying={tidyKey === active.key && !activeArchived}
-              onTidyChange={(on) => setTidyKey(on ? active.key : null)}
-              onMoveOutStage={(stageId) => boards.moveOutStage(active.key, stageId)}
-            />
-          </ReactFlowProvider>
-        )}
-      </main>
-      {settingsOpen && (
-        <SettingsPanel settings={settings} onClose={() => setSettingsOpen(false)} />
-      )}
-      {changelogOpen && <ChangelogDialog currentVersion={version ?? ""} onClose={() => setChangelogOpen(false)} />}
-      {confirm && (
-        <RunConfirmDialog
-          items={confirm.items}
-          scope={confirm.scope}
-          onCancel={() => setConfirm(null)}
-          onConfirm={(ids) => void startRun(confirm.boardKey, confirm.board, ids)}
-        />
-      )}
-      {sendText && <SendTextDialog item={sendText} onCopy={copyText} onClose={() => setSendText(null)} />}
-      {pack.dialog && <BoardPackDialog {...pack.dialog} />}
-      {toastText && <div className="toast">{toastText}</div>}
-    </div>
+
+    <>
+      <AppShell
+        view={view}
+        sessions={sessions}
+        activeKey={activeKey}
+        userRoot={userRoot}
+        ready={ready}
+        version={versionOrEmpty(version)}
+        updateNotice={updateNotice}
+        packMenu={state.packMenu}
+        boardListOpen={state.boardListOpen}
+        manageBoards={state.manageBoards}
+        settingsLoaded={settingsEnabled(settings.loaded, userRoot)}
+        tableError={state.tableError}
+        settingsFileProblem={settings.fileProblem}
+        settingsOpen={state.settingsOpen}
+        usageNotice={usageNotice}
+        runIndicator={{
+          active: runState.active,
+          titleOf: view.titleOf,
+          onJump: (t) => jumpToTask(boards.setActiveKey, store.setFocus, state.focus, t),
+          onCancelCopy: (taskId) => runner.cancel({ kind: "copy", taskId }),
+          onCancelWaiting: () => runner.cancel({ kind: "waiting" }),
+        }}
+        canvasProps={{
+          board: canvasBoard(view.active, EMPTY_BOARD),
+          boardFile: boardFileOf(view.active),
+          table,
+          userRoot: orEmpty(userRoot),
+          apply: (change: BoardChange) => applyActive(apply, activeKey, change) as ReturnType<typeof apply>,
+          check: (change: BoardChange) => checkActive(check, activeKey, change) as ReturnType<typeof check>,
+          locked: lockedOf(runState.board(orEmpty(activeKey)).locked),
+          onUndo: () => undoOn(undoBoard, activeKey),
+          onRedo: () => redoOn(redoBoard, activeKey),
+          undoLabel: view.undoLabel,
+          redoLabel: view.redoLabel,
+          toast,
+          discovery: settings.discovery,
+          concurrency: settings.settings.concurrency,
+          runNodes: runState.board(orEmpty(activeKey)).nodes,
+          handled: handledOf(runState.board(orEmpty(activeKey)).handled),
+          onRun: (ids) => void openRun(ids),
+          onCancelTask: cancelTask,
+          onRegenerate: doRegenerate,
+          onViewSendText: (id) => void viewSendText(id),
+          toolbarSlot,
+          readOnly: view.activeArchived,
+          modalOpen,
+          focus: focusFor(state.focus, view.active),
+          tidying: tidyingFor(state.tidyKey, view.active, view.activeArchived),
+          onTidyChange: (on) => store.setTidyKey(tidyKeyAfter(on, view.active)),
+          onMoveOutStage: (stageId) => boards.moveOutStage(boardKeyOf(view.active), stageId),
+        }}
+        onActivate={(key) => activateBoard(boards.setActiveKey, () => store.setFocus(null), key)}
+        onCloseTab={(key) => void closeOne(key)}
+        onRename={(key, title) => void boards.renameBoard(key, title)}
+        onCreate={() => void createOne()}
+        onOpenList={() => openManageBoards(boards.flushAll, store.setManageBoards, store.setBoardListOpen)}
+        onExportPack={(key) => void pack.prepareExport(key)}
+        onOpenChangelog={openChangelog}
+        onCloseUpdateNotice={() => store.setLastSeenVersion(versionOrUndefined(version))}
+        onOpenListItem={(path) => openFromList(openPath, toast, path)}
+        onCloseBoardList={() => {
+          closeBoardList(store.setBoardListOpen, store.setManageBoards);
+          usageLimit.refresh();
+        }}
+        onDeleteBoard={deleteBoardAt}
+        onArchiveBoard={archiveBoardAtPath}
+        onUnarchiveBoard={boards.unarchiveBoard}
+        onCopyBoard={boards.copyAsNewBoard}
+        onExportBoard={(path) => void exportBoardAt(path).catch((e) => toast(errorText(e)))}
+        onTogglePackMenu={(at) => store.setPackMenu(togglePackMenu(state.packMenu, at))}
+        onPackMenuPick={(action) => packMenuPick(action, view.active, () => void pack.importPack(), (k) => void pack.prepareExport(k), (p) => downloadBoardResults(port, p, toast))}
+        onPackMenuClose={() => store.setPackMenu(null)}
+        onDismissTableError={() => store.setTableError(null)}
+        onOpenSettings={() => store.setSettingsOpen(true)}
+        onManageBoards={() => openManageBoards(boards.flushAll, store.setManageBoards, store.setBoardListOpen)}
+        onDismissUsage={() => store.setUsageDismissed(usageNotice?.level ?? null)}
+        onTidy={() => tidyAction(view, state.sizeNotices, store.setSizeNotices, store.setTidyKey)}
+        onDismissSize={() => dismissSizeAction(view, state.sizeNotices, store.setSizeNotices)}
+        onUnarchive={() => archivedAction(view.archived, boards.unarchiveBoard)}
+        onCopyArchived={() => archivedAction(view.archived, boards.copyAsNewBoard)}
+        onDismissBoardNotice={() => dismissBoardNotice(view.active, boards.dismissNotice)}
+        onReload={(key) => void boards.reload(key)}
+        onRetrySave={(key) => void boards.retrySave(key)}
+        onExportFailure={(key) => void pack.prepareExport(key)}
+        onCloseMissing={(key) => void discardMissingBoard(key)}
+        onImportPack={() => void pack.importPack()}
+        importDisabled={view.importDisabled}
+        onLogout={onLogout}
+        onToolbarSlot={setToolbarSlot}
+      />
+      <AppOverlays
+        settings={settings}
+        settingsOpen={state.settingsOpen}
+        onSettingsClose={() => store.setSettingsOpen(false)}
+        changelogOpen={state.changelogOpen}
+        version={versionOrEmpty(version)}
+        onChangelogClose={() => store.setChangelogOpen(false)}
+        confirm={state.confirm}
+        onConfirmCancel={() => store.setConfirm(null)}
+        onConfirm={(ids) => void runNow(state.confirm!.boardKey, state.confirm!.board, ids)}
+        sendText={state.sendText}
+        onCopyText={copyText}
+        onSendTextClose={() => store.setSendText(null)}
+        packDialog={pack.dialog}
+        toastText={state.toastText}
+      />
+    </>
+
   );
 }

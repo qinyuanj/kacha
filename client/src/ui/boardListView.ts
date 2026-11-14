@@ -1,0 +1,68 @@
+// 画板列表对话框的可见判定（#137）：从 ui/BoardListDialog.tsx 拆出的纯逻辑，便于单测。
+import { BOARD_EXTENSION } from "../core/board";
+import { bySizeDescending, sizeTier, type SizeTier } from "../core/boardSize";
+import type { BoardListEntry, BoardListing } from "../shell/types";
+
+/** 画板名（去掉扩展名）：列表里显示的是标题，不是文件名。 */
+export const titleOf = (name: string) => name.slice(0, -BOARD_EXTENSION.length);
+
+/** 一行画板在列表里的样子。 */
+export interface BoardRow {
+  entry: BoardListEntry;
+  /** 标题（去扩展名）。 */
+  title: string;
+  /** 本页已经打开着。 */
+  isOpen: boolean;
+  /** 体量档位（越过提醒线时才有）。 */
+  tier: SizeTier | null;
+  /** 归档画板。 */
+  archived: boolean;
+}
+
+/** 列表按体量分两组：可编辑的与归档的。 */
+export interface BoardGroups {
+  editable: BoardListEntry[];
+  archived: BoardListEntry[];
+}
+
+/** 「管理画板」按体量从大到小排，普通列表照服务端给的顺序。 */
+export function boardGroups(listing: BoardListing | null, manage: boolean): BoardGroups {
+  const boards = listing?.boards ?? [];
+  const sorted = manage ? bySizeDescending(boards) : boards;
+  return { editable: sorted.filter((b) => !b.archived), archived: sorted.filter((b) => b.archived) };
+}
+
+/** 一行画板的样子：标题、是否已打开、体量档位。 */
+export function boardRow(entry: BoardListEntry, openPaths: readonly string[], listing: BoardListing | null): BoardRow {
+  return {
+    entry,
+    title: titleOf(entry.name),
+    isOpen: openPaths.includes(entry.path),
+    tier: listing ? sizeTier(entry.bytes, listing.size_lines) : null,
+    archived: entry.archived,
+  };
+}
+
+/** 画板位已满：不能再新建（老用户超出的情况只是提醒，不挡编辑）。 */
+export function slotsFull(listing: BoardListing | null): boolean {
+  if (!listing) return false;
+  return listing.slots.used >= listing.slots.total;
+}
+
+/** 画板位超出（老用户）：列表顶部提醒「归档几块后才能新建」。 */
+export function overSlots(listing: BoardListing | null): boolean {
+  if (!listing) return false;
+  return listing.slots.used > listing.slots.total;
+}
+
+/** 列表的标题：普通列表与「管理画板」两种。 */
+export function listTitle(manage: boolean, manageTitle: string): string {
+  return manage ? manageTitle : "画板列表";
+}
+
+/** 列表的说明文字：两种入口各一句。 */
+export function listDescription(manage: boolean): string {
+  return manage
+    ? "按画板体量从大到小排列：先整理最大的几块。删除画板、整理掉不要的结果后，图片按清理规则释放空间。"
+    : "画板保存在服务端；换浏览器后用同一把密钥也能看到同一份。";
+}

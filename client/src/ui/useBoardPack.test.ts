@@ -1,60 +1,97 @@
-// 画板包导出（#127）：端口说「尚不可用」时要说出来，不能既不报错也不给消息。
-// Web 版照旧：导出流程照常走。
-import { createElement } from "react";
-import { renderToString } from "react-dom/server";
-import { afterEach, expect, it, vi } from "vitest";
-
-import { newBoard, serializeBoard, type Board } from "../core/board";
-import { PortError } from "../shell/port";
+// @vitest-environment jsdom
+// 画板包的界面流程（#137）：导出与导入的接线。
+import { act, createElement } from "react";
+import { createRoot, type Root as ReactRoot } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { ShellProvider } from "./shell";
 import { useBoardPack } from "./useBoardPack";
+import type { Board } from "../core/board";
 
-afterEach(() => {
-  vi.restoreAllMocks();
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+let container: HTMLDivElement;
+let dom: ReactRoot;
+
+beforeEach(() => {
+  container = document.createElement("div");
+  document.body.append(container);
+  dom = createRoot(container);
 });
 
-/** 用给定端口渲染一次 hook（server renderer 执行真实 hook）。 */
-function packHook(port: FakePort, toast: (message: string) => void, board: Board | null = null) {
-  let result!: ReturnType<typeof useBoardPack>;
-  function Host() {
-    result = useBoardPack(port.userRoot, {
-      flushAll: async () => undefined,
-      getBoard: () => board,
-      boardFileName: () => (board ? "a.ugcboard.json" : null),
-      openImportedBoard: async () => undefined,
-    }, toast);
-    return null;
-  }
-  renderToString(createElement(ShellProvider, { port, children: createElement(Host) }));
-  return result;
+afterEach(async () => {
+  await act(async () => dom.unmount());
+  container.remove();
+});
+
+const board = { format_version: 2, title: "a", viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges: [], extra: {} } as unknown as Board;
+
+interface Harness {
+  prepareExport(key: string): Promise<void>;
+  importPack(): Promise<void>;
+  dialog: unknown;
 }
 
-it("Web 版：画板包导出照常走，不报「尚不可用」", async () => {
-  const port = createFakePort();
-  const toast = vi.fn();
-  const pack = packHook(port, toast, newBoard("画板"));
-  const facts = vi.spyOn(port.pack, "facts").mockResolvedValue([]);
+async function show(port: FakePort, boards: { flushAll: () => Promise<void>; getBoard: (k: string) => Board | null; boardFileName: (k: string) => string | null; openImportedBoard: (p: string) => Promise<void> }): Promise<Harness> {
+  const harness: Harness = { prepareExport: async () => undefined, importPack: async () => undefined, dialog: null };
+  const Probe = () => {
+    const pack = useBoardPack("/~", boards, () => undefined);
+    harness.prepareExport = pack.prepareExport;
+    harness.importPack = pack.importPack;
+    harness.dialog = pack.dialog;
+    return null;
+  };
+  await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(Probe) })));
+  return harness;
+}
 
-  await expect(pack.prepareExport("k")).resolves.toBeUndefined();
-  // 端口没拒绝：流程走到 hash 阶段，没有失败消息。
-  expect(facts).toHaveBeenCalled();
-  expect(toast).not.toHaveBeenCalled();
+const boardsStub = (patch: Partial<{ flushAll: () => Promise<void>; getBoard: (k: string) => Board | null; boardFileName: (k: string) => string | null; openImportedBoard: (p: string) => Promise<void> }> = {}) => ({
+  flushAll: async () => undefined,
+  getBoard: () => board,
+  boardFileName: () => "a.ugcboard.json",
+  openImportedBoard: async () => undefined,
+  ...patch,
 });
 
-it("桌面壳：画板包导出尚不可用时给出消息，不静默吞掉", async () => {
-  const port = createFakePort({ boards: [{ path: "/~/画板/a.ugcboard.json", main: serializeBoard(newBoard("画板")), version: "v" }] });
-  // 桌面壳的画板包端口每一项都拒绝：io.cancel(false) 就在 try 之外，没有守卫就静默。
-  const unavailable = (): never => {
-    throw new PortError({ kind: "unavailable", code: "unavailable", message: "桌面客户端：画板包导出尚不可用", status: 0, feature: "packExport" });
-  };
-  port.pack.io.cancel = async () => unavailable();
-  port.pack.facts = async () => unavailable();
-  port.pack.exportPack = async () => unavailable();
-  const toast = vi.fn();
-  const pack = packHook(port, toast, newBoard("画板"));
+describe("画板包流程", () => {
+  it("导出：算计划后进确认框", async () => {
+    const port = createFakePort();
+    port.pack.facts = async () => [];
+    const harness = await show(port, boardsStub());
+    await act(async () => void harness.prepareExport("k1"));
+    expect(harness.dialog).toBeTruthy();
+  });
 
-  await expect(pack.prepareExport("k")).resolves.toBeUndefined();
-  expect(toast).toHaveBeenCalledTimes(1);
-  expect(toast.mock.calls[0][0]).toContain("尚不可用");
+  it("导出：没有画板时什么都不做", async () => {
+    const port = createFakePort();
+    const harness = await show(port, boardsStub({ getBoard: () => null }));
+    await act(async () => void harness.prepareExport("k1"));
+    expect(harness.dialog).toBeNull();
+  });
+
+  it("导入：没有选文件就什么都不做", async () => {
+    const port = createFakePort();
+    port.media.pickPackFile = async () => null;
+    const harness = await show(port, boardsStub());
+    await act(async () => void harness.importPack());
+    expect(harness.dialog).toBeNull();
+  });
+
+  it("导入：成功给一句话提示（关掉对话框）", async () => {
+    const port = createFakePort();
+    port.media.pickPackFile = async () => new File(["x"], "包.ugcpack");
+    const harness = await show(port, boardsStub());
+    await act(async () => void harness.importPack());
+    expect(harness.dialog).toBeNull();
+  });
+
+  it("导入：出错给失败提示", async () => {
+    const port = createFakePort();
+    port.media.pickPackFile = async () => {
+      throw new Error("offline");
+    };
+    const harness = await show(port, boardsStub());
+    await act(async () => void harness.importPack());
+    expect(harness.dialog).toBeNull();
+  });
 });
