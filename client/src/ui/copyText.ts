@@ -17,8 +17,22 @@ export const COPY_TEXT = {
   imageFailed: (reason: string) => `复制图片失败：${reason}；${COPY_TEXT.saveAsHint}`,
 } as const;
 
-/** 复制图片失败时的提示：原因按类别取文案，类别认不出就照原文说。 */
-export function imageCopyFailureText(reason: ImageCopyFailure | string): string {
+/** 容器名的大写写法：界面说「TIFF 不受支持」，与用户看到文件类型时的写法一致。 */
+function containerLabel(detail: string): string {
+  return detail.toUpperCase();
+}
+
+/**
+ * 复制图片失败时的提示：原因按类别取文案，类别认不出就照原文说。
+ *
+ * detail 是具体对象（如认出来的容器名 tiff）：有它时提示说清「TIFF 不受支持」，
+ * 没有时退回该原因的通用文案。
+ */
+export function imageCopyFailureText(reason: ImageCopyFailure | string, detail?: string): string {
   const known = COPY_TEXT.imageReason as Record<string, string | undefined>;
+  if (detail) {
+    if (reason === "unsupported") return COPY_TEXT.imageFailed(`这张图的格式（${containerLabel(detail)}）不受支持`);
+    return COPY_TEXT.imageFailed(`${known[reason] ?? String(reason)}（${detail}）`);
+  }
   return COPY_TEXT.imageFailed(known[reason] ?? String(reason));
 }

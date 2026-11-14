@@ -63,7 +63,7 @@ function copyImageShortcut(e: KeyboardEvent, path: string, format: string, opts:
   void opts.port.media
     .copyImage(absPath, format)
     .then((result) => {
-      if (!result.ok) opts.toast(imageCopyFailureText(result.reason));
+      if (!result.ok) opts.toast(imageCopyFailureText(result.reason, result.detail));
     })
     .catch((error) => opts.toast(imageCopyFailureText(errorText(error))));
 }
