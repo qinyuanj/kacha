@@ -201,7 +201,7 @@ async function readClipboardSnapshot(bridge: DesktopBridge): Promise<ClipboardCo
 
 /**
  * 复制文本到系统剪贴板（#124）：桌面壳经 Go 原生 Clipboard.WriteText 写节点标记，不依赖浏览器剪贴板权限。
- * 桥里没有剪贴板（旧替身）时才退回浏览器路径。
+ * 桥里没有剪贴板（旧替身）时按 unavailable 收，不退回浏览器剪贴板。
  */
 async function copyTextToSystemClipboard(bridge: DesktopBridge, text: string): Promise<void> {
   // 桌面壳不退回浏览器剪贴板：那条路依赖焦点与 Web Clipboard 权限，正是 #124 要摆脱的。
