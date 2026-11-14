@@ -102,7 +102,10 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
   );
   const { runner, snapshot: runState } = useRunner(applyOne, settings.settings.concurrency);
   runnerRef.current = runner;
+
   const toast = useCallback((message: string) => store.setToastText(message), [store]);
+
+  // 导入与导出是两项能力（#131）：桌面壳能导入、还不能导出。
   const pack = useBoardPack(userRoot, boards, toast);
 
   useToastTimer(state.toastText, store.setToastText);
@@ -259,9 +262,11 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
   }, [ready, uiSignature]);
 
   // 当前画板越线提示（#87）：只提醒，不碰生成。体量回落时校正已提醒档位（清除回落那条线的记录）。
-  const sizeQuery = sizeQueryOf(appView({ sessions, activeKey, userRoot, activeSize: null, sizeNotices: state.sizeNotices }).active);
+  // 导入与导出是两项能力（#131）：桌面壳能导入、还不能导出。
+  const packImportOff = port.features.packImport === false;
+  const sizeQuery = sizeQueryOf(appView({ sessions, activeKey, userRoot, activeSize: null, sizeNotices: state.sizeNotices, packImportOff }).active);
   const activeSize = useActiveBoardSize(sizeQuery?.path ?? null, sizeQuery?.version ?? null);
-  const view = appView({ sessions, activeKey, userRoot, activeSize, sizeNotices: state.sizeNotices });
+  const view = appView({ sessions, activeKey, userRoot, activeSize, sizeNotices: state.sizeNotices, packImportOff });
   // 用量上限提醒（#88）：只提醒，生成照常。
   const usageLimit = useUsageLimit(usageEnabled(state.metadataReady, userRoot));
   const usageNotice = usageNoticeOf(usageLimit.notice, state.usageDismissed);
@@ -283,6 +288,7 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
     sessionExpired,
   });
   return (
+
     <>
       <AppShell
         view={view}
@@ -371,6 +377,7 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
         onExportFailure={(key) => void pack.prepareExport(key)}
         onCloseMissing={(key) => void discardMissingBoard(key)}
         onImportPack={() => void pack.importPack()}
+        importDisabled={view.importDisabled}
         onLogout={onLogout}
         onToolbarSlot={setToolbarSlot}
       />
@@ -391,5 +398,6 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
         toastText={state.toastText}
       />
     </>
+
   );
 }

@@ -16,7 +16,8 @@ import { clipboardContentOf, extensionOf } from "./desktopClipboard";
 import { sha256Hex } from "../core/sha256";
 import { IMPORTED_REFERENCES_DIR } from "../core/boardPack";
 import { joinPath, toRootRelative } from "../core/paths";
-import { checked, desktopBoardStore, desktopFileStore, desktopMediaStore, desktopMetaStore, desktopPackStore, desktopUsageStore, localRun, unavailable } from "./desktopStores";
+import { checked, desktopBoardStore, desktopFileStore, desktopMediaStore, desktopMetaStore, desktopUsageStore, localRun, unavailable } from "./desktopStores";
+import { createDesktopPack } from "./desktopPack";
 
 /** Go 侧写操作的结局：成功时 kind 为空，失败时 kind 是类别（见 localservice.Outcome）。 */
 export interface DesktopOutcome {
@@ -94,12 +95,57 @@ export interface DesktopClipboardBridge {
   copyImage(path: string, format: string): Promise<DesktopImageCopy>;
 }
 
+/** Go 侧导入进度（Pack.Snapshot 的 progress）。 */
+export interface DesktopPackProgress {
+  step: string;
+  done: number;
+  total: number;
+  detail: string;
+  bytes_done: number;
+  bytes_total: number;
+}
+
+/** Go 侧一次导入的结局（Pack.Snapshot 的 outcome）。 */
+export interface DesktopPackOutcome {
+  ok: boolean;
+  kind: string;
+  step: string;
+  message: string;
+  report?: {
+    outcomes: { path: string; outcome: string }[];
+    bytes: number;
+    boards: string[];
+    imported: number;
+    skipped: number;
+    conflicts: string[];
+    missing: string[];
+    message: string;
+  } | null;
+}
+
+/** Go 侧导入状态快照。 */
+export interface DesktopPackSnapshot {
+  running: boolean;
+  progress: DesktopPackProgress;
+  outcome: DesktopPackOutcome | null;
+}
+
+/** Go 侧画板包服务（Pack 服务，#131）：选包、开始导入、轮询状态、取消。 */
+export interface DesktopPackBridge {
+  pick(): Promise<string>;
+  start(path: string): Promise<DesktopPackOutcome>;
+  snapshot(): Promise<DesktopPackSnapshot>;
+  cancel(): Promise<void>;
+}
+
 /** MyGo 桥：Go 侧绑定与测试替身都满足它。 */
 export interface DesktopBridge {
   info(): Promise<DesktopInfo>;
   local: DesktopLocalBridge;
   /** 系统剪贴板（#129）；没有这一项的替身按读不到处理。 */
   clipboard?: DesktopClipboardBridge;
+  /** 画板包导入（#131）；没有这一项的替身按「尚不可用」处理。 */
+  pack?: DesktopPackBridge;
 }
 
 /** 本切片还没有的能力：以 kind: "unavailable" 拒绝。 */
@@ -172,6 +218,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     generation: info.features.generation,
     usage: info.features.usage,
     packExport: info.features.pack_export,
+    // 画板包导入（#131）在本机做：桥上有 Pack 服务就能导入（导入与导出是两项能力）。
+    packImport: bridge.pack !== undefined,
     // 整理模式本切片还没实现（度量画板体量留给后续切片）。
     tidy: false,
     // 桌面壳直接读系统剪贴板（#129）：粘贴截图不必先存成文件。
@@ -184,15 +232,20 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
 
   const meta = desktopMetaStore(local);
 
+  // 画板包导入（#131）是本机能力：选包、进度与结局都在 shell/desktopPack.ts。
+  const desktopPack = createDesktopPack(bridge);
+
   // 本机图片进 导入参考图/ 与系统剪贴板是本机独有的两样（#129 / #130）：其余浏览器能力来自 desktopStores。
   const media: MediaStore = {
     ...desktopMediaStore(),
+    // 选画板包用系统对话框（页面拿不到 File 的路径），之后交给 Pack.Import。
+    pickPackFile: () => desktopPack.pickPackFile(),
     uploadReference: (file: File): Promise<{ path: string; sha256: string }> => uploadReference(local, info.user_data_root, file),
     readClipboard: (): Promise<ClipboardContent | null> => readClipboardSnapshot(bridge),
     copyImage: (absPath: string, format = ""): Promise<ImageCopyResult> => copyImageToSystemClipboard(bridge, absPath, format),
   };
 
-  const pack = desktopPackStore();
+  const pack = desktopPack.store;
 
   const ui = {
     // 确认框与提示框用窗口自带的：桌面壳没有服务端，浏览器能力照样有。
@@ -201,7 +254,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
       window.alert(text);
       return Promise.resolve();
     },
-    onPackProgress: async (): Promise<never> => unavailable("packExport"),
+    // 进度订阅：导入期间由 Pack.Snapshot 的字节进度推送（#131）。
+    onPackProgress: async (handler: (progress: { done: number; total: number }) => void): Promise<() => void> => desktopPack.onProgress(handler),
     openExternal: (url: string): void => {
       window.open(url, "_blank", "noopener");
     },

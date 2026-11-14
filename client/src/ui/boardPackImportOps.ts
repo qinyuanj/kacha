@@ -1,5 +1,5 @@
 // 画板包导入的接线（#137）：从 ui/useBoardPack.ts 拆出的模块级函数，便于单测。
-import type { ImportOptions } from "../core/boardPack";
+import type { ImportOptions, ImportPhase } from "../core/boardPack";
 import { errorText } from "../core/errors";
 import { slotsRefusal } from "./boardText";
 import { importOutcome } from "./boardPackImport";
@@ -29,7 +29,7 @@ export interface PackImportDeps {
 export async function packImportOutcome(
   deps: PackImportDeps,
   progress: (title: string) => () => void,
-  onPhase: (phase: "check" | "existing" | "hash" | "upload" | "merge") => void,
+  onPhase: (phase: ImportPhase) => void,
 ): Promise<PackImportResult> {
   let file: File | null;
   try {

@@ -169,12 +169,15 @@ export function AppToolbar({
 /** 画板包菜单：导入、导出、下载整板结果。 */
 export function AppPackMenu({
   at,
+  importDisabledReason,
   exportDisabledReason,
   downloadDisabledReason,
   onPick,
   onClose,
 }: {
   at: { x: number; y: number };
+  /** 导入画板包的置灰原因（端口说这项能力还没有时非空）。 */
+  importDisabledReason: string | null;
   exportDisabledReason: string | null;
   downloadDisabledReason: string | null;
   onPick(action: "importPack" | "exportPack" | "downloadResults"): void;
@@ -184,7 +187,7 @@ export function AppPackMenu({
     <ContextMenu
       at={at}
       items={[
-        { action: "importPack", label: "导入画板包…", disabledReason: null },
+        { action: "importPack", label: importDisabledReason ? "导入画板包…（尚不可用）" : "导入画板包…", disabledReason: importDisabledReason },
         { action: "exportPack", label: "导出画板包…", disabledReason: exportDisabledReason },
         { action: "downloadResults" as const, label: "下载整板结果（zip）", disabledReason: downloadDisabledReason },
       ]}
@@ -201,6 +204,7 @@ export function AppWorkspace({
   ready,
   onCreate,
   onImportPack,
+  importDisabled,
   canvasProps,
 }: {
   /** 当前画板会话；没有为 undefined。 */
@@ -209,6 +213,8 @@ export function AppWorkspace({
   ready: boolean;
   onCreate(): void;
   onImportPack(): void;
+  /** 导入画板包的置灰原因（端口说这项能力还没有时非空）。 */
+  importDisabled: string | null;
   canvasProps: ComponentProps<typeof BoardCanvas>;
 }) {
   if (!active || !userRoot) {
@@ -221,8 +227,8 @@ export function AppWorkspace({
               <button className="primary" onClick={onCreate} disabled={!userRoot}>
                 新建画板
               </button>
-              <button onClick={onImportPack} disabled={!userRoot}>
-                导入画板包…
+              <button onClick={onImportPack} disabled={!userRoot || importDisabled !== null} title={importDisabled ?? undefined}>
+                导入画板包…{importDisabled ? "（尚不可用）" : ""}
               </button>
             </div>
           </>

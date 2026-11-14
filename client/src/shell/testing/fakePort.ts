@@ -112,6 +112,8 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
       generation: !missing.has("generation"),
       usage: !missing.has("usage"),
       packExport: !missing.has("packExport"),
+      // 导入与导出是两项能力（#131）：替身默认都有。
+      packImport: !missing.has("packImport"),
     },
     board,
     files,

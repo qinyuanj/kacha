@@ -22,7 +22,7 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 		t.Fatalf("GenerateTypeScript: %v", err)
 	}
 	src := string(client)
-	for _, want := range []string{"Shell", "Local", "Clipboard"} {
+	for _, want := range []string{"Shell", "Local", "Clipboard", "Pack"} {
 		if !strings.Contains(src, want) {
 			t.Fatalf("生成的客户端里没有 %s 服务：\n%s", want, src)
 		}

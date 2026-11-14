@@ -1,11 +1,10 @@
 // 桌面壳端口的各个分组（#137）：从 shell/desktop.ts 拆出，一组一个函数。
 // 拆开之后每个函数的复杂度单独看得到，门禁也按函数计。
-import { PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore, type PackStore } from "./port";
+import { PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore } from "./port";
 import type { BoardListing, BoardTexts, BoardWriteOptions, ImageInfo, UsagePort } from "./types";
 import { base64ToBytes } from "../core/base64";
 import { joinPath } from "../core/paths";
 import type { DirEntry } from "../core/relocate";
-import type { PackIo } from "../core/boardPack";
 import { copyTextToClipboard } from "./clipboard";
 import type { DesktopLocalBridge, DesktopOutcome } from "./desktop";
 
@@ -22,6 +21,7 @@ const FEATURE_LABEL: Record<FeatureId, string> = {
   generation: "生成",
   usage: "用量统计",
   packExport: "画板包导出",
+  packImport: "画板包导入",
   archive: "归档",
   tidy: "整理",
   relay: "结果中转",
@@ -145,18 +145,6 @@ export function desktopMediaStore(): MediaStore {
     downloadBoardResults: (): void => {
       void unavailable("generation");
     },
-  };
-}
-
-/** 画板包那一组：桌面壳还没有画板包能力。 */
-export function desktopPackStore(): PackStore {
-  return {
-    io: new Proxy({} as PackIo, {
-      get: () => async (): Promise<never> => unavailable("packExport"),
-    }),
-    import: async (): Promise<never> => unavailable("packExport"),
-    facts: async (): Promise<never> => unavailable("packExport"),
-    exportPack: async (): Promise<never> => unavailable("packExport"),
   };
 }
 

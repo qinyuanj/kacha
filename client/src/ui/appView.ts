@@ -18,6 +18,8 @@ export interface AppView {
   boardNotice: string | null;
   exportDisabled: string | null;
   downloadDisabled: string | null;
+  /** 导入画板包的置灰原因（端口说这项能力还没有时非空）。 */
+  importDisabled: string | null;
   sizeNotice: { bytes: number; tier: SizeTier; path: string } | null;
   titleOf(key: string): string;
 }
@@ -31,6 +33,8 @@ export function appView(input: {
   activeSize: { path: string; bytes: number; tier: SizeTier | null } | null;
   /** 各画板已提醒到的体量档位。 */
   sizeNotices: Record<string, SizeTier>;
+  /** 端口没有画板包导入能力（桌面壳的旧版本 / Web 的降级实现）。 */
+  packImportOff?: boolean;
 }): AppView {
   const active = activeSession(input.sessions, input.activeKey);
   const labels = historyLabels(active);
@@ -47,6 +51,7 @@ export function appView(input: {
     boardNotice: boardNoticeText(active),
     exportDisabled: packMenuReason(active, "exportPack"),
     downloadDisabled: packMenuReason(active, "downloadResults"),
+    importDisabled: input.packImportOff ? "画板包导入尚不可用" : null,
     sizeNotice: notice?.tier ? { bytes: notice.bytes, tier: notice.tier, path: notice.path } : null,
     titleOf: (key: string) => boardTitleOf(input.sessions, key),
   };

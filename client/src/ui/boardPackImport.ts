@@ -1,5 +1,5 @@
 // 画板包导入结局的可见判定（#137）：从 ui/useBoardPack.ts 拆出的纯逻辑，便于单测。
-import type { ImportResult } from "../core/boardPack";
+import type { ImportPhase, ImportResult } from "../core/boardPack";
 import { isSlotsFullText, PACK_IMPORT_TEXT } from "./boardText";
 import type { PackDialogState } from "./BoardPackDialog";
 
@@ -56,11 +56,18 @@ export function importOutcome(result: ImportResult): ImportOutcome {
   }
 }
 
-/** 导入进度对话框里各步的说明（#62）。 */
-export const IMPORT_PHASES: Record<"check" | "existing" | "hash" | "upload" | "merge", string> = {
+/**
+ * 导入进度对话框里各步的说明（#62）。
+ *
+ * 前五步是 Web 版（服务端合并）；后三步是桌面壳（#131）在本机解压合并时走的。
+ */
+export const IMPORT_PHASES: Record<ImportPhase, string> = {
   check: "正在检查画板包…",
   existing: "正在比对服务端已有的任务目录…",
   hash: "正在计算内容校验值…",
   upload: "正在上传缺少的内容…",
   merge: "正在合并任务目录…",
+  extract: "正在解压画板包…",
+  restore: "正在还原重复内容…",
+  boards: "正在写入画板…",
 };

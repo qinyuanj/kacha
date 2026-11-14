@@ -20,12 +20,12 @@ export interface PackBoardState {
   broken: boolean;
 }
 
-/** 导入画板包：不需要打开的画板，置灰只看端口的能力开关。 */
+/** 导入画板包：不需要打开的画板，置灰只看端口的能力开关（导入与导出是两项能力，见 #131）。 */
 export function packImportEntry(port: ShellPort): PackMenuEntry {
-  const off = !port.features.packExport;
+  const off = port.features.packImport === false;
   return {
     label: off ? "导入画板包…（尚不可用）" : "导入画板包…",
-    disabledReason: off ? "画板包导出尚不可用" : null,
+    disabledReason: off ? "画板包导入尚不可用" : null,
   };
 }
 

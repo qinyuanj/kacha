@@ -19,15 +19,20 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "generation" | "usage" | "packExport" | "archive" | "tidy" | "relay" | "login";
+export type FeatureId = "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "login";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
   generation: boolean;
   /** 用量统计与未引用清理。 */
   usage: boolean;
-  /** 画板包导出；导入是本地能力，任何实现都有。 */
+  /** 画板包导出（打包并下载）。 */
   packExport: boolean;
+  /**
+   * 画板包导入（#131）：桌面壳在本机解压合并，Web 走服务端合并。
+   * 不声明按有处理（两种实现都有）；只有实现明确做不到时才写 false。
+   */
+  readonly packImport?: boolean;
   /**
    * 整理模式（按任务目录量画板体量）：桌面壳本切片还没实现，没做时入口标「尚不可用」。
    * 不声明按有处理（Web 版有）。
@@ -115,6 +120,7 @@ const FEATURE_LABELS: Record<FeatureId, string> = {
   generation: "生成",
   usage: "用量统计",
   packExport: "画板包导出",
+  packImport: "画板包导入",
   archive: "归档",
   tidy: "整理",
   relay: "结果中转",

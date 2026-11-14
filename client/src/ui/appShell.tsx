@@ -59,6 +59,8 @@ export function AppShell(props: {
   onExportFailure(key: string): void;
   onCloseMissing(key: string): void;
   onImportPack(): void;
+  /** 导入画板包的置灰原因（端口说这项能力还没有时非空）。 */
+  importDisabled: string | null;
   onLogout?: () => void;
   onToolbarSlot(slot: HTMLElement | null): void;
 }) {
@@ -109,6 +111,7 @@ export function AppShell(props: {
       {props.packMenu && (
         <AppPackMenu
           at={props.packMenu}
+          importDisabledReason={props.importDisabled}
           exportDisabledReason={view.exportDisabled}
           downloadDisabledReason={view.downloadDisabled}
           onPick={props.onPackMenuPick}
@@ -145,6 +148,7 @@ export function AppShell(props: {
           ready={ready}
           onCreate={props.onCreate}
           onImportPack={props.onImportPack}
+          importDisabled={props.importDisabled}
           canvasProps={props.canvasProps}
         />
       </main>

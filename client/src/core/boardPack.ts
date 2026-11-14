@@ -463,8 +463,12 @@ export interface ImportOptions {
   log(kind: "board_pack", fields: Record<string, unknown>): void;
 }
 
-/** 进度阶段内的各步：本地检查 → 问服务端已有 → hash → 上传 → 服务端落盘合并。 */
-export type ImportPhase = "check" | "existing" | "hash" | "upload" | "merge";
+/**
+ * 进度阶段内的各步：本地检查 → 问服务端已有 → hash → 上传 → 服务端落盘合并。
+ *
+ * 桌面壳（#131）在本机解压合并，走的是 extract / restore / boards 这三步；Web 版不产生它们。
+ */
+export type ImportPhase = "check" | "existing" | "hash" | "upload" | "merge" | "extract" | "restore" | "boards";
 
 type OkCheck = Extract<PackCheck, { kind: "ok" }>;
 type Merged = { check: OkCheck; report: MergeReport };
