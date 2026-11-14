@@ -121,6 +121,9 @@ export function useCanvasPaste({
         handle(action, () => images);
         return;
       }
+      // 输入框里的文本粘贴完全交给浏览器：不读快照、不吞，文本照旧落进输入框。
+      // （剪贴板里没有文本时仍走下面的原生读法：粘截图进画板与焦点在不在输入框无关。）
+      if (isEditableTarget(document.activeElement) && (data?.getData("text/plain") ?? "") !== "") return;
       // 桌面壳：系统剪贴板要经 Go 读，是异步的（等主线程）。先吞掉默认行为再等快照，
       // 否则同一个 Ctrl+V 会既落一份到页面、又落一份到画板。
       event.preventDefault();
