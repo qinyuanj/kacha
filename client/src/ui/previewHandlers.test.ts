@@ -29,8 +29,9 @@ describe("选中的层", () => {
     expect(pickedLayerIndex(0, 3)).toBeNull();
   });
 
-  it("第几层：从 1 起", () => {
-    expect(pickedLayerIndex(2, 3)).toBe(1);
+  it("第几层：从 1 起（与 core 的 sourceLayer 同口径）", () => {
+    expect(pickedLayerIndex(1, 3)).toBe(1);
+    expect(pickedLayerIndex(2, 3)).toBe(2);
   });
 
   it("越界：没有层", () => {

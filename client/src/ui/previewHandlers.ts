@@ -17,11 +17,15 @@ export function initialEditTarget(req: { edit?: RegionTarget }): EditTarget {
   return { editing: req.edit, regionMode: regionModeOf(req.edit), rects: req.edit.rects.map((r) => [...r] as [number, number, number, number]) };
 }
 
-/** 图层侧栏的「加为参考图 / 以此继续编辑」用哪一层：0 = 底图。 */
+/**
+ * 图层侧栏的「加为参考图 / 以此继续编辑」用哪一层：null = 底图（合成结果）。
+ *
+ * 图层编号从 1 起（core/edit.ts 的 sourceLayer 也是 1 起）：选中的下拉项就是层号，
+ * 0 是底图。层号越界（理论上不会发生）按底图处理。
+ */
 export function pickedLayerIndex(pickSource: number, layerCount: number): number | null {
-  if (pickSource <= 0) return null;
-  const index = pickSource - 1;
-  return index < layerCount ? index : null;
+  if (pickSource <= 0 || pickSource > layerCount) return null;
+  return pickSource;
 }
 
 /** 预览弹窗要渲染的图层（没有就是没有）。 */
