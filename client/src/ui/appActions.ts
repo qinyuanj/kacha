@@ -1,7 +1,6 @@
 // 工作台的动作接线（#137）：从 src/App.tsx 拆出的独立动作函数，便于单测与拆分复杂度。
 // 一个动作一个函数：每个的判定都在自己身上，App 只负责把它们接到界面上。
 import type { Board } from "../core/board";
-import type { BoardChange } from "../core/edit";
 import type { RegenerateRequest, RunTarget } from "../core/runner";
 import { buildConfirmItems, collectRunFacts, copiesByNode, runScope, type ConfirmItem } from "../core/submission";
 import { errorText } from "../core/errors";
@@ -255,9 +254,4 @@ export async function copySendText(deps: { copyText(text: string): Promise<void>
 }
 
 /** 看板板变更的接线：提交与结果立即落盘。 */
-export function applyGuarded(apply: (key: string, change: BoardChange) => unknown, flushNow: (key: string) => Promise<void>, key: string, change: BoardChange): unknown {
-  const result = apply(key, change);
-  // 提交与结果立即落盘，避免浏览器关页 / 刷新时丢失 last_submitted 或新结果节点。
-  if (result && (change.kind === "submitted" || change.kind === "runResult")) void flushNow(key);
-  return result;
-}
+export { applyWithFlush as applyGuarded } from "./appCallbacks";

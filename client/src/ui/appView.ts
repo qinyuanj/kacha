@@ -153,19 +153,10 @@ export function archivedAction(archived: string | null, run: (path: string) => P
 }
 
 /** 画板包菜单里点了一项之后该做什么。 */
-export function packMenuPick(action: "importPack" | "exportPack" | "downloadResults", session: Session | undefined, importPack: () => void, prepareExport: (key: string) => void, download: (path: string) => void): void {
-  if (action === "importPack") return void importPack();
-  if (session?.status !== "ok") return;
-  if (action === "exportPack") return void prepareExport(session.key);
-  void download(session.path);
-}
+export { packMenuPick } from "./appCallbacks";
 
 /** 从画板列表打开一块画板：打不开时提示。 */
-export function openFromList(open: (path: string, activate: boolean) => Promise<boolean>, toast: (message: string) => void, path: string): void {
-  void open(path, true).then((opened) => {
-    if (!opened) toast("画板不存在，可能已在别处改名；请刷新列表");
-  });
-}
+export { openFromList } from "./appCallbacks";
 
 /** 提示条的动作：整理模式。 */
 export function tidyAction(view: AppView, notices: Record<string, SizeTier>, setSizeNotices: (next: Record<string, SizeTier>) => void, setTidyKey: (key: string | null) => void): void {

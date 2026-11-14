@@ -3,11 +3,10 @@
 import { useCallback, useState } from "react";
 import { type Board } from "../core/board";
 import type { PackDialogState } from "./BoardPackDialog";
-import { errorText } from "../core/errors";
-import { slotsRefusal } from "./boardText";
 import { useShell } from "./shell";
-import { IMPORT_PHASES, importOutcome } from "./boardPackImport";
+import { IMPORT_PHASES } from "./boardPackImport";
 import { confirmDialog, exportPackStep, exportPlanStep, progressDialog } from "./boardPackOps";
+import { packImportOutcome, type PackImportDeps } from "./boardPackImportOps";
 
 interface PackBoards {
   flushAll: () => Promise<void>;
@@ -76,31 +75,17 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
 
   const importPack = useCallback(async () => {
     if (!userRoot) return;
-    try {
-      const file = await port.media.pickPackFile();
-      if (!file) return;
-      const result = await port.pack.import(file, {
-        file,
-        openBoard: boards.openImportedBoard,
-        // 画板位预检（#89）：读不到列表时不拦，服务端合并前仍会检查。
-        slotsRefusal: async (adding) => {
-          const slots = await port.board.list().then((l) => l.slots, () => null);
-          return slots && slotsRefusal(slots, adding);
-        },
-        onStage: progress(`正在导入画板包：${file.name}`),
-        onPhase: (phase) => setDialog((d) => (d?.stage === "progress" ? { ...d, detail: IMPORT_PHASES[phase] } : d)),
-        log: (kind, fields) => port.ui.log(kind, fields),
-      });
-      const outcome = importOutcome(result);
-      if (outcome.kind === "toast") {
-        setDialog(null);
-        return toast(outcome.text);
-      }
-      setDialog(outcome.state);
-    } catch (e) {
-      setDialog(null);
-      toast(`导入画板包失败：${errorText(e)}`);
-    }
+    const deps: PackImportDeps = {
+      pickPackFile: () => port.media.pickPackFile(),
+      import: (file, options) => port.pack.import(file, options),
+      listSlots: () => port.board.list().then((l) => l.slots, () => null),
+      openBoard: (path) => boards.openImportedBoard(path),
+      log: (kind, fields) => port.ui.log(kind, fields),
+    };
+    const outcome = await packImportOutcome(deps, progress, (phase) => setDialog((d) => (d?.stage === "progress" ? { ...d, detail: IMPORT_PHASES[phase] } : d)));
+    if (outcome.kind === "dialog") return setDialog(outcome.state);
+    setDialog(null);
+    if (outcome.text) toast(outcome.text);
   }, [userRoot, boards, toast]);
 
   return {

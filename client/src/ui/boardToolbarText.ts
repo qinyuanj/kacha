@@ -25,9 +25,11 @@ export function newTaskHint(generationUnavailable: boolean): string {
 
 /** 运行按钮的后缀：选中了就只跑选中的；生成不可用时标出来。 */
 export function runSuffix(selectedCount: number, generationUnavailable: boolean): string {
-  const selected = selectedCount > 0 ? "选中" : "";
-  return `${selected}${newTaskSuffix(generationUnavailable)}`;
+  return `${selectedLabel(selectedCount)}${newTaskSuffix(generationUnavailable)}`;
 }
+
+/** 「选中」后缀：选了才写。 */
+export const selectedLabel = (selectedCount: number): string => (selectedCount > 0 ? "选中" : "");
 
 /** 运行按钮的悬浮提示。 */
 export function runHint(generationUnavailable: boolean): string {

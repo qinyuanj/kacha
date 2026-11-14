@@ -71,7 +71,14 @@ import {
 /** 没有画板时的占位画板（工作区这时不渲染画布）。 */
 const EMPTY_BOARD: Board = { format_version: 2, title: "", viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges: [], extra: {} };
 
-export function App({ onLogout, version, sessionExpired = false }: { onLogout?: () => void; version?: string | null; sessionExpired?: boolean } = {}) {
+/** 工作台的 props。 */
+export interface AppProps {
+  onLogout?: () => void;
+  version?: string | null;
+  sessionExpired?: boolean;
+}
+
+export function App({ onLogout, version, sessionExpired = false }: AppProps) {
   const port = useShell();
   const userRoot = port.userRoot;
   const store = useAppState();
