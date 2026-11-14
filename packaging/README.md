@@ -53,6 +53,23 @@ build/windows-amd64/
 
 MyGo 与 CLI 固定在 0.9.0，不跟随后续开发分支；升级要先单独验证。`build-info.json` 记录构建时用的版本，WebView2 Runtime 版本取自 `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` 的 `pv`。
 
+### Go 模块放在仓库根（不是 desktop/）
+
+`go.mod` / `go.sum` 在**仓库根**，Go 源码在 `desktop/`：
+
+```text
+go.mod            # module github.com/qinyuanj/kacha，钉住 mygo v0.9.0 与 go 1.27.3
+mygo.config.ts    # main: "./desktop"（Go 包），frontendDist: "client/dist"，out: "build"
+desktop/          # main.go + internal/{dataroot,shellapp,localstore,localservice}
+client/           # 现有 React 前端（构建后嵌进可执行文件）
+```
+
+原因是 MyGo 的 `main` 按 `go list` 解析，而 `go list` 从项目根找 `go.mod`：把 `go.mod` 放在 `desktop/` 里时，
+`mygo build` 会报 `go.mod file not found in current directory or any parent directory`。
+`main` 仍写 `"./desktop"`：写成 `"desktop"` 会被 `go list` 当成标准库包名（*package desktop is not in std*）。
+后续票（画板存储、剪贴板、画板包）继续往 `desktop/internal/` 加包，不要另起第二个 Go 模块。
+
+
 ## 配置
 
 命令行参数优先于环境变量。Windows 服务建议使用下面的绝对路径参数，避免服务工作目录影响相对路径。
