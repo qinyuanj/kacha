@@ -6,19 +6,13 @@ import { BUILTIN_TABLE } from "../core/capabilities";
 import type { BoardChange, EditResult } from "../core/edit";
 import { LOCKED_HINT } from "../core/iterate";
 import { findReferenceFile, findResultFile } from "../core/relocate";
-import { ipc, transfer, type ImageInfo } from "../shell/ipc";
-import { logEvent } from "../shell/log";
+import type { ImageInfo } from "../shell/port";
+import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { REGION_TEXT, RELOCATE_TEXT, VARIANT_TEXT } from "./boardText";
 import { canvasBoardActions, type CanvasBoardActionsDeps } from "./canvasBoardActions";
 import { nodePreviewRequest } from "./canvasPreview";
 
 vi.mock("../core/relocate", () => ({ findResultFile: vi.fn(), findReferenceFile: vi.fn() }));
-vi.mock("../shell/adapters", () => ({ relocateFs: { listDir: vi.fn(), isFile: vi.fn(), sha256: vi.fn() } }));
-vi.mock("../shell/ipc", () => ({
-  ipc: { inspectImage: vi.fn() },
-  transfer: { pickLocalImages: vi.fn(), uploadReference: vi.fn() },
-}));
-vi.mock("../shell/log", () => ({ logEvent: vi.fn() }));
 
 const SPEC = { tier: "1K", ratio: "1:1", width: null, height: null } as const;
 const ROOT = "/~";
@@ -82,6 +76,7 @@ interface Harness {
   setPromptDrafts: ReturnType<typeof vi.fn>;
   setExpandOverrides: ReturnType<typeof vi.fn>;
   performRef: { current: CanvasBoardActionsDeps["performRef"]["current"] };
+  port: FakePort;
   boardRef: { current: Board };
   selectedRef: { current: ReadonlySet<string> };
   lockedRef: { current: ReadonlySet<string> };
@@ -96,6 +91,7 @@ function harness(patch: Partial<CanvasBoardActionsDeps> = {}): Harness {
     focusPromptRef: { current: null as string | null },
     performRef: { current: vi.fn() },
   };
+  const port = createFakePort();
   const fns = {
     apply: vi.fn<(change: BoardChange) => EditResult | null>(() => null),
     showPreview: vi.fn(),
@@ -108,6 +104,7 @@ function harness(patch: Partial<CanvasBoardActionsDeps> = {}): Harness {
     setExpandOverrides: vi.fn(),
   };
   const deps: CanvasBoardActionsDeps = {
+    port,
     table: BUILTIN_TABLE,
     boardFile: BOARD_FILE,
     userRoot: ROOT,
@@ -129,7 +126,7 @@ function harness(patch: Partial<CanvasBoardActionsDeps> = {}): Harness {
     performRef: refs.performRef,
     ...patch,
   };
-  return { deps, ...fns, ...refs };
+  return { deps, port, ...fns, ...refs };
 }
 
 beforeEach(() => {
@@ -353,45 +350,51 @@ describe("生成变体", () => {
 describe("重新定位：选文件", () => {
   const pick = (h: Harness) => canvasBoardActions(h.deps).relocate("ref1", "pick");
 
-  it("上传到用户数据根后按服务端路径改写节点，并记一条成功日志", async () => {
+  it("上传到用户数据根后按端口给的路径改写节点，并记一条成功日志", async () => {
     const h = harness();
-    vi.mocked(transfer.pickLocalImages).mockResolvedValue([{ name: "新文件.png" } as File]);
-    vi.mocked(transfer.uploadReference).mockResolvedValue({ path: "refs/新文件.png", sha256: "c".repeat(64) });
-    vi.mocked(ipc.inspectImage).mockResolvedValue(INFO);
+    h.port.media.pickImages = async () => [{ name: "新文件.png" } as File];
+    h.port.media.uploadReference = async () => ({ path: "refs/新文件.png", sha256: "c".repeat(64) });
+    h.port.files.inspectImage = async () => INFO;
     pick(h);
     await flush();
-    expect(transfer.pickLocalImages).toHaveBeenCalledWith(false);
-    expect(h.primeImageInfo).toHaveBeenCalledWith("/~/refs/新文件.png", INFO);
     expect(h.apply).toHaveBeenCalledWith({ kind: "relocate", nodeId: "ref1", path: "refs/新文件.png", sha256: "b".repeat(64), fileName: "新文件.png", picked: true });
-    expect(logEvent).toHaveBeenCalledWith("relocate", { board_file: BOARD_FILE, node_id: "ref1", node_type: "reference", mode: "pick", ok: true });
+    expect(h.primeImageInfo).toHaveBeenCalledWith("/~/refs/新文件.png", INFO);
+    expect(h.port.calls.log).toEqual([{ kind: "relocate", fields: { board_file: BOARD_FILE, node_id: "ref1", node_type: "reference", mode: "pick", ok: true } }]);
   });
 
   it("用户取消选文件：什么也不做", async () => {
     const h = harness();
-    vi.mocked(transfer.pickLocalImages).mockResolvedValue([]);
+    h.port.media.pickImages = async () => [];
     pick(h);
     await flush();
     expect(h.apply).not.toHaveBeenCalled();
-    expect(logEvent).not.toHaveBeenCalled();
+    expect(h.port.calls.log).toEqual([]);
   });
 
   it("上传 / 读图失败：提示读了哪个文件，记 unreadable", async () => {
     const h = harness();
-    vi.mocked(transfer.pickLocalImages).mockResolvedValue([{ name: "坏.png" } as File]);
-    vi.mocked(transfer.uploadReference).mockRejectedValue(new Error("网关拒绝"));
+    h.port.media.pickImages = async () => [{ name: "坏.png" } as File];
+    h.port.media.uploadReference = async () => {
+      throw new Error("网关拒绝");
+    };
     pick(h);
     await flush();
     expect(h.apply).not.toHaveBeenCalled();
-    expect(logEvent).toHaveBeenCalledWith("relocate", { board_file: BOARD_FILE, node_id: "ref1", node_type: "reference", mode: "pick", ok: false, reason: "unreadable" });
     expect(h.toast).toHaveBeenCalledWith(RELOCATE_TEXT.unreadable("坏.png", "网关拒绝"));
+    expect(h.port.calls.log).toEqual([{ kind: "relocate", fields: { board_file: BOARD_FILE, node_id: "ref1", node_type: "reference", mode: "pick", ok: false, reason: "unreadable" } }]);
   });
 
   it("不是参考图 / 结果节点时不做任何事", async () => {
     const h = harness();
+    const picked: File[][] = [];
+    h.port.media.pickImages = async () => {
+      picked.push([]);
+      return [];
+    };
     canvasBoardActions(h.deps).relocate("t1", "pick");
     await flush();
-    expect(transfer.pickLocalImages).not.toHaveBeenCalled();
-    expect(logEvent).not.toHaveBeenCalled();
+    expect(picked).toEqual([]);
+    expect(h.port.calls.log).toEqual([]);
   });
 });
 
@@ -399,22 +402,22 @@ describe("重新定位：在用户数据根内找", () => {
   it("结果按 task_id 与文件名找，找到后写相对路径与文件名", async () => {
     const h = harness();
     vi.mocked(findResultFile).mockResolvedValue("/~/任务/task-res1/res1.png");
-    vi.mocked(ipc.inspectImage).mockResolvedValue(INFO);
+    h.port.files.inspectImage = async () => INFO;
     canvasBoardActions(h.deps).relocate("res1", "search");
     await flush();
-    expect(findResultFile).toHaveBeenCalledWith(expect.anything(), ROOT, { task_id: "task-res1", file: "res1.png" });
+    expect(findResultFile).toHaveBeenCalledWith(h.port.core.relocateFs, ROOT, { task_id: "task-res1", file: "res1.png" });
     expect(findReferenceFile).not.toHaveBeenCalled();
     expect(h.apply).toHaveBeenCalledWith({ kind: "relocate", nodeId: "res1", path: "任务/task-res1/res1.png", sha256: "b".repeat(64), fileName: "res1.png", picked: false });
-    expect(logEvent).toHaveBeenCalledWith("relocate", { board_file: BOARD_FILE, node_id: "res1", node_type: "result", mode: "search", ok: true });
+    expect(h.port.calls.log).toEqual([{ kind: "relocate", fields: { board_file: BOARD_FILE, node_id: "res1", node_type: "result", mode: "search", ok: true } }]);
   });
 
   it("参考图按 sha256 与显示名找", async () => {
     const h = harness();
     vi.mocked(findReferenceFile).mockResolvedValue("/~/参考/ref1.png");
-    vi.mocked(ipc.inspectImage).mockResolvedValue(INFO);
+    h.port.files.inspectImage = async () => INFO;
     canvasBoardActions(h.deps).relocate("ref1", "search");
     await flush();
-    expect(findReferenceFile).toHaveBeenCalledWith(expect.anything(), ROOT, { sha256: "a".repeat(64), display_name: "ref1.png" });
+    expect(findReferenceFile).toHaveBeenCalledWith(h.port.core.relocateFs, ROOT, { sha256: "a".repeat(64), display_name: "ref1.png" });
     expect(findResultFile).not.toHaveBeenCalled();
   });
 
@@ -423,9 +426,9 @@ describe("重新定位：在用户数据根内找", () => {
     vi.mocked(findResultFile).mockResolvedValue(null);
     canvasBoardActions(h.deps).relocate("res1", "search");
     await flush();
-    expect(logEvent).toHaveBeenCalledWith("relocate", { board_file: BOARD_FILE, node_id: "res1", node_type: "result", mode: "search", ok: false, reason: "not_found" });
     expect(h.toast).toHaveBeenCalledWith(RELOCATE_TEXT.missing("res1.png"));
     expect(h.apply).not.toHaveBeenCalled();
+    expect(h.port.calls.log).toEqual([{ kind: "relocate", fields: { board_file: BOARD_FILE, node_id: "res1", node_type: "result", mode: "search", ok: false, reason: "not_found" } }]);
   });
 
   it("参考图没找到时用显示名", async () => {
@@ -439,12 +442,14 @@ describe("重新定位：在用户数据根内找", () => {
   it("读图失败：按文件名提示，记 unreadable", async () => {
     const h = harness();
     vi.mocked(findResultFile).mockResolvedValue("/~/任务/task-res1/res1.png");
-    vi.mocked(ipc.inspectImage).mockRejectedValue(new Error("文件不可读"));
+    h.port.files.inspectImage = async () => {
+      throw new Error("文件不可读");
+    };
     canvasBoardActions(h.deps).relocate("res1", "search");
     await flush();
-    expect(logEvent).toHaveBeenCalledWith("relocate", { board_file: BOARD_FILE, node_id: "res1", node_type: "result", mode: "search", ok: false, reason: "unreadable" });
     expect(h.toast).toHaveBeenCalledWith(RELOCATE_TEXT.unreadable("res1.png", "文件不可读"));
     expect(h.apply).not.toHaveBeenCalled();
+    expect(h.port.calls.log).toEqual([{ kind: "relocate", fields: { board_file: BOARD_FILE, node_id: "res1", node_type: "result", mode: "search", ok: false, reason: "unreadable" } }]);
   });
 
   it("找不到节点（已经不在画板上）时什么也不做", async () => {
@@ -452,6 +457,6 @@ describe("重新定位：在用户数据根内找", () => {
     canvasBoardActions(h.deps).relocate("没有这个节点", "search");
     await flush();
     expect(findResultFile).not.toHaveBeenCalled();
-    expect(logEvent).not.toHaveBeenCalled();
+    expect(h.port.calls.log).toEqual([]);
   });
 });

@@ -11,11 +11,11 @@ import { UPLOAD_FAILURES } from "./uploadText";
 import type { BoardListing, BrowserPort, Ipc, PackContentPort, PackUploadPort, RelayPort, SessionPort, TransferPort, UsagePort } from "./types";
 import { errorText } from "../core/errors";
 
-export type { ImageInfo } from "./types";
 
-/** core/ 按「用户数据根 + 相对路径」拼路径；用户数据根在浏览器里是固定的虚拟根，壳层在边界剥掉，服务端只收相对路径。 */
+
+/** core/ 按「用户数据根 + 相对路径」拼路径；用户数据根在浏览器里是固定的虚拟根，壳层在边界剥掉，服务端只收相对路径。
+ *  界面经壳端口的 userRoot 取它（webPort），不再直接 import 这个常量。 */
 const VIRTUAL_ROOT = "/~";
-export const userRoot = VIRTUAL_ROOT;
 
 /** 会话失效事件：HTTP 层统一识别 401，页面据此回到粘贴密钥界面（不能当成「没有数据」）。 */
 type SessionListener = () => void;

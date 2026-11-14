@@ -9,7 +9,7 @@ import type { CapabilityTable } from "../core/capabilities";
 import type { BoardChange, EditResult } from "../core/edit";
 import type { NodeRunState } from "../core/runner";
 import { OUTCOME_FILE, taskFilePath } from "../core/taskDir";
-import type { ImageInfo } from "../shell/ipc";
+import type { ImageInfo } from "../shell/port";
 import { useCanvasData, type CanvasData } from "./useCanvasData";
 
 // React 19 的 act() 要在测试环境里显式打开。
@@ -22,14 +22,13 @@ const shell = vi.hoisted(() => ({
   logEvent: vi.fn(async () => undefined),
 }));
 
-vi.mock("../shell/ipc", () => ({
+vi.mock("../shell/ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../shell/ipc")>()),
   ipc: { inspectImage: shell.inspectImage, logEvent: shell.logEvent },
-  // 导入面里画布用得上的地址拼装函数一并替身，免得测试碰到真实现。
-  fileUrl: (path: string) => `file:${path}`,
-  thumbUrl: (path: string) => `thumb:${path}`,
 }));
 
-vi.mock("../shell/adapters", () => ({
+vi.mock("../shell/adapters", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../shell/adapters")>()),
   taskFs: { readFile: shell.readFile, writeNewFile: vi.fn(async () => undefined) },
 }));
 

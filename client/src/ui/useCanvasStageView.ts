@@ -7,8 +7,8 @@ import { stagesOf } from "../core/board";
 import { errorText } from "../core/errors";
 import { collapsedMembers, nextStageName, prunableResults, stageBoxes, type StageBox } from "../core/stages";
 import { nodesBytes, pruneSavings } from "../core/tidy";
-import { browser } from "../shell/ipc";
 import { TIDY_TEXT } from "./boardText";
+import { useShell } from "./shell";
 import type { StageTidy } from "./stages";
 import { useTidyMeasure, type TidyMeasure } from "./tidy";
 
@@ -24,6 +24,7 @@ interface StageTidyOptions {
 
 /** 整理模式下阶段框多出的内容：各阶段体量、「收掉未定稿」张数、移出为新画板。不在整理模式为 null。 */
 export function useStageTidy({ board, boardRef, tidying, tidyMeasure, apply, toast, onMoveOutStage }: StageTidyOptions): StageTidy | null {
+  const port = useShell();
   const [movingOut, setMovingOut] = useState(false);
   return useMemo((): StageTidy | null => {
     if (!tidying) return null;
@@ -36,7 +37,7 @@ export function useStageTidy({ board, boardRef, tidying, tidyMeasure, apply, toa
         const ids = prunableResults(boardRef.current, [id]);
         if (!ids.length) return toast(TIDY_TEXT.nothingToPrune);
         const saved = measure ? pruneSavings(measure, ids) : null;
-        void browser.ask(TIDY_TEXT.pruneConfirm(ids.length, saved), { title: TIDY_TEXT.pruneTitle, okLabel: TIDY_TEXT.pruneOk, cancelLabel: TIDY_TEXT.cancelLabel }).then((ok) => {
+        void port.ui.ask(TIDY_TEXT.pruneConfirm(ids.length, saved), { title: TIDY_TEXT.pruneTitle, okLabel: TIDY_TEXT.pruneOk, cancelLabel: TIDY_TEXT.cancelLabel }).then((ok) => {
           if (ok) apply({ kind: "pruneUnfinal", stageIds: [id] });
         });
       },

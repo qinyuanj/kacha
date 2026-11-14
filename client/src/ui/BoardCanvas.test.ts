@@ -21,7 +21,7 @@ import { MAX_PASTE_BYTES, nodeMarker, PASTE_NAME_PREFIX } from "../core/pageInpu
 import type { BoardMeasure } from "../core/tidy";
 import { browser, ipc, transfer } from "../shell/ipc";
 import { copyTextToClipboard } from "../shell/clipboard";
-import { saveCopyAs } from "../shell/saveFile";
+import { webPort } from "../shell/webPort";
 import { BoardCanvas } from "./BoardCanvas";
 import { ARCHIVE_TEXT, DELETE_TASK_TEXT, IMPORT_TEXT, PASTE_TEXT, SAVE_TEXT, STAGE_TEXT, TIDY_TEXT } from "./boardText";
 import { writeClipboard } from "./canvasKeyboard";
@@ -91,8 +91,10 @@ vi.mock("@xyflow/react", async () => {
 });
 
 // 会碰宿主 / 网络的接线一律替身；core 逻辑保持真实（本测试锁的是它与界面的接线）。
-vi.mock("../shell/ipc", () => ({
+vi.mock("../shell/ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../shell/ipc")>()),
   ipc: {
+    ...(await importOriginal<typeof import("../shell/ipc")>()).ipc,
     inspectImage: vi.fn(),
     measureBoard: vi.fn(),
     readFileBytes: vi.fn(),
@@ -103,23 +105,20 @@ vi.mock("../shell/ipc", () => ({
   },
   browser: { ask: vi.fn(), message: vi.fn(), onPackProgress: vi.fn(), openExternal: vi.fn(), version: vi.fn() },
   transfer: { pickLocalImages: vi.fn(), uploadReference: vi.fn(), downloadImage: vi.fn(), downloadBoardResults: vi.fn() },
-  fileUrl: (path: string) => `/api/fs/file?path=${encodeURIComponent(path)}`,
-  thumbUrl: (path: string) => `/api/fs/thumb?path=${encodeURIComponent(path)}`,
-  userRoot: "/~",
 }));
 
-vi.mock("../shell/adapters", () => ({
+vi.mock("../shell/adapters", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../shell/adapters")>()),
   relocateFs: { listDir: vi.fn(), isFile: vi.fn(), sha256: vi.fn() },
   // 画板状态的读取在本次运行的测试里没有任务目录：一律读失败，画布按「没有结局记录」处理。
   taskFs: { readFile: vi.fn(async () => Promise.reject(new Error("测试里没有任务目录"))), writeNewFile: vi.fn() },
-  openExternal: vi.fn(),
 }));
 
 vi.mock("../shell/log", () => ({ logEvent: vi.fn() }));
 // 系统剪贴板写入是宿主能力（安全上下文 / 内网 HTTP 两套实现）：替身只记调用，回成功。
 vi.mock("../shell/clipboard", () => ({ copyTextToClipboard: vi.fn(async () => undefined) }));
 vi.mock("../shell/imageClipboard", () => ({ copyImageToClipboard: vi.fn(async () => null) }));
-vi.mock("../shell/saveFile", () => ({ saveCopyAs: vi.fn(async () => undefined) }));
+
 
 // ---- 画板夹具 ----
 
@@ -173,6 +172,8 @@ let slot: HTMLDivElement;
 let root: Root;
 /** 落点判定（dropTargetAt）用 document.elementFromPoint：jsdom 没有实现，由测试喂。 */
 let elementAt: Mock<() => Element | null>;
+/** 壳端口的另存为替身（每次 beforeEach 重新装）。 */
+let saveCopyAs: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -182,6 +183,8 @@ beforeEach(() => {
   vi.mocked(transfer.pickLocalImages).mockResolvedValue([]);
   vi.mocked(transfer.uploadReference).mockImplementation(async (file: File) => ({ path: `reference/${file.name}`, sha256: SHA_B }));
   vi.mocked(copyTextToClipboard).mockResolvedValue(undefined);
+  // 「另存为」经壳端口的 media.saveCopyAs（Web 实现是下载附件）；这里只记调用。
+  saveCopyAs = vi.spyOn(webPort.media, "saveCopyAs").mockResolvedValue(undefined);
   // 应用内剪贴板是模块级状态（可跨画板粘贴），每条用例从「没复制过」开始。
   writeClipboard(null);
   xyflow.connection.current = { inProgress: false, fromHandle: null };

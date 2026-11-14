@@ -4,9 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import type { PortRef, RegionRender } from "../core/board";
 import { MAX_REGIONS, regionCss } from "../core/overlay";
 import { type LayerRecord } from "../core/taskDir";
-import { fileUrl, transfer } from "../shell/ipc";
-import { saveCopyAs } from "../shell/saveFile";
 import { useBoardActions, useImageInfos } from "./context";
+import { useShell } from "./shell";
 import { dragRect, isMeaningful, moveRect, resizeRect, type Corner, type Point01, type Rect01 } from "./rects";
 import { errorText } from "../core/errors";
 
@@ -57,6 +56,7 @@ type Drag =
 const CORNERS: Corner[] = ["nw", "ne", "sw", "se"];
 
 export function PreviewDialog({ req, toast, onClose }: Props) {
+  const port = useShell();
   const { apply, addAsReference, continueEditing } = useBoardActions();
   const stage = useRef<HTMLImageElement>(null);
   const [editing, setEditing] = useState<RegionTarget | null>(req.edit ?? null);
@@ -171,12 +171,12 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
   };
   const exportOne = (absPath: string) =>
     runExport(async () => {
-      await saveCopyAs(absPath);
+      await port.media.saveCopyAs(absPath);
       return "已开始下载";
     });
   const exportAll = () =>
     runExport(async () => {
-      transfer.downloadImage(req.absPath);
+      port.media.downloadImage(req.absPath);
       return "已开始下载：底图、全部图层与 layers.json（zip）";
     });
 
@@ -212,13 +212,13 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
           <div className="preview-stage nodrag" onPointerDown={onPointerDown}>
             <div className="preview-canvas">
               {solo !== null ? (
-                <img ref={stage} src={fileUrl(layers[solo].absPath)} alt={layers[solo].record.file} draggable={false} />
+                <img ref={stage} src={port.media.imageUrl(layers[solo].absPath)} alt={layers[solo].record.file} draggable={false} />
               ) : (
-                <img ref={stage} src={fileUrl(req.absPath)} alt={req.title} draggable={false} />
+                <img ref={stage} src={port.media.imageUrl(req.absPath)} alt={req.title} draggable={false} />
               )}
               {solo === null &&
                 layers.map((layer, i) =>
-                  checked.has(i) ? <img key={layer.record.file} className="preview-layer" style={layerStyle(layer.record)} src={fileUrl(layer.absPath)} alt={layer.record.file} draggable={false} /> : null,
+                  checked.has(i) ? <img key={layer.record.file} className="preview-layer" style={layerStyle(layer.record)} src={port.media.imageUrl(layer.absPath)} alt={layer.record.file} draggable={false} /> : null,
                 )}
               {solo === null &&
                 showOutlines &&
@@ -273,7 +273,7 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
                         }
                       />
                       <img
-                        src={fileUrl(layer.absPath)}
+                        src={port.media.imageUrl(layer.absPath)}
                         alt={layer.record.file}
                         draggable={false}
                         className={solo === i ? "layer-solo" : ""}

@@ -13,8 +13,8 @@ import {
   type ModelsCache,
   type Settings,
 } from "../core/settings";
-import { settingsPorts } from "../shell/adapters";
 import { SETTINGS_UNREADABLE_TEXT, settingsNewerText } from "./settingsText";
+import { useShell } from "./shell";
 
 export type ConnectionResult = { ok: true; count: number } | { ok: false; message: string };
 
@@ -47,6 +47,8 @@ function fileProblemOf(loaded: LoadedSettings): string | null {
 }
 
 export function useSettings() {
+  const port = useShell();
+  const settingsPorts = port.core.settingsPorts;
   const [state, setState] = useState<SettingsState>({
     loaded: false,
     file: "ok",

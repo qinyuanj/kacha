@@ -4,9 +4,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { BOARD_EXTENSION } from "../core/board";
 import { bySizeDescending, sizeTier } from "../core/boardSize";
-import { ipc } from "../shell/ipc";
 import type { BoardListEntry, BoardListing } from "../shell/types";
 import { errorText } from "../core/errors";
+import { useShell } from "./shell";
 import { approxSizeText, ARCHIVE_TEXT, MANAGE_BOARDS_TEXT, OVER_SLOTS_TEXT, slotsUsageText } from "./boardText";
 
 interface Props {
@@ -30,6 +30,7 @@ interface Props {
 const titleOf = (name: string) => name.slice(0, -BOARD_EXTENSION.length);
 
 export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose, onArchive, onUnarchive, onCopy, manage = false }: Props) {
+  const port = useShell();
   const [listing, setListing] = useState<BoardListing | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<{ entry: BoardListEntry; busy: boolean; error: string | null } | null>(null);
@@ -38,7 +39,7 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
   const [actionError, setActionError] = useState<string | null>(null);
   const refresh = useCallback(() => {
     setError(null);
-    ipc.listBoards().then(setListing, (e) => {
+    port.board.list().then(setListing, (e) => {
       setListing({ boards: [], slots: { used: 0, total: 0 }, size_lines: { warn: Infinity, alert: Infinity } });
       setError(errorText(e));
     });

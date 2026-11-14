@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import { newBoard, type Board, type BoardNode } from "../core/board";
 import { nodeMarker } from "../core/pageInput";
 import { copyTextToClipboard } from "../shell/clipboard";
+import { webPort } from "../shell/webPort";
 import { PASTE_TEXT } from "./boardText";
 import { readClipboard, writeClipboard } from "./canvasKeyboard";
 import { useBoardKeyboard } from "./useBoardKeyboard";
@@ -74,6 +75,7 @@ beforeEach(async () => {
     onUndo,
     onRedo,
     toast,
+    port: webPort,
   };
   await show();
 });

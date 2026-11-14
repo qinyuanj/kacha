@@ -7,7 +7,7 @@ import type { BoardChange, EditResult } from "../core/edit";
 import { nodeImages, type NodeImage } from "../core/graph";
 import type { TaskStatus } from "../core/run";
 import { nodeStatus, type NodeRunState } from "../core/runner";
-import type { ImageInfo } from "../shell/ipc";
+import type { ImageInfo } from "../shell/port";
 import { useImageInfos, useMissingImages, useStoredStatuses } from "./context";
 
 /** 每个图片源节点的透明通道；未知的不进 Map（节点按「不知道」渲染）。 */

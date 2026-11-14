@@ -1,5 +1,5 @@
 // 节点四型的渲染。节点数据只来自画板文件模型；派生信息（露出端口、标红原因、校验规则）由画布计算后传入。
-import { openExternal } from "../shell/adapters";
+
 import { NodeResizer, Position, useUpdateNodeInternals, type Node, type NodeProps } from "@xyflow/react";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import type {
@@ -37,8 +37,8 @@ import { resolveFromRoot } from "../core/paths";
 import { autoRatioLabel, isAutoRatio, ratiosForSizeTier, ratioText, sizeTiersOf, type SizeSpec } from "../core/size";
 import { AUTO_RATIO, commitRatioDraft, ratioComboClass, ratioComboText, ratioFocusText, ratioPickChanges, ratioPresetLabel, ratioPresetSelected } from "./ratioCombo";
 import type { TaskView } from "../core/taskView";
-import { thumbUrl } from "../shell/ipc";
 import { useBoardActions, useImageInfo } from "./context";
+import { useShell } from "./shell";
 import { HoverButton, HoverSpan, useHover } from "./hoverInfo";
 import { Port } from "./ports";
 import type { Rect01 } from "./rects";
@@ -128,12 +128,13 @@ function Shell({ kind, title, className = "", children }: { kind: string; title:
 const LAZY_IMAGE = { loading: "lazy", decoding: "async" } as const;
 
 function Thumb({ absPath, alt, onOpen }: { absPath: string; alt: string; onOpen?: () => void }) {
+  const port = useShell();
   const [missing, setMissing] = useState(false);
   useEffect(() => setMissing(false), [absPath]);
   return missing ? (
     <div className="thumb thumb-missing">图片缺失</div>
   ) : (
-    <img className="thumb" {...LAZY_IMAGE} src={thumbUrl(absPath)} alt={alt} draggable={false} onError={() => setMissing(true)} onDoubleClick={onOpen} />
+    <img className="thumb" {...LAZY_IMAGE} src={port.media.thumbUrl(absPath)} alt={alt} draggable={false} onError={() => setMissing(true)} onDoubleClick={onOpen} />
   );
 }
 
@@ -209,6 +210,7 @@ export function ImageNode({
 }
 
 export const PromptNodeView = memo(function PromptNodeView({ data, width, height }: NodeProps<PromptFlowNode>) {
+  const port = useShell();
   const { apply, setPromptDraft, takePromptFocus } = useBoardActions();
   const { node, recorded, autoFocus, draft: pending, portKind, guides } = data;
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -313,7 +315,7 @@ export const PromptNodeView = memo(function PromptNodeView({ data, width, height
                   <button key={`${guide.taskId}:${image.port}`} type="button" className="reference-guide-thumb" title={image.label} onMouseDown={holdFocus} onClick={() => insertReference(image.port)}>
                     {image.absPath && (
                       <>
-                        <img {...LAZY_IMAGE} src={thumbUrl(image.absPath)} alt="" draggable={false} />
+                        <img {...LAZY_IMAGE} src={port.media.thumbUrl(image.absPath)} alt="" draggable={false} />
                         {image.rects.map((r, k) => (
                           <span key={k} className="reference-guide-rect" style={{ left: `${r[0] * 100}%`, top: `${r[1] * 100}%`, width: `${(r[2] - r[0]) * 100}%`, height: `${(r[3] - r[1]) * 100}%` }} />
                         ))}
@@ -424,6 +426,7 @@ export function ModelOptions({ table, available }: { table: CapabilityTable; ava
 
 /** 模型说明浮层：档位、参考图上限、待测能力与官方文档链接。导出只作为单测接缝（生产调用都在本文件内）。 */
 export function ModelInfo({ modelId, onClose }: { modelId: string; onClose: () => void }) {
+  const port = useShell();
   const { table } = useBoardActions();
   const model = findModel(table, modelId);
   if (!model) return null;
@@ -450,7 +453,7 @@ export function ModelInfo({ modelId, onClose }: { modelId: string; onClose: () =
         </>
       )}
       {model.help_url && (
-        <button className="link" onClick={() => void openExternal(model.help_url!)}>
+        <button className="link" onClick={() => port.ui.openExternal(model.help_url!)}>
           查看官方文档
         </button>
       )}
@@ -706,6 +709,7 @@ function CountField({ count, limit, disabled, onPick }: { count: number; limit: 
 }
 
 export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskFlowNode>) {
+  const port = useShell();
   const { table, apply, availableModels, concurrency, editRegion, previewNode, perform } = useBoardActions();
   const { node, ports, view, locked, workflow, slots, regionRender, hasPositive, status, summary, expanded, run } = data;
   const filledImages = slots.filter((s) => s.kind === "image").length;
@@ -937,7 +941,7 @@ export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskF
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => (canRegion ? editRegion(node.id, slot.edgeRef!) : slot.edgeRef && previewNode(slot.edgeRef.from[0]))}
                 >
-                  <img {...LAZY_IMAGE} src={thumbUrl(slot.absPath)} alt={slot.label} draggable={false} />
+                  <img {...LAZY_IMAGE} src={port.media.thumbUrl(slot.absPath)} alt={slot.label} draggable={false} />
                   {slot.rects.map((r, k) => (
                     <span
                       key={k}

@@ -1,11 +1,12 @@
 // 用量与自助清理（Web 版，ADR 0018）：高级设置里的一块；清单来自服务端，服务端逐条重算候选资格。
 import { useCallback, useEffect, useState } from "react";
-import { usage as usagePort } from "../shell/ipc";
 import type { Usage } from "../shell/types";
 import { errorText } from "../core/errors";
+import { useShell } from "./shell";
 import { formatBytes, IDLE_USER_RULE_TEXT } from "./boardText";
 
 export function UsageSection() {
+  const port = useShell();
   const [usage, setUsage] = useState<Usage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
@@ -15,7 +16,7 @@ export function UsageSection() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      setUsage(await usagePort!.usage());
+      setUsage(await port.usage.usage());
     } catch (e) {
       setError(errorText(e));
     }
@@ -29,7 +30,7 @@ export function UsageSection() {
     setBusy(true);
     setError(null);
     try {
-      const result = await usagePort!.cleanupUnreferenced(usage.unreferenced.map((d) => d.dir));
+      const result = await port.usage.cleanupUnreferenced(usage.unreferenced.map((d) => d.dir));
       setNote(`已把 ${result.moved.length} 个任务目录移入回收区${result.skipped.length ? `；${result.skipped.length} 个已不符合条件，未动` : ""}`);
       setConfirm(false);
       await load();

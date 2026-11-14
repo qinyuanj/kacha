@@ -7,6 +7,7 @@ import { newBoard, type Board, type BoardNode } from "../core/board";
 import { ipc, transfer } from "../shell/ipc";
 import { ARCHIVE_TEXT, IMPORT_TEXT } from "./boardText";
 import { knownImageInfo } from "./context";
+import { webPort } from "../shell/webPort";
 import { imageImportPorts, useCanvasDrop } from "./useCanvasDrop";
 
 // 本机图片的上传与元信息读取走壳层端口：这里换成替身，避免真的发请求。
@@ -112,6 +113,7 @@ beforeEach(async () => {
     toast,
     userRoot: "/~",
     readOnly: false,
+    port: webPort,
   };
   await show();
 });
@@ -127,13 +129,14 @@ afterEach(async () => {
 describe("imageImportPorts", () => {
   it("三个方法分别转发到壳层上传、元信息读取与画布缓存（选图加参考图也走这一组）", async () => {
     const file = fileOf("a.png", "image/png");
-    await expect(imageImportPorts.upload(file)).resolves.toEqual({ path: "导入参考图/a.png", sha256: "sha-a" });
+    const ports = imageImportPorts(webPort);
+    await expect(ports.upload(file)).resolves.toEqual({ path: "导入参考图/a.png", sha256: "sha-a" });
     expect(transfer.uploadReference).toHaveBeenCalledWith(file);
 
-    await expect(imageImportPorts.inspect("/~/导入参考图/a.png")).resolves.toEqual(imageInfo);
+    await expect(ports.inspect("/~/导入参考图/a.png")).resolves.toEqual(imageInfo);
     expect(ipc.inspectImage).toHaveBeenCalledWith("/~/导入参考图/a.png");
 
-    imageImportPorts.prime("/~/导入参考图/cached.png", imageInfo);
+    ports.prime("/~/导入参考图/cached.png", imageInfo);
     expect(knownImageInfo("/~/导入参考图/cached.png")).toEqual(imageInfo);
   });
 });

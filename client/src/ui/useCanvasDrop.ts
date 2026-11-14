@@ -1,21 +1,21 @@
 // 画布上的 HTML5 拖放挂载点：dragover 拦下浏览器默认接管，drop 在捕获阶段先接（#97 的承重行为）。
 // 只认图片：按松手处的落点挂到任务卡片左侧或就地新建参考图节点；过滤、导入与落盘在 canvasDrop。
 import { useEffect, useRef, type RefObject } from "react";
+import type { ShellPort } from "../shell/port";
 import type { Board } from "../core/board";
 import type { BoardChange } from "../core/edit";
 import { blocksFileDrag } from "../core/pageInput";
-import { ipc, transfer } from "../shell/ipc";
 import { ARCHIVE_TEXT, IMPORT_TEXT } from "./boardText";
 import { addImportedReferences, dropAttachOf, imageFilesOf, importImages, type ImagePorts } from "./canvasDrop";
 import { dropTargetAt } from "./canvasPoint";
 import { primeImageInfo } from "./context";
 
-/** 生产用的图片导入端口：壳层的上传与元信息读取，加上画布的图片信息缓存。 */
-export const imageImportPorts: ImagePorts = {
-  upload: (file) => transfer.uploadReference(file),
-  inspect: (absPath) => ipc.inspectImage(absPath),
+/** 生产用的图片导入端口：壳端口的上传与元信息读取，加上画布的图片信息缓存。 */
+export const imageImportPorts = (port: ShellPort): ImagePorts => ({
+  upload: (file) => port.media.uploadReference(file),
+  inspect: (absPath) => port.files.inspectImage(absPath),
   prime: primeImageInfo,
-};
+});
 
 interface Options {
   /** 画布根元素：拖放监听挂在它上面。 */
@@ -31,10 +31,12 @@ interface Options {
   userRoot: string;
   /** 归档画板：拖进来的图片不导入，只提示只读。 */
   readOnly: boolean;
+  /** 壳端口：上传参考图与读图片信息。 */
+  port: ShellPort;
 }
 
 /** 画布上的拖放：dragover 让浏览器别接管文件拖拽，drop 在捕获阶段接并阻断冒泡。 */
-export function useCanvasDrop({ wrapper, boardRef, screenToFlowPosition, apply, toast, userRoot, readOnly }: Options): void {
+export function useCanvasDrop({ wrapper, boardRef, screenToFlowPosition, apply, toast, userRoot, readOnly, port }: Options): void {
   // 坐标换算只在松手那一刻用（不必随它重挂监听）：调用方常写成箭头包装，每次渲染都是新函数，经 ref 取最新一版。
   const positionOf = useRef(screenToFlowPosition);
   positionOf.current = screenToFlowPosition;
@@ -54,7 +56,7 @@ export function useCanvasDrop({ wrapper, boardRef, screenToFlowPosition, apply, 
       if (!files.length) return toast(IMPORT_TEXT.imageOnly);
       // 落点按松手这一刻算（elementFromPoint 随 DOM 变化），上传是异步的。
       const attach = dropAttachOf(dropTargetAt({ x: e.clientX, y: e.clientY }), boardRef.current);
-      void importImages(files, { userRoot, toast, ports: imageImportPorts }).then((images) => addImportedReferences(images, at, attach, apply));
+      void importImages(files, { userRoot, toast, ports: imageImportPorts(port) }).then((images) => addImportedReferences(images, at, attach, apply));
     };
     el.addEventListener("dragover", over);
     // 捕获阶段接 drop：先于页面级接管（shell/pageInput）跑并阻断冒泡，拖进画板的图片仍落成参考图节点。
@@ -63,5 +65,5 @@ export function useCanvasDrop({ wrapper, boardRef, screenToFlowPosition, apply, 
       el.removeEventListener("dragover", over);
       el.removeEventListener("drop", drop, true);
     };
-  }, [apply, boardRef, readOnly, toast, userRoot, wrapper]);
+  }, [apply, boardRef, port, readOnly, toast, userRoot, wrapper]);
 }

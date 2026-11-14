@@ -1,6 +1,6 @@
 // 高级设置：网关地址、连接测试、按页面并发上限、存储用量与自助清理。
-import { browser } from "../shell/ipc";
 import { useEffect, useState } from "react";
+import { useShell } from "./shell";
 import { DEFAULT_SETTINGS, isPlainHttp, MAX_CONCURRENCY, mayOverwriteSettings, MIN_CONCURRENCY, normalizeBaseUrl, parseConcurrency, settingsFromForm, validateBaseUrl } from "../core/settings";
 import { UsageSection } from "./UsageSection";
 import type { ConnectionResult, useSettings } from "./useSettings";
@@ -11,6 +11,7 @@ interface Props {
 }
 
 export function SettingsPanel({ settings, onClose }: Props) {
+  const port = useShell();
   const [baseUrl, setBaseUrl] = useState(settings.settings.base_url);
   // 草稿是原始文本，输入中可为空或越界；失焦与保存时才经 parseConcurrency 钳制。
   const [concurrencyDraft, setConcurrencyDraft] = useState(String(settings.settings.concurrency));
@@ -21,7 +22,7 @@ export function SettingsPanel({ settings, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
-    void browser.version().then(setVersion, () => undefined);
+    void port.ui.version().then(setVersion, () => undefined);
   }, []);
 
   const urlError = validateBaseUrl(baseUrl);

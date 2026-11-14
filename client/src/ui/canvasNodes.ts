@@ -22,7 +22,7 @@ import type { TaskStatus } from "../core/run";
 import { nodeCopyDetail, nodeSummary, summaryTone, type NodeRunState } from "../core/runner";
 import { defaultTaskModel, type Discovery } from "../core/settings";
 import { taskView } from "../core/taskView";
-import type { ImageInfo } from "../shell/ipc";
+import type { ImageInfo } from "../shell/port";
 import type { ImagePortInfo, ImageSlotInfo, PromptReferenceGuideTask } from "./nodes";
 
 /** 尚未回传测量结果的节点：非空即可让 React Flow 保留内部已测得的 handleBounds（见 baseNodeOf 的 measured）。 */

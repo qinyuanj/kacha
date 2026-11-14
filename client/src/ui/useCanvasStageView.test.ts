@@ -20,9 +20,10 @@ const shell = vi.hoisted(() => ({
   measureBoard: vi.fn(),
 }));
 
-vi.mock("../shell/ipc", () => ({
-  ipc: { measureBoard: shell.measureBoard },
-  browser: { ask: shell.ask },
+vi.mock("../shell/ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../shell/ipc")>()),
+  ipc: { ...(await importOriginal<typeof import("../shell/ipc")>()).ipc, measureBoard: shell.measureBoard },
+  browser: { ...(await importOriginal<typeof import("../shell/ipc")>()).browser, ask: shell.ask },
 }));
 
 // ---- 画板与渲染脚手架 ----
