@@ -254,4 +254,3 @@ export function AppWorkspace({
     </ReactFlowProvider>
   );
 }
-

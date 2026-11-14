@@ -15,6 +15,7 @@ import { errorText } from "./core/errors";
 import { useShell } from "./ui/shell";
 import { modalOpenOf, noticesAfterMove, uiStateOf, uiStateText } from "./ui/appUiState";
 import { AppOverlays } from "./ui/appDialogs";
+import { downloadBoardResults } from "./ui/packMenu";
 import { AppShell } from "./ui/appShell";
 import { useAppState, useRestoreTabs, useStartupReads, useToastTimer, useUiStateWriter, useVersionNotice } from "./ui/useAppState";
 import {
@@ -354,7 +355,7 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
         onCopyBoard={boards.copyAsNewBoard}
         onExportBoard={(path) => void exportBoardAt(path).catch((e) => toast(errorText(e)))}
         onTogglePackMenu={(at) => store.setPackMenu(togglePackMenu(state.packMenu, at))}
-        onPackMenuPick={(action) => packMenuPick(action, view.active, () => void pack.importPack(), (k) => void pack.prepareExport(k), (p) => port.media.downloadBoardResults(p))}
+        onPackMenuPick={(action) => packMenuPick(action, view.active, () => void pack.importPack(), (k) => void pack.prepareExport(k), (p) => downloadBoardResults(port, p, toast))}
         onPackMenuClose={() => store.setPackMenu(null)}
         onDismissTableError={() => store.setTableError(null)}
         onOpenSettings={() => store.setSettingsOpen(true)}

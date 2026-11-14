@@ -69,3 +69,10 @@ export async function submitKey(session: SessionProbe, key: string): Promise<Log
     return { kind: "error", message: e instanceof Error ? e.message : `验证失败：${String(e)}` };
   }
 }
+/** 此刻该显示哪一屏：启动失败 → 加载中 → 粘贴密钥 → 工作台。 */
+export function screenOf(fatal: string | null, phase: Phase): "fatal" | "loading" | "enter" | "ready" {
+  if (fatal) return "fatal";
+  if (phase === "loading") return "loading";
+  if (phase === "enter") return "enter";
+  return "ready";
+}

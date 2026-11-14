@@ -4,8 +4,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App } from "../App";
 import { useShell } from "./shell";
-import { bootSession, submitKey, type Phase } from "./rootSession";
-import { fatalText, KeyEntryForm, SessionExpiredModal, useKeyFocus } from "./rootViews";
+import { bootSession, screenOf, submitKey, type Phase } from "./rootSession";
+import { fatalText, KeyEntryForm, PendingScreen, SessionExpiredModal, useKeyFocus } from "./rootViews";
 
 export function Root() {
   const port = useShell();
@@ -61,9 +61,8 @@ export function Root() {
 
   const form = <KeyEntryForm apiKey={key} busy={busy} error={error} version={version} onChange={setKey} onSubmit={() => void submit()} inputRef={inputRef} />;
 
-  if (fatal) return <div className="fatal">{fatal}</div>;
-  if (phase === "loading") return <div className="empty">正在加载…</div>;
-  if (phase === "enter") return <div className="key-entry-page">{form}</div>;
+  const screen = screenOf(fatal, phase);
+  if (screen !== "ready") return <PendingScreen screen={screen} fatal={fatal}>{form}</PendingScreen>;
   return (
     <>
       {/* 会话失效时遮罩盖在 App 之上、不销毁它：告诉画布此刻有模态，粘贴不落到背后的画板（#96）。 */}

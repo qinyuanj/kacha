@@ -1,9 +1,10 @@
+// 标签页栏（#127 / #137）：标签、新建、画板列表与右键菜单。
+// 判定在 ui/tabView.ts，这里只留接线与 DOM 摆放。
 import { useCallback, useState } from "react";
-import { basename } from "../core/paths";
 import { ContextMenu } from "./ContextMenu";
-import { packExportEntry } from "./packMenuEntries";
 import { useShell } from "./shell";
 import type { Session } from "./useBoardSessions";
+import { canRename, renameDraftOf, renameKeyOf, tabClassOf, tabPackMenu, tabTitleOf } from "./tabView";
 
 interface Props {
   sessions: Session[];
@@ -17,10 +18,77 @@ interface Props {
   onExportPack: (key: string) => void;
 }
 
-const titleOf = (s: Session) => (s.status === "ok" ? s.board.title : basename(s.path));
+/** 一个标签：单击切换、双击改名、右键出菜单、× 关闭。 */
+function TabItem(props: {
+  session: Session;
+  activeKey: string | null;
+  editing: boolean;
+  draft: string;
+  onDraft(value: string): void;
+  onActivate(): void;
+  onClose(): void;
+  onStartRename(): void;
+  onCommit(): void;
+  onCancelRename(): void;
+  onMenu(at: { x: number; y: number }): void;
+}) {
+  const { session, activeKey, editing, draft } = props;
+  return (
+    <div
+      className={tabClassOf(session, activeKey)}
+      title={session.path}
+      onClick={props.onActivate}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        props.onMenu({ x: e.clientX, y: e.clientY });
+      }}
+      onDoubleClick={() => {
+        if (canRename(session)) props.onStartRename();
+      }}
+    >
+      {editing ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => props.onDraft(e.target.value)}
+          onBlur={props.onCommit}
+          onKeyDown={(e) => {
+            const action = renameKeyOf(e.key);
+            if (action === "commit") props.onCommit();
+            if (action === "cancel") props.onCancelRename();
+          }}
+        />
+      ) : (
+        <span className="tab-title">{tabTitleOf(session)}</span>
+      )}
+      <button
+        className="tab-close"
+        title="关闭"
+        onClick={(e) => {
+          e.stopPropagation();
+          props.onClose();
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+/** 标签的右键菜单：导出画板包（标签与置灰原因跟顶部「画板包」菜单同一处定义）。 */
+function TabMenu(props: { session: Session; at: { x: number; y: number }; onExport(): void; onClose(): void }) {
+  const port = useShell();
+  return (
+    <ContextMenu
+      at={props.at}
+      items={[{ action: "exportPack", ...tabPackMenu(port, props.session)[0] }]}
+      onPick={props.onExport}
+      onClose={props.onClose}
+    />
+  );
+}
 
 export function TabBar({ sessions, activeKey, onActivate, onClose, onRename, onCreate, onOpenList, onExportPack }: Props) {
-  const port = useShell();
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<{ key: string; at: { x: number; y: number } } | null>(null);
@@ -35,46 +103,23 @@ export function TabBar({ sessions, activeKey, onActivate, onClose, onRename, onC
   return (
     <nav className="tabs">
       {sessions.map((s) => (
-        <div
+        <TabItem
           key={s.key}
-          className={`tab ${s.key === activeKey ? "tab-active" : ""} ${s.status !== "ok" || s.saveError ? "tab-bad" : ""}`}
-          title={s.path}
-          onClick={() => onActivate(s.key)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setMenu({ key: s.key, at: { x: e.clientX, y: e.clientY } });
-          }}
-          onDoubleClick={() => {
-            if (s.status !== "ok") return;
-            setDraft(s.board.title);
+          session={s}
+          activeKey={activeKey}
+          editing={editing === s.key}
+          draft={draft}
+          onDraft={setDraft}
+          onActivate={() => onActivate(s.key)}
+          onClose={() => onClose(s.key)}
+          onStartRename={() => {
+            setDraft(renameDraftOf(s) ?? "");
             setEditing(s.key);
           }}
-        >
-          {editing === s.key ? (
-            <input
-              autoFocus
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={() => commit(s.key)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commit(s.key);
-                if (e.key === "Escape") setEditing(null);
-              }}
-            />
-          ) : (
-            <span className="tab-title">{titleOf(s)}</span>
-          )}
-          <button
-            className="tab-close"
-            title="关闭"
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose(s.key);
-            }}
-          >
-            ×
-          </button>
-        </div>
+          onCommit={() => commit(s.key)}
+          onCancelRename={() => setEditing(null)}
+          onMenu={(at) => setMenu({ key: s.key, at })}
+        />
       ))}
       <button className="tab-new" title="新建画板" onClick={onCreate}>
         ＋
@@ -85,19 +130,7 @@ export function TabBar({ sessions, activeKey, onActivate, onClose, onRename, onC
         </button>
       )}
       {menuSession && menu && (
-        <ContextMenu
-          at={menu.at}
-          items={[
-            {
-              action: "exportPack",
-              // 标签与置灰原因跟顶部「画板包」菜单同一处定义（#127）：
-              // 桌面壳本切片没有画板包导出时标「尚不可用」并置灰。
-              ...packExportEntry(port, { open: menuSession.status === "ok", broken: menuSession.status !== "ok" }),
-            },
-          ]}
-          onPick={() => onExportPack(menuSession.key)}
-          onClose={closeMenu}
-        />
+        <TabMenu session={menuSession} at={menu.at} onExport={() => onExportPack(menuSession.key)} onClose={closeMenu} />
       )}
     </nav>
   );

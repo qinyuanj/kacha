@@ -29,22 +29,22 @@ export function packImportEntry(port: ShellPort): PackMenuEntry {
   };
 }
 
+/** 要打开画板才能用的条目：端口说还没有这项能力时标「尚不可用」。 */
+function needsBoard(available: boolean, offReason: string, label: string, verb: string, board: PackBoardState): PackMenuEntry {
+  return {
+    label: available ? label : `${label}（尚不可用）`,
+    disabledReason: available ? (board.open ? null : board.broken ? `画板无法打开，不能${verb}` : "没有打开的画板") : offReason,
+  };
+}
+
 /** 导出画板包：要有打开的画板；端口说还没有时标「尚不可用」。 */
 export function packExportEntry(port: ShellPort, board: PackBoardState): PackMenuEntry {
-  const off = !port.features.packExport;
-  return {
-    label: off ? "导出画板包…（尚不可用）" : "导出画板包…",
-    disabledReason: off ? "画板包导出尚不可用" : board.open ? null : board.broken ? "画板无法打开，不能导出" : "没有打开的画板",
-  };
+  return needsBoard(port.features.packExport, "画板包导出尚不可用", "导出画板包…", "导出", board);
 }
 
 /** 下载整板结果：要画板打开着；没有生成时标「尚不可用」。 */
 export function packDownloadEntry(port: ShellPort, board: PackBoardState): PackMenuEntry {
-  const off = !port.features.generation;
-  return {
-    label: off ? "下载整板结果（zip）（尚不可用）" : "下载整板结果（zip）",
-    disabledReason: off ? "生成尚不可用，没有结果可下载" : board.open ? null : board.broken ? "画板无法打开，不能下载" : "没有打开的画板",
-  };
+  return needsBoard(port.features.generation, "生成尚不可用，没有结果可下载", "下载整板结果（zip）", "下载", board);
 }
 
 /** 画板包菜单的条目（顶部「画板包」菜单）：导入、导出、下载整板结果。 */

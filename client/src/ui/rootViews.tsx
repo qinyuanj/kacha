@@ -65,3 +65,9 @@ export function useKeyFocus(phase: string, expired: boolean, inputRef: React.Ref
 
 /** 连不上服务端时的说明。 */
 export const fatalText = (message: string) => `无法连接 Kacha 服务端：${message}`;
+/** 还没进工作台时的三屏：启动失败、加载中、粘贴密钥。 */
+export function PendingScreen(props: { screen: "fatal" | "loading" | "enter"; fatal: string | null; children: React.ReactNode }) {
+  if (props.screen === "fatal") return <div className="fatal">{props.fatal}</div>;
+  if (props.screen === "loading") return <div className="empty">正在加载…</div>;
+  return <div className="key-entry-page">{props.children}</div>;
+}
