@@ -186,6 +186,101 @@ describe("复制", () => {
   });
 });
 
+describe("复制图片（#130）", () => {
+  const reference = (id: string, path: string): BoardNode => ({ id, type: "reference", pos: [0, 0], size: [200, 200], extra: {}, path, sha256: "a".repeat(64), display_name: "cat.png" });
+
+  /** 选区恰好是一张参考图：Ctrl+C 走图片那条路。 */
+  async function selectImage(path = "参考/cat.png"): Promise<void> {
+    board = { ...newBoard("画板"), nodes: [reference("r1", path), prompt("p1")] };
+    opts = { ...opts, boardRef: { current: board }, selectedRef: { current: new Set(["r1"]) } };
+    await show();
+  }
+
+  it("单选一张参考图：写进系统剪贴板的是这张图，不写节点标记，也不动节点剪贴板", async () => {
+    await selectImage();
+    const event = press({ key: "c", ctrlKey: true });
+    await settle();
+    expect(event.defaultPrevented).toBe(true);
+    // 路径按用户数据根拼成绝对路径，格式提示跟着扩展名走。
+    expect(port.calls.copyImage).toEqual([{ path: "/~/参考/cat.png", format: "png" }]);
+    expect(port.calls.copyText).toEqual([]);
+    expect(readClipboard()).toBeNull();
+    // 复制图片不新增节点、不构成撤销步、不写画板。
+    expect(board.nodes).toHaveLength(2);
+    expect(onUndo).not.toHaveBeenCalled();
+    expect(port.calls.write).toEqual([]);
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("多选（含图片）仍复制节点标记，不碰系统剪贴板里的图片", async () => {
+    board = { ...newBoard("画板"), nodes: [reference("r1", "参考/cat.png"), prompt("p1")] };
+    opts = { ...opts, boardRef: { current: board }, selectedRef: { current: new Set(["r1", "p1"]) } };
+    await show();
+    const event = press({ key: "c", ctrlKey: true });
+    await settle();
+    expect(event.defaultPrevented).toBe(true);
+    expect(port.calls.copyImage).toEqual([]);
+    expect(port.calls.copyText).toEqual([nodeMarker(2)]);
+    expect(readClipboard()?.nodes.map((n) => n.id)).toEqual(["r1", "p1"]);
+  });
+
+  it("单选提示词节点仍复制节点标记，不碰图片", async () => {
+    const event = press({ key: "c", ctrlKey: true });
+    await settle();
+    expect(event.defaultPrevented).toBe(true);
+    expect(port.calls.copyImage).toEqual([]);
+    expect(port.calls.copyText).toEqual([nodeMarker(1)]);
+  });
+
+  it("格式不受支持（HEIC、TIFF）：明确失败并指向该节点的「另存为…」", async () => {
+    port.media.copyImage = async () => ({ ok: false, reason: "unsupported" });
+    await selectImage("参考/cat.heic");
+    press({ key: "c", ctrlKey: true });
+    await settle();
+    expect(toast).toHaveBeenCalledTimes(1);
+    const message = toast.mock.calls[0][0] as string;
+    expect(message).toContain("复制图片失败");
+    expect(message).toContain("另存为");
+  });
+
+  it("剪贴板被占用：说成可重试，并指向「另存为…」，不报成功", async () => {
+    port.media.copyImage = async () => ({ ok: false, reason: "busy" });
+    await selectImage();
+    press({ key: "c", ctrlKey: true });
+    await settle();
+    const message = toast.mock.calls[0][0] as string;
+    expect(message).toContain("复制图片失败");
+    expect(message).toContain("重试");
+    expect(message).toContain("另存为");
+  });
+
+  it("端口抛异常：收成一句失败提示，不静默", async () => {
+    port.media.copyImage = async () => {
+      throw new Error("桥没实现");
+    };
+    await selectImage();
+    press({ key: "c", ctrlKey: true });
+    await settle();
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast.mock.calls[0][0]).toContain("复制图片失败");
+  });
+
+  it("复制节点后粘贴是节点、复制图片后粘贴是图片：两边各写各的，不互相误判", async () => {
+    // 先复制图片：系统剪贴板里只有图片，没有标记。
+    await selectImage();
+    press({ key: "c", ctrlKey: true });
+    await settle();
+    expect(port.calls.copyText).toEqual([]);
+    // 再复制节点：系统剪贴板里是标记，没有图片。
+    opts.selectedRef.current = new Set(["p1"]);
+    await show();
+    press({ key: "c", ctrlKey: true });
+    await settle();
+    expect(port.calls.copyImage).toHaveLength(1);
+    expect(port.calls.copyText).toEqual([nodeMarker(1)]);
+  });
+});
+
 describe("卸载", () => {
   it("卸载后 window 上不再留监听", async () => {
     await act(async () => root?.unmount());

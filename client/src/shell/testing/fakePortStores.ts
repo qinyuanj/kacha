@@ -158,9 +158,9 @@ export function fakeMediaStore(options: FakePortOptions, calls: FakeCalls, pickI
     copyText: async (text) => {
       calls.copyText.push(text);
     },
-    copyImage: async (absPath) => {
-      calls.copyImage.push(absPath);
-      const result = typeof options.copyImage === "function" ? options.copyImage(absPath) : options.copyImage;
+    copyImage: async (absPath, format) => {
+      calls.copyImage.push({ path: absPath, format });
+      const result = typeof options.copyImage === "function" ? options.copyImage(absPath, format) : options.copyImage;
       return result ?? { ok: true };
     },
     readClipboard: async () => options.clipboard ?? null,

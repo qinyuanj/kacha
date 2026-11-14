@@ -7,7 +7,7 @@
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
 // 各组实现（画板、文件、元数据、媒体、画板包、用量）在 shell/desktopStores.ts（#137），这里只做接线。
-import { portFailureOf, type ClipboardContent, type MediaStore, type ShellFeatures, type ShellPort } from "./port";
+import { portFailureOf, type ClipboardContent, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type ShellFeatures, type ShellPort } from "./port";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
 import type { BrowserOptions, ImageInfo, SessionPort, UsagePort } from "./types";
 import type { LogKind } from "./log";
@@ -78,9 +78,20 @@ export interface DesktopClipboardSnapshot {
   formats: string[];
 }
 
-/** Go 侧剪贴板服务（Clipboard 服务）。 */
+/** Go 侧复制图片的结局（Clipboard.CopyImage）：类别与 desktop/internal/clipboard 的 Image* 常量一致。 */
+export interface DesktopImageCopy {
+  ok: boolean;
+  /** unsupported / invalid / busy / failed；成功时为空。 */
+  kind: string;
+  message: string;
+  bytes: number;
+}
+
+/** Go 侧剪贴板服务（Clipboard 服务）：读快照（#129）与把图片写进系统剪贴板（#130）。 */
 export interface DesktopClipboardBridge {
   read(): Promise<DesktopClipboardSnapshot>;
+  /** 字节由 Go 自己按路径读（用户数据根在那边），页面只给路径与格式提示。 */
+  copyImage(path: string, format: string): Promise<DesktopImageCopy>;
 }
 
 /** MyGo 桥：Go 侧绑定与测试替身都满足它。 */
@@ -128,6 +139,31 @@ async function readClipboardSnapshot(bridge: DesktopBridge): Promise<ClipboardCo
   return clipboardContentOf(snapshot);
 }
 
+/**
+ * 复制图片到系统剪贴板（#130）：Go 侧按路径读字节、归一化成 PNG、写进系统剪贴板。
+ *
+ * 失败折成端口类别：Go 的 kind 与端口的 ImageCopyFailure 同名，认不出的按 failed。
+ * 桥里没有剪贴板（旧替身）时按 unavailable 收：复制图片在桌面壳里不该伪装成功。
+ */
+async function copyImageToSystemClipboard(bridge: DesktopBridge, absPath: string, format: string): Promise<ImageCopyResult> {
+  if (!bridge.clipboard) return { ok: false, reason: "unavailable" };
+  const outcome = await localRun(() => bridge.clipboard!.copyImage(absPath, format));
+  return outcome.ok ? { ok: true } : { ok: false, reason: copyFailureOf(outcome.kind) };
+}
+
+/** Go 侧的失败类别 → 端口的失败类别；认不出的按 failed（不伪装成可重试）。 */
+const COPY_FAILURE_BY_GO: Record<string, ImageCopyFailure> = {
+  unsupported: "unsupported",
+  invalid: "invalid",
+  busy: "busy",
+  failed: "failed",
+};
+
+/** Go 侧的复制失败类别 → 端口的类别。 */
+function copyFailureOf(kind: string): ImageCopyFailure {
+  return COPY_FAILURE_BY_GO[kind] ?? "failed";
+}
+
 /** 造桌面壳端口：读一次壳信息，之后都从这份快照回答。 */
 export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopShell> {
   const info = await bridge.info();
@@ -148,11 +184,12 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
 
   const meta = desktopMetaStore(local);
 
-  // 本机图片进 导入参考图/ 与系统剪贴板是本机独有的两样（#129）：其余浏览器能力来自 desktopStores。
+  // 本机图片进 导入参考图/ 与系统剪贴板是本机独有的两样（#129 / #130）：其余浏览器能力来自 desktopStores。
   const media: MediaStore = {
     ...desktopMediaStore(),
     uploadReference: (file: File): Promise<{ path: string; sha256: string }> => uploadReference(local, info.user_data_root, file),
     readClipboard: (): Promise<ClipboardContent | null> => readClipboardSnapshot(bridge),
+    copyImage: (absPath: string, format = ""): Promise<ImageCopyResult> => copyImageToSystemClipboard(bridge, absPath, format),
   };
 
   const pack = desktopPackStore();

@@ -137,6 +137,42 @@ describe("本机图片进 导入参考图/（#129）", () => {
   });
 });
 
+describe("复制图片到系统剪贴板（#130）", () => {
+  /** 桥：Clipboard.Read 空快照，Clipboard.CopyImage 按给定结局回答。 */
+  function copyBridge(outcome: { ok: boolean; kind: string; message: string; bytes: number }, calls: { method: string; args: unknown[] }[] = []): DesktopBridge {
+    return {
+      info: () => Promise.resolve(INFO),
+      local: new Proxy({} as DesktopLocalBridge, { get: () => () => Promise.reject(new Error("没实现的本地调用")) }),
+      clipboard: {
+        read: () => Promise.resolve({ kind: "empty", text: "", images: [], reason: "", formats: [] }),
+        copyImage: (path, format) => {
+          calls.push({ method: "Clipboard.CopyImage", args: [path, format] });
+          return Promise.resolve(outcome);
+        },
+      },
+    };
+  }
+
+  it("成功：路径与格式提示原样交给 Go，结局是 ok", async () => {
+    const calls: { method: string; args: unknown[] }[] = [];
+    const { port } = await createDesktopPort(copyBridge({ ok: true, kind: "", message: "", bytes: 167 }, calls));
+    await expect(port.media.copyImage("C:/data/参考/cat.png", "png")).resolves.toEqual({ ok: true });
+    expect(calls).toEqual([{ method: "Clipboard.CopyImage", args: ["C:/data/参考/cat.png", "png"] }]);
+  });
+
+  it("Go 侧的失败类别折成端口类别：不支持 / 内容坏 / 占用 / 其它", async () => {
+    for (const [kind, reason] of [["unsupported", "unsupported"], ["invalid", "invalid"], ["busy", "busy"], ["failed", "failed"], ["没见过的", "failed"]] as const) {
+      const { port } = await createDesktopPort(copyBridge({ ok: false, kind, message: "失败", bytes: 0 }));
+      await expect(port.media.copyImage("C:/data/参考/cat.png", "png")).resolves.toEqual({ ok: false, reason });
+    }
+  });
+
+  it("桥里没有剪贴板：按 unavailable 收，不伪装成功", async () => {
+    const { port } = await createDesktopPort(fakeBridge());
+    await expect(port.media.copyImage("C:/data/参考/cat.png", "png")).resolves.toEqual({ ok: false, reason: "unavailable" });
+  });
+});
+
 describe("读系统剪贴板（#129）", () => {
   it("桥里没有剪贴板：返回 null，调用方改用 paste 事件", async () => {
     const { port } = await createDesktopPort(fakeBridge());
@@ -146,7 +182,13 @@ describe("读系统剪贴板（#129）", () => {
   it("有剪贴板：快照折成页面的 ClipboardContent，图片还原成 image/png", async () => {
     const bridge = fakeBridge();
     const b64 = Buffer.from(PNG_BYTES).toString("base64");
-    const withClip = { ...bridge, clipboard: { read: () => Promise.resolve({ kind: "images", text: "", images: [b64], reason: "", formats: ["image/png"] }) } };
+    const withClip = {
+      ...bridge,
+      clipboard: {
+        read: () => Promise.resolve({ kind: "images", text: "", images: [b64], reason: "", formats: ["image/png"] }),
+        copyImage: () => Promise.resolve({ ok: true, kind: "", message: "", bytes: b64.length }),
+      },
+    };
     const { port } = await createDesktopPort(withClip);
     const content = await port.media.readClipboard();
     expect(content?.kind).toBe("images");

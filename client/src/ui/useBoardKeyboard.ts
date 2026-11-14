@@ -4,11 +4,12 @@ import { useEffect, type RefObject } from "react";
 import type { Board } from "../core/board";
 import { errorText } from "../core/errors";
 import { copySelection } from "../core/iterate";
-import { copyTarget, nodeMarker } from "../core/pageInput";
+import { nodeMarker } from "../core/pageInput";
 import { resolveFromRoot } from "../core/paths";
 import type { ShellPort } from "../shell/port";
 import { PASTE_TEXT } from "./boardText";
-import { COPY_TEXT } from "./copyText";
+import { copyOutcome } from "./copySelection";
+import { imageCopyFailureText } from "./copyText";
 import { shortcutCommand, writeClipboard, type ShortcutCommand } from "./canvasKeyboard";
 
 interface Options {
@@ -50,23 +51,26 @@ function shortcutContextOf(e: KeyboardEvent, opts: Options) {
   };
 }
 
-/** 复制：Ctrl+C 的语义只看选区（#98）；单选图片写图，其它选区保持节点复制与标记（#96）。 */
-function copyShortcut(e: KeyboardEvent, opts: Options): void {
-  const board = opts.boardRef.current;
-  const selected = [...opts.selectedRef.current];
-  const target = copyTarget(board, selected);
-  if (target.mode === "image") {
-    // 立即拦掉原生复制，避免默认动作在异步解码完成后覆盖图片；不改画板，也不写节点标记或内存剪贴板。
-    e.preventDefault();
-    void opts.port.media
-      .copyImage(resolveFromRoot(opts.port.userRoot, target.node.path))
-      .then((result) => {
-        if (!result.ok) opts.toast(COPY_TEXT.imageFailed(COPY_TEXT.imageReason[result.reason]));
-      })
-      .catch((error) => opts.toast(COPY_TEXT.imageFailed(errorText(error))));
-    return;
-  }
-  const clip = copySelection(board, selected);
+/**
+ * 复制图片（#130）：把这张图写进系统剪贴板。
+ *
+ * 立即拦掉原生复制，避免默认动作在异步写入完成后再覆盖一遍；失败只说一句话并指向「另存为…」，
+ * 不改画板、不新增节点、不构成撤销步，也不碰应用内的节点剪贴板（ADR 0021 / 0023）。
+ */
+function copyImageShortcut(e: KeyboardEvent, path: string, format: string, opts: Options): void {
+  e.preventDefault();
+  const absPath = resolveFromRoot(opts.port.userRoot, path);
+  void opts.port.media
+    .copyImage(absPath, format)
+    .then((result) => {
+      if (!result.ok) opts.toast(imageCopyFailureText(result.reason));
+    })
+    .catch((error) => opts.toast(imageCopyFailureText(errorText(error))));
+}
+
+/** 复制节点：写应用内剪贴板与系统剪贴板里的节点标记（#96）。 */
+function copyNodesShortcut(e: KeyboardEvent, opts: Options): void {
+  const clip = copySelection(opts.boardRef.current, [...opts.selectedRef.current]);
   writeClipboard(clip);
   if (!clip.nodes.length) return;
   // 先拦掉浏览器的原生复制：默认复制动作在本处理器之后才写剪贴板，会把刚写好的标记冲掉。
@@ -74,6 +78,19 @@ function copyShortcut(e: KeyboardEvent, opts: Options): void {
   // 同时向系统剪贴板写一段节点标记（#96）：Ctrl+V 靠它分辨该粘节点还是该落一张剪贴板里的图。
   // 写不进去时粘贴节点会失效，所以给一句话和一条可用的替代动作，而不是静默失败。
   void opts.port.media.copyText(nodeMarker(clip.nodes.length)).catch(() => opts.toast(PASTE_TEXT.markerUnwritable));
+}
+
+/**
+ * 复制：Ctrl+C 的语义只看选区（#98 / #130），判定在 copySelection（纯逻辑），这里只执行。
+ *
+ * 单选一张参考图或结果图 → 复制图片；其余选区 → 复制节点标记。两条路各写各的：
+ * 复制图片不写标记，复制节点不写图片，粘贴时不会互相误判（ADR 0021）。
+ */
+function copyShortcut(e: KeyboardEvent, opts: Options): void {
+  const outcome = copyOutcome(opts.boardRef.current, [...opts.selectedRef.current]);
+  if (outcome.kind === "nothing") return;
+  if (outcome.kind === "image") return copyImageShortcut(e, outcome.path, outcome.format, opts);
+  copyNodesShortcut(e, opts);
 }
 
 /** 执行一条命令：撤销 / 重做交给画板会话；复制按目标写图片，或写应用内节点剪贴板与系统标记。 */

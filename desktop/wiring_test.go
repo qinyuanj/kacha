@@ -31,7 +31,19 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 	if !strings.Contains(src, "read") {
 		t.Fatalf("Clipboard 上没有 read 方法：\n%s", src)
 	}
+	// 复制图片（#130）：页面按 Clipboard.CopyImage(path, format) 调用。
+	// 少这个方法时复制图片在桌面壳里只会静默失败。
+	if !strings.Contains(src, "copyImage") {
+		t.Fatalf("Clipboard 上没有 copyImage 方法：\n%s", src)
+	}
+	// 结局的键名来自 Go 的 json tag：页面按 ok / kind / message / bytes 读。
+	for _, key := range []string{"ok", "kind", "message", "bytes"} {
+		if !strings.Contains(src, key) {
+			t.Fatalf("复制结局的类型里没有 %q 字段：\n%s", key, src)
+		}
+	}
 }
+
 
 // 剪贴板服务的快照字段是页面的约定（client/src/shell/desktop.ts 的 DesktopClipboardSnapshot）：
 // 键名变了前端就静默读不到 kind，只会按「读不到」退回 paste 事件。

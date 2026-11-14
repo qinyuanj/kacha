@@ -4,7 +4,7 @@
 // 源码与单测在没有它时也要能编译。调用名与 Go 侧绑定名一致（Shell.Info / Local.WriteBoard）。
 import { call } from "mygo-runtime";
 
-import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopInfo, DesktopLocalBridge } from "./desktop";
+import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopImageCopy, DesktopInfo, DesktopLocalBridge } from "./desktop";
 
 /** camelCase 的页面侧方法名 → Go 侧的 PascalCase 绑定名。 */
 function goName(method: string): string {
@@ -20,6 +20,8 @@ export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promi
   // 少这一项时 desktop.ts 的 readClipboard 恒为 null，粘贴会静默退回 paste 事件。
   const clipboard: DesktopClipboardBridge = {
     read: () => callFn("Clipboard.Read") as Promise<DesktopClipboardSnapshot>,
+    // 复制图片（#130）：Go 侧自己按路径读字节并归一化成 PNG，页面只给路径与格式提示。
+    copyImage: (path, format) => callFn("Clipboard.CopyImage", path, format) as Promise<DesktopImageCopy>,
   };
   return {
     info: () => callFn("Shell.Info") as Promise<DesktopInfo>,
