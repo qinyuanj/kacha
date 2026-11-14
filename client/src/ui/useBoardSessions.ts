@@ -138,27 +138,23 @@ export function useSessionEditing(options: {
   return { envOf, check, apply, undoBoard, redoBoard, getBoard, boardFileName };
 }
 
-/** 会话的生命周期接线：打开、新建、关闭、删除、归档、改名与重载。 */
+/** 会话的开合接线：打开、新建、关掉与移出。 */
 export function useSessionLifecycle(options: {
   userRoot: string | null;
   store: ReturnType<typeof useSessionState>;
   ports: SessionPorts;
   flush: (key: string) => Promise<void>;
   cancelTimer: (key: string) => void;
-  saverOf: (key: string) => Saver;
   setActiveKey: (next: string | null | ((prev: string | null) => string | null)) => void;
   apply: (key: string, change: BoardChange) => EditResult | null;
   envOf: (key: string) => EditEnv;
   readOnlyPath: (path: string) => boolean;
   movingSessions: React.MutableRefObject<Set<string>>;
   movingOut: React.MutableRefObject<boolean>;
-  onMoved: (from: string, to: string) => void;
 }) {
-  const { userRoot, store, ports, flush, cancelTimer, saverOf, setActiveKey, apply, envOf, readOnlyPath, movingSessions, movingOut, onMoved } = options;
+  const { userRoot, store, ports, flush, cancelTimer, setActiveKey, apply, envOf, readOnlyPath, movingSessions, movingOut } = options;
   const userRootRef = useRef(userRoot);
   userRootRef.current = userRoot;
-  const onMovedRef = useRef(onMoved);
-  onMovedRef.current = onMoved;
   const closeBoardRef = useRef<(key: string) => Promise<void>>(async () => undefined);
   /** 关闭全部标签页（切换用户数据根时用）；先落盘。 */
   const closeAll = useCallback(async () => {
@@ -194,6 +190,28 @@ export function useSessionLifecycle(options: {
     },
     [store, setActiveKey, cancelTimer],
   );
+  return { closeAll, openPath, createBoard, moveOutStage, openImportedBoard, dropSession, closeBoardRef };
+}
+
+/** 会话的存档接线：关闭、删除、归档、复制、改名与重载。 */
+export function useSessionArchive(options: {
+  userRoot: string | null;
+  store: ReturnType<typeof useSessionState>;
+  ports: SessionPorts;
+  flush: (key: string) => Promise<void>;
+  saverOf: (key: string) => Saver;
+  dropSession: (key: string) => void;
+  openPath: (path: string, activate?: boolean) => Promise<boolean>;
+  apply: (key: string, change: BoardChange) => EditResult | null;
+  readOnlyPath: (path: string) => boolean;
+  movingSessions: React.MutableRefObject<Set<string>>;
+  onMoved: (from: string, to: string) => void;
+}) {
+  const { userRoot, store, ports, flush, saverOf, dropSession, openPath, apply, readOnlyPath, movingSessions, onMoved } = options;
+  const userRootRef = useRef(userRoot);
+  userRootRef.current = userRoot;
+  const onMovedRef = useRef(onMoved);
+  onMovedRef.current = onMoved;
   const closeBoard = useCallback(
     async (key: string) => {
       const saver = saverOf(key);
@@ -232,7 +250,6 @@ export function useSessionLifecycle(options: {
     async (path: string): Promise<string | null> => copyAsNewBoardSession(store, ports, userRoot, openPath, path),
     [store, openPath],
   );
-  closeBoardRef.current = closeBoard;
   /** 本页打开该路径画板的标签页 key；没打开为 null。 */
   const keyOf = useCallback((path: string): string | null => store.sessionsRef.current.find((s) => samePath(s.path, path))?.key ?? null, [store]);
   /** 改标题：文件名由标题派生，重名加 (2)，连同 .bak 一起改名。 */
@@ -247,24 +264,7 @@ export function useSessionLifecycle(options: {
   }, [flush]);
   /** 冲突后由用户显式重新载入服务端的画板；本页未保存的改动随之放弃（不做自动合并）。 */
   const reload = useCallback(async (key: string) => reloadBoardSession(store, ports, userRootRef.current, movingSessions.current, key), [store]);
-  return {
-    closeAll,
-    openPath,
-    createBoard,
-    moveOutStage,
-    openImportedBoard,
-    dropSession,
-    closeBoard,
-    deleteBoard,
-    archiveBoard,
-    unarchiveBoard,
-    copyAsNewBoard,
-    keyOf,
-    renameBoard,
-    dismissNotice,
-    retrySave,
-    reload,
-  };
+  return { closeBoard, deleteBoard, archiveBoard, unarchiveBoard, copyAsNewBoard, keyOf, renameBoard, dismissNotice, retrySave, reload };
 }
 
 export function useBoardSessions(userRoot: string | null, envSource: EnvSource, onMoved: (from: string, to: string) => void = () => undefined) {
@@ -285,17 +285,30 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource, 
     ports,
     flush,
     cancelTimer,
-    saverOf,
     setActiveKey,
     apply: editing.apply,
     envOf: editing.envOf,
     readOnlyPath,
     movingSessions,
     movingOut,
+  });
+  const archive = useSessionArchive({
+    userRoot,
+    store,
+    ports,
+    flush,
+    saverOf,
+    dropSession: life.dropSession,
+    openPath: life.openPath,
+    apply: editing.apply,
+    readOnlyPath,
+    movingSessions,
     onMoved,
   });
   const { check, apply, undoBoard, redoBoard, getBoard, boardFileName } = editing;
-  const { closeAll, openPath, createBoard, moveOutStage, openImportedBoard, dropSession, closeBoard, deleteBoard, archiveBoard, unarchiveBoard, copyAsNewBoard, keyOf, renameBoard, dismissNotice, retrySave, reload } = life;
+  const { closeAll, openPath, createBoard, moveOutStage, openImportedBoard, dropSession } = life;
+  const { closeBoard, deleteBoard, archiveBoard, unarchiveBoard, copyAsNewBoard, keyOf, renameBoard, dismissNotice, retrySave, reload } = archive;
+  life.closeBoardRef.current = closeBoard;
 
   return {
     sessions: store.sessions,

@@ -1,4 +1,4 @@
-// 画板会话的各个操作（#137）：改名、删除、归档、另存与重载。
+// 画板会话的各个操作（#137）：能不能编辑、改名、删除、归档与另存。
 import { describe, expect, it, vi } from "vitest";
 import type { Board } from "../core/board";
 import { createFakePort } from "../shell/testing/fakePort";
@@ -130,9 +130,8 @@ describe("改名", () => {
 
   it("标题没变：什么都不做", async () => {
     const port = createFakePort({ boards: [{ path: "/~/a.ugcboard.json", main: "{}", version: "v1" }] });
-    const port2 = port as unknown as SessionPorts;
     const apply = vi.fn();
-    await renameBoardSession(storeOf([okSession("k1", "/~/a.ugcboard.json", "a")]), port2, async () => undefined, apply, vi.fn(), () => false, new Set(), "k1", "a");
+    await renameBoardSession(storeOf([okSession("k1", "/~/a.ugcboard.json", "a")]), port as unknown as SessionPorts, async () => undefined, apply, vi.fn(), () => false, new Set(), "k1", "a");
     expect(port.calls.rename).toHaveLength(0);
     expect(apply).not.toHaveBeenCalled();
   });
