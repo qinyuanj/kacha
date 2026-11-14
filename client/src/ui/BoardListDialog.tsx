@@ -199,14 +199,11 @@ function ArchiveConfirm({
   );
 }
 
-export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose, onArchive, onUnarchive, onCopy, manage = false }: Props) {
+/** 画板列表的读取与刷新。 */
+function useBoardListing() {
   const port = useShell();
   const [listing, setListing] = useState<BoardListing | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<PendingAction | null>(null);
-  const [archiving, setArchiving] = useState<PendingAction | null>(null);
-  /** 取消归档 / 复制为新画板被拒（画板位满）或失败时的说明。 */
-  const [actionError, setActionError] = useState<string | null>(null);
   const refresh = useCallback(() => {
     setError(null);
     port.board.list().then(setListing, (e) => {
@@ -215,8 +212,14 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
     });
   }, []);
   useEffect(refresh, [refresh]);
+  return { listing, error, refresh };
+}
 
-  const confirmDelete = async () => {
+/** 画板列表的确认框：删除与归档。 */
+function useBoardConfirm(refresh: () => void) {
+  const [deleting, setDeleting] = useState<PendingAction | null>(null);
+  const [archiving, setArchiving] = useState<PendingAction | null>(null);
+  const confirmDelete = async (onDelete: (path: string) => Promise<void>) => {
     if (!deleting || deleting.busy) return;
     setDeleting({ ...deleting, busy: true, error: null });
     const result = await runConfirm(deleting, (entry) => onDelete(entry.path));
@@ -224,8 +227,7 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
     else setDeleting({ ...deleting, busy: false, error: result.error });
     refresh();
   };
-
-  const confirmArchive = async () => {
+  const confirmArchive = async (onArchive: (path: string) => Promise<void>) => {
     if (!archiving || archiving.busy) return;
     setArchiving({ ...archiving, busy: true, error: null });
     const result = await runConfirm(archiving, (entry) => onArchive(entry.path));
@@ -233,6 +235,15 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
     else setArchiving({ ...archiving, busy: false, error: result.error });
     refresh();
   };
+  return { deleting, setDeleting, archiving, setArchiving, confirmDelete, confirmArchive };
+}
+
+export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose, onArchive, onUnarchive, onCopy, manage = false }: Props) {
+  const { listing, error, refresh } = useBoardListing();
+  const confirm = useBoardConfirm(refresh);
+  const { deleting, setDeleting, archiving, setArchiving } = confirm;
+  /** 取消归档 / 复制为新画板被拒（画板位满）或失败时的说明。 */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const runArchived = async (action: (path: string) => Promise<string | null>, entry: BoardListEntry) => {
     setActionError(null);
@@ -272,7 +283,7 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
           busy={deleting.busy}
           error={deleting.error}
           onExport={() => onExport(deleting.entry.path)}
-          onConfirm={() => void confirmDelete()}
+          onConfirm={() => void confirm.confirmDelete(onDelete)}
           onCancel={() => setDeleting(null)}
         />
       )}
@@ -281,7 +292,7 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
           title={boardRow(archiving.entry, openPaths, listing).title}
           busy={archiving.busy}
           error={archiving.error}
-          onConfirm={() => void confirmArchive()}
+          onConfirm={() => void confirm.confirmArchive(onArchive)}
           onCancel={() => setArchiving(null)}
         />
       )}

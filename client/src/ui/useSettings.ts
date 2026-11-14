@@ -20,20 +20,20 @@ export type { ConnectionResult, SettingsState } from "./useSettingsOps";
 function useModelRefresh(settingsPorts: ReturnType<typeof useShell>["core"]["settingsPorts"]) {
   const cacheRef = useRef<ModelsCache | null>(null);
   const refreshVersion = useRef(0);
-  const [discovery, setDiscovery] = useState<Discovery>({ source: "none" });
+  const discoveryRef = useRef<Discovery>({ source: "none" });
   const refreshModels = useCallback(
     async (baseUrl: string, apiKey: string): Promise<ConnectionResult> => {
       const version = ++refreshVersion.current;
       const refreshed = await refreshModelsState(settingsPorts, cacheRef.current, baseUrl, apiKey);
       if (version === refreshVersion.current) {
         if (refreshed.cache) cacheRef.current = refreshed.cache;
-        setDiscovery(refreshed.discovery);
+        discoveryRef.current = refreshed.discovery;
       }
       return refreshed.result;
     },
     [settingsPorts],
   );
-  return { cacheRef, refreshVersion, discovery, setDiscovery, refreshModels };
+  return { cacheRef, refreshVersion, discoveryRef, refreshModels };
 }
 
 export function useSettings() {
@@ -47,10 +47,10 @@ export function useSettings() {
   const refreshModels = useCallback(
     async (baseUrl: string, apiKey: string): Promise<ConnectionResult> => {
       const result = await models.refreshModels(baseUrl, apiKey);
-      setState((s) => (discoveryApplies(s.settings.base_url, baseUrl) ? { ...s, discovery: models.discovery } : s));
+      setState((s) => (discoveryApplies(s.settings.base_url, baseUrl) ? { ...s, discovery: models.discoveryRef.current } : s));
       return result;
     },
-    [models],
+    [models.refreshModels],
   );
 
   useEffect(() => {
