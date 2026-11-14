@@ -46,6 +46,10 @@ export interface FakePortOptions {
   writeFailures?: Map<string, PortFailureKind>;
   /** 没有的能力。 */
   missing?: FeatureId[];
+  /** 是否需要登录界面：默认要（Web 版）；桌面壳给 false。 */
+  requiresLogin?: boolean;
+  /** 本地存着的密钥：有它时界面直接进工作台（Web 版已登录的样子）。 */
+  storedKey?: string | null;
   slots?: { used: number; total: number };
 }
 
@@ -273,12 +277,14 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
   };
 
   const session: SessionPort = {
+    // requiresLogin 可改：桌面壳（不登录）与 Web 版（要登录）用同一个替身。
+    requiresLogin: options.requiresLogin ?? true,
     login: async () => ({ fingerprint: "fake" }),
     current: async () => ({ fingerprint: "fake" }),
     logout: async () => undefined,
     config: async () => ({ version: "9.9.9", gateway_url: "http://gateway.invalid" }),
     onExpired: () => () => undefined,
-    readStoredKey: () => null,
+    readStoredKey: () => options.storedKey ?? null,
     storeKey: () => undefined,
     clearStoredKey: () => undefined,
   };

@@ -30,7 +30,61 @@ const (
 	BoardExt = ".ugcboard.json"
 	// BoardSlots 是画板位上限：本切片本地没有服务端配额，给一个宽松的默认值。
 	BoardSlots = 20
+	// DefaultBoardTitle 是新建画板的默认标题（与共享契约 contracts/board-policy.json 一致）。
+	DefaultBoardTitle = "未命名画板"
 )
+
+// windowsReserved 是 Windows 不能用作文件名的保留名。
+var windowsReserved = map[string]bool{
+	"con": true, "prn": true, "aux": true, "nul": true,
+	"com1": true, "com2": true, "com3": true, "com4": true, "com5": true,
+	"com6": true, "com7": true, "com8": true, "com9": true,
+	"lpt1": true, "lpt2": true, "lpt3": true, "lpt4": true, "lpt5": true,
+	"lpt6": true, "lpt7": true, "lpt8": true, "lpt9": true,
+}
+
+// boardFileStem 是标题派生的文件名主干：去掉 Windows / macOS 非法字符与控制字符，
+// 去首尾空白，Windows 不允许结尾空格和点；空则用默认标题；保留名加下划线。
+func boardFileStem(title string) string {
+	stem := strings.Map(func(r rune) rune {
+		switch {
+		case r < 0x20:
+			return -1
+		case strings.ContainsRune(`<>:"/\|?*`, r):
+			return -1
+		default:
+			return r
+		}
+	}, title)
+	stem = strings.TrimSpace(stem)
+	stem = strings.TrimRight(stem, ". ")
+	if stem == "" {
+		stem = DefaultBoardTitle
+	}
+	if windowsReserved[strings.ToLower(stem)] {
+		stem += "_"
+	}
+	return stem
+}
+
+// BoardFileName 由标题派生画板文件名（带扩展名）：重名加 " (2)"、" (3)"…，
+// 比较不区分大小写（Windows / macOS 默认文件系统）。与 client/src/core/board.ts 同口径。
+func BoardFileName(title string, existing []string) string {
+	taken := map[string]bool{}
+	for _, n := range existing {
+		taken[strings.ToLower(n)] = true
+	}
+	stem := boardFileStem(title)
+	for i := 1; ; i++ {
+		name := stem + BoardExt
+		if i > 1 {
+			name = fmt.Sprintf("%s (%d)%s", stem, i, BoardExt)
+		}
+		if !taken[strings.ToLower(name)] {
+			return name
+		}
+	}
+}
 
 // 失败类别：前端按类别分支（见 shell/port.ts 的 PortFailureKind），不是按文案。
 const (
@@ -66,17 +120,17 @@ type BoardTexts struct {
 
 // BoardEntry 是画板列表的一行：字节数读不出来时为 null（度量留给后面的切片）。
 type BoardEntry struct {
-	Name     string  `json:"name"`
-	Path     string  `json:"path"`
-	Archived bool    `json:"archived"`
-	Bytes    *int64  `json:"bytes"`
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Archived bool   `json:"archived"`
+	Bytes    *int64 `json:"bytes"`
 }
 
 // BoardListing 是画板列表：画板、画板位与体量提醒线。
 type BoardListing struct {
-	Boards []BoardEntry `json:"boards"`
-	Slots  Slots        `json:"slots"`
-	SizeLines SizeLines `json:"size_lines"`
+	Boards    []BoardEntry `json:"boards"`
+	Slots     Slots        `json:"slots"`
+	SizeLines SizeLines    `json:"size_lines"`
 }
 
 // Slots 是画板位：已用与总数。
@@ -161,6 +215,9 @@ type WriteOptions struct {
 }
 
 // WriteBoard 写画板：原子落盘，覆盖前把旧主文件留成 .bak（只留读得出 JSON 的那份）。
+//
+// 只新建（createOnly）：主文件或只剩 .bak 的孤儿占住名字都拒绝。
+// 带版本：主文件不在就说画板没了（不凭空建出同名画板），内容变了就是冲突。
 func (s *Store) WriteBoard(path, text string, opts WriteOptions) Result {
 	abs, err := s.Resolve(path)
 	if err != nil {
@@ -171,11 +228,21 @@ func (s *Store) WriteBoard(path, text string, opts WriteOptions) Result {
 	if readErr != nil && !os.IsNotExist(readErr) {
 		return fail(KindFailed, readErr.Error())
 	}
-	if exists && opts.CreateOnly {
-		return fail(KindAlreadyExist, "目标已存在，只新建不覆盖")
+	if opts.CreateOnly {
+		if exists {
+			return fail(KindAlreadyExist, "目标已存在，只新建不覆盖")
+		}
+		if _, err := os.Stat(abs + ".bak"); err == nil {
+			return fail(KindAlreadyExist, "目标已存在，只新建不覆盖")
+		}
 	}
-	if exists && opts.Version != "" && hashOf(old) != opts.Version {
-		return fail(KindConflict, "画板已在别处修改")
+	if opts.Version != "" {
+		if !exists {
+			return fail(KindMissing, "画板不存在，可能已在别处改名或删除")
+		}
+		if hashOf(old) != opts.Version {
+			return fail(KindConflict, "画板已在别处修改")
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return fail(KindFailed, err.Error())
@@ -189,7 +256,23 @@ func (s *Store) WriteBoard(path, text string, opts WriteOptions) Result {
 	return ok(hashOf([]byte(text)))
 }
 
-// ListBoardNames 列出目录里的画板文件名（含只剩下的 .bak 孤儿，按服务端口径算）。
+// CreateBoard 在画板目录里新建一块画板：文件名由标题派生（重名加 (2)），
+// 只新建不覆盖已有画板。返回画板路径与结局（成功时带内容版本）。
+func (s *Store) CreateBoard(title, text string) (string, Result) {
+	existing, err := s.ListBoardNames(s.BoardDir())
+	if err != nil {
+		return "", fail(KindFailed, err.Error())
+	}
+	path := filepath.Join(s.BoardDir(), BoardFileName(title, existing))
+	result := s.WriteBoard(path, text, WriteOptions{CreateOnly: true})
+	if !result.OK {
+		return "", result
+	}
+	return path, result
+}
+
+// ListBoardNames 列出目录里的画板文件名：带扩展名，与 Web 服务端口径一致
+// （只剩 .bak 的孤儿也算一块画板，主文件与它的 .bak 是同一块，列一次）。
 func (s *Store) ListBoardNames(dir string) ([]string, error) {
 	abs, err := s.Resolve(dir)
 	if err != nil {
@@ -207,13 +290,13 @@ func (s *Store) ListBoardNames(dir string) ([]string, error) {
 		if e.IsDir() {
 			continue
 		}
-		name := e.Name()
-		if strings.HasSuffix(name, BoardExt) || strings.HasSuffix(name, BoardExt+".bak") {
-			names = append(names, strings.TrimSuffix(strings.TrimSuffix(name, BoardExt+".bak"), BoardExt))
+		main := strings.TrimSuffix(e.Name(), ".bak")
+		if strings.HasSuffix(main, BoardExt) {
+			names = append(names, main)
 		}
 	}
 	sort.Strings(names)
-	return names, nil
+	return dedupe(names), nil
 }
 
 // List 列出画板目录与归档目录里的画板，以及画板位与体量提醒线。
@@ -230,17 +313,14 @@ func (s *Store) List() (BoardListing, error) {
 		{s.BoardDir(), false},
 		{filepath.Join(s.BoardDir(), ArchiveDir), true},
 	} {
-		entries, err := os.ReadDir(spec.dir)
+		names, err := s.ListBoardNames(spec.dir)
 		if err != nil {
 			continue
 		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), BoardExt) {
-				continue
-			}
-			full := filepath.Join(spec.dir, e.Name())
+		for _, name := range names {
+			full := filepath.Join(spec.dir, name)
 			listing.Boards = append(listing.Boards, BoardEntry{
-				Name:     strings.TrimSuffix(e.Name(), BoardExt),
+				Name:     name,
 				Path:     s.rel(full),
 				Archived: spec.archived,
 				Bytes:    nil,
@@ -253,8 +333,9 @@ func (s *Store) List() (BoardListing, error) {
 	return listing, nil
 }
 
-// RenameBoard 改画板名：主文件与 .bak 一起搬；目标已存在则拒绝。
-func (s *Store) RenameBoard(from, to string) Result {
+// RenameBoard 改画板名：主文件与 .bak 一起搬；目标已存在（含只剩 .bak 的孤儿）则拒绝。
+// 带版本：内容已变就说画板已在别处改过，原地不动。
+func (s *Store) RenameBoard(from, to string, version string) Result {
 	src, err := s.Resolve(from)
 	if err != nil {
 		return fail(KindInvalid, err.Error())
@@ -263,17 +344,24 @@ func (s *Store) RenameBoard(from, to string) Result {
 	if err != nil {
 		return fail(KindInvalid, err.Error())
 	}
-	if _, err := os.Stat(src); err != nil {
+	if !s.exists(src) {
 		return fail(KindMissing, "画板不存在")
 	}
-	if _, err := os.Stat(dst); err == nil {
+	if version != "" {
+		if got := s.checkVersion(src, version); !got.OK {
+			return got
+		}
+	}
+	if s.exists(dst) {
 		return fail(KindAlreadyExist, "目标已存在")
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fail(KindFailed, err.Error())
 	}
-	if err := os.Rename(src, dst); err != nil {
-		return fail(KindFailed, err.Error())
+	if _, err := os.Stat(src); err == nil {
+		if err := os.Rename(src, dst); err != nil {
+			return fail(KindFailed, err.Error())
+		}
 	}
 	if bak, err := os.Stat(src + ".bak"); err == nil && !bak.IsDir() {
 		_ = os.Rename(src+".bak", dst+".bak")
@@ -282,13 +370,19 @@ func (s *Store) RenameBoard(from, to string) Result {
 }
 
 // RemoveBoard 删画板：主文件与 .bak 移进回收区（可恢复），不是抹掉。
-func (s *Store) RemoveBoard(path string) Result {
+// 带版本：内容已变就拒绝，画板留在原地。
+func (s *Store) RemoveBoard(path string, version string) Result {
 	abs, err := s.Resolve(path)
 	if err != nil {
 		return fail(KindInvalid, err.Error())
 	}
-	if _, err := os.Stat(abs); err != nil {
+	if !s.exists(abs) {
 		return fail(KindMissing, "画板不存在")
+	}
+	if version != "" {
+		if got := s.checkVersion(abs, version); !got.OK {
+			return got
+		}
 	}
 	recycle := filepath.Join(s.root, RecycleDir)
 	if err := os.MkdirAll(recycle, 0o755); err != nil {
@@ -399,6 +493,41 @@ func (s *Store) WriteMeta(name, text string) Result {
 		return fail(KindFailed, err.Error())
 	}
 	return ok("")
+}
+
+// exists 报告画板在不在：主文件或只剩 .bak 的孤儿都算在。
+func (s *Store) exists(abs string) bool {
+	if _, err := os.Stat(abs); err == nil {
+		return true
+	}
+	if _, err := os.Stat(abs + ".bak"); err == nil {
+		return true
+	}
+	return false
+}
+
+// checkVersion 核对画板内容版本：主文件不在或内容已变都拒绝（画板已在别处改动）。
+func (s *Store) checkVersion(abs, version string) Result {
+	old, err := os.ReadFile(abs)
+	if err != nil {
+		return fail(KindConflict, "画板已在别处修改")
+	}
+	if hashOf(old) != version {
+		return fail(KindConflict, "画板已在别处修改")
+	}
+	return ok("")
+}
+
+// dedupe 去掉重复项（排序后同名的挨在一起）。
+func dedupe(names []string) []string {
+	out := names[:0]
+	for i, n := range names {
+		if i > 0 && n == names[i-1] {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
 }
 
 // rel 把绝对路径写成相对用户数据根的正斜杠路径；根目录外的保留绝对路径。

@@ -6,6 +6,7 @@ import type { PackDialogState } from "./BoardPackDialog";
 import { errorText } from "../core/errors";
 import { isSlotsFullText, PACK_IMPORT_TEXT, slotsRefusal } from "./boardText";
 import { useShell } from "./shell";
+import { unavailableMessage } from "../shell/port";
 
 interface PackBoards {
   flushAll: () => Promise<void>;
@@ -38,20 +39,39 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
       const boardFile = boards.boardFileName(key);
       if (!board || !boardFile) return;
       const stem = boardFile.slice(0, -BOARD_EXTENSION.length);
-      let plan;
+      // 整段包住：端口拒绝时（桌面壳本切片没有画板包导出）要说出「尚不可用」，
+      // 不能既不报错也不给消息——runCancellable 复位取消标记就在它自己的 try 之外，漏了就静默。
       try {
-        plan = await planExport(board, userRoot, port.core.packFs);
+        let plan;
+        try {
+          plan = await planExport(board, userRoot, port.core.packFs);
+        } catch (e) {
+          return toast(`无法导出画板包：${errorText(e)}`);
+        }
+        // hash 阶段：服务端给逐文件长度与 sha256，core 据此去重并算预估大小，再请用户确认（包格式 v2）。
+        // runCancellable 把异常压成文本，类别就丢了：端口说「尚不可用」时在这里先记下来。
+        let unavailable: string | null = null;
+        const outcome = await runCancellable(port.pack.io, progress(`正在计算画板包大小：${stem}`), async () => {
+          try {
+            return await port.pack.facts(exportSources(plan));
+          } catch (e) {
+            unavailable = unavailableMessage(e);
+            throw e;
+          }
+        });
+        if (!outcome.ok) {
+          setDialog(null);
+          port.ui.log("board_pack", { action: "export", board_file: boardFile, stage: "hash", result: outcome.result });
+          // 端口说这项能力还没有（桌面壳本切片没有画板包导出）：说清「尚不可用」。
+          return toast(unavailable ?? (outcome.result === "cancelled" ? "已取消导出画板包" : `无法导出画板包：${outcome.error}`));
+        }
+        setDialog({ stage: "confirmExport", boardFile, plan, contents: planPackContents(outcome.value) });
       } catch (e) {
-        return toast(`无法导出画板包：${errorText(e)}`);
-      }
-      // hash 阶段：服务端给逐文件长度与 sha256，core 据此去重并算预估大小，再请用户确认（包格式 v2）。
-      const outcome = await runCancellable(port.pack.io, progress(`正在计算画板包大小：${stem}`), () => port.pack.facts(exportSources(plan)));
-      if (!outcome.ok) {
         setDialog(null);
-        port.ui.log("board_pack", { action: "export", board_file: boardFile, stage: "hash", result: outcome.result });
-        return toast(outcome.result === "cancelled" ? "已取消导出画板包" : `无法导出画板包：${outcome.error}`);
+        // 端口说「尚不可用」就说它；其它失败按原文案，不冒充成功。
+        const message = unavailableMessage(e);
+        return toast(message ?? `无法导出画板包：${errorText(e)}`);
       }
-      setDialog({ stage: "confirmExport", boardFile, plan, contents: planPackContents(outcome.value) });
     },
     [userRoot, boards, toast],
   );
@@ -63,7 +83,16 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
     const target = `${stem}${PACK_EXTENSION}`;
     const spec = buildExportSpec(await port.ui.version(), boardFile, plan, contents);
     const fields = { action: "export", board_file: boardFile, task_dirs: plan.taskDirs.length, missing: plan.missing.length, duplicates: spec.omitted.length, estimated_bytes: contents.bytes };
-    const outcome = await runCancellable(port.pack.io, progress(`正在导出画板包：${stem}`), () => port.pack.exportPack(target, spec));
+    // 端口可能拒绝（桌面壳本切片没有画板包导出）：runCancellable 的取消复位在它自己的 try 之外，
+    // 这里也整段包住，不能静默。
+    let outcome;
+    try {
+      outcome = await runCancellable(port.pack.io, progress(`正在导出画板包：${stem}`), () => port.pack.exportPack(target, spec));
+    } catch (e) {
+      setDialog(null);
+      const message = unavailableMessage(e);
+      return toast(message ?? `导出画板包失败：${errorText(e)}`);
+    }
     setDialog(null);
     if (outcome.ok) {
       port.ui.log("board_pack", { ...fields, task_dirs: outcome.value.task_dirs, bytes: outcome.value.bytes, result: "ok" });
@@ -127,7 +156,9 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
       }
     } catch (e) {
       setDialog(null);
-      toast(PACK_IMPORT_TEXT.failed(errorText(e)));
+      // 端口说这项能力还没有（桌面壳本切片没有画板包导入）：说清「尚不可用」。
+      const unavailable = unavailableMessage(e);
+      toast(unavailable ?? PACK_IMPORT_TEXT.failed(errorText(e)));
     }
   }, [userRoot, boards, toast]);
 
@@ -137,7 +168,10 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
     dialog: dialog && {
       state: dialog,
       onExport: () => void confirmExport(),
-      onCancelProgress: () => void port.pack.io.cancel(true),
+      onCancelProgress: () => {
+        // 桌面壳本切片没有画板包导出：取消也可能被端口拒绝，别让它冒成未捕获异常。
+        void port.pack.io.cancel(true).catch(() => undefined);
+      },
       onClose: () => setDialog(null),
     },
   };
