@@ -89,6 +89,32 @@ export function portFailureOf(error: unknown): PortFailure {
   return { kind: "failed", code: "unknown", message: errorText(error), status: 0 };
 }
 
+/**
+ * 端口说这项能力还没有时给用户的说法（#127）；不是 unavailable 就返回 null。
+ *
+ * 桌面壳本切片没有生成、结果下载、画板包导出等能力：调用点拿到 unavailable 时要说清「还没做」，
+ * 不能报成功，也不能把内部错误原文丢给用户。其它失败仍按各自原有的文案处理（Web 版不变）。
+ */
+export function unavailableMessage(error: unknown): string | null {
+  const failure = portFailureOf(error);
+  if (failure.kind !== "unavailable") return null;
+  // 端口自己写的消息里已经说了「尚不可用」就照用：它可能更具体（结果下载、画板包导出）。
+  if (failure.message.includes("尚不可用")) return failure.message;
+  const label = failure.feature ? FEATURE_LABELS[failure.feature] : "";
+  return label ? "尚不可用：" + label : "尚不可用";
+}
+
+/** 能力名（界面用中文）：与 FeatureId 一一对应。 */
+const FEATURE_LABELS: Record<FeatureId, string> = {
+  generation: "生成",
+  usage: "用量统计",
+  packExport: "画板包导出",
+  archive: "归档",
+  tidy: "整理",
+  relay: "结果中转",
+  login: "登录",
+};
+
 // ---- 端口分组 ----
 
 /** 画板文件：打开 / 新建 / 保存 / 改名 / 删除 / 归档 / 列表 / 度量。写失败一律是类型化 PortError。 */

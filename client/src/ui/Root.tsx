@@ -83,6 +83,10 @@ export function Root() {
     setPhase("enter");
   }, []);
 
+  // 桌面壳没有会话可退出（#127）：不传 onLogout，界面上就没有「退出」按钮，
+  // 点它回到粘贴密钥的界面这种事不会发生。Web 版照旧。
+  const canLogout = session.requiresLogin !== false;
+
   const form = (
     <div className="key-entry" role="dialog" aria-label="粘贴 API 密钥">
       <h1>Kacha</h1>
@@ -120,7 +124,7 @@ export function Root() {
   return (
     <>
       {/* 会话失效时遮罩盖在 App 之上、不销毁它：告诉画布此刻有模态，粘贴不落到背后的画板（#96）。 */}
-      <App key={sessionNonce} onLogout={() => void logout()} version={version} sessionExpired={expired} />
+      <App key={sessionNonce} onLogout={canLogout ? () => void logout() : undefined} version={version} sessionExpired={expired} />
       {expired && (
         <div className="modal-backdrop">
           <div className="modal">
