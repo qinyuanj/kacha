@@ -1,6 +1,6 @@
 // 移出为新画板的最后两步（#137）：写新画板与从原画板删节点。
 import { describe, expect, it, vi } from "vitest";
-import type { Board } from "../core/board";
+import { newBoard, type Board, type TaskNode } from "../core/board";
 import { finishMoveOut, moveOutWrite, moveOutRefusal, writeMovedOut } from "./boardSessionsMoveOut";
 
 const board = (title = "新"): Board => ({ format_version: 2, title, viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges: [], extra: {} });
@@ -101,4 +101,36 @@ describe("移出流程", () => {
     const message = await moveOutWrite(d, "s1", "k1");
     expect(message).toContain("阶段");
   });
+
+  it("阶段还在：拆出新画板、写好并从原画板删掉节点", async () => {
+    const staged = stagedBoard();
+    const d = deps({ boardOf: vi.fn(() => staged) });
+    const message = await moveOutWrite(d, "s1", "k1");
+    expect(d.write).toHaveBeenCalled();
+    expect(d.apply).toHaveBeenCalledWith("k1", { kind: "moveOutStage", stageId: "s1" });
+    expect(message).toContain("移出");
+  });
 });
+
+/** 一块带阶段的画板：阶段 s1 里有一个任务节点。 */
+function stagedBoard(): Board {
+  const taskNode: TaskNode = {
+    id: "t1",
+    type: "task",
+    pos: [0, 0],
+    size: [280, 260],
+    extra: {},
+    model: "doubao-seedream-5-0-pro-260628",
+    size_spec: { tier: "2K", ratio: "1:1", width: null, height: null },
+    image_ports: 0,
+    layer_decomposition: false,
+    transparent_background: false,
+    last_submitted: null,
+  };
+  return {
+    ...newBoard("原画板"),
+    nodes: [taskNode],
+    edges: [],
+    stages: [{ id: "s1", name: "第二轮", nodes: ["t1"], collapsed: false, extra: {} }],
+  };
+}
