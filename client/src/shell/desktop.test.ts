@@ -151,7 +151,7 @@ describe("复制图片到系统剪贴板（#130）", () => {
           calls.push({ method: "Clipboard.CopyImage", args: [path, format] });
           return Promise.resolve(outcome);
         },
-        writeText: () => Promise.resolve(),
+        writeText: () => Promise.resolve({ ok: true, kind: "", message: "" }),
       },
     };
   }
@@ -195,7 +195,7 @@ describe("读系统剪贴板（#129）", () => {
       clipboard: {
         read: () => Promise.resolve({ kind: "images", text: "", images: [b64], reason: "", formats: ["image/png"] }),
         copyImage: () => Promise.resolve({ ok: true, kind: "", message: "", bytes: b64.length }),
-        writeText: () => Promise.resolve(),
+        writeText: () => Promise.resolve({ ok: true, kind: "", message: "" }),
       },
     };
     const { port } = await createDesktopPort(withClip);

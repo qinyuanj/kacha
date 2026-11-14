@@ -44,11 +44,29 @@ describe("桌面复制文本走 Go 原生剪贴板（#124 A1）", () => {
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     const { bridge, calls } = recordingBridge({
       "Shell.Info": () => Promise.resolve(INFO),
-      "Clipboard.WriteText": () => Promise.resolve(undefined),
+      "Clipboard.WriteText": () => Promise.resolve({ ok: true, kind: "", message: "" }),
     });
     const { port } = await createDesktopPort(bridge);
     await port.media.copyText("kacha:clip:v1:1");
     expect(calls).toContainEqual({ method: "Clipboard.WriteText", args: ["kacha:clip:v1:1"] });
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("Go 写后读回核实失败：copyText 拒绝，调用点会提示标记可能不生效", async () => {
+    const { bridge } = recordingBridge({
+      "Shell.Info": () => Promise.resolve(INFO),
+      "Clipboard.WriteText": () => Promise.resolve({ ok: false, kind: "failed", message: "复制文本失败：系统剪贴板没有写进去，请重试" }),
+    });
+    const { port } = await createDesktopPort(bridge);
+    await expect(port.media.copyText("kacha:clip:v1:1")).rejects.toMatchObject({ kind: "failed", message: expect.stringContaining("剪贴板") });
+  });
+
+  it("桥没有剪贴板：报 unavailable，不回退浏览器剪贴板", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const local = localWith("readBoard", (() => Promise.reject(new Error("没实现"))) as never);
+    const { port } = await createDesktopPort({ info: () => Promise.resolve(INFO), local });
+    await expect(port.media.copyText("kacha:clip:v1:1")).rejects.toMatchObject({ kind: "unavailable", feature: "copyText" });
     expect(writeText).not.toHaveBeenCalled();
   });
 });
@@ -70,14 +88,14 @@ describe("桌面另存为真的能存（#124 A2 / #130）", () => {
       return Promise.resolve({ ok: true, kind: "", message: "", version: "" });
     }) as never);
     const { port } = await createDesktopPort({ info: () => Promise.resolve(INFO), local });
-    await port.media.saveCopyAs("C:/data/参考/cat.png");
+    await expect(port.media.saveCopyAs("C:/data/参考/cat.png")).resolves.toEqual({ kind: "saved" });
     expect(saved).toEqual(["C:/data/参考/cat.png"]);
   });
 
-  it("用户取消另存为：当作没发生，不抛错", async () => {
+  it("用户取消另存为：返回 cancelled，调用点不会提示已开始下载", async () => {
     const local = localWith("saveCopyAs", (() => Promise.resolve({ ok: false, kind: "cancelled", message: "已取消", version: "" })) as never);
     const { port } = await createDesktopPort({ info: () => Promise.resolve(INFO), local });
-    await expect(port.media.saveCopyAs("C:/data/参考/cat.png")).resolves.toBeUndefined();
+    await expect(port.media.saveCopyAs("C:/data/参考/cat.png")).resolves.toEqual({ kind: "cancelled" });
   });
 
   it("其它写失败照旧抛 PortError，不伪装成功", async () => {

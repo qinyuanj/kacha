@@ -214,6 +214,7 @@ export function fakeMediaStore(options: FakePortOptions, calls: FakeCalls, pickI
     readClipboard: async () => options.clipboard ?? null,
     saveCopyAs: async (absPath) => {
       calls.saveCopyAs.push(absPath);
+      return { kind: "saved" as const };
     },
     downloadImage: (path) => {
       calls.downloadImage = [...(calls.downloadImage ?? []), path];

@@ -43,6 +43,16 @@ type mygoTextWriter struct{}
 
 func (mygoTextWriter) WriteText(text string) { mygo.Clipboard.WriteText(text) }
 
+// TextReader 读回系统剪贴板里的文本：MyGo 的 WriteText 不返回错误，写入后要读回来核实。
+type TextReader interface {
+	ReadText() string
+}
+
+// mygoTextReader 是生产实现：MyGo 的 ReadText 读系统剪贴板里的纯文本。
+type mygoTextReader struct{}
+
+func (mygoTextReader) ReadText() string { return mygo.Clipboard.ReadText() }
+
 // Service 读写系统剪贴板（MyGo），把结果折成类型化结局。
 //
 // 读的失败不当作错误抛：剪贴板被占用是可重试的失败，页面要拿到「busy」这一类才能提示用户重试。
@@ -52,6 +62,8 @@ type Service struct {
 	Writer Writer
 	// TextWriter 是系统剪贴板的文本写入端；留空时用 MyGo。
 	TextWriter TextWriter
+	// TextReader 读回剪贴板文本；留空时用 MyGo。WriteText 没有返回值，只能写后读回核实。
+	TextReader TextReader
 }
 
 // writer 返回图片写入端：没注入时用 MyGo。
@@ -70,8 +82,40 @@ func (s Service) textWriter() TextWriter {
 	return mygoTextWriter{}
 }
 
+// textReader 返回读回端：没注入时用 MyGo。
+func (s Service) textReader() TextReader {
+	if s.TextReader != nil {
+		return s.TextReader
+	}
+	return mygoTextReader{}
+}
+
+// TextFailed 是文本没写进剪贴板的类别。
+const TextFailed = "failed"
+
+// TextCopyOutcome 是一次「把文本写进系统剪贴板」的结局。
+//
+// MyGo 的 Clipboard.WriteText 不返回错误（Windows 上失败是静默的），所以这里写后读回剪贴板核实：
+// 读回来与写入不一致就明确失败，页面据此提示「Ctrl+V 粘贴节点可能不生效」，而不是假装成功。
+type TextCopyOutcome struct {
+	// OK 说明文本已经真的在剪贴板里。
+	OK bool `json:"ok"`
+	// Kind 是失败类别（目前只有 failed），成功时为空。
+	Kind string `json:"kind"`
+	// Message 是给用户看的一句话。
+	Message string `json:"message"`
+}
+
 // WriteText 把一段纯文本写进系统剪贴板：桌面壳复制节点标记走这里，不再依赖浏览器剪贴板权限（#124）。
-func (s Service) WriteText(text string) { s.textWriter().WriteText(text) }
+//
+// 写入端没有错误可报时，读回剪贴板是唯一能核实「真的写进去了」的办法（MyGo 的 WriteText 不返回值）。
+func (s Service) WriteText(text string) TextCopyOutcome {
+	s.textWriter().WriteText(text)
+	if s.textReader().ReadText() != text {
+		return TextCopyOutcome{Kind: TextFailed, Message: "复制文本失败：系统剪贴板没有写进去，请重试"}
+	}
+	return TextCopyOutcome{OK: true}
+}
 
 // Read 读一次系统剪贴板。
 //
@@ -176,7 +220,7 @@ func NewBound(read Reader) Bound {
 }
 
 // WriteText 把文本写进系统剪贴板（#124）：页面复制节点标记时由 Go 原生写，不依赖浏览器剪贴板权限。
-func (b Bound) WriteText(text string) { b.Service.WriteText(text) }
+func (b Bound) WriteText(text string) TextCopyOutcome { return b.Service.WriteText(text) }
 
 // CopyImage 把 path 指向的图片写进系统剪贴板（#130）。
 //

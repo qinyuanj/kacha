@@ -13,6 +13,7 @@ import { resolveFromRoot } from "../core/paths";
 import { dragKind, type DragFrom, type DragState } from "../core/ports";
 
 import type { CSSProperties } from "react";
+import type { SaveCopyOutcome } from "../shell/port";
 import { SAVE_TEXT } from "./boardText";
 import { canvasFlowProps } from "./canvasFlowProps";
 import { edgeIdOf } from "./canvasPoint";
@@ -83,12 +84,14 @@ export function edgeHoverMove(
 /** 「另存为」：参考图 / 结果节点才有；结果带图层时下载的是 zip。 */
 export async function saveNodeAsOf(
   nodeId: string,
-  deps: { board: Board; userRoot: string; toast: (message: string) => void; save: (absPath: string) => Promise<unknown> },
+  deps: { board: Board; userRoot: string; toast: (message: string) => void; save: (absPath: string) => Promise<SaveCopyOutcome> },
 ): Promise<void> {
   const node = deps.board.nodes.find((n) => n.id === nodeId);
   if (node?.type !== "reference" && node?.type !== "result") return;
   try {
-    await deps.save(resolveFromRoot(deps.userRoot, node.path));
+    const outcome = await deps.save(resolveFromRoot(deps.userRoot, node.path));
+    // 用户取消系统「另存为」不是保存：什么都不说，绝不提示「已开始下载」。
+    if (outcome.kind === "cancelled") return;
     deps.toast(SAVE_TEXT.started);
   } catch (e) {
     deps.toast(SAVE_TEXT.failed(errorText(e)));

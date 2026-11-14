@@ -2,8 +2,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { exportAllImages, exportAllText, exportFailedText, exportOneImage, exportOneText, runExport } from "./previewExport";
 
-const port = (patch: Partial<{ saveCopyAs(absPath: string): Promise<void>; downloadImage(path: string): void }> = {}) => ({
-  saveCopyAs: vi.fn(async () => undefined),
+const port = (patch: Partial<{ saveCopyAs(absPath: string): Promise<{ kind: "saved" | "cancelled" }>; downloadImage(path: string): void }> = {}) => ({
+  saveCopyAs: vi.fn(async () => ({ kind: "saved" as const })),
   downloadImage: vi.fn(),
   ...patch,
 });
@@ -39,6 +39,14 @@ describe("导出接线", () => {
     await exportOneImage(p, toast, vi.fn(), "/~/a.png");
     expect(p.saveCopyAs).toHaveBeenCalledWith("/~/a.png");
     expect(toast).toHaveBeenCalledWith(exportOneText);
+  });
+
+  it("取消系统另存为：不提示已开始下载", async () => {
+    const p = port({ saveCopyAs: vi.fn(async () => ({ kind: "cancelled" as const })) });
+    const toast = vi.fn();
+    await exportOneImage(p, toast, vi.fn(), "/~/a.png");
+    expect(p.saveCopyAs).toHaveBeenCalledWith("/~/a.png");
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it("导出全部：调端口并提示", async () => {

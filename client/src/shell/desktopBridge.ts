@@ -4,7 +4,7 @@
 // 源码与单测在没有它时也要能编译。调用名与 Go 侧绑定名一致（Shell.Info / Local.WriteBoard）。
 import { call } from "mygo-runtime";
 
-import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot } from "./desktop";
+import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy } from "./desktop";
 
 /** camelCase 的页面侧方法名 → Go 侧的 PascalCase 绑定名。 */
 function goName(method: string): string {
@@ -23,7 +23,7 @@ export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promi
     // 复制图片（#130）：Go 侧自己按路径读字节并归一化成 PNG，页面只给路径与格式提示。
     copyImage: (path, format) => callFn("Clipboard.CopyImage", path, format) as Promise<DesktopImageCopy>,
     // 复制文本（#124）：Go 原生 Clipboard.WriteText，桌面壳复制节点标记不再依赖浏览器剪贴板权限。
-    writeText: (text) => callFn("Clipboard.WriteText", text) as Promise<void>,
+    writeText: (text) => callFn("Clipboard.WriteText", text) as Promise<DesktopTextCopy>,
   };
   // 画板包导入（#131）：与 Go 侧 BindAs("Pack", packservice.New(root)) 对齐。
   // 少这一项时 desktop.ts 的 features.packImport 为 false，导入入口会标「尚不可用」。

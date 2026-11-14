@@ -7,7 +7,7 @@
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
 // 各组实现（画板、文件、元数据、媒体、画板包、用量）在 shell/desktopStores.ts（#137），这里只做接线。
-import { portFailureOf, type ClipboardContent, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type ShellFeatures, type ShellPort } from "./port";
+import { PortError, portFailureOf, type ClipboardContent, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort } from "./port";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
 import type { BrowserOptions, ImageInfo, SessionPort, UsagePort } from "./types";
 import type { LogKind } from "./log";
@@ -17,7 +17,6 @@ import { sha256Hex } from "../core/sha256";
 import { IMPORTED_REFERENCES_DIR } from "../core/boardPack";
 import { joinPath, toRootRelative } from "../core/paths";
 import { checked, desktopBoardStore, desktopFileStore, desktopMediaStore, desktopMetaStore, desktopUsageStore, localRun, unavailable } from "./desktopStores";
-import { copyTextToClipboard } from "./clipboard";
 import { createDesktopPack } from "./desktopPack";
 
 /** Go 侧写操作的结局：成功时 kind 为空，失败时 kind 是类别（见 localservice.Outcome）。 */
@@ -93,13 +92,21 @@ export interface DesktopImageCopy {
   bytes: number;
 }
 
+/** Go 侧写文本的结局（Clipboard.WriteText）。MyGo 的 WriteText 不返回错误，Go 侧写后读回来核实。 */
+export interface DesktopTextCopy {
+  ok: boolean;
+  /** failed；成功时为空。 */
+  kind: string;
+  message: string;
+}
+
 /** Go 侧剪贴板服务（Clipboard 服务）：读快照（#129）与把图片写进系统剪贴板（#130）。 */
 export interface DesktopClipboardBridge {
   read(): Promise<DesktopClipboardSnapshot>;
   /** 字节由 Go 自己按路径读（用户数据根在那边），页面只给路径与格式提示。 */
   copyImage(path: string, format: string): Promise<DesktopImageCopy>;
   /** 把纯文本写进系统剪贴板（#124）：Go 原生 Clipboard.WriteText，不依赖浏览器权限。 */
-  writeText(text: string): Promise<void>;
+  writeText(text: string): Promise<DesktopTextCopy>;
 }
 
 /** Go 侧导入进度（Pack.Snapshot 的 progress）。 */
@@ -197,18 +204,26 @@ async function readClipboardSnapshot(bridge: DesktopBridge): Promise<ClipboardCo
  * 桥里没有剪贴板（旧替身）时才退回浏览器路径。
  */
 async function copyTextToSystemClipboard(bridge: DesktopBridge, text: string): Promise<void> {
-  if (!bridge.clipboard) return copyTextToClipboard(text);
-  await localRun(() => bridge.clipboard!.writeText(text));
+  // 桌面壳不退回浏览器剪贴板：那条路依赖焦点与 Web Clipboard 权限，正是 #124 要摆脱的。
+  if (!bridge.clipboard) return unavailable("copyText");
+  // MyGo 的 WriteText 没有返回值（Windows 上失败是静默的），Go 侧写后读回剪贴板核实；
+  // 核实失败时拒绝，调用点（useBoardKeyboard）会给「Ctrl+V 粘贴节点可能不生效」的提示。
+  const outcome = await localRun(() => bridge.clipboard!.writeText(text));
+  if (!outcome.ok) {
+    throw new PortError({ kind: "failed", code: outcome.kind || "failed", message: outcome.message || "复制文本失败：系统剪贴板没有写进去", status: 0 });
+  }
 }
 
 /**
  * 「另存为…」（#130 复制失败时的兜底）：经 Go 的 Local.SaveCopyAs 打开系统另存为对话框并写字节。
  * 用户取消（kind = cancelled）当作没发生，不弹失败提示。
  */
-async function saveCopyAsThroughLocal(local: DesktopLocalBridge, absPath: string): Promise<void> {
+async function saveCopyAsThroughLocal(local: DesktopLocalBridge, absPath: string): Promise<SaveCopyOutcome> {
   const outcome = await localRun(() => local.saveCopyAs(absPath));
-  if (outcome.ok || outcome.kind === "cancelled") return;
-  checked(outcome);
+  // 用户取消不是保存：返回 cancelled，调用点不提示「已开始下载」。
+  if (outcome.kind === "cancelled") return { kind: "cancelled" };
+  if (!outcome.ok) checked(outcome);
+  return { kind: "saved" };
 }
 
 /**
@@ -273,7 +288,7 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     readClipboard: (): Promise<ClipboardContent | null> => readClipboardSnapshot(bridge),
     copyText: (text: string): Promise<void> => copyTextToSystemClipboard(bridge, text),
     copyImage: (absPath: string, format = ""): Promise<ImageCopyResult> => copyImageToSystemClipboard(bridge, absPath, format),
-    saveCopyAs: (absPath: string): Promise<void> => saveCopyAsThroughLocal(local, absPath),
+    saveCopyAs: (absPath: string): Promise<SaveCopyOutcome> => saveCopyAsThroughLocal(local, absPath),
   };
 
   const pack = desktopPack.store;
