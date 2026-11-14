@@ -110,6 +110,22 @@ func (s *Service) WriteBoard(path, text string, options BoardWriteOptions) Outco
 	return Outcome{OK: result.OK, Kind: result.Kind, Message: result.Message, Version: result.Version}
 }
 
+// BoardCreated 是新建画板的结局：成功时带画板路径与内容版本。
+type BoardCreated struct {
+	Outcome
+	Path string `json:"path"`
+}
+
+// CreateBoard 在本机画板目录里新建一块画板：文件名由标题派生（重名加 (2)），
+// 只新建不覆盖已有画板。失败时结局带类别与原因。
+func (s *Service) CreateBoard(title, text string) BoardCreated {
+	path, result := s.store.CreateBoard(title, text)
+	if !result.OK {
+		return BoardCreated{Outcome: Outcome{OK: false, Kind: result.Kind, Message: result.Message}, Path: path}
+	}
+	return BoardCreated{Outcome: Outcome{OK: true, Version: result.Version}, Path: path}
+}
+
 // ListBoardNames 列出目录里的画板文件名。
 func (s *Service) ListBoardNames(dir string) ([]string, error) {
 	return s.store.ListBoardNames(dir)
@@ -132,15 +148,15 @@ func (s *Service) ListBoards() (BoardListing, error) {
 	}, nil
 }
 
-// RenameBoard 改画板名：主文件与 .bak 一起搬。
-func (s *Service) RenameBoard(from, to string) Outcome {
-	result := s.store.RenameBoard(from, to)
+// RenameBoard 改画板名：主文件与 .bak 一起搬。带版本时内容已变就拒绝。
+func (s *Service) RenameBoard(from, to string, version string) Outcome {
+	result := s.store.RenameBoard(from, to, version)
 	return Outcome{OK: result.OK, Kind: result.Kind, Message: result.Message, Version: result.Version}
 }
 
-// DeleteBoard 删画板：主文件与 .bak 移进回收区。
-func (s *Service) DeleteBoard(path string) Outcome {
-	result := s.store.RemoveBoard(path)
+// DeleteBoard 删画板：主文件与 .bak 移进回收区。带版本时内容已变就拒绝。
+func (s *Service) DeleteBoard(path string, version string) Outcome {
+	result := s.store.RemoveBoard(path, version)
 	return Outcome{OK: result.OK, Kind: result.Kind, Message: result.Message, Version: result.Version}
 }
 
