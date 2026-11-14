@@ -8,6 +8,7 @@ import { createPortal } from "react-dom";
 import { BoardToolbar } from "./BoardToolbar";
 import { FLASH_UNAVAILABLE_TEXT } from "./boardText";
 import { ModelOptions } from "./nodes";
+import { useShell } from "./shell";
 
 export interface CanvasToolbarProps {
   /** 顶部第二行左侧的工具栏容器：画布把工具栏 portal 进去；null = 页面没有这个槽位（不渲染）。 */
@@ -45,7 +46,12 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
 
 /** 工具栏本体：归档画板只给置灰的一整块（连模型下拉都没有，BoardToolbar 自己补占位）。 */
 function ToolbarBody(props: CanvasToolbarProps) {
+  const port = useShell();
   if (props.readOnly) return <BoardToolbar disabled />;
+  // 本切片还没做的能力（桌面壳的生成与整理）：入口留着但标成「尚不可用」，不假装能点。
+  const generationOff = !port.features.generation;
+  // tidy 没声明按有处理（Web 版有）；只有显式 false 才是尚不可用。
+  const tidyOff = port.features.tidy === false;
   return (
     <BoardToolbar
       modelSelect={
@@ -60,7 +66,9 @@ function ToolbarBody(props: CanvasToolbarProps) {
       redoLabel={props.redoLabel}
       selectedCount={props.selectedCount}
       onRun={props.onRun}
+      generationUnavailable={generationOff}
       tidying={props.tidying}
+      tidyUnavailable={tidyOff}
       onTidy={() => props.onTidyChange(!props.tidying)}
     />
   );

@@ -30,6 +30,11 @@ export function Root() {
         setFatal(`无法连接 Kacha 服务端：${errorText(e)}`);
         return;
       }
+      // 桌面壳没有登录（#127）：不需要粘贴密钥，直接进工作台。
+      if (session.requiresLogin === false) {
+        setPhase("ready");
+        return;
+      }
       // 已有会话 cookie（HttpOnly，JS 读不到）且本地还留着密钥：直接进工作台。
       if (session.readStoredKey()) {
         try {

@@ -119,6 +119,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     generation: info.features.generation,
     usage: info.features.usage,
     packExport: info.features.pack_export,
+    // 整理模式本切片还没实现（度量画板体量留给后续切片）。
+    tidy: false,
   };
 
   /** 一次本地调用：Go 侧异常折成 failed（消息保持原文），结局失败折成类别化 PortError。 */
@@ -227,6 +229,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
   };
 
   const session: SessionPort = {
+    // 桌面壳没有服务端会话：不需要登录界面（Root 看到它就直接进工作台）。
+    requiresLogin: false,
     login: async (): Promise<never> => unavailable("login"),
     current: (): Promise<{ fingerprint: string }> => Promise.resolve({ fingerprint: LOCAL_FINGERPRINT }),
     logout: (): Promise<void> => Promise.resolve(),

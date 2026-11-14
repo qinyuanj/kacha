@@ -27,6 +27,11 @@ export interface ShellFeatures {
   usage: boolean;
   /** 画板包导出；导入是本地能力，任何实现都有。 */
   packExport: boolean;
+  /**
+   * 整理模式（按任务目录量画板体量）：桌面壳本切片还没实现，没做时入口标「尚不可用」。
+   * 不声明按有处理（Web 版有）。
+   */
+  readonly tidy?: boolean;
 }
 
 /** 端口失败的类别：界面只按它分支。 */
