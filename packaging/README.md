@@ -31,6 +31,28 @@ Linux 上命令相同，只需把 `python` 换成 `python3`、路径分隔符换
 
 2026-11-07 在 Windows 开发机实测：`python packaging\build_web.py` 完成 release 构建并产出 `kacha-server.exe` 与 `static/`；前台启动后 `GET /` 返回首页、`GET /api/config` 返回版本，登录后经符号链接越界读文件返回 403；`cleanup --dry-run` 正常执行并退出 0。尚未实测：在 lzxsvn 上以 Windows 服务运行（见下文「待人工实测」与 [#70](https://github.com/qinyuanj/kacha/issues/70)）。
 
+## 桌面客户端（#127）
+
+本地优先的 Windows 客户端用 MyGo 壳加载同一份 React 画板（ADR 0023）：不连服务端、不要求密钥、没有登录。在仓库根目录执行：
+
+```powershell
+python packaging\build_desktop.py
+# 已按 lockfile 安装过前端依赖时可跳过 npm ci：
+python packaging\build_desktop.py --skip-install
+```
+
+脚本跑固定版本的 CLI（`go.mod` 的 tool 指令钉住 MyGo 0.9.0），由它先构建 `client/`、再把 `client/dist` 嵌进可执行文件，最后输出：
+
+```text
+build/windows-amd64/
+  Kacha.exe
+  build-info.json     # 本次构建的 MyGo / Go / WebView2 版本与产物路径
+```
+
+`Kacha.exe` 可双击运行，不需要 Node、Go 或 Python。首次启动在 `%AppData%\Kacha\data` 建立本机唯一一份用户数据根并记住它（`%AppData%\Kacha\shell-state.json`），之后每次启动都回到同一份；同一台电脑只开一个实例，重复双击只是把已有窗口叫到前面。本切片还没有生成、用量与画板包导出，界面上标为「尚不可用」。
+
+MyGo 与 CLI 固定在 0.9.0，不跟随后续开发分支；升级要先单独验证。`build-info.json` 记录构建时用的版本，WebView2 Runtime 版本取自 `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` 的 `pv`。
+
 ## 配置
 
 命令行参数优先于环境变量。Windows 服务建议使用下面的绝对路径参数，避免服务工作目录影响相对路径。
