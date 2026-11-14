@@ -1,5 +1,6 @@
 // 多画板会话的各个操作（#137）：从 ui/useBoardSessions.ts 拆出的模块级函数。
 // crapper 按函数各自计复杂度：操作都放这里，hook 里就只剩接线。
+import { finishMoveOut as finishMoveOutTo, writeMovedOut as writeMovedOutTo } from "./boardSessionsMoveOut";
 import { archiveDir } from "../core/archive";
 import { BOARD_EXTENSION, DEFAULT_BOARD_TITLE, newBoard, openBoard, serializeBoard, uniqueBoardFileName, type Board } from "../core/board";
 import { editBoard, type BoardChange, type EditEnv, type EditResult } from "../core/edit";
@@ -463,32 +464,7 @@ async function moveOutWrite(
   const { source: latest, board: fresh } = prepared;
   const path = await freePathIn(store, ports, boardsDir(userRoot), "", fresh.title);
   if (boardOf() !== latest) return TIDY_TEXT.moveOutFailed("移出期间本画板有了新的改动，请重试");
-  const written = await writeMovedOut(ports, path, fresh);
+  const written = await writeMovedOutTo(ports, path, fresh);
   if (written) return written;
-  return finishMoveOut(boardOf, apply, key, stageId, fresh, latest);
-}
-
-/** 写好新画板之后：从原画板删去这些节点。 */
-function finishMoveOut(
-  boardOf: () => Board | null,
-  apply: (key: string, change: BoardChange) => EditResult | null,
-  key: string,
-  stageId: string,
-  fresh: Board,
-  latest: Board,
-): string {
-  if (boardOf() !== latest) return TIDY_TEXT.movedOutKept(fresh.title, "移出期间本画板有了新的改动");
-  const result = apply(key, { kind: "moveOutStage", stageId });
-  // 写好之后才被拒（期间有任务开始运行）：新画板已在列表里，原画板不动。
-  return result?.step ? TIDY_TEXT.movedOut(fresh.title) : TIDY_TEXT.movedOutKept(fresh.title, result?.hint ?? null);
-}
-
-/** 写新画板；写不进去时给一句说明（成功为 null）。 */
-async function writeMovedOut(ports: SessionPorts, path: string, fresh: Board): Promise<string | null> {
-  try {
-    await ports.board.write(path, serializeBoard(fresh), { createOnly: true });
-    return null;
-  } catch (e) {
-    return isSlotsFull(e) ? errorText(e) : TIDY_TEXT.moveOutFailed(errorText(e));
-  }
+  return finishMoveOutTo(boardOf, apply, key, stageId, fresh, latest);
 }

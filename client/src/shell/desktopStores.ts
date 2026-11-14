@@ -103,16 +103,26 @@ export function desktopFileStore(local: DesktopLocalBridge): FileStore {
   };
 }
 
+/** 读一个文本：空串当没有。 */
+export function readText(read: () => Promise<string>): Promise<string | null> {
+  return localRun(async () => (await read()) || null);
+}
+
+/** 写一个文本：结局失败折成类别化的错误。 */
+export function writeText(write: () => Promise<DesktopOutcome>): Promise<void> {
+  return localRun(async () => checked(await write()));
+}
+
 /** 元数据那一组。 */
 export function desktopMetaStore(local: DesktopLocalBridge): MetaStore {
   return {
-    readSettings: (): Promise<string | null> => localRun(async () => (await local.readSettings()) || null),
-    writeSettings: (text: string): Promise<void> => localRun(async () => checked(await local.writeSettings(text))),
-    readUiState: (): Promise<string | null> => localRun(async () => (await local.readUiState()) || null),
-    writeUiState: (text: string): Promise<void> => localRun(async () => checked(await local.writeUiState(text))),
-    readModelsCache: (): Promise<string | null> => localRun(async () => (await local.readModelsCache()) || null),
-    writeModelsCache: (text: string): Promise<void> => localRun(async () => checked(await local.writeModelsCache(text))),
-    readCapabilityOverride: (): Promise<string | null> => localRun(async () => (await local.readCapabilityOverride()) || null),
+    readSettings: () => readText(() => local.readSettings()),
+    writeSettings: (text: string) => writeText(() => local.writeSettings(text)),
+    readUiState: () => readText(() => local.readUiState()),
+    writeUiState: (text: string) => writeText(() => local.writeUiState(text)),
+    readModelsCache: () => readText(() => local.readModelsCache()),
+    writeModelsCache: (text: string) => writeText(() => local.writeModelsCache(text)),
+    readCapabilityOverride: () => readText(() => local.readCapabilityOverride()),
   };
 }
 
