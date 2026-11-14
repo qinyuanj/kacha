@@ -8,13 +8,16 @@ package localservice
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	"image/png"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/egoist/mygo"
 
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
@@ -167,7 +170,7 @@ func (s *Service) ReadFile(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return base64Encode(data), nil
+	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 // WriteNewFile 写新文件：目标已存在就拒绝。
@@ -186,6 +189,39 @@ func (s *Service) WriteNewFileBase64(path, data string) (Outcome, error) {
 		return Outcome{}, err
 	}
 	return s.WriteNewFile(path, bytes), nil
+}
+
+// saveDialog 弹系统「另存为」对话框；测试替换掉，不弹窗。
+var saveDialog = func(opts mygo.SaveDialogOptions) (string, error) { return mygo.Dialog.Save(opts) }
+
+// SaveCopyAs 把 path 指向的图片另存为用户选的位置（#130）：复制图片失败时界面指向的「另存为…」就是它。
+//
+// 字节由 Go 按用户数据根读（越界由 localstore 拒绝）；目标位置由系统「另存为」对话框选，
+// 用户取消返回 kind = cancelled，不写文件。这样承诺的兜底是真能用的，而不是一句「尚不可用」。
+func (s *Service) SaveCopyAs(path string) (Outcome, error) {
+	data, err := s.store.ReadFile(path)
+	if err != nil {
+		return Outcome{}, err
+	}
+	ext := strings.TrimPrefix(filepath.Ext(path), ".")
+	if ext == "" {
+		ext = "png"
+	}
+	target, err := saveDialog(mygo.SaveDialogOptions{
+		Title:       "另存为",
+		DefaultPath: filepath.Base(path),
+		Filters:     []mygo.FileFilter{{Name: "图片", Extensions: []string{ext}}},
+	})
+	if err != nil {
+		return Outcome{}, err
+	}
+	if target == "" {
+		return Outcome{OK: false, Kind: "cancelled", Message: "已取消另存为"}, nil
+	}
+	if err := os.WriteFile(target, data, 0o644); err != nil {
+		return Outcome{OK: false, Kind: localstore.KindFailed, Message: err.Error()}, nil
+	}
+	return Outcome{OK: true}, nil
 }
 
 // IsFile 报告路径是不是一个文件。
@@ -312,30 +348,3 @@ func pngHasTransparentPixel(data []byte) bool {
 	}
 	return false
 }
-
-// base64Encode 是字节的标准 base64（页面侧用 atob 还原）。
-func base64Encode(data []byte) string {
-	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-	var out strings.Builder
-	for i := 0; i < len(data); i += 3 {
-		var chunk [3]byte
-		n := copy(chunk[:], data[i:])
-		value := uint32(chunk[0])<<16 | uint32(chunk[1])<<8 | uint32(chunk[2])
-		out.WriteByte(alphabet[(value>>18)&0x3F])
-		out.WriteByte(alphabet[(value>>12)&0x3F])
-		if n > 1 {
-			out.WriteByte(alphabet[(value>>6)&0x3F])
-		} else {
-			out.WriteByte('=')
-		}
-		if n > 2 {
-			out.WriteByte(alphabet[value&0x3F])
-		} else {
-			out.WriteByte('=')
-		}
-	}
-	return out.String()
-}
-
-// ensure JSON 保持被引用（生成的 TS 客户端用反射读结构体字段）。
-var _ = json.Marshal

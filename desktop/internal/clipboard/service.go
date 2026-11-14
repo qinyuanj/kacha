@@ -33,22 +33,45 @@ type mygoWriter struct{}
 
 func (mygoWriter) WriteImage(png []byte) error { return mygo.Clipboard.WriteImage(png) }
 
+// TextWriter 把一段文本写进系统剪贴板：生产实现是 MyGo 的 Clipboard.WriteText，测试用替身。
+type TextWriter interface {
+	WriteText(text string)
+}
+
+// mygoTextWriter 是生产实现：MyGo 的 WriteText 把纯文本放进系统剪贴板。
+type mygoTextWriter struct{}
+
+func (mygoTextWriter) WriteText(text string) { mygo.Clipboard.WriteText(text) }
+
 // Service 读写系统剪贴板（MyGo），把结果折成类型化结局。
 //
 // 读的失败不当作错误抛：剪贴板被占用是可重试的失败，页面要拿到「busy」这一类才能提示用户重试。
 // 写的失败同样折成结局（#130）：失败不能报成功，占用要说成可重试。
 type Service struct {
-	// Writer 是系统剪贴板的写入端；留空时用 MyGo。
+	// Writer 是系统剪贴板的图片写入端；留空时用 MyGo。
 	Writer Writer
+	// TextWriter 是系统剪贴板的文本写入端；留空时用 MyGo。
+	TextWriter TextWriter
 }
 
-// writer 返回写入端：没注入时用 MyGo。
+// writer 返回图片写入端：没注入时用 MyGo。
 func (s Service) writer() Writer {
 	if s.Writer != nil {
 		return s.Writer
 	}
 	return mygoWriter{}
 }
+
+// textWriter 返回文本写入端：没注入时用 MyGo。
+func (s Service) textWriter() TextWriter {
+	if s.TextWriter != nil {
+		return s.TextWriter
+	}
+	return mygoTextWriter{}
+}
+
+// WriteText 把一段纯文本写进系统剪贴板：桌面壳复制节点标记走这里，不再依赖浏览器剪贴板权限（#124）。
+func (s Service) WriteText(text string) { s.textWriter().WriteText(text) }
 
 // Read 读一次系统剪贴板。
 //
@@ -58,8 +81,10 @@ func (Service) Read() Snapshot {
 	formats := formatNames(mygo.Clipboard.Formats())
 	data, err := mygo.Clipboard.Read(transfer.Text, transfer.PNG, transfer.FileList)
 	if err != nil && !isFormatMiss(err) {
-		// 读不动：被占用、读取期间换了主人、图片超上限，都有自己的原因码。
-		return Snapshot{Kind: string(KindBusy), Reason: reasonOf(err), Formats: formats}
+		// 读不动：只有「被占用 / 读取期间换了主人 / 重入」才是可重试的 busy；
+		// 图片超过单张上限要报成超限（unsupported + tooLarge），不能折成 busy 让用户白重试。
+		kind, reason := readFailureKindReason(err)
+		return Snapshot{Kind: kind, Reason: reason, Formats: formats}
 	}
 	// 一种请求的表示都没有（transfer.ErrFormat）时 data 是空值：往下走，Classify 会给 empty / unsupported。
 	content := Content{}
@@ -149,6 +174,9 @@ type Bound struct {
 func NewBound(read Reader) Bound {
 	return Bound{Service: Service{}, read: read}
 }
+
+// WriteText 把文本写进系统剪贴板（#124）：页面复制节点标记时由 Go 原生写，不依赖浏览器剪贴板权限。
+func (b Bound) WriteText(text string) { b.Service.WriteText(text) }
 
 // CopyImage 把 path 指向的图片写进系统剪贴板（#130）。
 //
@@ -245,6 +273,17 @@ func formatNames(formats []transfer.Format) []string {
 // 那不是失败——内容仍然读到了，只是没有那一种表示，不能报成 busy 让用户白重试。
 func isFormatMiss(err error) bool {
 	return errors.Is(err, transfer.ErrFormat)
+}
+
+// readFailureKindReason 把一次读失败折成快照的类别与原因。
+//
+// busy 严格留给剪贴板被占用 / 读取期间换了主人 / 重入；其余（尤其超过 64 MiB 单张上限）
+// 归到 unsupported，原因码由 reasonOf 给出，页面据此说清是超限而不是「稍后重试」。
+func readFailureKindReason(err error) (kind string, reason string) {
+	if isBusy(err) {
+		return string(KindBusy), reasonOf(err)
+	}
+	return string(KindUnsupported), reasonOf(err)
 }
 
 // reasonOf 把读取错误折成原因码。

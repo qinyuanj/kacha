@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
 // 桌面壳本次切片的能力开关：生成、用量、画板包导出都还没有。
@@ -37,6 +39,18 @@ func TestInfoReportsRootsAndCreatesBoardRoot(t *testing.T) {
 	}
 	if info.Features.Generation || info.Features.Usage || info.Features.PackExport {
 		t.Fatalf("features = %+v, want all off", info.Features)
+	}
+}
+
+// 画板根与 localstore.BoardsDir 是同一个目录名（目录名只在一处定义，B2）。
+func TestBoardRootSharesLocalstoreBoardsDir(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "data")
+	info, err := New("0.1.0", root).Info()
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if want := filepath.Join(root, localstore.BoardsDir); info.BoardRoot != want {
+		t.Fatalf("board root = %q，期望 %q", info.BoardRoot, want)
 	}
 }
 
