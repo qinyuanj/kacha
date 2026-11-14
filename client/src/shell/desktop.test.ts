@@ -140,7 +140,7 @@ describe("本机图片进 导入参考图/（#129）", () => {
 
 describe("复制图片到系统剪贴板（#130）", () => {
   /** 桥：Clipboard.Read 空快照，Clipboard.CopyImage 按给定结局回答。 */
-  function copyBridge(outcome: { ok: boolean; kind: string; message: string; bytes: number }, calls: { method: string; args: unknown[] }[] = []): DesktopBridge {
+  function copyBridge(outcome: { ok: boolean; kind: string; message: string; container?: string; bytes: number }, calls: { method: string; args: unknown[] }[] = []): DesktopBridge {
     return {
       info: () => Promise.resolve(INFO),
       local: new Proxy({} as DesktopLocalBridge, { get: () => () => Promise.reject(new Error("没实现的本地调用")) }),
@@ -166,6 +166,11 @@ describe("复制图片到系统剪贴板（#130）", () => {
       const { port } = await createDesktopPort(copyBridge({ ok: false, kind, message: "失败", bytes: 0 }));
       await expect(port.media.copyImage("C:/data/参考/cat.png", "png")).resolves.toEqual({ ok: false, reason });
     }
+  });
+
+  it("Go 认出容器名时折成 detail：界面据此说出具体格式，而不是笼统的「格式不受支持」", async () => {
+    const { port } = await createDesktopPort(copyBridge({ ok: false, kind: "unsupported", message: "复制图片失败", container: "tiff", bytes: 0 }));
+    await expect(port.media.copyImage("C:/data/参考/cat.tiff", "tiff")).resolves.toEqual({ ok: false, reason: "unsupported", detail: "tiff" });
   });
 
   it("桥里没有剪贴板：按 unavailable 收，不伪装成功", async () => {

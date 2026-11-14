@@ -187,9 +187,10 @@ export type ImageCopyFailure = "decode" | "unavailable" | "unsupported" | "inval
 /**
  * 复制图片的结局：失败只影响这一次复制，不改画板。
  *
- * format 是给实现侧的格式提示（节点路径的扩展名），实现按字节判断容器，提示写错不影响结果。
+ * detail 是失败的具体对象（如认出来的容器名 tiff）：界面据此说「TIFF 不受支持」而不是笼统的
+ * 「格式不受支持」。实现没给时界面按 reason 的通用文案收。
  */
-export type ImageCopyResult = { ok: true } | { ok: false; reason: ImageCopyFailure };
+export type ImageCopyResult = { ok: true } | { ok: false; reason: ImageCopyFailure; detail?: string };
 
 /** 界面用的媒体能力：图片地址、选文件、上传参考图、系统剪贴板、另存为。 */
 export interface MediaStore {

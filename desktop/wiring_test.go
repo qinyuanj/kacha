@@ -37,7 +37,7 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 		t.Fatalf("Clipboard 上没有 copyImage 方法：\n%s", src)
 	}
 	// 结局的键名来自 Go 的 json tag：页面按 ok / kind / message / bytes 读。
-	for _, key := range []string{"ok", "kind", "message", "bytes"} {
+	for _, key := range []string{"ok", "kind", "message", "container", "bytes"} {
 		if !strings.Contains(src, key) {
 			t.Fatalf("复制结局的类型里没有 %q 字段：\n%s", key, src)
 		}

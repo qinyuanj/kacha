@@ -122,9 +122,15 @@ type ImageCopyOutcome struct {
 	Kind string `json:"kind"`
 	// Message 是给用户看的一句话（已含替代动作），页面可以直接显示。
 	Message string `json:"message"`
+	// Container 是认出来的容器名（unsupported 时非空）：页面据此说「TIFF 不受支持」而不是笼统的「格式不受支持」。
+	Container string `json:"container"`
 	// Bytes 是实际写进剪贴板的 PNG 字节数（诊断用）。
 	Bytes int `json:"bytes"`
 }
+
+// ErrClipboardBusy 是「系统剪贴板被别的程序占用」的哨兵：写入端可以返回它，
+// 让 busy 判定走结构化错误而不是匹配文案（MyGo 改措辞也不会把可重试的失败降级）。
+var ErrClipboardBusy = errors.New("系统剪贴板正被其他程序占用")
 
 // Reader 按用户数据根里的路径读字节：生产实现是 localstore 的 ReadFile（自带越界拒绝）。
 type Reader func(path string) ([]byte, error)
@@ -165,7 +171,12 @@ func (s Service) CopyImage(data []byte, format Format) ImageCopyOutcome {
 	normalized, err := Normalize(data, format)
 	if err != nil {
 		kind := kindOf(err)
-		return ImageCopyOutcome{Kind: kind, Message: copyMessage(kind, err, format)}
+		outcome := ImageCopyOutcome{Kind: kind, Message: copyMessage(kind, err, format)}
+		var unsupported UnsupportedError
+		if errors.As(err, &unsupported) {
+			outcome.Container = string(unsupported.Container)
+		}
+		return outcome
 	}
 	if err := s.writer().WriteImage(normalized); err != nil {
 		kind := ImageFailed
@@ -187,9 +198,13 @@ func kindOf(err error) string {
 
 // isBusy 判断写失败是不是「剪贴板被别的程序占用」。
 //
-// MyGo 没有为这个情形导出哨兵值（Windows 后端返回的是一句英文错误），所以按消息认，
-// 与读取侧的 reasonOf 同一套判据：认不出时按 failed 收，不伪装成 busy 让用户白重试。
+// 先认结构化错误：本包的 ErrClipboardBusy，以及 MyGo 自己的 ErrClipboardChanged / ErrClipboardReentrant
+// （读取期间换了主人、重入，同样可重试）。MyGo 没为「占用」导出专门的哨兵值，Windows 后端给的是
+// 一句英文错误，所以最后才按文案兜底：认不出时按 failed 收，不伪装成 busy 让用户白重试。
 func isBusy(err error) bool {
+	if errors.Is(err, ErrClipboardBusy) || errors.Is(err, mygo.ErrClipboardChanged) || errors.Is(err, mygo.ErrClipboardReentrant) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "busy") || strings.Contains(msg, "cannot lock") || strings.Contains(msg, "reentrant")
 }

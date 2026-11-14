@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo"
+
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
@@ -67,6 +69,31 @@ func TestCopyImageUnsupportedNamesRealContainer(t *testing.T) {
 	}
 	if !strings.Contains(out.Message, "tiff") || strings.Contains(out.Message, "（png）") {
 		t.Fatalf("消息应说出真实容器：%q", out.Message)
+	}
+}
+
+// TestCopyImageUnsupportedReportsContainer 结局带上认出来的容器名：页面据此说「TIFF 不受支持」。
+func TestCopyImageUnsupportedReportsContainer(t *testing.T) {
+	out := Service{Writer: &fakeWriter{}}.CopyImage(fixture(t, "photo.tiff"), "png")
+	if out.Kind != ImageUnsupported {
+		t.Fatalf("类别 = %q，期望 %q", out.Kind, ImageUnsupported)
+	}
+	if out.Container != "tiff" {
+		t.Fatalf("容器 = %q，期望 tiff", out.Container)
+	}
+}
+
+// TestCopyImageBusyPrefersStructuredKind 写入端给出结构化的「占用」错误时按 busy 收，
+// 不依赖错误文案，MyGo 改措辞也不会把可重试的失败降级成普通失败。
+func TestCopyImageBusyPrefersStructuredKind(t *testing.T) {
+	service := Service{Writer: &fakeWriter{err: ErrClipboardBusy}}
+	if out := service.CopyImage(fixture(t, "alpha.png"), "png"); out.Kind != ImageBusy {
+		t.Fatalf("ErrClipboardBusy 的类别 = %q，期望 %q", out.Kind, ImageBusy)
+	}
+	// MyGo 自己的哨兵值也认：读取期间换了主人同样是可重试的。
+	service = Service{Writer: &fakeWriter{err: mygo.ErrClipboardChanged}}
+	if out := service.CopyImage(fixture(t, "alpha.png"), "png"); out.Kind != ImageBusy {
+		t.Fatalf("ErrClipboardChanged 的类别 = %q，期望 %q", out.Kind, ImageBusy)
 	}
 }
 

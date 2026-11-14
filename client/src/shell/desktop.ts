@@ -85,6 +85,8 @@ export interface DesktopImageCopy {
   /** unsupported / invalid / busy / failed；成功时为空。 */
   kind: string;
   message: string;
+  /** 认出来的容器名（unsupported 时非空，如 tiff / heic）。 */
+  container?: string;
   bytes: number;
 }
 
@@ -194,7 +196,10 @@ async function readClipboardSnapshot(bridge: DesktopBridge): Promise<ClipboardCo
 async function copyImageToSystemClipboard(bridge: DesktopBridge, absPath: string, format: string): Promise<ImageCopyResult> {
   if (!bridge.clipboard) return { ok: false, reason: "unavailable" };
   const outcome = await localRun(() => bridge.clipboard!.copyImage(absPath, format));
-  return outcome.ok ? { ok: true } : { ok: false, reason: copyFailureOf(outcome.kind) };
+  if (outcome.ok) return { ok: true };
+  const reason = copyFailureOf(outcome.kind);
+  // 容器名（tiff / heic）原样交给界面：失败提示要说清是哪种格式不行。
+  return outcome.container ? { ok: false, reason, detail: outcome.container } : { ok: false, reason };
 }
 
 /** Go 侧的失败类别 → 端口的失败类别；认不出的按 failed（不伪装成可重试）。 */

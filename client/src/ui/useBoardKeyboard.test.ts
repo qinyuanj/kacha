@@ -243,6 +243,16 @@ describe("复制图片（#130）", () => {
     expect(message).toContain("另存为");
   });
 
+it("格式不受支持时提示带上 Go 认出的容器名（TIFF），并指向「另存为…」", async () => {
+    port.media.copyImage = async () => ({ ok: false, reason: "unsupported", detail: "tiff" });
+    await selectImage("参考/cat.tiff");
+    press({ key: "c", ctrlKey: true });
+    await settle();
+    const message = toast.mock.calls[0][0] as string;
+    expect(message).toContain("TIFF");
+    expect(message).toContain("另存为");
+  });
+
   it("剪贴板被占用：说成可重试，并指向「另存为…」，不报成功", async () => {
     port.media.copyImage = async () => ({ ok: false, reason: "busy" });
     await selectImage();
