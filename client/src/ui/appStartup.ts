@@ -53,11 +53,12 @@ export interface RestoreResult {
  * 恢复标签页：照界面状态里的顺序打开；找不到的记一条提示。
  * 当前画板仍在就激活它，否则激活第一个打开的；一个都没打开时交给调用方新建。
  */
-export function restorePlan(ui: UiState, opened: readonly string[]): RestoreResult {
+export function restorePlan(ui: UiState, opened: readonly string[], failed: readonly string[] = []): RestoreResult {
   const notices: string[] = [];
   const open = ui.open_boards.filter((p) => {
     if (opened.includes(p)) return true;
-    notices.push(`找不到画板文件：${p}`);
+    // 打开时抛错的画板（如 layers.json 损坏）已经报了真实原因，不再额外报「找不到」。
+    if (!failed.includes(p)) notices.push(`找不到画板文件：${p}`);
     return false;
   });
   const activate = ui.active_board && open.includes(ui.active_board) ? ui.active_board : (open[0] ?? null);

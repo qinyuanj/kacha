@@ -51,6 +51,7 @@ import {
   cancelTaskOn,
   checkActive,
   jumpToTask,
+  openBoardList,
   openManageBoards,
   redoOn,
   sizeNoticeUpdated,
@@ -346,7 +347,7 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
         onCloseTab={(key) => void closeOne(key)}
         onRename={(key, title) => void boards.renameBoard(key, title)}
         onCreate={() => void createOne()}
-        onOpenList={() => openManageBoards(boards.flushAll, store.setManageBoards, store.setBoardListOpen)}
+        onOpenList={() => openBoardList(boards.flushAll, store.setBoardListOpen)}
         onExportPack={(key) => void pack.prepareExport(key)}
         onOpenChangelog={openChangelog}
         onCloseUpdateNotice={() => store.setLastSeenVersion(versionOrUndefined(version))}

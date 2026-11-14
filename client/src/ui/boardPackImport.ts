@@ -7,6 +7,8 @@ import type { PackDialogState } from "./BoardPackDialog";
 export type ImportOutcome =
   /** 关掉对话框，给用户一句话提示。 */
   | { kind: "toast"; text: string }
+  /** 关掉对话框，用系统提示框（window.alert）说明——导入包版本过新时用。 */
+  | { kind: "message"; text: string }
   /** 弹窗说明结局（服务端导入失败、打开画板失败、有冲突）。 */
   | { kind: "dialog"; state: PackDialogState };
 
@@ -38,7 +40,7 @@ export function commitFailedOutcome(error: string): ImportOutcome {
 export function importOutcome(result: ImportResult): ImportOutcome {
   switch (result.kind) {
     case "newer":
-      return toast(result.message);
+      return { kind: "message", text: result.message };
     case "corrupt":
       return toast(`无法导入画板包：${result.reason}`);
     case "cancelled":

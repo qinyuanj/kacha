@@ -4,8 +4,8 @@ import { PACK_IMPORT_TEXT } from "./boardText";
 import { importOutcome } from "./boardPackImport";
 
 describe("导入结局", () => {
-  it("包格式更新：提示原文", () => {
-    expect(importOutcome({ kind: "newer", message: "包太新" })).toEqual({ kind: "toast", text: "包太新" });
+  it("包格式更新：用系统提示框提示原文", () => {
+    expect(importOutcome({ kind: "newer", message: "包太新" })).toEqual({ kind: "message", text: "包太新" });
   });
 
   it("包损坏：提示无法导入并给原因", () => {

@@ -18,6 +18,8 @@ import {
   failingSessions,
   historyLabels,
   jumpToTask,
+  openBoardList,
+  openManageBoards,
   packMenuPick,
   packMenuReason,
   redoOn,
@@ -228,6 +230,28 @@ describe("其它接线", () => {
     closeBoardList(setBoardListOpen, setManageBoards);
     expect(setBoardListOpen).toHaveBeenCalledWith(false);
     expect(setManageBoards).toHaveBeenCalledWith(false);
+  });
+
+  it("工具栏「画板列表」入口：先落盘再开普通列表，不进入「管理画板」", async () => {
+    const flushAll = vi.fn(async () => undefined);
+    const setBoardListOpen = vi.fn();
+    const setManageBoards = vi.fn();
+    openBoardList(flushAll, setBoardListOpen);
+    await flushAll.mock.results[0].value;
+    expect(flushAll).toHaveBeenCalledTimes(1);
+    expect(setBoardListOpen).toHaveBeenCalledWith(true);
+    expect(setManageBoards).not.toHaveBeenCalled();
+  });
+
+  it("用量提醒「管理画板」入口：先落盘再按管理变体打开", async () => {
+    const flushAll = vi.fn(async () => undefined);
+    const setBoardListOpen = vi.fn();
+    const setManageBoards = vi.fn();
+    openManageBoards(flushAll, setManageBoards, setBoardListOpen);
+    await flushAll.mock.results[0].value;
+    expect(flushAll).toHaveBeenCalledTimes(1);
+    expect(setManageBoards).toHaveBeenCalledWith(true);
+    expect(setBoardListOpen).toHaveBeenCalledWith(true);
   });
 
   it("跳到任务：切画板并记下聚焦请求", () => {

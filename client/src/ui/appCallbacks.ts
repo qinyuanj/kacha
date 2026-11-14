@@ -5,6 +5,7 @@ import type { BoardChange } from "../core/edit";
 import type { RunTarget } from "../core/runner";
 import type { Session } from "./useBoardSessions";
 import { boardRenamedText } from "./appStartup";
+import { errorText } from "../core/errors";
 import { activeSizeNotice } from "./appUiState";
 import { packMenuDisabled } from "./appUiState";
 import { isArchivedPath } from "../core/archive";
@@ -108,7 +109,14 @@ export function closeBoardList(setBoardListOpen: (open: boolean) => void, setMan
   setManageBoards(false);
 }
 
-/** 用量提醒的入口：先落盘再打开画板列表。 */
+/** 工具栏的入口：先落盘再打开普通画板列表（不是「管理画板」变体）。 */
+export function openBoardList(flushAll: () => Promise<void>, setBoardListOpen: (open: boolean) => void): void {
+  void flushAll().then(() => {
+    setBoardListOpen(true);
+  });
+}
+
+/** 用量提醒的入口：先落盘再打开「管理画板」变体。 */
 export function openManageBoards(flushAll: () => Promise<void>, setManageBoards: (manage: boolean) => void, setBoardListOpen: (open: boolean) => void): void {
   void flushAll().then(() => {
     setManageBoards(true);
@@ -186,7 +194,7 @@ export function packMenuPick(action: "importPack" | "exportPack" | "downloadResu
 export function openFromList(open: (path: string, activate: boolean) => Promise<boolean>, toast: (message: string) => void, path: string): void {
   void open(path, true).then((opened) => {
     if (!opened) toast(boardRenamedText);
-  });
+  }, (e) => toast(errorText(e)));
 }
 
 /** 当前画板的撤销 / 重做标签。 */
