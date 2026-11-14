@@ -6,7 +6,6 @@
 // 调用时以 kind: "unavailable" 拒绝：界面据此标「尚不可用」，不失败得更晚，也不伪装成功。
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
-import { joinPath } from "../core/paths";
 import { PortError, type FeatureId, type ShellFeatures, type ShellPort } from "./port";
 import { copyTextToClipboard } from "./clipboard";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
