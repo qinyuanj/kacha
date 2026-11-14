@@ -1,6 +1,8 @@
 // 桌面壳端口的画板方法（#128）：对着绑定好的本地服务实现，失败要带类别与原因。
 import { describe, expect, it } from "vitest";
 
+import { isArchivedPath } from "../core/archive";
+import { boardsDir, joinPath } from "../core/paths";
 import { createDesktopPort, type DesktopBridge, type DesktopInfo, type DesktopLocalBridge, type DesktopOutcome } from "./desktop";
 import { portFailureOf } from "./port";
 
@@ -110,13 +112,13 @@ describe("桌面壳的画板方法", () => {
     expect(failure?.kind).toBe("conflict");
   });
 
-  it("列出画板：名字带扩展名，路径相对用户数据根", async () => {
+  it("列出画板：名字带扩展名，路径是用户数据根下的绝对路径", async () => {
     const stub = stubBridge();
     const { port } = await createDesktopPort(stub.bridge);
 
     const listing = await port.board.list();
     expect(listing.boards[0].name).toBe("本地.ugcboard.json");
-    expect(listing.boards[0].path).toBe("画板/本地.ugcboard.json");
+    expect(listing.boards[0].path).toBe(joinPath(INFO.user_data_root, "画板/本地.ugcboard.json"));
     expect(listing.slots.used).toBe(1);
   });
 
@@ -125,5 +127,52 @@ describe("桌面壳的画板方法", () => {
     const { port } = await createDesktopPort(stub.bridge);
 
     await expect(port.board.listNames("C:/data/画板")).resolves.toEqual(["本地.ugcboard.json"]);
+  });
+
+  it("画板列表的路径是用户数据根下的绝对路径（与界面别处同一形状）", async () => {
+    const stub = stubBridge();
+    const { port } = await createDesktopPort(stub.bridge);
+
+    const listing = await port.board.list();
+    expect(listing.boards[0].path).toBe(joinPath(INFO.user_data_root, "画板/本地.ugcboard.json"));
+    // 与界面自己拼的画板目录同一形状：列表里的路径能直接当作会话路径用。
+    expect(listing.boards[0].path.startsWith(boardsDir(INFO.user_data_root))).toBe(true);
+  });
+
+  it("列表 → 打开 → 带版本保存 → 带版本删除：路径形状一路一致", async () => {
+    const stub = stubBridge();
+    const { port } = await createDesktopPort(stub.bridge);
+
+    const listing = await port.board.list();
+    const path = listing.boards[0].path;
+
+    // 按列表给的路径打开。
+    const texts = await port.board.read(path);
+    expect(texts.version).toBe("v1");
+
+    // 带版本保存：交给本地服务的就是同一个路径。
+    await port.board.write(path, "{}", { version: texts.version ?? undefined });
+    expect(stub.calls.write[0].path).toBe(path);
+
+    // 带版本删除：同一个路径。
+    await port.board.remove(path, texts.version ?? undefined);
+    expect(stub.calls.remove[0].path).toBe(path);
+    expect(stub.calls.remove[0].version).toBe("v1");
+  });
+
+  it("归档画板在列表里的路径仍能认出是归档（不会误判成可编辑）", async () => {
+    const stub = stubBridge();
+    stub.bridge.local.listBoards = async () => ({
+      boards: [{ name: "旧.ugcboard.json", path: "画板/归档/旧.ugcboard.json", archived: true, bytes: null }],
+      slots: { used: 0, total: 20 },
+      size_lines: { warn: 1, alert: 2 },
+    });
+    const { port } = await createDesktopPort(stub.bridge);
+
+    const listing = await port.board.list();
+    const path = listing.boards[0].path;
+    expect(isArchivedPath(port.userRoot, path)).toBe(true);
+    // 归档能力本切片没有：不假装成功，界面据此知道归档入口尚不可用。
+    await expect(port.board.archive(path, path)).rejects.toMatchObject({ kind: "unavailable", feature: "archive" });
   });
 });
