@@ -50,9 +50,8 @@ interface Props {
   onClose: () => void;
 }
 
-export function PreviewDialog({ req, toast, onClose }: Props) {
-  const port = useShell();
-  const { apply, addAsReference, continueEditing } = useBoardActions();
+/** 区域编辑的状态与拖拽。 */
+function useRegionEditing(req: { edit?: RegionTarget }) {
   const stage = useRef<HTMLImageElement>(null);
   const initial = initialEditTarget(req);
   const [editing, setEditing] = useState<RegionTarget | null>(initial.editing);
@@ -60,17 +59,6 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
   const [rects, setRects] = useState<Rect01[]>(initial.rects);
   const [selected, setSelected] = useState<number | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
-  const [checked, setChecked] = useState<ReadonlySet<number>>(new Set());
-  const [solo, setSolo] = useState<number | null>(null);
-  const [showOutlines, setShowOutlines] = useState(false);
-  const [pickSource, setPickSource] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const layers = previewLayers(req.layers);
-  const baseInfo = useImageInfos([req.absPath]).get(req.absPath);
-  const targets = previewTargets(req.regionTargets);
-  const outlines = previewOutlines(req.regionOutlines);
-  const first = editing?.firstRegion ?? 0;
-  const layerInfos = useImageInfos(layers.map((l) => l.absPath));
 
   const startEdit = (target: RegionTarget) => {
     const next = editStateOf(target);
@@ -78,7 +66,6 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
     setRegionMode(next.regionMode);
     setRects(next.rects);
     setSelected(next.selected);
-    setSolo(null);
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -108,11 +95,34 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
     };
   }, [drag]);
 
-  const shown = shownRects(drag, rects);
   const removeOne = () => {
     setRects((rs) => removeSelected(rs, selected));
     setSelected(null);
   };
+  const clearAll = () => {
+    setRects([]);
+    setSelected(null);
+  };
+  return { stage, editing, regionMode, setRegionMode, rects, selected, startEdit, onPointerDown, removeOne, clearAll, shown: shownRects(drag, rects) };
+}
+
+export function PreviewDialog({ req, toast, onClose }: Props) {
+  const port = useShell();
+  const { apply, addAsReference, continueEditing } = useBoardActions();
+  const region = useRegionEditing(req);
+  const { stage, editing, regionMode, setRegionMode, rects, selected, startEdit, onPointerDown, removeOne, clearAll, shown } = region;
+  const [checked, setChecked] = useState<ReadonlySet<number>>(new Set());
+  const [solo, setSolo] = useState<number | null>(null);
+  const [showOutlines, setShowOutlines] = useState(false);
+  const [pickSource, setPickSource] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const layers = previewLayers(req.layers);
+  const baseInfo = useImageInfos([req.absPath]).get(req.absPath);
+  const targets = previewTargets(req.regionTargets);
+  const outlines = previewOutlines(req.regionOutlines);
+  const first = editing?.firstRegion ?? 0;
+  const layerInfos = useImageInfos(layers.map((l) => l.absPath));
+
   const saveRegion = () => {
     if (!editing) return;
     apply({ kind: "setRegion", edge: editing.edgeRef, region: regionSetting(rects, regionMode) });
@@ -183,10 +193,7 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
           regionMode={regionMode}
           first={first}
           onRemove={removeOne}
-          onClear={() => {
-            setRects([]);
-            setSelected(null);
-          }}
+          onClear={clearAll}
           onSave={saveRegion}
           onClose={onClose}
           onStartEdit={startEdit}

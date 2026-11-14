@@ -6,8 +6,9 @@ import { useCallback, useEffect, useState } from "react";
 import type { BoardListEntry, BoardListing } from "../shell/types";
 import { errorText } from "../core/errors";
 import { useShell } from "./shell";
-import { approxSizeText, ARCHIVE_TEXT, MANAGE_BOARDS_TEXT, OVER_SLOTS_TEXT, slotsUsageText } from "./boardText";
+import { ARCHIVE_TEXT, MANAGE_BOARDS_TEXT, OVER_SLOTS_TEXT, slotsUsageText } from "./boardText";
 import { boardGroups, boardRow, listDescription, listTitle, overSlots, slotsFull } from "./boardListView";
+import { BoardRow, type RowActions } from "./boardListRow";
 import { runArchivedAction, runConfirm, type PendingAction } from "./boardListActions";
 
 interface Props {
@@ -26,53 +27,6 @@ interface Props {
   onCopy(path: string): Promise<string | null>;
   /** 「管理画板」（#88，从用量提醒进入）：标题换成管理画板，各组按体量从大到小排，帮用户决定先整理哪块。 */
   manage?: boolean;
-}
-
-/** 一行画板的动作：归档、取消归档、复制为新画板、删除。 */
-interface RowActions {
-  archive(entry: BoardListEntry): void;
-  unarchive(entry: BoardListEntry): void;
-  copy(entry: BoardListEntry): void;
-  remove(entry: BoardListEntry): void;
-}
-
-/** 一行画板：标题、已打开标记、体量与动作。 */
-function BoardRow({ entry, openPaths, listing, onOpen, onClose, actions }: { entry: BoardListEntry; openPaths: string[]; listing: BoardListing | null; onOpen(path: string): void; onClose(): void; actions: RowActions }) {
-  const row = boardRow(entry, openPaths, listing);
-  return (
-    <li key={entry.path}>
-      <button
-        className="board-list-open"
-        onClick={() => {
-          onOpen(entry.path);
-          onClose();
-        }}
-      >
-        {row.title}
-      </button>
-      {row.isOpen && <span className="muted">已打开</span>}
-      <span className={`board-list-size${row.tier ? ` size-${row.tier}` : ""}`} data-size-tier={row.tier ?? "none"}>
-        {entry.bytes === null ? "大小未知" : approxSizeText(entry.bytes)}
-      </span>
-      {row.archived ? (
-        <>
-          <button className="board-list-action" onClick={() => actions.unarchive(entry)}>
-            {ARCHIVE_TEXT.unarchive}
-          </button>
-          <button className="board-list-action" onClick={() => actions.copy(entry)}>
-            {ARCHIVE_TEXT.copy}
-          </button>
-        </>
-      ) : (
-        <button className="board-list-action" aria-label={`${ARCHIVE_TEXT.action}「${row.title}」`} onClick={() => actions.archive(entry)}>
-          {ARCHIVE_TEXT.action}
-        </button>
-      )}
-      <button className="board-list-delete" aria-label={`删除「${row.title}」`} onClick={() => actions.remove(entry)}>
-        删除
-      </button>
-    </li>
-  );
 }
 
 /** 画板位用量那一行。 */
