@@ -43,8 +43,8 @@ export interface DesktopLocalBridge {
   writeBoard(path: string, text: string, options: { version?: string; create_only?: boolean }): Promise<DesktopOutcome>;
   listBoardNames(dir: string): Promise<string[]>;
   listBoards(): Promise<DesktopBoardListing>;
-  renameBoard(from: string, to: string): Promise<DesktopOutcome>;
-  deleteBoard(path: string): Promise<DesktopOutcome>;
+  renameBoard(from: string, to: string, version?: string): Promise<DesktopOutcome>;
+  deleteBoard(path: string, version?: string): Promise<DesktopOutcome>;
   readFile(path: string): Promise<string>;
   writeNewFile(path: string, bytes: Uint8Array): Promise<DesktopOutcome>;
   isFile(path: string): Promise<boolean>;
@@ -141,8 +141,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
       }),
     write: (path: string, text: string, options?: BoardWriteOptions): Promise<void> =>
       run(async () => checked(await local.writeBoard(path, text, { version: options?.version, create_only: options?.createOnly }))),
-    rename: (from: string, to: string): Promise<void> => run(async () => checked(await local.renameBoard(from, to))),
-    remove: (path: string): Promise<void> => run(async () => checked(await local.deleteBoard(path))),
+    rename: (from: string, to: string, version?: string): Promise<void> => run(async () => checked(await local.renameBoard(from, to, version))),
+    remove: (path: string, version?: string): Promise<void> => run(async () => checked(await local.deleteBoard(path, version))),
     archive: async (): Promise<void> => unavailable("archive"),
     unarchive: async (): Promise<void> => unavailable("archive"),
     listNames: (dir: string): Promise<string[]> => run(() => local.listBoardNames(dir)),
