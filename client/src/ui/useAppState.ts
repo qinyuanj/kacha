@@ -156,15 +156,17 @@ export function useRestoreTabs(
     void (async () => {
       const ui = store.initialUi.current!;
       const opened: string[] = [];
+      const failed: string[] = [];
       for (const p of ui.open_boards) {
         try {
           if (await deps.openPath(p, false)) opened.push(p);
         } catch (e) {
+          failed.push(p);
           deps.toast(errorMessage(e));
         }
       }
-      // 找不到的画板在这里提示（restorePlan 统一给出，不重复提示）。
-      const plan = restorePlan(ui, opened);
+      // 找不到的画板在这里提示（restorePlan 统一给出，不重复提示）；打开时抛错的只报真实错误。
+      const plan = restorePlan(ui, opened, failed);
       for (const notice of plan.notices) deps.toast(notice);
       if (plan.activate) await deps.openPath(plan.activate, true);
       else await deps.createBoardOrExplain();

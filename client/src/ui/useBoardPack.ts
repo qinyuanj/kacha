@@ -115,6 +115,11 @@ function useImport(
       setDialog((d) => (d?.stage === "progress" ? { ...d, detail: IMPORT_PHASES[phase] } : d)),
     );
     if (outcome.kind === "dialog") return setDialog(outcome.state);
+    if (outcome.kind === "message") {
+      setDialog(null);
+      await port.ui.message(outcome.text, { title: "无法导入画板包" });
+      return;
+    }
     setDialog(null);
     if (outcome.text) toast(outcome.text);
   }, [userRoot, boards, toast]);

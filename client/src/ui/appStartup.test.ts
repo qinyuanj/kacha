@@ -43,6 +43,12 @@ describe("恢复标签页", () => {
     expect(plan.activate).toBe("/~/a");
   });
 
+  it("打开时抛错的画板：只报真实错误，不额外报找不到", () => {
+    const plan = restorePlan({ open_boards: ["/~/a", "/~/b"], active_board: "/~/a" }, ["/~/a"], ["/~/b"]);
+    expect(plan.opened).toEqual(["/~/a"]);
+    expect(plan.notices).toEqual([]);
+  });
+
   it("当前画板不在了就激活第一个打开的", () => {
     const plan = restorePlan({ open_boards: ["/~/a", "/~/b"], active_board: "/~/b" }, ["/~/a"]);
     expect(plan.activate).toBe("/~/a");

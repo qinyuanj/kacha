@@ -10,6 +10,8 @@ import type { LogKind } from "../shell/log";
 export type PackImportResult =
   /** 一句话提示。 */
   | { kind: "toast"; text: string }
+  /** 用系统提示框说明（导入包版本过新）。 */
+  | { kind: "message"; text: string }
   /** 导入失败（抛错）。 */
   | { kind: "failed"; text: string }
   /** 弹窗说明结局。 */
@@ -53,6 +55,7 @@ export async function packImportOutcome(
     });
     const outcome = importOutcome(result as never);
     if (outcome.kind === "toast") return { kind: "toast", text: outcome.text };
+    if (outcome.kind === "message") return { kind: "message", text: outcome.text };
     return { kind: "dialog", state: outcome.state };
   } catch (e) {
     return { kind: "failed", text: `导入画板包失败：${errorText(e)}` };
