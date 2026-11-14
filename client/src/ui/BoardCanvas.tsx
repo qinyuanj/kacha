@@ -53,6 +53,8 @@ import { canvasClassName, posOf } from "./canvasPoint";
 import { CanvasToolbar } from "./canvasToolbar";
 import { BoardContext, primeImageInfo, type BoardActions } from "./context";
 import { useShell } from "./shell";
+import { unavailableMessage } from "../shell/port";
+import { errorText } from "../core/errors";
 import { edgeTypes } from "./edges";
 import { HoverProvider, useHoverLayer } from "./hoverInfo";
 import { nodeTypes } from "./nodes";
@@ -244,10 +246,20 @@ export function BoardCanvas({
   /** attachTo = 任务节点 id：只选一张，接到该任务的空图片端口（从图片端口反向拖线建节点）。 */
   const pickReferences = useCallback(
     (at?: { x: number; y: number }, attachTo?: string) =>
-      void pickReferencesOf({ pickImages: (multiple) => port.media.pickImages(multiple), importFiles: importLocalFiles, centerPosition: center }, at, attachTo),
-    [center, importLocalFiles, port],
+      void pickReferencesOf({ pickImages: (multiple) => port.media.pickImages(multiple), importFiles: importLocalFiles, centerPosition: center }, at, attachTo).catch((e) => {
+        // 端口说这项能力还没有（桌面壳本切片没有文件选择器）：说清「尚不可用」，不冒成未捕获异常。
+        toast(unavailableMessage(e) ?? `选择参考图失败：${errorText(e)}`);
+      }),
+    [center, importLocalFiles, port, toast],
   );
-  const saveNodeAs = useCallback((nodeId: string) => saveNodeAsOf(nodeId, { board: boardRef.current, userRoot, toast, save: (absPath) => port.media.saveCopyAs(absPath) }), [userRoot, toast, port]);
+  const saveNodeAs = useCallback(
+    (nodeId: string) =>
+      saveNodeAsOf(nodeId, { board: boardRef.current, userRoot, toast, save: (absPath) => port.media.saveCopyAs(absPath) }).catch((e) => {
+        // 同上：另存为在桌面壳本切片还没有，说清「尚不可用」。
+        toast(unavailableMessage(e) ?? `另存失败：${errorText(e)}`);
+      }),
+    [userRoot, toast, port],
+  );
 
   const commandDeps: CanvasCommandDeps = {
     apply, flow, boardRef, selectedRef, lockedRef, actions, onUndo, onRedo, onRun, onCancelTask, onRegenerate, onViewSendText,

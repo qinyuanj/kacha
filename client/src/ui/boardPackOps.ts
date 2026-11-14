@@ -3,6 +3,7 @@ import { type Board } from "../core/board";
 import { buildExportSpec, exportSources, planExport, planPackContents, runCancellable, type PackEntryFact } from "../core/boardPack";
 import type { PackDialogState } from "./BoardPackDialog";
 import type { LogKind } from "../shell/log";
+import { unavailableMessage } from "../shell/port";
 import { exportCancelledText, exportDoneText, exportFailedText, exportHashFailedText, exportLogFields, exportTargetOf, planFailedText } from "./boardPackExportOps";
 
 /** 导出用的端口。 */
@@ -32,14 +33,25 @@ export async function exportPlanStep(
   try {
     plan = await planExport(board, userRoot, deps.packFs);
   } catch (e) {
-    return { kind: "failed", text: planFailedText(e instanceof Error ? e.message : String(e)) };
+    // 端口拒绝时说「尚不可用」（桌面壳本切片没有画板包导出），不能只报底层错。
+    return { kind: "failed", text: unavailableMessage(e) ?? planFailedText(e instanceof Error ? e.message : String(e)) };
   }
   const { stem } = exportTargetOf(boardFile);
   // hash 阶段：服务端给逐文件长度与 sha256，core 据此去重并算预估大小，再请用户确认（包格式 v2）。
-  const outcome = await runCancellable(deps.io, progress(`正在计算画板包大小：${stem}`), () => deps.facts(exportSources(plan)));
+  // runCancellable 把异常压成文本，类别就丢了：端口说「尚不可用」时在这里先记下来。
+  let unavailable: string | null = null;
+  const outcome = await runCancellable(deps.io, progress(`正在计算画板包大小：${stem}`), async () => {
+    try {
+      return await deps.facts(exportSources(plan));
+    } catch (e) {
+      unavailable = unavailableMessage(e);
+      throw e;
+    }
+  });
   if (!outcome.ok) {
     deps.log("board_pack", { action: "export", board_file: boardFile, stage: "hash", result: outcome.result });
-    return { kind: "failed", text: outcome.result === "cancelled" ? exportCancelledText : exportHashFailedText(outcome.error) };
+    // 端口说这项能力还没有（桌面壳本切片没有画板包导出）：说清「尚不可用」。
+    return { kind: "failed", text: unavailable ?? (outcome.result === "cancelled" ? exportCancelledText : exportHashFailedText(outcome.error)) };
   }
   return { kind: "confirm", boardFile, plan, contents: planPackContents(outcome.value) };
 }

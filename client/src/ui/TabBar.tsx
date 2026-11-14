@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import { basename } from "../core/paths";
 import { ContextMenu } from "./ContextMenu";
+import { packExportEntry } from "./packMenuEntries";
+import { useShell } from "./shell";
 import type { Session } from "./useBoardSessions";
 
 interface Props {
@@ -18,6 +20,7 @@ interface Props {
 const titleOf = (s: Session) => (s.status === "ok" ? s.board.title : basename(s.path));
 
 export function TabBar({ sessions, activeKey, onActivate, onClose, onRename, onCreate, onOpenList, onExportPack }: Props) {
+  const port = useShell();
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<{ key: string; at: { x: number; y: number } } | null>(null);
@@ -84,7 +87,14 @@ export function TabBar({ sessions, activeKey, onActivate, onClose, onRename, onC
       {menuSession && menu && (
         <ContextMenu
           at={menu.at}
-          items={[{ action: "exportPack", label: "导出画板包…", disabledReason: menuSession.status === "ok" ? null : "画板无法打开，不能导出" }]}
+          items={[
+            {
+              action: "exportPack",
+              // 标签与置灰原因跟顶部「画板包」菜单同一处定义（#127）：
+              // 桌面壳本切片没有画板包导出时标「尚不可用」并置灰。
+              ...packExportEntry(port, { open: menuSession.status === "ok", broken: menuSession.status !== "ok" }),
+            },
+          ]}
           onPick={() => onExportPack(menuSession.key)}
           onClose={closeMenu}
         />

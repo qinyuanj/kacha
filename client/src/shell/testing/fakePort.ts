@@ -58,6 +58,7 @@ export function emptyFakeCalls(): FakeCalls {
 /** core 那一组：把文件与元数据的能力拼成 core 需要的形状。 */
 function fakeCorePorts(files: ReturnType<typeof fakeFileStore>, meta: ReturnType<typeof fakeMetaStore>): CorePorts {
   return {
+    ...{},
     taskFs: { readFile: files.readFile, writeNewFile: files.writeNewFile },
     runDeps: {
       readFile: files.readFile,
@@ -103,7 +104,7 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
   const pack = fakePackStore(imports, calls);
   const ui = fakeUiStore(calls);
   const usage = fakeUsageStore(new Set<string>(missing));
-  const session = fakeSessionStore();
+  const session = fakeSessionStore(options);
   const core = fakeCorePorts(files, meta);
 
   return {

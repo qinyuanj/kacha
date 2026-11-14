@@ -252,14 +252,16 @@ export function fakeUsageStore(missing: Set<string>): UsagePort {
 }
 
 /** 会话那一组。 */
-export function fakeSessionStore(): SessionPort {
+export function fakeSessionStore(options: { requiresLogin?: boolean; storedKey?: string | null } = {}): SessionPort {
   return {
+    // requiresLogin 可改：桌面壳（不登录）与 Web 版（要登录）用同一个替身。
+    requiresLogin: options.requiresLogin ?? true,
     login: async () => ({ fingerprint: "fake" }),
     current: async () => ({ fingerprint: "fake" }),
     logout: async () => undefined,
     config: async () => ({ version: "9.9.9", gateway_url: "http://gateway.invalid" }),
     onExpired: () => () => undefined,
-    readStoredKey: () => null,
+    readStoredKey: () => options.storedKey ?? null,
     storeKey: () => undefined,
     clearStoredKey: () => undefined,
   };

@@ -41,8 +41,8 @@ export interface DesktopLocalBridge {
   writeBoard(path: string, text: string, options: { version?: string; create_only?: boolean }): Promise<DesktopOutcome>;
   listBoardNames(dir: string): Promise<string[]>;
   listBoards(): Promise<DesktopBoardListing>;
-  renameBoard(from: string, to: string): Promise<DesktopOutcome>;
-  deleteBoard(path: string): Promise<DesktopOutcome>;
+  renameBoard(from: string, to: string, version?: string): Promise<DesktopOutcome>;
+  deleteBoard(path: string, version?: string): Promise<DesktopOutcome>;
   readFile(path: string): Promise<string>;
   writeNewFile(path: string, bytes: Uint8Array): Promise<DesktopOutcome>;
   isFile(path: string): Promise<boolean>;
@@ -88,7 +88,7 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     tidy: false,
   };
 
-  const board = desktopBoardStore(local);
+  const board = desktopBoardStore(local, info.user_data_root);
 
   const files = desktopFileStore(local);
 

@@ -121,7 +121,7 @@ func TestRemoveBoardMovesToRecycle(t *testing.T) {
 	path := filepath.Join(s.BoardDir(), "画板"+BoardExt)
 	s.WriteBoard(path, "{\"a\":1}", WriteOptions{CreateOnly: true})
 
-	if got := s.RemoveBoard(path); !got.OK {
+	if got := s.RemoveBoard(path, ""); !got.OK {
 		t.Fatalf("RemoveBoard: %+v", got)
 	}
 	if s.IsFile(path) {
@@ -180,7 +180,7 @@ func TestRenameBoard(t *testing.T) {
 	s.WriteBoard(from, "{\"a\":1}", WriteOptions{CreateOnly: true})
 	s.WriteBoard(from, "{\"a\":2}", WriteOptions{})
 
-	if got := s.RenameBoard(from, to); !got.OK {
+	if got := s.RenameBoard(from, to, ""); !got.OK {
 		t.Fatalf("RenameBoard: %+v", got)
 	}
 	if s.IsFile(from) {

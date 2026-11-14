@@ -2,6 +2,7 @@
 // 拆开之后每个函数的复杂度单独看得到，门禁也按函数计。
 import { PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore, type PackStore } from "./port";
 import type { BoardListing, BoardTexts, BoardWriteOptions, ImageInfo, UsagePort } from "./types";
+import { joinPath } from "../core/paths";
 import type { DirEntry } from "../core/relocate";
 import type { PackIo } from "../core/boardPack";
 import { copyTextToClipboard } from "./clipboard";
@@ -55,7 +56,7 @@ export function checked(outcome: DesktopOutcome): void {
 }
 
 /** 画板那一组。 */
-export function desktopBoardStore(local: DesktopLocalBridge): BoardStore {
+export function desktopBoardStore(local: DesktopLocalBridge, userRoot: string): BoardStore {
   return {
     read: (path: string): Promise<BoardTexts> =>
       localRun(async () => {
@@ -64,8 +65,8 @@ export function desktopBoardStore(local: DesktopLocalBridge): BoardStore {
       }),
     write: (path: string, text: string, options?: BoardWriteOptions): Promise<void> =>
       localRun(async () => checked(await local.writeBoard(path, text, { version: options?.version, create_only: options?.createOnly }))),
-    rename: (from: string, to: string): Promise<void> => localRun(async () => checked(await local.renameBoard(from, to))),
-    remove: (path: string): Promise<void> => localRun(async () => checked(await local.deleteBoard(path))),
+    rename: (from: string, to: string, version?: string): Promise<void> => localRun(async () => checked(await local.renameBoard(from, to, version))),
+    remove: (path: string, version?: string): Promise<void> => localRun(async () => checked(await local.deleteBoard(path, version))),
     archive: async (): Promise<void> => unavailable("archive"),
     unarchive: async (): Promise<void> => unavailable("archive"),
     listNames: (dir: string): Promise<string[]> => localRun(() => local.listBoardNames(dir)),
@@ -73,7 +74,9 @@ export function desktopBoardStore(local: DesktopLocalBridge): BoardStore {
       localRun(async () => {
         const listing = await local.listBoards();
         return {
-          boards: listing.boards.map((b) => ({ name: b.name, path: b.path, archived: b.archived, bytes: b.bytes })),
+          // Go 侧给的是相对用户数据根的路径；这里拼成绝对路径，
+          // 与界面别处（画板目录、标签页会话路径）同一形状：列表 → 打开 → 保存 → 删除一路对得上。
+          boards: listing.boards.map((b) => ({ name: b.name, path: joinPath(userRoot, b.path), archived: b.archived, bytes: b.bytes })),
           slots: listing.slots,
           size_lines: listing.size_lines,
         };

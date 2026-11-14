@@ -56,6 +56,9 @@ export function Root() {
     setPhase("enter");
   }, [session]);
 
+  // 桌面壳没有会话可退出（#127）：不传 onLogout，界面上就没有「退出」按钮。
+  const canLogout = session.requiresLogin !== false;
+
   const form = <KeyEntryForm apiKey={key} busy={busy} error={error} version={version} onChange={setKey} onSubmit={() => void submit()} inputRef={inputRef} />;
 
   if (fatal) return <div className="fatal">{fatal}</div>;
@@ -64,7 +67,7 @@ export function Root() {
   return (
     <>
       {/* 会话失效时遮罩盖在 App 之上、不销毁它：告诉画布此刻有模态，粘贴不落到背后的画板（#96）。 */}
-      <App key={sessionNonce} onLogout={() => void logout()} version={version} sessionExpired={expired} />
+      <App key={sessionNonce} onLogout={canLogout ? () => void logout() : undefined} version={version} sessionExpired={expired} />
       {expired && <SessionExpiredModal>{form}</SessionExpiredModal>}
     </>
   );

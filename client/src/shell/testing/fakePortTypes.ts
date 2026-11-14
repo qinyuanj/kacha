@@ -39,6 +39,10 @@ export interface FakePortOptions {
   writeFailures?: Map<string, PortFailureKind>;
   /** 没有的能力。 */
   missing?: FeatureId[];
+  /** 是否需要登录界面：默认要（Web 版）；桌面壳给 false。 */
+  requiresLogin?: boolean;
+  /** 本地存着的密钥：有它时界面直接进工作台（Web 版已登录的样子）。 */
+  storedKey?: string | null;
   slots?: { used: number; total: number };
 }
 
