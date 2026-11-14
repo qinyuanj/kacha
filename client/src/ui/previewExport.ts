@@ -1,9 +1,10 @@
 // 预览弹窗的导出接线（#137）：从 ui/PreviewDialog.tsx 拆出的模块级函数，便于单测。
 import { errorText } from "../core/errors";
+import type { SaveCopyOutcome } from "../shell/port";
 
 /** 导出用的端口。 */
 export interface PreviewExportPort {
-  saveCopyAs(absPath: string): Promise<void>;
+  saveCopyAs(absPath: string): Promise<SaveCopyOutcome>;
   downloadImage(path: string): void;
 }
 
@@ -36,8 +37,9 @@ export async function runExport(
 /** 导出单张图（图层或底图）。 */
 export async function exportOneImage(port: PreviewExportPort, toast: (message: string) => void, setBusy: (busy: boolean) => void, absPath: string): Promise<void> {
   await runExport(toast, setBusy, async () => {
-    await port.saveCopyAs(absPath);
-    return exportOneText;
+    const outcome = await port.saveCopyAs(absPath);
+    // 取消系统「另存为」时没有可说的：不提示「已开始下载」。
+    return outcome.kind === "cancelled" ? null : exportOneText;
   });
 }
 

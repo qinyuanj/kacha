@@ -113,7 +113,10 @@ const media: MediaStore = {
   },
   // Web 读不到系统剪贴板（内网 HTTP 不是安全上下文）：粘贴内容由 paste 事件带。
   readClipboard: async () => null,
-  saveCopyAs: async (absPath) => transfer.downloadImage(absPath),
+  saveCopyAs: async (absPath) => {
+    transfer.downloadImage(absPath);
+    return { kind: "saved" as const };
+  },
   downloadImage: (path, name) => transfer.downloadImage(path, name),
   downloadBoardResults: (boardPath) => transfer.downloadBoardResults(boardPath),
 };

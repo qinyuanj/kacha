@@ -223,7 +223,7 @@ describe("边悬浮", () => {
 
 describe("另存为", () => {
   it("参考图与结果节点都按绝对路径下载并提示", async () => {
-    const save = vi.fn(async () => undefined);
+    const save = vi.fn(async () => ({ kind: "saved" as const }));
     const toast = vi.fn();
     const board = boardOf([reference("r"), result("x")]);
     await saveNodeAsOf("r", { board, userRoot: "/~", toast, save });
@@ -234,11 +234,19 @@ describe("另存为", () => {
   });
 
   it("其它类型与不存在的节点什么都不做", async () => {
-    const save = vi.fn(async () => undefined);
+    const save = vi.fn(async () => ({ kind: "saved" as const }));
     const board = boardOf([prompt("p")]);
     await saveNodeAsOf("p", { board, userRoot: "/~", toast: vi.fn(), save });
     await saveNodeAsOf("gone", { board, userRoot: "/~", toast: vi.fn(), save });
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it("用户取消系统另存为：什么都不提示，绝不提示已开始下载", async () => {
+    const save = vi.fn(async () => ({ kind: "cancelled" as const }));
+    const toast = vi.fn();
+    await saveNodeAsOf("r", { board: boardOf([reference("r")]), userRoot: "/~", toast, save });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it("下载失败时提示另存失败", async () => {

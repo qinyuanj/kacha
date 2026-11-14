@@ -20,7 +20,7 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "login" | "copyImage" | "saveImage" | "downloadImage" | "downloadResults";
+export type FeatureId = "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "login" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
@@ -127,6 +127,7 @@ export const FEATURE_LABELS: Record<FeatureId, string> = {
   relay: "结果中转",
   login: "登录",
   copyImage: "复制图片",
+  copyText: "复制文本",
   saveImage: "另存为",
   downloadImage: "下载图片",
   downloadResults: "下载整板结果",
@@ -197,6 +198,12 @@ export type ImageCopyFailure = "decode" | "unavailable" | "unsupported" | "inval
  */
 export type ImageCopyResult = { ok: true } | { ok: false; reason: ImageCopyFailure; detail?: string };
 
+/**
+ * 「另存为」的结局：取消不是失败，也不该提示「已开始下载」。
+ * 桌面壳的系统另存为对话框可能被用户取消；Web 的下载一发出就算开始。
+ */
+export type SaveCopyOutcome = { kind: "saved" } | { kind: "cancelled" };
+
 /** 界面用的媒体能力：图片地址、选文件、上传参考图、系统剪贴板、另存为。 */
 export interface MediaStore {
   /** 原图地址（<img src> / 复制图片读源）。 */
@@ -212,8 +219,8 @@ export interface MediaStore {
   copyImage(absPath: string, format?: string): Promise<ImageCopyResult>;
   /** 读系统剪贴板；返回 null 表示这一端读不到（Web），调用方改用 paste 事件带的内容。 */
   readClipboard(): Promise<ClipboardContent | null>;
-  /** 结果另存为（带图层的结果是 zip）。 */
-  saveCopyAs(absPath: string): Promise<void>;
+  /** 结果另存为（带图层的结果是 zip）；用户取消时返回 cancelled。 */
+  saveCopyAs(absPath: string): Promise<SaveCopyOutcome>;
   downloadImage(path: string, name?: string): void;
   downloadBoardResults(boardPath: string): void;
 }

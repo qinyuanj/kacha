@@ -148,7 +148,7 @@ let elementAt: Mock<() => Element | null>;
 /** 壳端口的另存为替身（每次 beforeEach 重新装）。 */
 let port: FakePort;
 /** 「另存为」的替身（每次 beforeEach 重新装）。 */
-let saveCopyAs: (absPath: string) => Promise<void>;
+let saveCopyAs: (absPath: string) => Promise<{ kind: "saved" | "cancelled" }>;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -160,7 +160,7 @@ beforeEach(() => {
   port.media.uploadReference = vi.fn(async (file: File) => ({ path: `reference/${file.name}`, sha256: SHA_B }));
   port.media.copyText = vi.fn(async () => undefined);
   // 「另存为」经壳端口的 media.saveCopyAs；这里只记调用。
-  saveCopyAs = vi.fn(async () => undefined);
+  saveCopyAs = vi.fn(async () => ({ kind: "saved" as const }));
   port.media.saveCopyAs = saveCopyAs;
   // 画板状态的读取在本次运行的测试里没有任务目录：一律读失败，画布按「没有结局记录」处理。
   port.core.taskFs = { readFile: vi.fn(async () => Promise.reject(new Error("测试里没有任务目录"))), writeNewFile: vi.fn() };
