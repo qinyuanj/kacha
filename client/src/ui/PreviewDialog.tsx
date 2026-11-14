@@ -6,13 +6,14 @@ import type { PortRef, RegionRender } from "../core/board";
 import { type LayerRecord } from "../core/taskDir";
 import { useBoardActions, useImageInfos } from "./context";
 import { useShell } from "./shell";
-import type { Point01, Rect01 } from "./rects";
-import { errorText } from "../core/errors";
-import { rectsAfterDrag, regionModeOf, regionSetting, shownRects, type Drag, type RegionMode } from "./previewRegion";
+import type { Rect01 } from "./rects";
+import { regionModeOf, regionSetting, shownRects, type Drag, type RegionMode } from "./previewRegion";
 import { layerIndexOf, layerName } from "./previewLayers";
-import { beginDrag, pointInStage, removeSelected, startEditState, toggleChecked, toggleSolo } from "./previewState";
+import { removeSelected, startEditState, toggleChecked, toggleSolo } from "./previewState";
 import { PreviewFooter, PreviewHeader } from "./previewViews";
 import { PreviewStage } from "./previewStage";
+import { exportAllImages, exportOneImage } from "./previewExport";
+import { dragPoint, editStateOf, pointAt, rectsAfter, startDragAt } from "./previewDrag";
 
 export interface PreviewLayer {
   record: LayerRecord;
@@ -155,13 +156,8 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
   const first = editing?.firstRegion ?? 0;
   const layerInfos = useImageInfos(layers.map((l) => l.absPath));
 
-  const pointAt = (e: { clientX: number; clientY: number }): Point01 => {
-    const box = stage.current!.getBoundingClientRect();
-    return pointInStage(box, e);
-  };
-
   const startEdit = (target: RegionTarget) => {
-    const next = startEditState(target);
+    const next = editStateOf(target);
     setEditing(next.editing);
     setRegionMode(next.regionMode);
     setRects(next.rects);
@@ -171,8 +167,8 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (!editing || e.button !== 0 || !stage.current) return;
-    const p = pointAt(e);
-    const next = beginDrag({ editing, regionMode, rects, selected, drag }, e.target, p);
+    const p = pointAt(stage, e);
+    const next = startDragAt({ editing, regionMode, rects, selected, drag }, e.target, p);
     e.preventDefault();
     setSelected(next.selected);
     setDrag(next.drag);
@@ -180,10 +176,10 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
 
   useEffect(() => {
     if (!drag) return;
-    const move = (e: PointerEvent) => setDrag((d) => (d ? { ...d, current: pointAt(e) } : d));
+    const move = (e: PointerEvent) => setDrag((d) => (d ? dragPoint(d, pointAt(stage, e)) : d));
     const up = (e: PointerEvent) => {
-      const p = pointAt(e);
-      setRects((rs) => rectsAfterDrag(drag, rs, p));
+      const p = pointAt(stage, e);
+      setRects((rs) => rectsAfter(drag, rs, p));
       setDrag(null);
     };
     window.addEventListener("pointermove", move);
@@ -207,27 +203,8 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
     onClose();
   };
 
-  const runExport = async (fn: () => Promise<string | null>) => {
-    setBusy(true);
-    try {
-      const done = await fn();
-      if (done) toast(done);
-    } catch (e) {
-      toast(`导出失败：${errorText(e)}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const exportOne = (absPath: string) =>
-    runExport(async () => {
-      await port.media.saveCopyAs(absPath);
-      return "已开始下载";
-    });
-  const exportAll = () =>
-    runExport(async () => {
-      port.media.downloadImage(req.absPath);
-      return "已开始下载：底图、全部图层与 layers.json（zip）";
-    });
+  const exportOne = (absPath: string) => void exportOneImage(port.media, toast, setBusy, absPath);
+  const exportAll = () => void exportAllImages(port.media, toast, setBusy, req.absPath);
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>

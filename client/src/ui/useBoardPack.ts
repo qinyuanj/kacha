@@ -1,5 +1,5 @@
 // 画板包界面流程：导出 = 可取消的 hash 阶段 → 确认（含预估大小）→ 可取消的打包阶段与浏览器下载；浏览器选包 → 可取消进度里上传、判定、导入 → 打开画板。
-// 各个步骤在 ui/boardPackOps.ts 与 ui/boardPackImport.ts（#137），这里只留接线。
+// 各个步骤在 ui/boardPackOps.ts 与 ui/boardPackImportOps.ts（#137），这里只留接线。
 import { useCallback, useState } from "react";
 import { type Board } from "../core/board";
 import type { PackDialogState } from "./BoardPackDialog";
@@ -13,6 +13,29 @@ interface PackBoards {
   getBoard: (key: string) => Board | null;
   boardFileName: (key: string) => string | null;
   openImportedBoard: (path: string) => Promise<void>;
+}
+
+/** 导出用到的端口。 */
+function exportDeps(port: ReturnType<typeof useShell>): Parameters<typeof exportPlanStep>[0] {
+  return {
+    packFs: port.core.packFs,
+    io: port.pack.io,
+    facts: (spec) => port.pack.facts(spec),
+    exportPack: (target, spec) => port.pack.exportPack(target, spec),
+    version: () => port.ui.version(),
+    log: (kind, fields) => port.ui.log(kind, fields),
+  };
+}
+
+/** 导入用到的端口。 */
+function importDeps(port: ReturnType<typeof useShell>, openImportedBoard: (path: string) => Promise<void>): PackImportDeps {
+  return {
+    pickPackFile: () => port.media.pickPackFile(),
+    import: (file, options) => port.pack.import(file, options),
+    listSlots: () => port.board.list().then((l) => l.slots, () => null),
+    openBoard: (path) => openImportedBoard(path),
+    log: (kind, fields) => port.ui.log(kind, fields),
+  };
 }
 
 export function useBoardPack(userRoot: string | null, boards: PackBoards, toast: (message: string) => void) {
@@ -29,20 +52,7 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
       const board = boards.getBoard(key);
       const boardFile = boards.boardFileName(key);
       if (!board || !boardFile) return;
-      const step = await exportPlanStep(
-        {
-          packFs: port.core.packFs,
-          io: port.pack.io,
-          facts: (spec) => port.pack.facts(spec),
-          exportPack: (target, spec) => port.pack.exportPack(target, spec),
-          version: () => port.ui.version(),
-          log: (kind, fields) => port.ui.log(kind, fields),
-        },
-        board,
-        boardFile,
-        userRoot,
-        progress,
-      );
+      const step = await exportPlanStep(exportDeps(port), board, boardFile, userRoot, progress);
       if (step.kind === "failed") {
         setDialog(null);
         return toast(step.text);
@@ -55,34 +65,16 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
   const confirmExport = useCallback(async () => {
     if (!userRoot || dialog?.stage !== "confirmExport") return;
     const { boardFile, plan, contents } = dialog;
-    const result = await exportPackStep(
-      {
-        packFs: port.core.packFs,
-        io: port.pack.io,
-        facts: (spec) => port.pack.facts(spec),
-        exportPack: (target, spec) => port.pack.exportPack(target, spec),
-        version: () => port.ui.version(),
-        log: (kind, fields) => port.ui.log(kind, fields),
-      },
-      boardFile,
-      plan,
-      contents,
-      progress,
-    );
+    const result = await exportPackStep(exportDeps(port), boardFile, plan, contents, progress);
     setDialog(null);
     toast(result.text);
   }, [userRoot, dialog, toast]);
 
   const importPack = useCallback(async () => {
     if (!userRoot) return;
-    const deps: PackImportDeps = {
-      pickPackFile: () => port.media.pickPackFile(),
-      import: (file, options) => port.pack.import(file, options),
-      listSlots: () => port.board.list().then((l) => l.slots, () => null),
-      openBoard: (path) => boards.openImportedBoard(path),
-      log: (kind, fields) => port.ui.log(kind, fields),
-    };
-    const outcome = await packImportOutcome(deps, progress, (phase) => setDialog((d) => (d?.stage === "progress" ? { ...d, detail: IMPORT_PHASES[phase] } : d)));
+    const outcome = await packImportOutcome(importDeps(port, boards.openImportedBoard), progress, (phase) =>
+      setDialog((d) => (d?.stage === "progress" ? { ...d, detail: IMPORT_PHASES[phase] } : d)),
+    );
     if (outcome.kind === "dialog") return setDialog(outcome.state);
     setDialog(null);
     if (outcome.text) toast(outcome.text);

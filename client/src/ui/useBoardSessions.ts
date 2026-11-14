@@ -6,12 +6,10 @@ import type { BoardChange, EditEnv, EditResult } from "../core/edit";
 import { newId } from "../core/ids";
 import { redo, undo, type History } from "../core/history";
 import { basename, resolveFromRoot } from "../core/paths";
-import { serializeBoard } from "../core/board";
-import { sha256Hex } from "../core/sha256";
 import { knownImageInfo } from "./context";
 import { useShell } from "./shell";
-import { errorText } from "../core/errors";
-import { isReadOnly, isMissing, samePath, saveErrorFlags, saveErrorText } from "./boardSessions";
+import { isReadOnly, samePath } from "./boardSessions";
+import { useAutosave } from "./boardSessionsAutosave";
 import {
   applyChange,
   archiveBoardSession,
@@ -29,7 +27,7 @@ import {
   type SessionStore,
 } from "./boardSessionsOps";
 
-export const AUTOSAVE_DEBOUNCE_MS = 1000;
+export { AUTOSAVE_DEBOUNCE_MS } from "./boardSessionsAutosave";
 
 export type Session =
   | {
@@ -53,12 +51,6 @@ export type OkSession = Extract<Session, { status: "ok" }>;
 /** 编辑环境里随应用状态变化的部分：能力表、网关发现、该画板的锁定集（排队 / 执行 / 限流退避中的任务节点）。 */
 export type EnvSource = (key: string) => Pick<EditEnv, "table" | "discovery" | "locked">;
 
-interface Saver {
-  timer: ReturnType<typeof setTimeout> | null;
-  /** 串行化同一画板的写入，避免旧写入覆盖新写入。 */
-  chain: Promise<void>;
-}
-
 /** 会话状态与查找。 */
 export function useSessionState(): SessionStore & { sessions: Session[] } {
   const [sessions, setSessionsState] = useState<Session[]>([]);
@@ -76,72 +68,6 @@ export function useSessionState(): SessionStore & { sessions: Session[] } {
   );
   const sessionOf = useCallback((key: string) => sessionsRef.current.find((x) => x.key === key), []);
   return { sessions, sessionsRef, setSessions, patch, sessionOf };
-}
-
-/** 去抖自动保存：每块画板一个计时器与一条串行写入链。 */
-export function useAutosave(
-  patch: (key: string, fn: (s: OkSession) => OkSession) => void,
-  sessionOf: (key: string) => Session | undefined,
-  isReadOnlyPath: (path: string) => boolean,
-  port: ReturnType<typeof useShell>,
-) {
-  const savers = useRef(new Map<string, Saver>());
-  const saverOf = (key: string): Saver => {
-    let saver = savers.current.get(key);
-    if (!saver) {
-      saver = { timer: null, chain: Promise.resolve() };
-      savers.current.set(key, saver);
-    }
-    return saver;
-  };
-  /** 唯一写入实现：带内容版本（新建则只新建不覆盖），成功后用同一算法回写新版本。 */
-  const writeSession = async (key: string, s: OkSession) => {
-    const text = serializeBoard(s.board);
-    await port.board.write(s.path, text, s.version ? { version: s.version } : { createOnly: true });
-    const version = await sha256Hex(new TextEncoder().encode(text));
-    patch(key, (x) => (samePath(x.path, s.path) ? { ...x, version, saveError: null } : x));
-  };
-  const flush = useCallback(
-    (key: string): Promise<void> => {
-      const saver = saverOf(key);
-      if (saver.timer) clearTimeout(saver.timer);
-      saver.timer = null;
-      saver.chain = saver.chain.then(async () => {
-        // 写入时再取最新会话：路径可能刚被重命名或另存。
-        const s = sessionOf(key);
-        // 归档画板只读（#90）：从不写回，服务端也会拒绝。
-        if (!s || s.status !== "ok" || s.conflicted || isReadOnlyPath(s.path)) return;
-        try {
-          await writeSession(key, s);
-        } catch (e) {
-          port.ui.log("board_save_failed", { board_file: basename(s.path), reason: "autosave", message: errorText(e) });
-          patch(key, (x) => ({ ...x, saveError: saveErrorText(s.path, errorText(e), isMissing(e)), ...saveErrorFlags(e) }));
-        }
-      });
-      return saver.chain;
-    },
-    [patch, sessionOf, isReadOnlyPath],
-  );
-  const scheduleSave = useCallback(
-    (key: string) => {
-      const saver = saverOf(key);
-      if (saver.timer) clearTimeout(saver.timer);
-      saver.timer = setTimeout(() => void flush(key), AUTOSAVE_DEBOUNCE_MS);
-    },
-    [flush],
-  );
-  /** 关闭全部标签页（切换用户数据根时用）；先落盘。 */
-  const flushAll = useCallback(async () => {
-    const pending = [...savers.current.entries()].filter(([, s]) => s.timer !== null).map(([key]) => flush(key));
-    await Promise.all([...pending, ...[...savers.current.values()].map((s) => s.chain)]);
-  }, [flush]);
-  /** 停掉一块画板的待写计时器（关标签页时）。 */
-  const cancelTimer = useCallback((key: string) => {
-    const saver = savers.current.get(key);
-    if (saver?.timer) clearTimeout(saver.timer);
-    savers.current.delete(key);
-  }, []);
-  return { flush, scheduleSave, flushAll, cancelTimer, savers, saverOf };
 }
 
 /** 当前会话的切换。 */
