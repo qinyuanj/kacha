@@ -31,6 +31,7 @@ import { useBoardPack } from "./ui/useBoardPack";
 import { useBoardSessions } from "./ui/useBoardSessions";
 import { errorText } from "./core/errors";
 import { useShell } from "./ui/shell";
+import { downloadBoardResults } from "./ui/packMenu";
 
 export function App({ onLogout, version, sessionExpired = false }: { onLogout?: () => void; version?: string | null; sessionExpired?: boolean } = {}) {
   const port = useShell();
@@ -471,8 +472,9 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
             if (action === "importPack") void pack.importPack();
             else if (action === "exportPack" && active) void pack.prepareExport(active.key);
             else if (action === "downloadResults" && active) {
-              port.media.downloadBoardResults(active.path);
-              toast("已开始下载整板结果（含各结果的图层），缺失的结果列在包内 缺失文件.txt");
+              // 端口可能说这项能力还没有（桌面壳本切片没有结果下载）：说清「尚不可用」，
+              // 不能报成功，也不能让拒绝冒成未捕获异常。
+              downloadBoardResults(port, active.path, toast);
             }
           }}
           onClose={() => setPackMenu(null)}
