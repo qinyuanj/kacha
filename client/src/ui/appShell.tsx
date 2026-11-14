@@ -6,7 +6,6 @@ import { AppNotices } from "./appNotices";
 import { BackupHint } from "./appBars";
 import type { AppView } from "./appView";
 import type { Session } from "./useBoardSessions";
-import type { RunTarget } from "../core/runner";
 
 /** 工作台的外壳：顶栏、画板列表、工具栏、提示条与工作区。 */
 export function AppShell(props: {
@@ -153,16 +152,3 @@ export function AppShell(props: {
   );
 }
 
-/** 工作台外壳要用的那些提示条参数。 */
-export interface AppShellNotices {
-  tableError: string | null;
-  settingsFileProblem: string | null;
-  settingsOpen: boolean;
-  usageNotice: { level: "warn" | "alert"; total: number; limit: number } | null;
-}
-
-/** 运行指示的参数（从运行器快照来）。 */
-export type AppRunIndicator = ComponentProps<typeof AppToolbar>["runIndicator"];
-
-/** 提交运行的参数。 */
-export type AppRunTarget = RunTarget;

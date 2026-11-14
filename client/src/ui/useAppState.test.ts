@@ -1,6 +1,6 @@
 // 启动读数与版本提醒（#137）。
 import { describe, expect, it } from "vitest";
-import { boardMissingText, boardRenamedText, discardMissingText, restorePlan, shouldRecordVersion, stopTasksText } from "./appStartup";
+import { boardMissingText, discardMissingText, restorePlan, shouldRecordVersion, stopTasksText } from "./appStartup";
 
 describe("版本提醒", () => {
   it("没有见过这个版本：要提醒", () => {
@@ -42,6 +42,5 @@ describe("文案", () => {
     expect(stopTasksText(2)).toContain("2");
     expect(discardMissingText).toContain("导出画板包");
     expect(boardMissingText).toContain("刷新列表");
-    expect(boardRenamedText).toContain("刷新列表");
   });
 });

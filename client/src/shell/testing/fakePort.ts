@@ -17,7 +17,7 @@ import {
   fakeUsageStore,
 } from "./fakePortStores";
 
-export type { FakeBoard, FakeCalls, FakeImportOutcome, FakePortOptions } from "./fakePortTypes";
+export type { FakeCalls, FakePortOptions } from "./fakePortTypes";
 
 /** 造一个端口失败（界面按 kind 分支）。 */
 export const fakeFailure = (kind: PortFailureKind, message: string = kind, feature?: FeatureId): PortError =>

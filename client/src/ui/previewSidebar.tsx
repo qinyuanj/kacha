@@ -1,7 +1,8 @@
 // 预览弹窗的图层侧栏（#137）：从 ui/PreviewDialog.tsx 拆出的子组件，让弹窗本体只留接线。
 import type { LayerRecord } from "../core/taskDir";
+
+import { alphaBadgeText, exportOneLabel, pickedLayerIndex } from "./previewHandlers";
 import { layerName } from "./previewLayers";
-import { pickedLayerIndex } from "./previewHandlers";
 
 /** 一层预览图。 */
 export interface PreviewLayer {
@@ -50,11 +51,11 @@ export function LayerSidebar(props: {
               />
               <span title={layer.record.description}>
                 {layerName(layer.record, i)}
-                {layerInfos.get(layer.absPath)?.has_alpha && <span className="badge">透明</span>}
+                {layerInfos.get(layer.absPath)?.has_alpha && <span className="badge">{alphaBadgeText}</span>}
               </span>
             </label>
             <button className="link small" disabled={busy} onClick={() => props.onExportOne(layer.absPath)}>
-              保存
+              {exportOneLabel}
             </button>
           </li>
         ))}

@@ -6,9 +6,9 @@ import type { PortRef, RegionRender } from "../core/board";
 import { useBoardActions, useImageInfos } from "./context";
 import { useShell } from "./shell";
 import type { Rect01 } from "./rects";
-import { regionSetting, shownRects, type Drag, type RegionMode } from "./previewRegion";
+import { shownRects, type Drag, type RegionMode } from "./previewRegion";
 
-import { removeSelected, toggleChecked, toggleSolo } from "./previewState";
+import { clearRects, regionChange, removeSelected, toggleChecked, toggleSolo } from "./previewState";
 import { PreviewFooter, PreviewHeader } from "./previewViews";
 import { PreviewStage } from "./previewStage";
 import { LayerSidebar, type PreviewLayer } from "./previewSidebar";
@@ -105,7 +105,7 @@ function useRegionEditing(req: { edit?: RegionTarget }) {
     setSelected(null);
   };
   const clearAll = () => {
-    setRects([]);
+    setRects(clearRects());
     setSelected(null);
   };
   return { stage, editing, regionMode, setRegionMode, rects, selected, startEdit, onPointerDown, removeOne, clearAll, shown: shownRects(drag, rects) };
@@ -130,7 +130,7 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
 
   const saveRegion = () => {
     if (!editing) return;
-    apply({ kind: "setRegion", edge: editing.edgeRef, region: regionSetting(rects, regionMode) });
+    apply(regionChange(editing.edgeRef, rects, regionMode));
     onClose();
   };
 

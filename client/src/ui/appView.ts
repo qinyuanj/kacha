@@ -3,7 +3,8 @@
 import type { Board } from "../core/board";
 import type { SizeTier } from "../core/boardSize";
 import type { Session } from "./useBoardSessions";
-import { activeSession, archivedPath, boardNoticeText, boardOpenState, boardTitleOf, failingSessions, historyLabels, packMenuReason, sizeNoticeOf, type FailingSession } from "./appCallbacks";
+import { usageNoticeVisible } from "./appUiState";
+import { activeSession, archivedPath, boardNoticeText, boardOpenState, boardTitleOf, dismissSizeNotice, enterTidy, failingSessions, historyLabels, packMenuReason, sizeNoticeOf, type FailingSession } from "./appCallbacks";
 
 /** 工作台此刻的样子：所有派生值一次算好。 */
 export interface AppView {
@@ -60,8 +61,7 @@ export function sizeQueryOf(session: Session | undefined): { path: string; versi
 /** 用量提醒（没到线时为 null）。 */
 export function usageNoticeOf(notice: { level: SizeTier; total: number; limit: number } | null, dismissed: SizeTier | null): { level: SizeTier; total: number; limit: number } | null {
   if (!notice) return null;
-  const same = dismissed === "alert" || dismissed === notice.level;
-  return same ? null : notice;
+  return usageNoticeVisible(notice.level, dismissed) ? notice : null;
 }
 
 /** 更新提示（已经看过就不提示）。 */
@@ -110,17 +110,9 @@ export const orDefault = <T,>(value: T | null | undefined, fallback: T): T => (v
 /** 可选字符串：没有时给空串。 */
 export const orEmpty = (value: string | null | undefined): string => orDefault(value, "");
 
-/** 可选数字：没有时给 0。 */
-export const orZero = (value: number | null | undefined): number => orDefault(value, 0);
-
 /** 当前画板的锁定集（没有画板时为空集）。 */
 export function lockedOf(locked: ReadonlySet<string> | undefined): ReadonlySet<string> {
   return locked ?? new Set<string>();
-}
-
-/** 当前画板的运行节点表（没有画板时为空表）。 */
-export function runNodesOf(nodes: ReadonlyMap<string, unknown> | undefined): ReadonlyMap<string, unknown> {
-  return nodes ?? new Map<string, unknown>();
 }
 
 /** 当前画板已经手过的任务（没有画板时为空集）。 */
@@ -162,13 +154,12 @@ export { openFromList } from "./appCallbacks";
 export function tidyAction(view: AppView, notices: Record<string, SizeTier>, setSizeNotices: (next: Record<string, SizeTier>) => void, setTidyKey: (key: string | null) => void): void {
   const notice = view.sizeNotice;
   if (!notice) return;
-  setSizeNotices({ ...notices, [notice.path]: notice.tier });
-  if (view.active?.status === "ok") setTidyKey(view.active.key);
+  enterTidy(notices, notice.path, notice.tier ?? "warn", view.active, setSizeNotices, setTidyKey);
 }
 
 /** 提示条的动作：关闭体量提示。 */
 export function dismissSizeAction(view: AppView, notices: Record<string, SizeTier>, setSizeNotices: (next: Record<string, SizeTier>) => void): void {
   const notice = view.sizeNotice;
   if (!notice) return;
-  setSizeNotices({ ...notices, [notice.path]: notice.tier });
+  dismissSizeNotice(notices, notice.path, notice.tier ?? "warn", setSizeNotices);
 }

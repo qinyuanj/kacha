@@ -1,6 +1,6 @@
 // 高级设置面板的可见判定（#137）：从 ui/SettingsPanel.tsx 拆出的纯逻辑，便于单测。
 // 组件只留接线与 DOM 摆放。
-import { DEFAULT_SETTINGS, isPlainHttp, MAX_CONCURRENCY, mayOverwriteSettings, parseConcurrency, validateBaseUrl, type LoadedSettings, type Settings } from "../core/settings";
+import { DEFAULT_SETTINGS, isPlainHttp, MAX_CONCURRENCY, mayOverwriteSettings, parseConcurrency, settingsFromForm, validateBaseUrl, type LoadedSettings, type Settings } from "../core/settings";
 
 /** 面板此刻的样子：哪些提示要显示、保存能不能点。 */
 export interface SettingsPanelView {
@@ -70,5 +70,5 @@ export function discoveryText(discovery: { source: "live" | "cached" | "none"; f
 
 /** 保存时要写入的设置：在已存设置上套用表单。 */
 export function settingsToSave(saved: Settings, baseUrl: string, concurrencyDraft: string): Settings {
-  return { ...saved, base_url: baseUrl.trim().replace(/\/+$/, ""), concurrency: parseConcurrency(concurrencyDraft, saved.concurrency) };
+  return settingsFromForm(saved, { baseUrl, concurrencyDraft });
 }

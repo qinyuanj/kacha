@@ -1,7 +1,7 @@
 // 预览弹窗的拖拽接线（#137）：从 ui/PreviewDialog.tsx 拆出的模块级函数，便于单测。
 import type { Point01, Rect01 } from "./rects";
-import { beginDrag, pointInStage, startEditState, type PreviewEditState } from "./previewState";
-import { rectsAfterDrag, type Drag } from "./previewRegion";
+import { beginDrag, endDrag, pointInStage, startEditState, type PreviewEditState } from "./previewState";
+import type { Drag } from "./previewRegion";
 import type { RegionTarget } from "./PreviewDialog";
 
 /** 舞台上的坐标换算。 */
@@ -22,7 +22,11 @@ export function dragPoint(drag: Drag, at: Point01): Drag {
 
 /** 松手：把拖动结果落到矩形上。 */
 export function rectsAfter(drag: Drag, rects: Rect01[], at: Point01): Rect01[] {
-  return rectsAfterDrag(drag, rects, at);
+  let next = rects;
+  endDrag({ editing: null, regionMode: "overlay", rects, selected: null, drag }, at, (r) => {
+    next = r;
+  });
+  return next;
 }
 
 /** 进入编辑另一个目标：区域、表达方式与选中态都换过去。 */

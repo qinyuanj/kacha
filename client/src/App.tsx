@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Board } from "./core/board";
 import { BUILTIN_TABLE, type CapabilityTable } from "./core/capabilities";
 import type { BoardChange } from "./core/edit";
-import { basename } from "./core/paths";
 import type { Runner, RunTarget } from "./core/runner";
 import { useActiveBoardSize } from "./ui/useBoardSize";
 import { shouldShowUpdateNotice } from "./core/changelog";
@@ -45,6 +44,8 @@ import {
 } from "./ui/appView";
 import {
   activateBoard,
+  boardFileOf,
+  closeBoardList,
   applyActive,
   cancelTaskOn,
   checkActive,
@@ -307,7 +308,7 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
         }}
         canvasProps={{
           board: canvasBoard(view.active, EMPTY_BOARD),
-          boardFile: basename(view.active?.path ?? ""),
+          boardFile: boardFileOf(view.active),
           table,
           userRoot: orEmpty(userRoot),
           apply: (change: BoardChange) => applyActive(apply, activeKey, change) as ReturnType<typeof apply>,
@@ -338,14 +339,13 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
         onCloseTab={(key) => void closeOne(key)}
         onRename={(key, title) => void boards.renameBoard(key, title)}
         onCreate={() => void createOne()}
-        onOpenList={() => void boards.flushAll().then(() => store.setBoardListOpen(true))}
+        onOpenList={() => openManageBoards(boards.flushAll, store.setManageBoards, store.setBoardListOpen)}
         onExportPack={(key) => void pack.prepareExport(key)}
         onOpenChangelog={openChangelog}
         onCloseUpdateNotice={() => store.setLastSeenVersion(versionOrUndefined(version))}
         onOpenListItem={(path) => openFromList(openPath, toast, path)}
         onCloseBoardList={() => {
-          store.setBoardListOpen(false);
-          store.setManageBoards(false);
+          closeBoardList(store.setBoardListOpen, store.setManageBoards);
           usageLimit.refresh();
         }}
         onDeleteBoard={deleteBoardAt}

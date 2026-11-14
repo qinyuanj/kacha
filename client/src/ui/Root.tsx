@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { App } from "../App";
 import { useShell } from "./shell";
 import { bootSession, submitKey, type Phase } from "./rootSession";
-import { KeyEntryForm, SessionExpiredModal, useKeyFocus } from "./rootViews";
+import { fatalText, KeyEntryForm, SessionExpiredModal, useKeyFocus } from "./rootViews";
 
 export function Root() {
   const port = useShell();
@@ -24,7 +24,7 @@ export function Root() {
   useEffect(() => {
     void (async () => {
       const result = await bootSession(session);
-      if (result.kind === "fatal") return setFatal(result.message);
+      if (result.kind === "fatal") return setFatal(fatalText(result.message));
       setVersion(result.version);
       setPhase(result.kind);
     })();

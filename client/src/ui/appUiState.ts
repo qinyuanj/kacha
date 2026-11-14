@@ -1,7 +1,6 @@
 // 工作台的界面状态判定（#137）：从 src/App.tsx 拆出的纯逻辑，便于单测。
 import { moveSizeNotice, serializeUiState, type UiState } from "../core/uiState";
 import { sizeNotice, type SizeTier } from "../core/boardSize";
-import { usageLimitText } from "./boardText";
 
 /** 一次会话快照：写界面状态用。 */
 export interface SessionSnapshot {
@@ -36,9 +35,6 @@ export function usageNoticeVisible(level: SizeTier | null, dismissed: SizeTier |
   if (!level) return false;
   return !(dismissed === "alert" || dismissed === level);
 }
-
-/** 用量提醒的文案。 */
-export { usageLimitText };
 
 /** 页面级模态开着：粘贴放行给弹窗，不落到背后的画板（#96）。 */
 export function modalOpenOf(state: {

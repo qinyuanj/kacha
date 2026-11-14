@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { LayerRecord } from "../core/taskDir";
 import type { ImageInfo } from "../shell/port";
-import { baseImageAlt, baseImagePath, layerIndexOf, layerName, layerStyleOf } from "./previewLayers";
+import { baseImageAlt, baseImagePath, layerName, layerStyleOf } from "./previewLayers";
 
 const INFO: ImageInfo = { sha256: "a", bytes: 10, width: 100, height: 50, format: "png", has_alpha: false };
 
@@ -41,12 +41,5 @@ describe("预览图层", () => {
     expect(baseImagePath(req, layers, 0)).toBe("/~/l0.png");
     expect(baseImageAlt(req, layers, null)).toBe("预览");
     expect(baseImageAlt(req, layers, 0)).toBe("l.png");
-  });
-
-  it("选来源：底图是 0，图层从 1 起；越界当没有图层", () => {
-    expect(layerIndexOf(0, 2)).toBeNull();
-    expect(layerIndexOf(1, 2)).toBe(1);
-    expect(layerIndexOf(2, 2)).toBe(2);
-    expect(layerIndexOf(3, 2)).toBeNull();
   });
 });

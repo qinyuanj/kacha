@@ -1,5 +1,7 @@
 // 放大预览弹窗的头与尾（#137）：从 ui/PreviewDialog.tsx 拆出的子组件，让弹窗本体只留接线。
 import { MAX_REGIONS } from "../core/overlay";
+import { overRegionLimit } from "./previewRegion";
+import { targetLabel } from "./previewState";
 import type { Rect01 } from "./rects";
 import type { RegionMode } from "./previewRegion";
 import type { RegionTarget } from "./PreviewDialog";
@@ -68,7 +70,7 @@ export function PreviewFooter(props: {
     <div className="modal-foot">
       {editing ? (
         <>
-          <span className={first + rects.length > MAX_REGIONS ? "region-limit-exceeded" : "muted"}>
+          <span className={overRegionLimit(first + rects.length) ? "region-limit-exceeded" : "muted"}>
             拖拽空白处画新矩形；拖动矩形移动，拖动角柄缩放。提示词里写「区域N」指代对应区域，每个任务最多 {MAX_REGIONS} 个。{regionMode === "point" && "坐标点取每个框的中心，影响范围由模型判断。"}
           </span>
           <button disabled={selected === null} onClick={props.onRemove}>
@@ -90,8 +92,7 @@ export function PreviewFooter(props: {
                 框选修改区域：
                 {targets.map((t) => (
                   <button key={`${t.edgeRef.from.join(":")}->${t.edgeRef.to.join(":")}`} className="link" onClick={() => props.onStartEdit(t)}>
-                    {t.label}
-                    {t.rects.length > 0 ? `（${t.rects.length} 区域）` : ""}
+                    {targetLabel(t)}
                   </button>
                 ))}
               </>

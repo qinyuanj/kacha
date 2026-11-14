@@ -1,6 +1,6 @@
 // 放大预览弹窗的状态（#137）：从 ui/PreviewDialog.tsx 拆出的模块级函数，便于单测。
 import type { Point01, Rect01 } from "./rects";
-import { dragHandleOf, startDrag, type Drag } from "./previewRegion";
+import { dragHandleOf, rectsAfterDrag, regionSetting, startDrag, type Drag } from "./previewRegion";
 import type { RegionTarget } from "./PreviewDialog";
 
 /** 预览弹窗的编辑状态。 */
@@ -34,15 +34,10 @@ export function beginDrag(state: PreviewEditState, target: EventTarget | null, a
 export function endDrag(state: PreviewEditState, at: Point01, apply: (next: Rect01[]) => void): void {
   const drag = state.drag;
   if (!drag) return;
-  const drawn = drag.kind === "draw" ? dragRectOf(drag, at) : null;
-  apply(drawn ? [...state.rects, drawn] : state.rects);
+  apply(rectsAfterDrag(drag, state.rects, at));
 }
 
-/** 拖出的矩形。 */
-function dragRectOf(drag: { kind: "draw"; start: Point01 }, at: Point01): Rect01 | null {
-  const r: Rect01 = [Math.min(drag.start.x, at.x), Math.min(drag.start.y, at.y), Math.max(drag.start.x, at.x), Math.max(drag.start.y, at.y)];
-  return r[2] - r[0] >= 0.01 && r[3] - r[1] >= 0.01 ? r : null;
-}
+
 
 /** 指针位置：相对底图的归一化坐标（钳在 0–1）。 */
 export function pointInStage(box: { left: number; top: number; width: number; height: number }, client: { clientX: number; clientY: number }): Point01 {
@@ -74,9 +69,7 @@ export const clearRects = (): Rect01[] => [];
 
 /** 保存区域时要写进画板的形状。 */
 export function regionChange(edge: RegionTarget["edgeRef"], rects: Rect01[], mode: "overlay" | "bbox" | "point"): { kind: "setRegion"; edge: RegionTarget["edgeRef"]; region: { rects: Rect01[]; render: "highlight_overlay" | "bbox_tag"; coordinate_kind?: "point" | "bbox" } | null } {
-  if (!rects.length) return { kind: "setRegion", edge, region: null };
-  if (mode === "overlay") return { kind: "setRegion", edge, region: { rects, render: "highlight_overlay" } };
-  return { kind: "setRegion", edge, region: { rects, render: "bbox_tag", coordinate_kind: mode } };
+  return { kind: "setRegion", edge, region: regionSetting(rects, mode) };
 }
 
 /** 可编辑目标的入口文字：有区域时带上个数。 */
@@ -85,4 +78,3 @@ export function targetLabel(target: RegionTarget): string {
 }
 
 /** 图层侧栏的名字：没有名字时按序号写「图层N」。 */
-export const layerLabel = (name: string | undefined, index: number): string => name ?? `图层${index + 1}`;

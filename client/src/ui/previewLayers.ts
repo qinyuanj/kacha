@@ -48,7 +48,3 @@ export function baseImageAlt(req: { title: string }, layers: readonly { record: 
   return solo === null ? req.title : layers[solo].record.file;
 }
 
-/** 选来源：底图是 0，图层从 1 起；越界当 null（没有图层）。 */
-export function layerIndexOf(pickSource: number, layerCount: number): number | null {
-  return pickSource > 0 && pickSource <= layerCount ? pickSource : null;
-}

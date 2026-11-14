@@ -1,6 +1,6 @@
 // 预览弹窗的接线判定（#137）：初始状态、选中的层与列表的缺省值。
 import { describe, expect, it } from "vitest";
-import { alphaBadgeText, exportAllLabel, exportOneLabel, initialEditTarget, pickedLayerIndex, previewLayers, previewOutlines, previewTargets } from "./previewHandlers";
+import { alphaBadgeText, exportOneLabel, initialEditTarget, pickedLayerIndex, previewLayers, previewOutlines, previewTargets } from "./previewHandlers";
 
 const target = { label: "x", edgeRef: { from: ["a", "b"] as never, to: ["c", "d"] as never }, rects: [[0, 0, 1, 1] as never], render: "highlight_overlay" as const, firstRegion: 0 };
 
@@ -46,7 +46,6 @@ describe("缺省值", () => {
   });
 
   it("文案", () => {
-    expect(exportAllLabel).toContain("layers.json");
     expect(exportOneLabel).toBe("保存");
     expect(alphaBadgeText).toBe("透明");
   });

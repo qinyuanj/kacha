@@ -64,9 +64,6 @@ export async function exportPackStep(
   return { ok: true, text: exportDoneText(target) };
 }
 
-/** 导出对话框的状态：进度、确认或关闭。 */
-export type ExportDialogState = PackDialogState | null;
-
 /** 进度对话框的状态。 */
 export const progressDialog = (title: string): PackDialogState => ({ stage: "progress", title });
 

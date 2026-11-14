@@ -3,9 +3,8 @@
 import type { Board } from "../core/board";
 import type { RegenerateRequest, RunTarget } from "../core/runner";
 import { buildConfirmItems, collectRunFacts, copiesByNode, runScope, type ConfirmItem } from "../core/submission";
-import { errorText } from "../core/errors";
 import { copyTextDone, copyTextFailed, decideRegenerate, decideRun, NEED_KEY_TEXT } from "./appRun";
-import { boardMissingText, boardRenamedText, discardMissingText, stopTasksText } from "./appStartup";
+import { boardMissingText, discardMissingText, stopTasksText, errorMessage } from "./appStartup";
 
 /** 确认项要用的上下文。 */
 export interface ConfirmContext {
@@ -267,14 +266,6 @@ export async function discardMissing(
   deps.dropSession(key);
 }
 
-/** 从画板列表打开一块画板：打不开时提示。 */
-export async function openFromList(
-  deps: { open(path: string, activate: boolean): Promise<boolean>; toast(message: string): void },
-  path: string,
-): Promise<void> {
-  const opened = await deps.open(path, true);
-  if (!opened) deps.toast(boardRenamedText);
-}
 
 /** 复制发送文本。 */
 export async function copySendText(deps: { copyText(text: string): Promise<void>; toast(message: string): void }, text: string): Promise<void> {
@@ -282,7 +273,7 @@ export async function copySendText(deps: { copyText(text: string): Promise<void>
     await deps.copyText(text);
     deps.toast(copyTextDone);
   } catch (e) {
-    deps.toast(copyTextFailed(errorText(e)));
+    deps.toast(copyTextFailed(errorMessage(e)));
   }
 }
 

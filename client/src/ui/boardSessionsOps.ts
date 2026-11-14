@@ -38,14 +38,6 @@ export interface SessionStore {
   sessionOf(key: string): Session | undefined;
 }
 
-/** 打开一块画板的结果。 */
-export interface OpenResult {
-  /** 打开成功（主文件或 .bak 至少有一个）。 */
-  opened: boolean;
-  /** 新建的会话（新建时才有）。 */
-  session?: Session;
-}
-
 /** 会话是否可编辑（ok 状态且不在归档目录、也没在搬动中）。 */
 export function editable(session: Session | undefined, readOnlyPath: (path: string) => boolean, moving: ReadonlySet<string>): boolean {
   if (!session || session.status !== "ok") return false;

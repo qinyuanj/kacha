@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // 预览的状态判定（#137）：勾选、单层、拖拽与区域改动。
 import { describe, expect, it } from "vitest";
-import { beginDrag, clearRects, endDrag, layerLabel, pointInStage, regionChange, removeSelected, startEditState, targetLabel, toggleChecked, toggleSolo } from "./previewState";
+import { beginDrag, clearRects, endDrag, pointInStage, regionChange, removeSelected, startEditState, targetLabel, toggleChecked, toggleSolo } from "./previewState";
+import { layerName } from "./previewLayers";
 import type { RegionTarget } from "./PreviewDialog";
 
 const target = (patch: Partial<RegionTarget> = {}): RegionTarget => ({
@@ -111,8 +112,8 @@ describe("其余判定", () => {
   });
 
   it("图层名：没有名字时按序号", () => {
-    expect(layerLabel(undefined, 0)).toBe("图层1");
-    expect(layerLabel("底", 0)).toBe("底");
+    expect(layerName({ file: "a.png", name: undefined } as never, 0)).toBe("图层1");
+    expect(layerName({ file: "a.png", name: "底" } as never, 0)).toBe("底");
   });
 
   it("清空区域", () => {

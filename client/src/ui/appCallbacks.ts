@@ -4,39 +4,12 @@ import type { Board } from "../core/board";
 import type { BoardChange } from "../core/edit";
 import type { RunTarget } from "../core/runner";
 import type { Session } from "./useBoardSessions";
+import { boardRenamedText } from "./appStartup";
+import { activeSizeNotice } from "./appUiState";
+import { packMenuDisabled } from "./appUiState";
 import { isArchivedPath } from "../core/archive";
 import { redoLabel, undoLabel } from "../core/history";
-import { sizeNotice, type SizeTier } from "../core/boardSize";
-
-/** 端口里用到的那些。 */
-export interface AppPorts {
-  board: { remove(path: string, version?: string): Promise<void> };
-  media: { copyText(text: string): Promise<void>; downloadBoardResults(path: string): void };
-  ui: { ask(text: string, options?: Record<string, unknown>): Promise<boolean> };
-}
-
-/** 多画板会话里用到的那些。 */
-export interface AppBoards {
-  getBoard(key: string): Board | null;
-  boardFileName(key: string): string | null;
-  keyOf(path: string): string | null;
-  closeBoard(key: string): Promise<void>;
-  deleteBoard(key: string): Promise<void>;
-  archiveBoard(path: string): Promise<void>;
-  unarchiveBoard(path: string): Promise<string | null>;
-  copyAsNewBoard(path: string): Promise<string | null>;
-  dropSession(key: string): void;
-  dismissNotice(key: string): void;
-  reload(key: string): Promise<void>;
-  retrySave(key: string): Promise<void>;
-  openPath(path: string, activate: boolean): Promise<boolean>;
-  flushAll(): Promise<void>;
-  flushNow(key: string): Promise<void>;
-  renameBoard(key: string, title: string): Promise<void>;
-  moveOutStage(key: string, stageId: string): Promise<string>;
-  setActiveKey(key: string): void;
-  snapshot(): { sessions: { key: string; path: string }[]; activeKey: string | null };
-}
+import { type SizeTier } from "../core/boardSize";
 
 /** 运行器里用到的那些。 */
 export interface AppRunner {
@@ -50,11 +23,6 @@ export interface AppRunner {
 /** 当前画板的会话：没有打开的画板时为 undefined。 */
 export function activeSession(sessions: readonly Session[], activeKey: string | null): Session | undefined {
   return sessions.find((s) => s.key === activeKey);
-}
-
-/** 当前画板能不能打开（ok 状态才进画布）。 */
-export function openableBoard(session: Session | undefined): Board | null {
-  return session?.status === "ok" ? session.board : null;
 }
 
 /** 保存失败的画板（要提示的那几块）。 */
@@ -95,9 +63,7 @@ export function archivedPath(session: Session | undefined, userRoot: string | nu
 
 /** 画板包菜单的禁用原因：导出与下载各说各的。 */
 export function packMenuReason(session: Session | undefined, action: "exportPack" | "downloadResults"): string | null {
-  if (session?.status === "ok") return null;
-  if (!session) return "没有打开的画板";
-  return action === "exportPack" ? "画板无法打开，不能导出" : "画板无法打开，不能下载";
+  return packMenuDisabled(session, action);
 }
 
 /** 画板变更的接线：提交与结果立即落盘（避免关页时丢）。 */
@@ -174,7 +140,7 @@ export interface SizeNoticeView {
 /** 当前画板的体量提示：按体量分档，按已提醒的档位决定要不要再提醒。 */
 export function sizeNoticeOf(size: { path: string; bytes: number; tier: SizeTier | null } | null, notices: Record<string, SizeTier>): SizeNoticeView | null {
   if (!size) return null;
-  const noticed = sizeNotice(size.tier, notices[size.path]);
+  const noticed = activeSizeNotice(size.tier, notices[size.path]);
   return { path: size.path, bytes: size.bytes, tier: noticed.show, notified: noticed.notified };
 }
 
@@ -219,7 +185,7 @@ export function packMenuPick(action: "importPack" | "exportPack" | "downloadResu
 /** 画板列表里打开一块画板：打不开时提示。 */
 export function openFromList(open: (path: string, activate: boolean) => Promise<boolean>, toast: (message: string) => void, path: string): void {
   void open(path, true).then((opened) => {
-    if (!opened) toast("画板不存在，可能已在别处改名；请刷新列表");
+    if (!opened) toast(boardRenamedText);
   });
 }
 

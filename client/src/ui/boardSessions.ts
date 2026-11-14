@@ -41,7 +41,9 @@ export function deleteBlockedText(state: { missing: boolean; conflicted: boolean
 }
 
 /** 归档前的阻断说明：与删除同一套口径。 */
-export const archiveBlockedText = deleteBlockedText;
+export function archiveBlockedText(state: { missing: boolean; conflicted: boolean; saveError: string }): string {
+  return deleteBlockedText(state);
+}
 
 /** 删除失败后的画板状态：画板已不存在就标 missing，其余标 conflicted。 */
 export function deleteFailureState(e: unknown): { saveError: string | null; conflicted: boolean; missing: boolean } {
@@ -64,7 +66,3 @@ export function moveOutBlockedText(reason: "readOnly" | "notEditable" | "busy" |
   }
 }
 
-/** 移出为新画板：新画板写好之后原画板的移出被拒（期间有任务开始运行）。 */
-export function moveOutDoneText(title: string, hint: string | null): string {
-  return TIDY_TEXT.movedOutKept(title, hint);
-}

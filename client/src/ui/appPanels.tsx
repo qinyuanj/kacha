@@ -1,6 +1,5 @@
 // 工作台各个区块的子组件（#137）：从 src/App.tsx 拆出，让 App 只留接线与状态。
 import type { ComponentProps, ReactNode } from "react";
-import type { Board } from "../core/board";
 import { ReactFlowProvider } from "@xyflow/react";
 import { BoardCanvas } from "./BoardCanvas";
 import { BoardListDialog } from "./BoardListDialog";
@@ -256,5 +255,3 @@ export function AppWorkspace({
   );
 }
 
-/** 画板会话里的画板内容（工作区用）。 */
-export const boardOf = (session: Session | undefined): Board | null => (session?.status === "ok" ? session.board : null);

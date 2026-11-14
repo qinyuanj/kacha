@@ -6,14 +6,6 @@ import { importOutcome } from "./boardPackImport";
 import type { PackDialogState } from "./BoardPackDialog";
 import type { LogKind } from "../shell/log";
 
-/** 导入用到的端口。 */
-export interface PackImportPort {
-  media: { pickPackFile(): Promise<File | null> };
-  board: { list(): Promise<{ slots: { used: number; total: number } }> };
-  pack: { import(file: File, options: ImportOptions): Promise<Awaited<ReturnType<typeof importOutcome>> extends never ? never : never> };
-  ui: { log(kind: string, fields: Record<string, unknown>): void };
-}
-
 /** 导入的结局。 */
 export type PackImportResult =
   /** 一句话提示。 */

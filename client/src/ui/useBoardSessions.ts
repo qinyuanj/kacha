@@ -27,8 +27,6 @@ import {
   type SessionStore,
 } from "./boardSessionsOps";
 
-export { AUTOSAVE_DEBOUNCE_MS } from "./boardSessionsAutosave";
-
 export type Session =
   | {
       key: string;
