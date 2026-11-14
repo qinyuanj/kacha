@@ -4,6 +4,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { UNAVAILABLE_TEXT } from "../core/uiText";
 import { BoardToolbar } from "./BoardToolbar";
 
 // React 19 的 act() 要在测试环境里显式打开。
@@ -86,7 +87,7 @@ describe("画板工具栏", () => {
     const onRun = vi.fn();
     await show({ generationUnavailable: true, onRun });
     const run = buttonWithText("▶ 运行");
-    expect(run.textContent).toContain("（尚不可用）");
+    expect(run.textContent).toContain("（" + UNAVAILABLE_TEXT + "）");
     expect(run.getAttribute("aria-disabled")).toBe("true");
     expect(buttonWithText("＋ 生成任务").getAttribute("aria-disabled")).toBe("true");
     await act(async () => run.click());
@@ -96,7 +97,7 @@ describe("画板工具栏", () => {
   it("整理：不可用时标「尚不可用」并置灰；在整理模式时按钮按下", async () => {
     await show({ tidyUnavailable: true });
     const tidy = buttonWithText("整理");
-    expect(tidy.textContent).toBe("整理（尚不可用）");
+    expect(tidy.textContent).toBe("整理（" + UNAVAILABLE_TEXT + "）");
     expect(tidy.getAttribute("aria-disabled")).toBe("true");
     await show({ tidying: true });
     expect(buttonWithText("整理").getAttribute("aria-pressed")).toBe("true");

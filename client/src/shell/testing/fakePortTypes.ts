@@ -44,6 +44,10 @@ export interface FakePortOptions {
   /** 本地存着的密钥：有它时界面直接进工作台（Web 版已登录的样子）。 */
   storedKey?: string | null;
   slots?: { used: number; total: number };
+  /** 文件组已有的文件（绝对路径 → 字节）：readFile/sha256/inspectImage 只认这些与画板。 */
+  files?: Record<string, Uint8Array>;
+  /** 文件组已有的目录：listDir 用它判断目录在不在（缺省由一个文件路径推出来）。 */
+  dirs?: string[];
 }
 
 /** 替身记下的调用：断言界面把结局传出去时用。 */

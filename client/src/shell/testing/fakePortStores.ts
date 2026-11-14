@@ -104,17 +104,65 @@ export function fakeBoardStore(boards: Map<string, FakeBoard>, calls: FakeCalls,
   };
 }
 
-/** 文件那一组。 */
-export function fakeFileStore(boards: Map<string, FakeBoard>, calls: FakeCalls): FileStore {
+/** 统一成正斜杠并去掉尾部斜杠，便于比较目录前缀。 */
+function normPath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+/** 一个路径的字节：画板取正文，其余取注入的 files。 */
+function fakeBytesOf(boards: Map<string, FakeBoard>, files: Map<string, Uint8Array>, absPath: string): Uint8Array | undefined {
+  const board = boards.get(absPath);
+  return board ? new TextEncoder().encode(board.main ?? "") : files.get(absPath);
+}
+
+/** 目录在不在：显式声明的目录，或有文件落在它下面。 */
+function fakeDirExists(extraDirs: Set<string>, paths: readonly string[], absDir: string): boolean {
+  if (extraDirs.has(absDir) || extraDirs.has(normPath(absDir))) return true;
+  return paths.some((p) => normPath(p).startsWith(normPath(absDir) + "/"));
+}
+
+/** 列目录的直接子项（文件名 + 是否目录）。 */
+function fakeChildrenOf(paths: readonly string[], absDir: string): { name: string; is_dir: boolean }[] {
+  const dir = normPath(absDir) + "/";
+  const entries = new Map<string, boolean>();
+  for (const p of paths) {
+    const path = normPath(p);
+    if (!path.startsWith(dir)) continue;
+    const rest = path.slice(dir.length);
+    const slash = rest.indexOf("/");
+    entries.set(slash === -1 ? rest : rest.slice(0, slash), slash !== -1);
+  }
+  return [...entries].map(([name, is_dir]) => ({ name, is_dir }));
+}
+
+/** 文件那一组：与真实 FileStore 同形——路径不存在就报 missing，不假装读到空内容（B3）。 */
+export function fakeFileStore(boards: Map<string, FakeBoard>, calls: FakeCalls, options: FakePortOptions = {}): FileStore {
+  const files = new Map<string, Uint8Array>(Object.entries(options.files ?? {}));
+  const extraDirs = new Set(options.dirs ?? []);
+  const bytesOf = (absPath: string): Uint8Array | undefined => fakeBytesOf(boards, files, absPath);
+  const paths = (): string[] => [...boards.keys(), ...files.keys()];
   return {
-    readFile: async () => new Uint8Array(),
-    writeNewFile: async (absPath, bytes) => {
-      calls.writeNewFile = [...(calls.writeNewFile ?? []), { absPath, bytes }];
+    readFile: async (absPath) => {
+      const bytes = bytesOf(absPath);
+      if (!bytes) throw fakeFailureOf("missing", "文件不存在：" + absPath);
+      return bytes;
     },
-    isFile: async (absPath) => boards.has(absPath),
-    listDir: async () => [],
-    sha256: async (absPath) => `sha-${absPath}`,
+    writeNewFile: async (absPath, bytes) => {
+      if (bytesOf(absPath)) throw fakeFailureOf("alreadyExists", "目标已存在，只新建不覆盖");
+      calls.writeNewFile = [...(calls.writeNewFile ?? []), { absPath, bytes }];
+      files.set(absPath, bytes);
+    },
+    isFile: async (absPath) => bytesOf(absPath) !== undefined,
+    listDir: async (absDir) => {
+      if (!fakeDirExists(extraDirs, paths(), absDir)) throw fakeFailureOf("missing", "目录不存在：" + absDir);
+      return fakeChildrenOf(paths(), absDir);
+    },
+    sha256: async (absPath) => {
+      if (!bytesOf(absPath)) throw fakeFailureOf("missing", "文件不存在：" + absPath);
+      return `sha-${absPath}`;
+    },
     inspectImage: async (absPath): Promise<ImageInfo> => {
+      if (!bytesOf(absPath)) throw fakeFailureOf("missing", "文件不存在：" + absPath);
       calls.inspectImage.push(absPath);
       return { sha256: `sha-${absPath}`, bytes: 10, width: 64, height: 48, format: "png", has_alpha: false };
     },

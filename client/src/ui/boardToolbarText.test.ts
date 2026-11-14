@@ -1,5 +1,6 @@
 // 工具栏文案（#137）：置灰时的统一原因、「尚不可用」标记、撤销 / 重做与整理的说法。
 import { describe, expect, it } from "vitest";
+import { UNAVAILABLE_TEXT } from "../core/uiText";
 import { TIDY_TEXT } from "./boardText";
 import {
   NO_BOARD,
@@ -24,10 +25,10 @@ describe("工具栏文案", () => {
   });
 
   it("生成尚不可用：新建任务与运行都标「尚不可用」", () => {
-    expect(newTaskSuffix(true)).toBe("（尚不可用）");
+    expect(newTaskSuffix(true)).toBe("（" + UNAVAILABLE_TEXT + "）");
     expect(newTaskSuffix(false)).toBe("");
-    expect(newTaskHint(true)).toBe("生成尚不可用");
-    expect(runHint(true)).toBe("生成尚不可用");
+    expect(newTaskHint(true)).toBe("生成" + UNAVAILABLE_TEXT);
+    expect(runHint(true)).toBe("生成" + UNAVAILABLE_TEXT);
   });
 
   it("生成可用：说明各自的用法", () => {
@@ -38,7 +39,7 @@ describe("工具栏文案", () => {
   it("运行按钮：有选中时写「选中」", () => {
     expect(runSuffix(0, false)).toBe("");
     expect(runSuffix(2, false)).toBe("选中");
-    expect(runSuffix(2, true)).toBe("选中（尚不可用）");
+    expect(runSuffix(2, true)).toBe("选中（" + UNAVAILABLE_TEXT + "）");
   });
 
   it("撤销 / 重做：没有可撤销 / 重做的操作时说明没有", () => {
@@ -50,9 +51,9 @@ describe("工具栏文案", () => {
 
   it("整理按钮：不可用时标出来；在整理模式时说退出", () => {
     expect(tidyLabel(false)).toBe(TIDY_TEXT.enter);
-    expect(tidyLabel(true)).toBe(`${TIDY_TEXT.enter}（尚不可用）`);
+    expect(tidyLabel(true)).toBe(`${TIDY_TEXT.enter}（${UNAVAILABLE_TEXT}）`);
     expect(tidyHint(false, false)).toContain("整理模式");
     expect(tidyHint(true, false)).toBe("退出整理模式");
-    expect(tidyHint(false, true)).toBe("整理尚不可用");
+    expect(tidyHint(false, true)).toBe("整理" + UNAVAILABLE_TEXT);
   });
 });

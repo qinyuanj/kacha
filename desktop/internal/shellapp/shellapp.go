@@ -6,10 +6,9 @@ package shellapp
 import (
 	"os"
 	"path/filepath"
-)
 
-// BoardDir 是用户数据根里的画板目录，与 Web 服务端的布局一致（见 core/board.ts）。
-const BoardDir = "画板"
+	"github.com/qinyuanj/kacha/desktop/internal/localstore"
+)
 
 // Features 告诉界面哪些可选能力在这个实现里有；没有的入口按「尚不可用」隐藏。
 type Features struct {
@@ -54,7 +53,7 @@ func (s *Shell) UserDataRoot() string { return s.root }
 
 // Info 返回壳信息，并确保用户数据根与画板目录存在（首次启动就是在这里建出来的）。
 func (s *Shell) Info() (Info, error) {
-	boardRoot := filepath.Join(s.root, BoardDir)
+	boardRoot := filepath.Join(s.root, localstore.BoardsDir)
 	for _, dir := range []string{s.root, boardRoot} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return Info{}, err

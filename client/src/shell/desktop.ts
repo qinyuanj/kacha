@@ -17,6 +17,7 @@ import { sha256Hex } from "../core/sha256";
 import { IMPORTED_REFERENCES_DIR } from "../core/boardPack";
 import { joinPath, toRootRelative } from "../core/paths";
 import { checked, desktopBoardStore, desktopFileStore, desktopMediaStore, desktopMetaStore, desktopUsageStore, localRun, unavailable } from "./desktopStores";
+import { copyTextToClipboard } from "./clipboard";
 import { createDesktopPack } from "./desktopPack";
 
 /** Go 侧写操作的结局：成功时 kind 为空，失败时 kind 是类别（见 localservice.Outcome）。 */
@@ -54,6 +55,8 @@ export interface DesktopLocalBridge {
   writeNewFile(path: string, bytes: Uint8Array): Promise<DesktopOutcome>;
   /** 与 writeNewFile 相同，字节以 base64 传（Uint8Array 在 JSON 里解不进 Go 的 []byte）。 */
   writeNewFileBase64(path: string, data: string): Promise<DesktopOutcome>;
+  /** 把用户数据根里的图片另存为用户选的位置（#130 的「另存为…」兜底）。 */
+  saveCopyAs(path: string): Promise<DesktopOutcome>;
   isFile(path: string): Promise<boolean>;
   listDir(path: string): Promise<{ name: string; is_dir: boolean }[]>;
   fileSha256(path: string): Promise<string>;
@@ -95,6 +98,8 @@ export interface DesktopClipboardBridge {
   read(): Promise<DesktopClipboardSnapshot>;
   /** 字节由 Go 自己按路径读（用户数据根在那边），页面只给路径与格式提示。 */
   copyImage(path: string, format: string): Promise<DesktopImageCopy>;
+  /** 把纯文本写进系统剪贴板（#124）：Go 原生 Clipboard.WriteText，不依赖浏览器权限。 */
+  writeText(text: string): Promise<void>;
 }
 
 /** Go 侧导入进度（Pack.Snapshot 的 progress）。 */
@@ -188,6 +193,25 @@ async function readClipboardSnapshot(bridge: DesktopBridge): Promise<ClipboardCo
 }
 
 /**
+ * 复制文本到系统剪贴板（#124）：桌面壳经 Go 原生 Clipboard.WriteText 写节点标记，不依赖浏览器剪贴板权限。
+ * 桥里没有剪贴板（旧替身）时才退回浏览器路径。
+ */
+async function copyTextToSystemClipboard(bridge: DesktopBridge, text: string): Promise<void> {
+  if (!bridge.clipboard) return copyTextToClipboard(text);
+  await localRun(() => bridge.clipboard!.writeText(text));
+}
+
+/**
+ * 「另存为…」（#130 复制失败时的兜底）：经 Go 的 Local.SaveCopyAs 打开系统另存为对话框并写字节。
+ * 用户取消（kind = cancelled）当作没发生，不弹失败提示。
+ */
+async function saveCopyAsThroughLocal(local: DesktopLocalBridge, absPath: string): Promise<void> {
+  const outcome = await localRun(() => local.saveCopyAs(absPath));
+  if (outcome.ok || outcome.kind === "cancelled") return;
+  checked(outcome);
+}
+
+/**
  * 复制图片到系统剪贴板（#130）：Go 侧按路径读字节、归一化成 PNG、写进系统剪贴板。
  *
  * 失败折成端口类别：Go 的 kind 与端口的 ImageCopyFailure 同名，认不出的按 failed。
@@ -247,7 +271,9 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     pickPackFile: () => desktopPack.pickPackFile(),
     uploadReference: (file: File): Promise<{ path: string; sha256: string }> => uploadReference(local, info.user_data_root, file),
     readClipboard: (): Promise<ClipboardContent | null> => readClipboardSnapshot(bridge),
+    copyText: (text: string): Promise<void> => copyTextToSystemClipboard(bridge, text),
     copyImage: (absPath: string, format = ""): Promise<ImageCopyResult> => copyImageToSystemClipboard(bridge, absPath, format),
+    saveCopyAs: (absPath: string): Promise<void> => saveCopyAsThroughLocal(local, absPath),
   };
 
   const pack = desktopPack.store;

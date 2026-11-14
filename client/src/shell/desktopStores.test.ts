@@ -1,6 +1,6 @@
 // 桌面壳端口的各个分组（#137）：本地调用的异常折算与没有的能力。
 import { describe, expect, it } from "vitest";
-import { checked, localRun, unavailable } from "./desktopStores";
+import { checked, desktopMediaStore, localRun, unavailable } from "./desktopStores";
 import { PortError } from "./port";
 
 describe("本地调用", () => {
@@ -43,6 +43,23 @@ describe("没有的能力", () => {
       unavailable("generation");
     } catch (e) {
       expect(e).toMatchObject({ kind: "unavailable" });
+    }
+  });
+
+  it("图片能力用自己的名字，不把「生成」当成保存 / 下载的理由（C4）", async () => {
+    const media = desktopMediaStore("C:/data");
+    await expect(media.copyImage("C:/data/a.png")).rejects.toMatchObject({ kind: "unavailable", feature: "copyImage" });
+    await expect(media.saveCopyAs("C:/data/a.png")).rejects.toMatchObject({ kind: "unavailable", feature: "saveImage" });
+    expect(() => media.downloadImage("C:/data/a.png")).toThrow(PortError);
+    try {
+      media.downloadImage("C:/data/a.png");
+    } catch (e) {
+      expect(e).toMatchObject({ kind: "unavailable", feature: "downloadImage" });
+    }
+    try {
+      media.downloadBoardResults("C:/data/画板/a.ugcboard.json");
+    } catch (e) {
+      expect(e).toMatchObject({ kind: "unavailable", feature: "downloadResults" });
     }
   });
 });

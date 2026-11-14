@@ -81,7 +81,7 @@ describe("读一张图的信息", () => {
   });
 
   it("有路径：读到信息", async () => {
-    const port = createFakePort();
+    const port = createFakePort({ files: { "/a.png": new Uint8Array([137, 80, 78, 71]) } });
     let seen: unknown = "unset";
     const Probe = () => {
       seen = useImageInfo("/a.png");

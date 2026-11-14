@@ -40,6 +40,7 @@ function stubBridge(outcomes: { rename?: DesktopOutcome; remove?: DesktopOutcome
     readFile: async () => "",
     writeNewFile: async () => ({ ok: true, kind: "", message: "", version: "" }),
     writeNewFileBase64: async () => ({ ok: true, kind: "", message: "", version: "" }),
+    saveCopyAs: async () => ({ ok: true, kind: "", message: "", version: "" }),
     isFile: async () => true,
     listDir: async () => [],
     fileSha256: async () => "a".repeat(64),

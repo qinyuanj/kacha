@@ -182,10 +182,65 @@ func (s *Store) Resolve(path string) (string, error) {
 	}
 	abs = filepath.Clean(abs)
 	root := filepath.Clean(s.root)
-	if !strings.EqualFold(abs, root) && !strings.HasPrefix(strings.ToLower(abs), strings.ToLower(root)+string(os.PathSeparator)) {
+	if !withinRoot(root, abs) {
 		return "", fmt.Errorf("路径越出用户数据根：%s", path)
 	}
+	// 词法前缀不够：根内一个指向根外的符号链接会被顺着读 / 写，必须按真实路径再判一次。
+	if err := checkRealContainment(root, abs); err != nil {
+		return "", err
+	}
 	return abs, nil
+}
+
+// withinRoot 是词法前缀判定：abs 等于 root 或在 root 之下（大小写不敏感，Windows）。
+func withinRoot(root, abs string) bool {
+	return strings.EqualFold(abs, root) || strings.HasPrefix(strings.ToLower(abs), strings.ToLower(root)+string(os.PathSeparator))
+}
+
+// checkRealContainment 要求解析符号链接后的真实目标仍在根内（spec 故事 32）。
+//
+// 根与目标都按真实位置比较；目标还不存在（新建文件）时取最深的已存在祖先解析，再拼回剩余部分，
+// 这样根内的链接指向根外也会被拒。
+func checkRealContainment(root, abs string) error {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		// 根都还不存在：根内不可能已有链接，词法检查已够。
+		return nil
+	}
+	realAbs, err := evalExisting(abs)
+	if err != nil {
+		return err
+	}
+	if !withinRoot(filepath.Clean(realRoot), filepath.Clean(realAbs)) {
+		return fmt.Errorf("路径经符号链接越出用户数据根：%s", abs)
+	}
+	return nil
+}
+
+// evalExisting 解析路径的真实位置：目标不存在时找到最深的已存在祖先解析，再拼回其余部分。
+func evalExisting(path string) (string, error) {
+	p := filepath.Clean(path)
+	var rest []string
+	for {
+		if _, err := os.Lstat(p); err == nil {
+			real, err := filepath.EvalSymlinks(p)
+			if err != nil {
+				return "", err
+			}
+			for i := len(rest) - 1; i >= 0; i-- {
+				real = filepath.Join(real, rest[i])
+			}
+			return real, nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return "", fmt.Errorf("路径不存在：%s", path)
+		}
+		rest = append(rest, filepath.Base(p))
+		p = parent
+	}
 }
 
 // ReadBoard 读画板的主文件、备份与内容版本；画板不存在时返回空值而不报错。

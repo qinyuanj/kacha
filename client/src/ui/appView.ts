@@ -3,6 +3,7 @@
 import type { Board } from "../core/board";
 import type { SizeTier } from "../core/boardSize";
 import type { Session } from "./useBoardSessions";
+import { UNAVAILABLE_TEXT } from "../core/uiText";
 import { usageNoticeVisible } from "./appUiState";
 import { activeSession, archivedPath, boardNoticeText, boardOpenState, boardTitleOf, dismissSizeNotice, enterTidy, failingSessions, historyLabels, packMenuReason, sizeNoticeOf, type FailingSession } from "./appCallbacks";
 
@@ -51,7 +52,7 @@ export function appView(input: {
     boardNotice: boardNoticeText(active),
     exportDisabled: packMenuReason(active, "exportPack"),
     downloadDisabled: packMenuReason(active, "downloadResults"),
-    importDisabled: input.packImportOff ? "画板包导入尚不可用" : null,
+    importDisabled: input.packImportOff ? "画板包导入" + UNAVAILABLE_TEXT : null,
     sizeNotice: notice?.tier ? { bytes: notice.bytes, tier: notice.tier, path: notice.path } : null,
     titleOf: (key: string) => boardTitleOf(input.sessions, key),
   };

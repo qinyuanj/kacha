@@ -1,6 +1,7 @@
 // 桌面壳端口的各个分组（#137）：从 shell/desktop.ts 拆出，一组一个函数。
 // 拆开之后每个函数的复杂度单独看得到，门禁也按函数计。
-import { PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore } from "./port";
+import { FEATURE_LABELS, PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore } from "./port";
+import { UNAVAILABLE_TEXT } from "../core/uiText";
 import type { BoardListing, BoardTexts, BoardWriteOptions, ImageInfo, UsagePort } from "./types";
 import { base64ToBytes } from "../core/base64";
 import { joinPath } from "../core/paths";
@@ -16,24 +17,12 @@ const KIND_BY_GO: Record<string, "conflict" | "missing" | "alreadyExists" | "inv
   invalid: "invalid",
 };
 
-/** 能力的中文名，用来写「尚不可用」的提示。 */
-const FEATURE_LABEL: Record<FeatureId, string> = {
-  generation: "生成",
-  usage: "用量统计",
-  packExport: "画板包导出",
-  packImport: "画板包导入",
-  archive: "归档",
-  tidy: "整理",
-  relay: "结果中转",
-  login: "登录",
-};
-
-/** 本切片还没有的能力：以 kind: "unavailable" 拒绝。 */
+/** 本切片还没有的能力：以 kind: "unavailable" 拒绝。能力名与界面共用 port.ts 的那一份（C1）。 */
 export function unavailable(feature: FeatureId): never {
   throw new PortError({
     kind: "unavailable",
     code: "unavailable",
-    message: "桌面客户端：" + FEATURE_LABEL[feature] + "尚不可用",
+    message: "桌面客户端：" + FEATURE_LABELS[feature] + UNAVAILABLE_TEXT,
     status: 0,
     feature,
   });
@@ -161,14 +150,15 @@ export function desktopMediaStore(root: string): MediaStore {
     pickPackFile: async (): Promise<never> => unavailable("packExport"),
     uploadReference: async (): Promise<never> => unavailable("generation"),
     copyText: (text: string): Promise<void> => copyTextToClipboard(text),
-    copyImage: async (): Promise<never> => unavailable("generation"),
+    // 各能力用自己的名字，别把「生成尚不可用」当成保存 / 下载的理由（C4）。
+    copyImage: async (): Promise<never> => unavailable("copyImage"),
     readClipboard: async (): Promise<null> => null,
-    saveCopyAs: async (): Promise<never> => unavailable("generation"),
+    saveCopyAs: async (): Promise<never> => unavailable("saveImage"),
     downloadImage: (): void => {
-      void unavailable("generation");
+      void unavailable("downloadImage");
     },
     downloadBoardResults: (): void => {
-      void unavailable("generation");
+      void unavailable("downloadResults");
     },
   };
 }

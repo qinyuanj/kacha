@@ -3,6 +3,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { BoardCanvas } from "./BoardCanvas";
 import { BoardListDialog } from "./BoardListDialog";
+import { UNAVAILABLE_TEXT } from "../core/uiText";
 import { BoardToolbar } from "./BoardToolbar";
 import { ContextMenu } from "./ContextMenu";
 import { RunIndicator } from "./RunIndicator";
@@ -187,7 +188,7 @@ export function AppPackMenu({
     <ContextMenu
       at={at}
       items={[
-        { action: "importPack", label: importDisabledReason ? "导入画板包…（尚不可用）" : "导入画板包…", disabledReason: importDisabledReason },
+        { action: "importPack", label: importDisabledReason ? "导入画板包…（" + UNAVAILABLE_TEXT + "）" : "导入画板包…", disabledReason: importDisabledReason },
         { action: "exportPack", label: "导出画板包…", disabledReason: exportDisabledReason },
         { action: "downloadResults" as const, label: "下载整板结果（zip）", disabledReason: downloadDisabledReason },
       ]}
@@ -228,7 +229,7 @@ export function AppWorkspace({
                 新建画板
               </button>
               <button onClick={onImportPack} disabled={!userRoot || importDisabled !== null} title={importDisabled ?? undefined}>
-                导入画板包…{importDisabled ? "（尚不可用）" : ""}
+                导入画板包…{importDisabled ? "（" + UNAVAILABLE_TEXT + "）" : ""}
               </button>
             </div>
           </>

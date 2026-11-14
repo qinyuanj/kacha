@@ -1,6 +1,6 @@
 // 内存壳端口的各个分组（#137）：导入结局与画板存储。
 import { describe, expect, it } from "vitest";
-import { fakeBoardStore, fakePackStore, toImportResult } from "./fakePortStores";
+import { fakeBoardStore, fakeFileStore, fakePackStore, toImportResult } from "./fakePortStores";
 import { emptyFakeCalls } from "./fakePort";
 import type { FakeBoard } from "./fakePortTypes";
 
@@ -65,6 +65,26 @@ describe("画板存储", () => {
     const calls = emptyFakeCalls();
     const store = fakeBoardStore(new Map(), calls, {});
     await expect(store.remove("/~/a")).rejects.toThrow();
+  });
+});
+
+describe("文件存储与真实适配器同形（B3）", () => {
+  it("读不存在的文件：报 missing，不返回空数组", async () => {
+    const store = fakeFileStore(new Map(), emptyFakeCalls());
+    await expect(store.readFile("/~/不存在.png")).rejects.toMatchObject({ kind: "missing" });
+  });
+
+  it("列不存在的目录：报 missing，不返回空表", async () => {
+    const store = fakeFileStore(new Map(), emptyFakeCalls());
+    await expect(store.listDir("/~/不存在")).rejects.toMatchObject({ kind: "missing" });
+  });
+
+  it("存在的文件能读到字节、isFile 为真、listDir 能看到它", async () => {
+    const bytes = new Uint8Array([137, 80, 78, 71]);
+    const store = fakeFileStore(new Map(), emptyFakeCalls(), { files: { "/~/参考/cat.png": bytes } });
+    await expect(store.readFile("/~/参考/cat.png")).resolves.toEqual(bytes);
+    await expect(store.isFile("/~/参考/cat.png")).resolves.toBe(true);
+    await expect(store.listDir("/~/参考")).resolves.toEqual([{ name: "cat.png", is_dir: false }]);
   });
 });
 
