@@ -162,7 +162,7 @@ describe("复制（端口驱动）", () => {
     await show(createElement(KeyboardProbe, { current: board, selected: ["r1"] }));
     const event = await pressCopy();
     expect(event.defaultPrevented).toBe(true);
-    expect(port.calls.copyImage).toEqual(["/~/reference/r1.png"]);
+    expect(port.calls.copyImage).toEqual([{ path: "/~/reference/r1.png", format: "png" }]);
     expect(port.calls.copyText).toEqual([]);
     expect(toasts).toEqual([]);
   });

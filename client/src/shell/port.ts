@@ -167,9 +167,22 @@ export interface MetaStore {
  */
 export type { ClipboardContent } from "../core/clipboardDispatch";
 
-export type ImageCopyFailure = "decode" | "unavailable";
+/**
+ * 复制图片的失败类别（#130）：界面只按类别取文案，不读实现的消息原文。
+ *
+ * - decode / unavailable：Web 路线解不开这张图、浏览器拒绝写剪贴板；
+ * - unsupported：容器不受支持（HEIC、TIFF 等），换一种导出方式还有救；
+ * - busy：系统剪贴板正被别的程序占用，可重试；
+ * - invalid：内容坏掉，这张图本身解不开；
+ * - failed：别的写失败。
+ */
+export type ImageCopyFailure = "decode" | "unavailable" | "unsupported" | "invalid" | "busy" | "failed";
 
-/** 复制图片的结局：失败只影响这一次复制，不改画板。 */
+/**
+ * 复制图片的结局：失败只影响这一次复制，不改画板。
+ *
+ * format 是给实现侧的格式提示（节点路径的扩展名），实现按字节判断容器，提示写错不影响结果。
+ */
 export type ImageCopyResult = { ok: true } | { ok: false; reason: ImageCopyFailure };
 
 /** 界面用的媒体能力：图片地址、选文件、上传参考图、系统剪贴板、另存为。 */
@@ -183,8 +196,8 @@ export interface MediaStore {
   /** 本机图片进用户数据根的 导入参考图/，返回相对用户数据根的路径与 sha256。 */
   uploadReference(file: File): Promise<{ path: string; sha256: string }>;
   copyText(text: string): Promise<void>;
-  /** 复制一张图到系统剪贴板（读不到字节时由实现自己取源）。 */
-  copyImage(absPath: string): Promise<ImageCopyResult>;
+  /** 复制一张图到系统剪贴板；format 是路径扩展名给的提示，实现按字节判断容器。 */
+  copyImage(absPath: string, format?: string): Promise<ImageCopyResult>;
   /** 读系统剪贴板；返回 null 表示这一端读不到（Web），调用方改用 paste 事件带的内容。 */
   readClipboard(): Promise<ClipboardContent | null>;
   /** 结果另存为（带图层的结果是 zip）。 */

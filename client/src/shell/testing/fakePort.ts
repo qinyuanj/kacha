@@ -36,7 +36,7 @@ export interface FakePortOptions {
   /** 系统剪贴板内容：readClipboard 返回它（null = 读不到，按 paste 事件走）。 */
   clipboard?: ClipboardContent | null;
   /** copyImage 的结局：默认成功。 */
-  copyImage?: ImageCopyResult | ((absPath: string) => ImageCopyResult);
+  copyImage?: ImageCopyResult | ((absPath: string, format?: string) => ImageCopyResult);
   /** pickImages / pickPackFile 依次返回的文件（空了返回空 / null）。 */
   pickImages?: File[][];
   pickPackFiles?: (File | null)[];
@@ -200,9 +200,9 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
     copyText: async (text) => {
       calls.copyText.push(text);
     },
-    copyImage: async (absPath) => {
-      calls.copyImage.push(absPath);
-      const result = typeof options.copyImage === "function" ? options.copyImage(absPath) : options.copyImage;
+    copyImage: async (absPath, format) => {
+      calls.copyImage.push({ path: absPath, format });
+      const result = typeof options.copyImage === "function" ? options.copyImage(absPath, format) : options.copyImage;
       return result ?? { ok: true };
     },
     readClipboard: async () => options.clipboard ?? null,
@@ -349,7 +349,7 @@ export interface FakeCalls {
   archive: { from: string; to: string; version?: string }[];
   unarchive: { from: string; to: string }[];
   import: { file: File; options: ImportOptions }[];
-  copyImage: string[];
+  copyImage: { path: string; format?: string }[];
   copyText: string[];
   pickImages: { multiple: boolean; files: File[] }[];
   pickPackFile: (File | null)[];
