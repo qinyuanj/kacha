@@ -8,6 +8,7 @@ import { errorText } from "../core/errors";
 import { useShell } from "./shell";
 import { approxSizeText, ARCHIVE_TEXT, MANAGE_BOARDS_TEXT, OVER_SLOTS_TEXT, slotsUsageText } from "./boardText";
 import { boardGroups, boardRow, listDescription, listTitle, overSlots, slotsFull } from "./boardListView";
+import { runArchivedAction, runConfirm, type PendingAction } from "./boardListActions";
 
 interface Props {
   /** 本页已打开的画板路径：列表里标注，不重复开。 */
@@ -222,8 +223,8 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
   const port = useShell();
   const [listing, setListing] = useState<BoardListing | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<{ entry: BoardListEntry; busy: boolean; error: string | null } | null>(null);
-  const [archiving, setArchiving] = useState<{ entry: BoardListEntry; busy: boolean; error: string | null } | null>(null);
+  const [deleting, setDeleting] = useState<PendingAction | null>(null);
+  const [archiving, setArchiving] = useState<PendingAction | null>(null);
   /** 取消归档 / 复制为新画板被拒（画板位满）或失败时的说明。 */
   const [actionError, setActionError] = useState<string | null>(null);
   const refresh = useCallback(() => {
@@ -238,35 +239,25 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
   const confirmDelete = async () => {
     if (!deleting || deleting.busy) return;
     setDeleting({ ...deleting, busy: true, error: null });
-    try {
-      await onDelete(deleting.entry.path);
-      setDeleting(null);
-    } catch (e) {
-      setDeleting({ ...deleting, busy: false, error: errorText(e) });
-    }
+    const result = await runConfirm(deleting, (entry) => onDelete(entry.path));
+    if (result.ok) setDeleting(null);
+    else setDeleting({ ...deleting, busy: false, error: result.error });
     refresh();
   };
 
   const confirmArchive = async () => {
     if (!archiving || archiving.busy) return;
     setArchiving({ ...archiving, busy: true, error: null });
-    try {
-      await onArchive(archiving.entry.path);
-      setArchiving(null);
-    } catch (e) {
-      setArchiving({ ...archiving, busy: false, error: errorText(e) });
-    }
+    const result = await runConfirm(archiving, (entry) => onArchive(entry.path));
+    if (result.ok) setArchiving(null);
+    else setArchiving({ ...archiving, busy: false, error: result.error });
     refresh();
   };
 
   const runArchived = async (action: (path: string) => Promise<string | null>, entry: BoardListEntry) => {
     setActionError(null);
-    try {
-      const refusal = await action(entry.path);
-      if (refusal) setActionError(refusal);
-    } catch (e) {
-      setActionError(errorText(e));
-    }
+    const refusal = await runArchivedAction(action, entry);
+    if (refusal) setActionError(refusal);
     refresh();
   };
 

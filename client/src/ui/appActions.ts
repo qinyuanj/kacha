@@ -50,7 +50,11 @@ export async function openRunConfirm(deps: RunDeps): Promise<string | null> {
   const board = deps.board;
   if (!board) return null;
   const items = await confirmItemsOf(deps.ctx, board, runScope(board, deps.ctx.table, deps.selectedIds, deps.locked), deps.userRoot);
-  const decision = decideRun(items, deps.selectedIds.length, deps.hasApiKey);
+  return applyRunDecision(deps, board, decideRun(items, deps.selectedIds.length, deps.hasApiKey));
+}
+
+/** 按运行的分派结果给界面反应。 */
+export function applyRunDecision(deps: RunDeps, board: Board, decision: ReturnType<typeof decideRun>): string | null {
   // 没有可提交的任务时先说明原因；真要提交或弹确认窗才需要密钥。
   if (decision.kind === "toast") {
     deps.toast(decision.message);
@@ -62,10 +66,10 @@ export async function openRunConfirm(deps: RunDeps): Promise<string | null> {
     return null;
   }
   if (decision.kind === "submit") {
-    deps.startRun(deps.activeKey, board, [decision.taskId]);
+    deps.startRun(deps.activeKey!, board, [decision.taskId]);
     return null;
   }
-  deps.confirm(deps.activeKey, board, decision.items, decision.scope);
+  deps.confirm(deps.activeKey!, board, decision.items, decision.scope);
   return null;
 }
 
@@ -104,8 +108,19 @@ export async function regenerate(deps: RegenerateDeps, taskNodeId: string, fromT
     const ok = await deps.ask(decision.text, { title: "确认重新生成", okLabel: `重新生成 ${decision.copies} 份`, cancelLabel: "取消" });
     if (!ok) return null;
   }
-  const request: RegenerateRequest = fromTaskId === undefined ? { kind: "regenerate", copies: decision.copies } : { kind: "variant", fromTaskId };
-  const problem = await deps.regenerate(deps.targetOf(deps.activeKey), board, taskNodeId, request);
+  return submitRegenerate(deps, board, taskNodeId, fromTaskId, decision.copies);
+}
+
+/** 真正提交重新生成；返回要提示的话（没有则 null）。 */
+export async function submitRegenerate(
+  deps: RegenerateDeps,
+  board: Board,
+  taskNodeId: string,
+  fromTaskId: string | undefined,
+  copies: number,
+): Promise<string | null> {
+  const request: RegenerateRequest = fromTaskId === undefined ? { kind: "regenerate", copies } : { kind: "variant", fromTaskId };
+  const problem = await deps.regenerate(deps.targetOf(deps.activeKey!), board, taskNodeId, request);
   if (problem) deps.toast(`${fromTaskId ? "生成变体" : "重新生成"}失败：${problem}`);
   return null;
 }
@@ -147,11 +162,16 @@ export async function closeBoard(
   },
   key: string,
 ): Promise<void> {
-  const count = deps.pending(key);
-  if (count > 0 && !(await confirmStopTasks(deps.ask, count))) return;
+  if (!(await mayStopTasks(deps.pending(key), deps.ask))) return;
   // 取消并遗忘：重开后失败 / 已取消由任务目录的 outcome.json 给出。
   deps.closeRunner(key);
   await deps.closeSessions(key);
+}
+
+/** 还有未完成的任务时先问用户；没有任务或用户同意都放行。 */
+export async function mayStopTasks(count: number, ask: (text: string, options: Record<string, unknown>) => Promise<boolean>): Promise<boolean> {
+  if (count === 0) return true;
+  return confirmStopTasks(ask, count);
 }
 
 /** 从画板列表删除：本页开着的先保存再带版本删；没开的直接删。 */
@@ -169,8 +189,7 @@ export async function deleteBoardAt(
 ): Promise<void> {
   const key = deps.keyOf(path);
   if (!key) return deps.removeDirect(path);
-  const count = deps.pending(key);
-  if (count > 0 && !(await confirmStopTasks(deps.ask, count))) return;
+  if (!(await mayStopTasks(deps.pending(key), deps.ask))) return;
   // 先停任务（与关闭标签页同序）再删，免得结果落进一块正在删除的画板；删除失败时停掉的任务不恢复。
   deps.closeRunner(key);
   await deps.deleteSessions(key);
@@ -189,8 +208,7 @@ export async function archiveBoardAt(
 ): Promise<void> {
   const key = deps.keyOf(path);
   if (key) {
-    const count = deps.pending(key);
-    if (count > 0 && !(await confirmStopTasks(deps.ask, count))) return;
+    if (!(await mayStopTasks(deps.pending(key), deps.ask))) return;
     deps.closeRunner(key);
   }
   await deps.archiveSessions(path);
@@ -206,12 +224,27 @@ export async function exportBoardAt(
   },
   path: string,
 ): Promise<void> {
-  if (!deps.keyOf(path) && !(await deps.open(path, true))) {
-    deps.toast(boardMissingText);
-    return;
-  }
+  const key = await exportableKey(deps, path);
+  if (!key) return;
+  await deps.prepareExport(key);
+}
+
+/** 导出前拿到的画板 key：没打开的先打开，打不开就没有。 */
+export async function exportableKey(
+  deps: {
+    keyOf(path: string): string | null;
+    open(path: string, activate: boolean): Promise<boolean>;
+    toast(message: string): void;
+  },
+  path: string,
+): Promise<string | null> {
   const key = deps.keyOf(path);
-  if (key) await deps.prepareExport(key);
+  if (key) return key;
+  if (!(await deps.open(path, true))) {
+    deps.toast(boardMissingText);
+    return null;
+  }
+  return deps.keyOf(path);
 }
 
 /** 放弃一块服务端已不存在的画板：本页内容随之丢弃，先确认。 */
