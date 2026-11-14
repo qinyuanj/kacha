@@ -135,17 +135,25 @@ const ui: ShellPort["ui"] = {
   installInputTakeover: installPageInputTakeover,
 };
 
-/** Web 的壳端口：用户数据根是虚拟根 /~，所有能力都在。 */
-export const webPort: ShellPort = {
-  userRoot: "/~",
-  features: { generation: true, usage: true, packExport: true },
+/**
+ * 造一份 Web 壳端口：用户数据根是虚拟根 /~，所有能力都在。
+ * 桌面壳实现同一个 ShellPort（ADR 0023），只换这里的构造，不改任何调用点。
+ */
+export function createShellPort(): ShellPort {
+  return {
+    userRoot: "/~",
+    features: { generation: true, usage: true, packExport: true },
   board,
   files,
   meta,
   media,
   pack,
   ui,
-  usage,
-  session,
-  core: { taskFs, runDeps, relocateFs, packFs, imageProbe, settingsPorts },
-};
+    usage,
+    session,
+    core: { taskFs, runDeps, relocateFs, packFs, imageProbe, settingsPorts },
+  };
+}
+
+/** 生产用的 Web 壳端口（组合根注入一次，见 main.tsx）。 */
+export const webPort: ShellPort = createShellPort();
