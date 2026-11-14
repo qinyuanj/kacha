@@ -455,8 +455,7 @@ async function moveOutWrite(
   key: string,
 ): Promise<string> {
   // 读不到列表时不拦：服务端新建时仍会检查。
-  const slots = await ports.board.list().then((l) => l.slots, () => null);
-  const refusal = slots ? slotsRefusal(slots, 1) : null;
+  const refusal = await moveOutRefusal(ports);
   if (refusal) return refusal;
   const prepared = await prepareStageSplit(boardOf, stageId, (path) => ports.files.sha256(resolveFromRoot(userRoot, path)), newId);
   const check = tryRemove();
@@ -467,4 +466,10 @@ async function moveOutWrite(
   const written = await writeMovedOutTo(ports, path, fresh);
   if (written) return written;
   return finishMoveOutTo(boardOf, apply, key, stageId, fresh, latest);
+}
+
+/** 移出前的画板位预检：读不到列表时不拦（服务端新建时仍会检查）。 */
+async function moveOutRefusal(ports: SessionPorts): Promise<string | null> {
+  const slots = await ports.board.list().then((l) => l.slots, () => null);
+  return slots ? slotsRefusal(slots, 1) : null;
 }

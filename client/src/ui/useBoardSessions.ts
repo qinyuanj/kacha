@@ -193,6 +193,13 @@ export function useSessionLifecycle(options: {
   return { closeAll, openPath, createBoard, moveOutStage, openImportedBoard, dropSession, closeBoardRef };
 }
 
+/** 落盘待写的改动：有时计时器就直接写，有时等之前的写完。 */
+export async function flushPending(key: string, saverOf: (key: string) => Saver, flush: (key: string) => Promise<void>): Promise<void> {
+  const saver = saverOf(key);
+  if (saver?.timer) await flush(key);
+  else if (saver) await saver.chain;
+}
+
 /** 会话的存档接线：关闭、删除、归档、复制、改名与重载。 */
 export function useSessionArchive(options: {
   userRoot: string | null;
@@ -214,9 +221,7 @@ export function useSessionArchive(options: {
   onMovedRef.current = onMoved;
   const closeBoard = useCallback(
     async (key: string) => {
-      const saver = saverOf(key);
-      if (saver?.timer) await flush(key);
-      else if (saver) await saver.chain;
+      await flushPending(key, saverOf, flush);
       // 保存失败不能丢改动：标签页留着，修好后重试或先导出画板包。
       const current = store.sessionOf(key);
       if (current?.status === "ok" && current.saveError) return;
