@@ -44,7 +44,6 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 	}
 }
 
-
 // 剪贴板服务的快照字段是页面的约定（client/src/shell/desktop.ts 的 DesktopClipboardSnapshot）：
 // 键名变了前端就静默读不到 kind，只会按「读不到」退回 paste 事件。
 func TestClipboardSnapshotJSONKeys(t *testing.T) {
@@ -58,5 +57,16 @@ func TestClipboardSnapshotJSONKeys(t *testing.T) {
 		if !strings.Contains(src, key) {
 			t.Fatalf("Clipboard 快照的类型里没有 %q 字段：\n%s", key, src)
 		}
+	}
+}
+
+// 本机图片协议（#132 真机验收发现）：页面来自 http://mygo.localhost，不能加载 file://，
+// 必须把用户数据根注册成自定义协议，否则画板里的图片一律显示「图片缺失」。
+func TestRegisterAssetProtocol(t *testing.T) {
+	if err := registerAssetProtocol(t.TempDir()); err != nil {
+		t.Fatalf("registerAssetProtocol: %v", err)
+	}
+	if !mygo.Protocol.IsHandled(assetScheme) {
+		t.Fatalf("协议 %q 没注册上：页面读不到用户数据根里的图片", assetScheme)
 	}
 }
