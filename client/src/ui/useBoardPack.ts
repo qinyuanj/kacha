@@ -6,6 +6,7 @@ import type { PackDialogState } from "./BoardPackDialog";
 import { errorText } from "../core/errors";
 import { isSlotsFullText, PACK_IMPORT_TEXT, slotsRefusal } from "./boardText";
 import { useShell } from "./shell";
+import { unavailableMessage } from "../shell/port";
 
 interface PackBoards {
   flushAll: () => Promise<void>;
@@ -45,11 +46,21 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
         return toast(`无法导出画板包：${errorText(e)}`);
       }
       // hash 阶段：服务端给逐文件长度与 sha256，core 据此去重并算预估大小，再请用户确认（包格式 v2）。
-      const outcome = await runCancellable(port.pack.io, progress(`正在计算画板包大小：${stem}`), () => port.pack.facts(exportSources(plan)));
+      // runCancellable 把异常压成文本，类别就丢了：端口说「尚不可用」时在这里先记下来。
+      let unavailable: string | null = null;
+      const outcome = await runCancellable(port.pack.io, progress(`正在计算画板包大小：${stem}`), async () => {
+        try {
+          return await port.pack.facts(exportSources(plan));
+        } catch (e) {
+          unavailable = unavailableMessage(e);
+          throw e;
+        }
+      });
       if (!outcome.ok) {
         setDialog(null);
         port.ui.log("board_pack", { action: "export", board_file: boardFile, stage: "hash", result: outcome.result });
-        return toast(outcome.result === "cancelled" ? "已取消导出画板包" : `无法导出画板包：${outcome.error}`);
+        // 端口说这项能力还没有（桌面壳本切片没有画板包导出）：说清「尚不可用」。
+        return toast(unavailable ?? (outcome.result === "cancelled" ? "已取消导出画板包" : `无法导出画板包：${outcome.error}`));
       }
       setDialog({ stage: "confirmExport", boardFile, plan, contents: planPackContents(outcome.value) });
     },
@@ -127,7 +138,9 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
       }
     } catch (e) {
       setDialog(null);
-      toast(PACK_IMPORT_TEXT.failed(errorText(e)));
+      // 端口说这项能力还没有（桌面壳本切片没有画板包导入）：说清「尚不可用」。
+      const unavailable = unavailableMessage(e);
+      toast(unavailable ?? PACK_IMPORT_TEXT.failed(errorText(e)));
     }
   }, [userRoot, boards, toast]);
 
@@ -137,7 +150,10 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
     dialog: dialog && {
       state: dialog,
       onExport: () => void confirmExport(),
-      onCancelProgress: () => void port.pack.io.cancel(true),
+      onCancelProgress: () => {
+        // 桌面壳本切片没有画板包导出：取消也可能被端口拒绝，别让它冒成未捕获异常。
+        void port.pack.io.cancel(true).catch(() => undefined);
+      },
       onClose: () => setDialog(null),
     },
   };

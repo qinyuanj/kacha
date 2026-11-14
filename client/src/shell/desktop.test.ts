@@ -60,6 +60,19 @@ describe("桌面壳端口", () => {
     await expect(port.board.measure("{}")).rejects.toMatchObject({ kind: "unavailable", feature: "tidy" });
   });
 
+  it("结果下载在桌面壳不可用：拒绝而不是报成功", async () => {
+    const { port } = await createDesktopPort(fakeBridge());
+    // 端口同步抛：调用点按类别折成「尚不可用」。
+    expect(() => port.media.downloadBoardResults("/~/画板/a.ugcboard.json")).toThrow(PortError);
+    try {
+      port.media.downloadBoardResults("/~/画板/a.ugcboard.json");
+    } catch (e) {
+      const failure = portFailureOf(e);
+      expect(failure.kind).toBe("unavailable");
+      expect(failure.message).toContain("尚不可用");
+    }
+  });
+
   it("会话返回本机合成身份，不需要登录，也没有会话过期", async () => {
     const { port } = await createDesktopPort(fakeBridge());
     await expect(port.session.current()).resolves.toEqual({ fingerprint: LOCAL_FINGERPRINT });
