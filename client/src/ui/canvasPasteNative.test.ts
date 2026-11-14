@@ -37,7 +37,7 @@ function Probe(): null {
     apply: apply as never,
     toast,
     importPastedImages: importPastedImages as never,
-    isEditableTarget: () => false,
+    isEditableTarget: (target) => target instanceof Element && target.closest("input, textarea, select, [contenteditable='true']") !== null,
     readClipboard: () => Promise.resolve(snapshotValue),
     nativeClipboard: shellPort.features.nativeClipboard ?? false,
   });
@@ -58,9 +58,9 @@ function nativePort(native: boolean): FakePort {
 }
 
 /** 一次 Ctrl+V：桌面壳的路由（nativeClipboard）不看事件内容，只看端口读到的快照。 */
-async function paste(): Promise<Event> {
+async function paste(text = ""): Promise<Event> {
   const event = new Event("paste", { bubbles: true, cancelable: true });
-  Object.defineProperty(event, "clipboardData", { value: { files: [], getData: () => "" } });
+  Object.defineProperty(event, "clipboardData", { value: { files: [], getData: (type: string) => (type === "text/plain" ? text : "") } });
   await act(async () => {
     window.dispatchEvent(event);
     await Promise.resolve();
@@ -109,6 +109,27 @@ describe("原生剪贴板：成功", () => {
     // 应用内剪贴板是空的：标记优先，走的是「重新复制」而不是粘图。
     expect(importPastedImages).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith(PASTE_TEXT.staleNodeClip);
+  });
+});
+
+describe("原生剪贴板：普通文本仍放行", () => {
+  it("普通文本：不提示、不写画板、不落图", async () => {
+    snapshotValue = snapshot({ kind: "text", text: "一段普通文字" });
+    // 画布上没有可粘文本的地方；原生读是异步的，所以默认行为已经先吞掉——丢不了任何东西。
+    await paste("一段普通文字");
+    expect(toast).not.toHaveBeenCalled();
+    expect(importPastedImages).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("焦点在输入框里粘文本：交给输入框自己", async () => {
+    const input = document.createElement("input");
+    document.body.append(input);
+    input.focus();
+    snapshotValue = snapshot({ kind: "text", text: "填进输入框" });
+    expect((await paste("填进输入框")).defaultPrevented).toBe(false);
+    expect(toast).not.toHaveBeenCalled();
+    input.remove();
   });
 });
 
