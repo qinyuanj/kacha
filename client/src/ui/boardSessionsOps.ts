@@ -1,6 +1,6 @@
 // 多画板会话的各个操作（#137）：从 ui/useBoardSessions.ts 拆出的模块级函数。
 // crapper 按函数各自计复杂度：操作都放这里，hook 里就只剩接线。
-import { finishMoveOut as finishMoveOutTo, writeMovedOut as writeMovedOutTo } from "./boardSessionsMoveOut";
+import { moveOutWrite as moveOutWriteTo, writeMovedOut as writeMovedOutTo } from "./boardSessionsMoveOut";
 import { archiveDir } from "../core/archive";
 import { BOARD_EXTENSION, DEFAULT_BOARD_TITLE, newBoard, openBoard, serializeBoard, uniqueBoardFileName, type Board } from "../core/board";
 import { editBoard, type BoardChange, type EditEnv, type EditResult } from "../core/edit";
@@ -8,7 +8,6 @@ import { newId } from "../core/ids";
 import { emptyHistory, recordChange, type History } from "../core/history";
 import { basename, boardsDir, dirname, joinPath, resolveFromRoot } from "../core/paths";
 import { restoreResultLayers } from "../core/taskDir";
-import { prepareStageSplit } from "../core/moveOut";
 import { slotsRefusal, TIDY_TEXT } from "./boardText";
 import { sha256Hex } from "../core/sha256";
 import { errorText } from "../core/errors";
@@ -454,22 +453,17 @@ async function moveOutWrite(
   apply: (key: string, change: BoardChange) => EditResult | null,
   key: string,
 ): Promise<string> {
-  // 读不到列表时不拦：服务端新建时仍会检查。
-  const refusal = await moveOutRefusal(ports);
-  if (refusal) return refusal;
-  const prepared = await prepareStageSplit(boardOf, stageId, (path) => ports.files.sha256(resolveFromRoot(userRoot, path)), newId);
-  const check = tryRemove();
-  if (!prepared || !check?.step) return moveOutBlockedText("stageGone", check?.hint);
-  const { source: latest, board: fresh } = prepared;
-  const path = await freePathIn(store, ports, boardsDir(userRoot), "", fresh.title);
-  if (boardOf() !== latest) return TIDY_TEXT.moveOutFailed("移出期间本画板有了新的改动，请重试");
-  const written = await writeMovedOutTo(ports, path, fresh);
-  if (written) return written;
-  return finishMoveOutTo(boardOf, apply, key, stageId, fresh, latest);
-}
-
-/** 移出前的画板位预检：读不到列表时不拦（服务端新建时仍会检查）。 */
-async function moveOutRefusal(ports: SessionPorts): Promise<string | null> {
-  const slots = await ports.board.list().then((l) => l.slots, () => null);
-  return slots ? slotsRefusal(slots, 1) : null;
+  return moveOutWriteTo(
+    {
+      freePathIn: (title) => freePathIn(store, ports, boardsDir(userRoot), "", title),
+      sha256: (path) => ports.files.sha256(resolveFromRoot(userRoot, path)),
+      write: (path, fresh) => writeMovedOutTo(ports, path, fresh),
+      boardOf,
+      tryRemove,
+      apply,
+      board: ports.board,
+    },
+    stageId,
+    key,
+  );
 }

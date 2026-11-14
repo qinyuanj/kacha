@@ -176,6 +176,26 @@ export function fakeMediaStore(options: FakePortOptions, calls: FakeCalls, pickI
   };
 }
 
+/** 跑一次导入：记住调用，把结局折成 core 的 ImportResult。 */
+export async function runImport(
+  imports: FakeImportOutcome[],
+  calls: FakeCalls,
+  file: File,
+  importOptions: ImportOptions,
+): Promise<ImportResult> {
+  calls.import.push({ file, options: importOptions });
+  const outcome = imports.shift() ?? { kind: "done", summary: { imported: 0, skipped: 0, conflicts: [], message: "已导入" }, written: [] };
+  const result = toImportResult(outcome);
+  // 与真实导入一致：结局是 done 时逐个打开导入的画板，打开失败记进 writeError。
+  if (result.kind !== "done") return result;
+  try {
+    for (const path of outcome.kind === "done" ? outcome.written : []) await importOptions.openBoard(path);
+    return result;
+  } catch (e) {
+    return { ...result, writeError: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /** 画板包那一组。 */
 export function fakePackStore(imports: FakeImportOutcome[], calls: FakeCalls): PackStore {
   const io = {
@@ -194,19 +214,7 @@ export function fakePackStore(imports: FakeImportOutcome[], calls: FakeCalls): P
   };
   return {
     io,
-    import: async (file, importOptions: ImportOptions) => {
-      calls.import.push({ file, options: importOptions });
-      const outcome = imports.shift() ?? { kind: "done", summary: { imported: 0, skipped: 0, conflicts: [], message: "已导入" }, written: [] };
-      const result = toImportResult(outcome);
-      // 与真实导入一致：结局是 done 时逐个打开导入的画板，打开失败记进 writeError。
-      if (result.kind !== "done") return result;
-      try {
-        for (const path of outcome.kind === "done" ? outcome.written : []) await importOptions.openBoard(path);
-        return result;
-      } catch (e) {
-        return { ...result, writeError: e instanceof Error ? e.message : String(e) };
-      }
-    },
+    import: async (file, importOptions: ImportOptions) => runImport(imports, calls, file, importOptions),
     facts: async () => [],
     exportPack: async () => ({ task_dirs: 0, bytes: 0 }),
   };
