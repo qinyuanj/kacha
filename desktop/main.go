@@ -10,8 +10,6 @@ import (
 	"github.com/egoist/mygo"
 
 	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
-	"github.com/qinyuanj/kacha/desktop/internal/localservice"
-	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 	"github.com/qinyuanj/kacha/desktop/internal/shellapp"
 )
 
@@ -43,9 +41,8 @@ func main() {
 	}
 	shell := shellapp.New(version(), root)
 
-	// 页面只经这两个服务取壳信息与本地文件；其余能力（画板包、剪贴板）留给后续切片。
-	mygo.BindAs("Shell", shellService{shell: shell})
-	mygo.BindAs("Local", localservice.New(localstore.New(root)))
+	// 页面经这几个服务取壳信息、本地文件与系统剪贴板；画板包留给后续切片。
+	bindServices(shell, root)
 
 	mygo.App.WhenReady(func() {
 		win = mygo.NewWindow(mygo.WindowOptions{
