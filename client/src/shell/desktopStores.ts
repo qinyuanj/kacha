@@ -122,16 +122,41 @@ export function desktopMetaStore(local: DesktopLocalBridge): MetaStore {
   };
 }
 
-/** 本机文件地址：file:/// 加正斜杠路径。 */
-export function fileUrl(absPath: string): string {
+/**
+ * 用户数据根下的文件在页面上可读的地址。
+ *
+ * WebView2 的页面来自 http://mygo.localhost，不允许这种 http 页面加载 file:// 子资源：用 file:// 时
+ * 节点上的图片一律显示「图片缺失」。Go 侧把用户数据根注册成自定义协议 kacha（见 desktop/wiring.go
+ * 的 registerAssetProtocol），页面通过 http://kacha.localhost/<相对路径> 取图。
+ */
+const ASSET_ORIGIN = "http://kacha.localhost/";
+
+/** 相对用户数据根的路径（正斜杠）；不在根内返回 null。根比较不区分大小写（Windows）。 */
+function rootRelative(root: string, absPath: string): string | null {
+  const base = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  const abs = absPath.replace(/\\/g, "/");
+  if (abs.toLowerCase() === base.toLowerCase()) return "";
+  const prefix = base.toLowerCase() + "/";
+  return abs.toLowerCase().startsWith(prefix) ? abs.slice(base.length + 1) : null;
+}
+
+/** 本机文件地址：用户数据根内走 kacha 协议，根外退回 file:///（画板契约要求路径在根内）。 */
+export function servedFileUrl(root: string, absPath: string): string {
+  const rel = rootRelative(root, absPath);
+  if (rel === null) return fileUrl(absPath);
+  return ASSET_ORIGIN + rel.split("/").map(encodeURIComponent).join("/");
+}
+
+/** 本机文件地址：file:/// 加正斜杠路径（只作根外兜底；根内用 servedFileUrl）。 */
+function fileUrl(absPath: string): string {
   return "file:///" + absPath.replace(/\\/g, "/").replace(/^\/+/, "");
 }
 
 /** 浏览器能力那一组。 */
-export function desktopMediaStore(): MediaStore {
+export function desktopMediaStore(root: string): MediaStore {
   return {
-    imageUrl: (absPath: string) => fileUrl(absPath),
-    thumbUrl: (absPath: string) => fileUrl(absPath),
+    imageUrl: (absPath: string) => servedFileUrl(root, absPath),
+    thumbUrl: (absPath: string) => servedFileUrl(root, absPath),
     pickImages: async (): Promise<never> => unavailable("generation"),
     pickPackFile: async (): Promise<never> => unavailable("packExport"),
     uploadReference: async (): Promise<never> => unavailable("generation"),

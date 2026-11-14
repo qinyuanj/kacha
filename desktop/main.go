@@ -39,6 +39,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("kacha: 用户数据根不可用: %v", err)
 	}
+	// 图片经自定义协议交给页面（WebView2 不允许 http 页面加载 file://）；协议要在建窗口前注册。
+	if err := registerAssetProtocol(root); err != nil {
+		log.Fatalf("kacha: 注册本机文件协议失败: %v", err)
+	}
 	shell := shellapp.New(version(), root)
 
 	// 页面经这几个服务取壳信息、本地文件与系统剪贴板；画板包留给后续切片。

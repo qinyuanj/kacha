@@ -242,7 +242,7 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
 
   // 本机图片进 导入参考图/ 与系统剪贴板是本机独有的两样（#129 / #130）：其余浏览器能力来自 desktopStores。
   const media: MediaStore = {
-    ...desktopMediaStore(),
+    ...desktopMediaStore(info.user_data_root),
     // 选画板包用系统对话框（页面拿不到 File 的路径），之后交给 Pack.Import。
     pickPackFile: () => desktopPack.pickPackFile(),
     uploadReference: (file: File): Promise<{ path: string; sha256: string }> => uploadReference(local, info.user_data_root, file),
