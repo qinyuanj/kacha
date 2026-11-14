@@ -1,13 +1,13 @@
 // 页面级粘贴接管（#96）：分派是纯逻辑（core/pageInput 的 dispatchPaste），这里只做事件读数、粘贴落点与画板写入。
 // 监听挂在 window 上而不是画布元素：焦点在工具栏、标签栏时粘贴也落图；没有画板时画布不挂载，登录页粘贴不受影响。
+// 判定与落点在 ui/canvasPasteFacts.ts（#137），这里只留事件读数与接线。
 import { useEffect, useRef, type RefObject } from "react";
 import type { BoardChange } from "../core/edit";
-import { dispatchPaste } from "../core/pageInput";
 import type { ClipboardSnapshot } from "../shell/port";
 import { pasteRefusalText } from "./boardText";
 import { isImageFile } from "./canvasDrop";
 import { nextPasteClip, readClipboard, writeClipboard } from "./canvasKeyboard";
-import { posOf } from "./canvasPoint";
+import { decidePaste, pastePosition, pastedFacts } from "./canvasPasteFacts";
 
 interface Options {
   /** 画布根元素：粘贴落点跟着它上面的指针位置。 */
@@ -68,20 +68,27 @@ export function useCanvasPaste({
       // 桌面壳直接读系统剪贴板（Web 读不到，返回 null）：有快照就以它为准，没有再用 paste 事件带的内容。
       const snapshot = readClipboardPort();
       const files = snapshot ? snapshot.images : [...(data?.files ?? [])];
-      // 读得到内容才算图片；资源管理器里复制的文件只有名字没有内容，归到 opaqueFiles 里提示改为拖入。
-      const images = files.filter((f) => isImageFile(f) && f.size > 0);
-      const opaque = snapshot ? snapshot.readFailureCount : files.length - images.length;
-      const at = posOf(lastPointer.current ? positionOf.current(lastPointer.current) : centerPosition());
-      const action = dispatchPaste(
-        { text: snapshot ? snapshot.text : data?.getData("text/plain") || null, images: images.length, opaqueFiles: opaque },
-        // board 恒为 true：画布只在有画板时挂载，「没有画板就放行」由登录页 / 空工作台不挂载兑现。
-        { board: true, readOnly, modal: modalOpen || dialogOpen.current, textFocus: isEditableTarget(document.activeElement), hasNodeClip: (readClipboard()?.nodes.length ?? 0) > 0, at },
-      );
+      const facts = pastedFacts(snapshot, files, data?.getData("text/plain") || null, isImageFile);
+      const at = pastePosition({
+        pointer: lastPointer.current,
+        center: centerPosition,
+        toFlow: (client) => positionOf.current(client),
+      });
+      const action = decidePaste(facts, {
+        readOnly,
+        modal: modalOpen || dialogOpen.current,
+        textFocus: isEditableTarget(document.activeElement),
+        hasNodeClip: (readClipboard()?.nodes.length ?? 0) > 0,
+        at,
+      });
       if (action.kind === "pass") return;
       // 落到这一步都是本应用要处理 / 要拒绝的粘贴：吞掉，免得浏览器再往别处塞一份。
       event.preventDefault();
       if (action.kind === "refuse") return toast(pasteRefusalText(action.reason));
-      if (action.kind === "importImages") return void importPastedImages(images, { x: action.at[0], y: action.at[1] });
+      if (action.kind === "importImages") {
+        const images = files.filter((f) => isImageFile(f) && f.size > 0);
+        return void importPastedImages(images, { x: action.at[0], y: action.at[1] });
+      }
       // 含节点标记却内存剪贴板为空的分支已被分派拦下，这里必有内容。
       const clip = readClipboard();
       if (!clip?.nodes.length) return;

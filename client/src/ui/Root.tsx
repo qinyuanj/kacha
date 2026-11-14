@@ -1,11 +1,10 @@
 // 进入与身份（ADR 0018）：粘贴 new-api API 密钥 → 服务端验证 → 7 天会话。
 // 会话失效（HTTP 层统一识别 401）时只盖一层重新粘贴的模态，不卸载工作台，未保存的画板改动保留。
+// 启动与提交的判定在 ui/rootSession.ts（#137），这里只留接线与 DOM 摆放。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App } from "../App";
-import { errorText } from "../core/errors";
 import { useShell } from "./shell";
-
-type Phase = "loading" | "enter" | "ready";
+import { bootSession, submitKey, type Phase } from "./rootSession";
 
 export function Root() {
   const port = useShell();
@@ -23,29 +22,10 @@ export function Root() {
 
   useEffect(() => {
     void (async () => {
-      try {
-        const config = await session.config();
-        setVersion(config.version);
-      } catch (e) {
-        setFatal(`无法连接 Kacha 服务端：${errorText(e)}`);
-        return;
-      }
-      // 桌面壳没有登录（#127）：不需要粘贴密钥，直接进工作台。
-      if (session.requiresLogin === false) {
-        setPhase("ready");
-        return;
-      }
-      // 已有会话 cookie（HttpOnly，JS 读不到）且本地还留着密钥：直接进工作台。
-      if (session.readStoredKey()) {
-        try {
-          await session.current();
-          setPhase("ready");
-          return;
-        } catch {
-          // 401 或网络失败都回到粘贴界面，由用户重新提交。
-        }
-      }
-      setPhase("enter");
+      const result = await bootSession(session);
+      if (result.kind === "fatal") return setFatal(result.message);
+      setVersion(result.version);
+      setPhase(result.kind);
     })();
   }, []);
 
@@ -60,20 +40,14 @@ export function Root() {
     if (!pasted || busy) return;
     setBusy(true);
     setError(null);
-    try {
-      await session.login(pasted);
-      session.storeKey(pasted);
-      setKey("");
-      setExpired(false);
-      setPhase("ready");
-      setSessionNonce((n) => n + 1);
-    } catch (e) {
-      // invalid_key（密钥问题）与 gateway_unavailable / network（服务故障）分开显示。
-      setError(e instanceof Error ? e.message : `验证失败：${String(e)}`);
-    } finally {
-      setBusy(false);
-    }
-  }, [key, busy]);
+    const result = await submitKey(session, pasted);
+    setBusy(false);
+    if (result.kind === "error") return setError(result.message);
+    setKey("");
+    setExpired(false);
+    setPhase("ready");
+    setSessionNonce((n) => n + 1);
+  }, [key, busy, session]);
 
   const logout = useCallback(async () => {
     await session.logout().catch(() => undefined);
@@ -81,7 +55,7 @@ export function Root() {
     setExpired(false);
     setError(null);
     setPhase("enter");
-  }, []);
+  }, [session]);
 
   const form = (
     <div className="key-entry" role="dialog" aria-label="粘贴 API 密钥">

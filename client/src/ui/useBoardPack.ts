@@ -1,11 +1,14 @@
 // 画板包界面流程：导出 = 可取消的 hash 阶段 → 确认（含预估大小）→ 可取消的打包阶段与浏览器下载；浏览器选包 → 可取消进度里上传、判定、导入 → 打开画板。
+// 导入结局的判定在 ui/boardPackImport.ts，导出的各步在 ui/boardPackExportOps.ts（#137），这里只留接线。
 import { useCallback, useState } from "react";
-import { BOARD_EXTENSION, type Board } from "../core/board";
-import { buildExportSpec, exportSources, PACK_EXTENSION, planExport, planPackContents, runCancellable, type ImportPhase } from "../core/boardPack";
+import { type Board } from "../core/board";
+import { buildExportSpec, exportSources, planExport, planPackContents, runCancellable } from "../core/boardPack";
 import type { PackDialogState } from "./BoardPackDialog";
 import { errorText } from "../core/errors";
-import { isSlotsFullText, PACK_IMPORT_TEXT, slotsRefusal } from "./boardText";
+import { slotsRefusal } from "./boardText";
 import { useShell } from "./shell";
+import { IMPORT_PHASES, importOutcome } from "./boardPackImport";
+import { exportCancelledText, exportDoneText, exportFailedText, exportHashFailedText, exportLogFields, exportTargetOf, planFailedText } from "./boardPackExportOps";
 
 interface PackBoards {
   flushAll: () => Promise<void>;
@@ -13,15 +16,6 @@ interface PackBoards {
   boardFileName: (key: string) => string | null;
   openImportedBoard: (path: string) => Promise<void>;
 }
-
-/** 导入进度对话框里各步的说明（#62）。 */
-const IMPORT_PHASES: Record<ImportPhase, string> = {
-  check: "正在检查画板包…",
-  existing: "正在比对服务端已有的任务目录…",
-  hash: "正在计算内容校验值…",
-  upload: "正在上传缺少的内容…",
-  merge: "正在合并任务目录…",
-};
 
 export function useBoardPack(userRoot: string | null, boards: PackBoards, toast: (message: string) => void) {
   const port = useShell();
@@ -37,19 +31,19 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
       const board = boards.getBoard(key);
       const boardFile = boards.boardFileName(key);
       if (!board || !boardFile) return;
-      const stem = boardFile.slice(0, -BOARD_EXTENSION.length);
+      const { stem } = exportTargetOf(boardFile);
       let plan;
       try {
         plan = await planExport(board, userRoot, port.core.packFs);
       } catch (e) {
-        return toast(`无法导出画板包：${errorText(e)}`);
+        return toast(planFailedText(errorText(e)));
       }
       // hash 阶段：服务端给逐文件长度与 sha256，core 据此去重并算预估大小，再请用户确认（包格式 v2）。
       const outcome = await runCancellable(port.pack.io, progress(`正在计算画板包大小：${stem}`), () => port.pack.facts(exportSources(plan)));
       if (!outcome.ok) {
         setDialog(null);
         port.ui.log("board_pack", { action: "export", board_file: boardFile, stage: "hash", result: outcome.result });
-        return toast(outcome.result === "cancelled" ? "已取消导出画板包" : `无法导出画板包：${outcome.error}`);
+        return toast(outcome.result === "cancelled" ? exportCancelledText : exportHashFailedText(outcome.error));
       }
       setDialog({ stage: "confirmExport", boardFile, plan, contents: planPackContents(outcome.value) });
     },
@@ -59,18 +53,17 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
   const confirmExport = useCallback(async () => {
     if (!userRoot || dialog?.stage !== "confirmExport") return;
     const { boardFile, plan, contents } = dialog;
-    const stem = boardFile.slice(0, -BOARD_EXTENSION.length);
-    const target = `${stem}${PACK_EXTENSION}`;
+    const { stem, target } = exportTargetOf(boardFile);
     const spec = buildExportSpec(await port.ui.version(), boardFile, plan, contents);
-    const fields = { action: "export", board_file: boardFile, task_dirs: plan.taskDirs.length, missing: plan.missing.length, duplicates: spec.omitted.length, estimated_bytes: contents.bytes };
+    const fields = { ...exportLogFields(boardFile, plan, contents), duplicates: spec.omitted.length };
     const outcome = await runCancellable(port.pack.io, progress(`正在导出画板包：${stem}`), () => port.pack.exportPack(target, spec));
     setDialog(null);
     if (outcome.ok) {
       port.ui.log("board_pack", { ...fields, task_dirs: outcome.value.task_dirs, bytes: outcome.value.bytes, result: "ok" });
-      toast(`已导出画板包 ${target}`);
+      toast(exportDoneText(target));
     } else {
       port.ui.log("board_pack", { ...fields, result: outcome.result });
-      toast(outcome.result === "cancelled" ? "已取消导出画板包" : `导出画板包失败：${outcome.error}`);
+      toast(outcome.result === "cancelled" ? exportCancelledText : exportFailedText(outcome.error));
     }
   }, [userRoot, dialog, toast]);
 
@@ -91,43 +84,15 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
         onPhase: (phase) => setDialog((d) => (d?.stage === "progress" ? { ...d, detail: IMPORT_PHASES[phase] } : d)),
         log: (kind, fields) => port.ui.log(kind, fields),
       });
-      switch (result.kind) {
-        case "newer":
-          setDialog(null);
-          await port.ui.message(result.message, { title: "无法导入画板包" });
-          return;
-        case "corrupt":
-          setDialog(null);
-          return toast(`无法导入画板包：${result.reason}`);
-        case "cancelled":
-          setDialog(null);
-          return toast(PACK_IMPORT_TEXT.cancelled);
-        case "slotsFull":
-          setDialog(null);
-          return toast(result.message);
-        case "failed":
-        case "commitFailed":
-          // 服务端合并前按画板位拒绝（两页抢最后的位）：它的报错就是统一文案，不加前缀，此时什么都没合并。
-          if (isSlotsFullText(result.error)) {
-            setDialog(null);
-            return toast(result.error);
-          }
-          // 导入请求失败时任务目录可能已移入一部分：用弹窗说明画板没有写入，而不是一闪而过的提示。
-          if (result.kind === "commitFailed") return setDialog({ stage: "importDone", message: PACK_IMPORT_TEXT.failed(result.error), conflicts: [], notice: PACK_IMPORT_TEXT.commitFailed });
-          setDialog(null);
-          return toast(PACK_IMPORT_TEXT.failed(result.error));
-        case "done": {
-          const { summary, writeError } = result;
-          if (writeError || summary.conflicts.length) setDialog({ stage: "importDone", message: summary.message, conflicts: summary.conflicts, notice: writeError && PACK_IMPORT_TEXT.openFailed(writeError) });
-          else {
-            setDialog(null);
-            toast(summary.message);
-          }
-        }
+      const outcome = importOutcome(result);
+      if (outcome.kind === "toast") {
+        setDialog(null);
+        return toast(outcome.text);
       }
+      setDialog(outcome.state);
     } catch (e) {
       setDialog(null);
-      toast(PACK_IMPORT_TEXT.failed(errorText(e)));
+      toast(`导入画板包失败：${errorText(e)}`);
     }
   }, [userRoot, boards, toast]);
 

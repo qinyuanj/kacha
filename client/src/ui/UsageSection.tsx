@@ -1,9 +1,11 @@
 // 用量与自助清理（Web 版，ADR 0018）：高级设置里的一块；清单来自服务端，服务端逐条重算候选资格。
+// 可见判定在 ui/usageView.ts（#137），这里只留接线与 DOM 摆放。
 import { useCallback, useEffect, useState } from "react";
 import type { Usage } from "../shell/types";
 import { errorText } from "../core/errors";
 import { useShell } from "./shell";
 import { formatBytes, IDLE_USER_RULE_TEXT } from "./boardText";
+import { canClean, cleanupNote, unreadableNotice, unreferencedSummary, usageBreakdown, usageByDate } from "./usageView";
 
 export function UsageSection() {
   const port = useShell();
@@ -31,7 +33,7 @@ export function UsageSection() {
     setError(null);
     try {
       const result = await port.usage.cleanupUnreferenced(usage.unreferenced.map((d) => d.dir));
-      setNote(`已把 ${result.moved.length} 个任务目录移入回收区${result.skipped.length ? `；${result.skipped.length} 个已不符合条件，未动` : ""}`);
+      setNote(cleanupNote(result));
       setConfirm(false);
       await load();
     } catch (e) {
@@ -42,7 +44,6 @@ export function UsageSection() {
   };
 
   const dirs = usage?.unreferenced ?? [];
-  const unreferencedBytes = dirs.reduce((n, d) => n + d.bytes, 0);
   return (
     <div className="usage-section">
       <div className="form-row">
@@ -58,28 +59,20 @@ export function UsageSection() {
       </div>
       {usage && (
         <>
-          <div className="muted small form-hint">
-            画板 {formatBytes(usage.boards_bytes)}；设置与缓存 {formatBytes(usage.meta_bytes)}；最后访问 {new Date(usage.last_access * 1000).toLocaleString()}
-          </div>
+          <div className="muted small form-hint">{usageBreakdown(usage)}</div>
           <div className="muted small form-hint" data-testid="usage-note">
             用量按文件长度累加：导入画板包时内容相同的文件共用一份磁盘空间，这里会重复计入，实际占用可能更小；清理也不一定释放显示的全部字节。
           </div>
-          <div className="muted small form-hint" data-testid="usage-dates">
-            {usage.by_date.length === 0 ? "还没有任务目录" : usage.by_date.map((d) => `${d.date}：${formatBytes(d.bytes)}`).join("；")}
-          </div>
+          <div className="muted small form-hint" data-testid="usage-dates">{usageByDate(usage)}</div>
           <div className="form-row">
             <span>未引用任务目录</span>
-            <span className="muted small" data-testid="usage-unreferenced-summary">
-              {dirs.length === 0 ? "没有未引用任务目录" : `${dirs.length} 个未引用任务目录，共 ${formatBytes(unreferencedBytes)}`}
-            </span>
-            <button onClick={() => setConfirm(true)} disabled={!dirs.length || !!usage.unreadable_board || busy}>
+            <span className="muted small" data-testid="usage-unreferenced-summary">{unreferencedSummary(dirs)}</span>
+            <button onClick={() => setConfirm(true)} disabled={!canClean(usage, busy)}>
               清理未引用任务目录…
             </button>
           </div>
           {usage.unreadable_board && (
-            <div className="notice notice-warn" data-testid="usage-unreadable">
-              画板读不懂（{usage.unreadable_board}），为避免误删暂不清理；仍被画板引用的结果不会按时间清理。
-            </div>
+            <div className="notice notice-warn" data-testid="usage-unreadable">{unreadableNotice(usage.unreadable_board)}</div>
           )}
           <div className="muted small form-hint" data-testid="usage-idle-rule">{IDLE_USER_RULE_TEXT}</div>
           <div className="muted small form-hint">没有画板引用、建立超过 30 天的任务目录可以清理；清掉的先进回收区，14 天内可找管理员恢复。</div>
