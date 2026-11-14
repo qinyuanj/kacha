@@ -4,6 +4,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { UNAVAILABLE_TEXT } from "../core/uiText";
 
 import { emptyHistory } from "../core/history";
 import { createDesktopPort, type DesktopBridge, type DesktopInfo, type DesktopLocalBridge } from "../shell/desktop";
@@ -72,7 +73,7 @@ describe("标签页右键菜单", () => {
     const { port } = await createDesktopPort(fakeBridge());
     await openMenu(port);
     const item = container.querySelector('[role="menuitem"]') as HTMLElement;
-    expect(item.textContent).toContain("尚不可用");
+    expect(item.textContent).toContain(UNAVAILABLE_TEXT);
     expect(item.getAttribute("aria-disabled")).toBe("true");
   });
 

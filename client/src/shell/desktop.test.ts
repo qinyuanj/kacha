@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createDesktopPort, LOCAL_FINGERPRINT, type DesktopBridge, type DesktopInfo, type DesktopLocalBridge } from "./desktop";
+import { UNAVAILABLE_TEXT } from "../core/uiText";
 import { PortError, portFailureOf } from "./port";
 
 const INFO: DesktopInfo = {
@@ -46,7 +47,7 @@ describe("桌面壳端口", () => {
       expect(failure.kind).toBe("unavailable");
       expect(failure.feature).toBe("generation");
       expect(failure.message).toContain("生成");
-      expect(failure.message).toContain("尚不可用");
+      expect(failure.message).toContain(UNAVAILABLE_TEXT);
     }
   });
 
@@ -71,7 +72,7 @@ describe("桌面壳端口", () => {
     } catch (e) {
       const failure = portFailureOf(e);
       expect(failure.kind).toBe("unavailable");
-      expect(failure.message).toContain("尚不可用");
+      expect(failure.message).toContain(UNAVAILABLE_TEXT);
     }
   });
 
@@ -150,6 +151,7 @@ describe("复制图片到系统剪贴板（#130）", () => {
           calls.push({ method: "Clipboard.CopyImage", args: [path, format] });
           return Promise.resolve(outcome);
         },
+        writeText: () => Promise.resolve(),
       },
     };
   }
@@ -193,6 +195,7 @@ describe("读系统剪贴板（#129）", () => {
       clipboard: {
         read: () => Promise.resolve({ kind: "images", text: "", images: [b64], reason: "", formats: ["image/png"] }),
         copyImage: () => Promise.resolve({ ok: true, kind: "", message: "", bytes: b64.length }),
+        writeText: () => Promise.resolve(),
       },
     };
     const { port } = await createDesktopPort(withClip);

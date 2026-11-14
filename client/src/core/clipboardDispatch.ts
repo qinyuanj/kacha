@@ -47,9 +47,10 @@ function hasMark(content: ClipboardContent): boolean {
 
 /** 用不了的东西怎么说：文件只能拖入，其余是格式 / 超限 / 剪贴板占用。 */
 function noticeOf(content: ClipboardContent): ClipboardPasteAction {
+  // 超限先于 busy：超过 64 MiB 单张上限的图不是「稍后重试」能好的，不能被 busy 掩盖（A3）。
+  if (content.reason === "tooLarge") return { kind: "notice", notice: "tooLarge" };
   if (content.kind === "busy") return { kind: "notice", notice: "busy" };
   if (content.reason === "files" || content.readFailureCount > 0) return { kind: "refuse", reason: "filesNotReadable" };
-  if (content.reason === "tooLarge") return { kind: "notice", notice: "tooLarge" };
   if (content.kind === "unsupported") return { kind: "notice", notice: "unsupported" };
   return { kind: "notice", notice: "empty" };
 }

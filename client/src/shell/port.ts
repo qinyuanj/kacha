@@ -2,6 +2,7 @@
 // 换底层实现（桌面 Go 壳，见 ADR 0023）只换实现、不改调用点：缺的能力由 features 提前关掉，
 // 或在调用时返回 kind: "unavailable"，界面据此隐藏入口而不是失败得很晚。
 import { errorText } from "../core/errors";
+import { UNAVAILABLE_TEXT } from "../core/uiText";
 import type { ImportOptions, ImportResult, PackEntryFact, PackExportSpec, PackFs, PackIo } from "../core/boardPack";
 import type { DirEntry, RelocateFs } from "../core/relocate";
 import type { RunDeps } from "../core/run";
@@ -19,7 +20,7 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "login";
+export type FeatureId = "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "login" | "copyImage" | "saveImage" | "downloadImage" | "downloadResults";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
@@ -110,13 +111,13 @@ export function unavailableMessage(error: unknown): string | null {
   const failure = portFailureOf(error);
   if (failure.kind !== "unavailable") return null;
   // 端口自己写的消息里已经说了「尚不可用」就照用：它可能更具体（结果下载、画板包导出）。
-  if (failure.message.includes("尚不可用")) return failure.message;
+  if (failure.message.includes(UNAVAILABLE_TEXT)) return failure.message;
   const label = failure.feature ? FEATURE_LABELS[failure.feature] : "";
-  return label ? "尚不可用：" + label : "尚不可用";
+  return label ? UNAVAILABLE_TEXT + "：" + label : UNAVAILABLE_TEXT;
 }
 
-/** 能力名（界面用中文）：与 FeatureId 一一对应。 */
-const FEATURE_LABELS: Record<FeatureId, string> = {
+/** 能力名（界面用中文）：与 FeatureId 一一对应；桌面壳与本文件共用这一份（C1）。 */
+export const FEATURE_LABELS: Record<FeatureId, string> = {
   generation: "生成",
   usage: "用量统计",
   packExport: "画板包导出",
@@ -125,6 +126,10 @@ const FEATURE_LABELS: Record<FeatureId, string> = {
   tidy: "整理",
   relay: "结果中转",
   login: "登录",
+  copyImage: "复制图片",
+  saveImage: "另存为",
+  downloadImage: "下载图片",
+  downloadResults: "下载整板结果",
 };
 
 // ---- 端口分组 ----

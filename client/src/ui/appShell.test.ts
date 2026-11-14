@@ -3,6 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { UNAVAILABLE_TEXT } from "../core/uiText";
 import type { Board } from "../core/board";
 import { emptyHistory } from "../core/history";
 import { AppNotices, type AppNoticesProps } from "./appNotices";
@@ -150,9 +151,9 @@ describe("画板包菜单", () => {
   });
 
   it("端口没有导入能力：导入标「尚不可用」并置灰", async () => {
-    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: "画板包导入尚不可用", exportDisabledReason: null, downloadDisabledReason: null, onPick: vi.fn(), onClose: vi.fn() })));
+    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: "画板包导入" + UNAVAILABLE_TEXT, exportDisabledReason: null, downloadDisabledReason: null, onPick: vi.fn(), onClose: vi.fn() })));
     const importButton = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("导入画板包"));
-    expect(importButton?.textContent).toContain("尚不可用");
+    expect(importButton?.textContent).toContain(UNAVAILABLE_TEXT);
     // 置灰态用 aria-disabled 表示（与画布菜单同一口径）。
     expect(importButton?.getAttribute("aria-disabled")).toBe("true");
   });

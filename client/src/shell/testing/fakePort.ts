@@ -97,7 +97,7 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
   const missing = new Set<FeatureId>(options.missing ?? []);
 
   const board = fakeBoardStore(boards, calls, options);
-  const files = fakeFileStore(boards, calls);
+  const files = fakeFileStore(boards, calls, options);
   const meta = fakeMetaStore(calls);
   const media = fakeMediaStore(options, calls, pickImages, pickPacks);
   const pack = fakePackStore(imports, calls);

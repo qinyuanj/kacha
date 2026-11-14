@@ -86,6 +86,10 @@ describe("读不出东西时给明确提示，不静默丢弃", () => {
     expect(dispatchClipboardPaste(content({ kind: "unsupported", reason: "tooLarge" }), context())).toEqual({ kind: "notice", notice: "tooLarge" });
   });
 
+  it("超限优先于 busy：不可变小的图不能报成「稍后重试」（A3）", () => {
+    expect(dispatchClipboardPaste(content({ kind: "busy", reason: "tooLarge" }), context())).toEqual({ kind: "notice", notice: "tooLarge" });
+  });
+
   it("剪贴板被别的程序占用：给可重试的失败提示", () => {
     expect(dispatchClipboardPaste(content({ kind: "busy", reason: "busy" }), context())).toEqual({ kind: "notice", notice: "busy" });
   });

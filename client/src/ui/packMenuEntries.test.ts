@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { createDesktopPort, type DesktopBridge, type DesktopInfo, type DesktopLocalBridge } from "../shell/desktop";
 import { createFakePort } from "../shell/testing/fakePort";
+import { UNAVAILABLE_TEXT } from "../core/uiText";
 import { packExportEntry, packImportEntry, packMenuEntries } from "./packMenuEntries";
 
 const INFO: DesktopInfo = {
@@ -25,21 +26,21 @@ describe("画板包菜单", () => {
     const { port } = await createDesktopPort(fakeBridge());
     const entries = packMenuEntries(port, { open: true, broken: false });
     const exportEntry = entries.find((e) => e.label.startsWith("导出画板包"));
-    expect(exportEntry?.label).toContain("尚不可用");
+    expect(exportEntry?.label).toContain(UNAVAILABLE_TEXT);
     expect(exportEntry?.disabledReason).not.toBeNull();
   });
 
   it("桌面壳：桥上没有 Pack 服务时导入才标「尚不可用」", async () => {
     const { port } = await createDesktopPort(fakeBridge());
     const importEntry = packMenuEntries(port, { open: true, broken: false }).find((e) => e.label.startsWith("导入画板包"));
-    expect(importEntry?.label).toContain("尚不可用");
-    expect(importEntry?.disabledReason).toBe("画板包导入尚不可用");
+    expect(importEntry?.label).toContain(UNAVAILABLE_TEXT);
+    expect(importEntry?.disabledReason).toBe("画板包导入" + UNAVAILABLE_TEXT);
   });
 
   it("桌面壳：下载整板结果标「尚不可用」并置灰", async () => {
     const { port } = await createDesktopPort(fakeBridge());
     const entry = packMenuEntries(port, { open: true, broken: false }).find((e) => e.label.startsWith("下载整板结果"));
-    expect(entry?.label).toContain("尚不可用");
+    expect(entry?.label).toContain(UNAVAILABLE_TEXT);
     expect(entry?.disabledReason).not.toBeNull();
   });
 
@@ -47,7 +48,7 @@ describe("画板包菜单", () => {
     const port = createFakePort();
     const entries = packMenuEntries(port, { open: true, broken: false });
     for (const entry of entries) {
-      expect(entry.label).not.toContain("尚不可用");
+      expect(entry.label).not.toContain(UNAVAILABLE_TEXT);
       expect(entry.disabledReason).toBeNull();
     }
   });
