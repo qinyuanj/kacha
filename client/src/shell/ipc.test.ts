@@ -71,6 +71,21 @@ describe("画板包的 HTTP 出口", () => {
 });
 
 describe("画板包的内容接口", () => {
+  /** 替掉 Worker：立刻回一条消息。 */
+  function stubWorker(reply: (request: unknown) => unknown): void {
+    vi.stubGlobal(
+      "Worker",
+      class {
+        onmessage: ((e: MessageEvent) => void) | null = null;
+        onerror: ((e: { message: string }) => void) | null = null;
+        postMessage(request: unknown): void {
+          queueMicrotask(() => this.onmessage?.({ data: reply(request) } as MessageEvent));
+        }
+        terminate(): void {}
+      },
+    );
+  }
+
   afterEach(() => vi.unstubAllGlobals());
 
   it("比对服务端已有的目录：问服务端", async () => {
@@ -94,7 +109,18 @@ describe("画板包的内容接口", () => {
     expect(seen[0]).toContain("/api/packs/staging");
   });
 
-  it("服务��出错时抛 ApiError", async () => {
+  it("Worker 回了消息：把内容发给服务端", async () => {
+    stubWorker(() => ({ kind: "body", body: new Blob(["x"]) }));
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      seen.push(String(url));
+      return new Response(null, { status: 200 });
+    });
+    await packContent.uploadContent("staging-1", "sha", { file: new File(["x"], "a.ugcpack"), entry: { path: "a.txt", method: 1, offset: 0, size: 1 } } as never, { done: 0, total: 1 });
+    expect(seen[0]).toContain("/api/packs/staging/staging-1/contents/sha");
+  });
+
+  it("服务端出错时抛 ApiError", async () => {
     vi.stubGlobal("fetch", async () => new Response("炸了", { status: 500 }));
     await expect(packContent.stage()).rejects.toBeInstanceOf(ApiError);
   });

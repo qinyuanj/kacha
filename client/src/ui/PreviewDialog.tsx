@@ -50,6 +50,27 @@ interface Props {
   onClose: () => void;
 }
 
+/** 拖拽时的窗口事件：移动跟手，松手落框。 */
+function useDragWindow(drag: Drag | null, stage: React.RefObject<HTMLImageElement | null>, setRects: (fn: (rs: Rect01[]) => Rect01[]) => void, setDrag: (drag: Drag | null) => void): void {
+  useEffect(() => {
+    if (!drag) return;
+    const move = (e: PointerEvent) => setDrag(drag ? dragPoint(drag, pointAt(stage, e)) : drag);
+    const up = (e: PointerEvent) => {
+      const p = pointAt(stage, e);
+      setRects((rs) => rectsAfter(drag, rs, p));
+      setDrag(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [drag]);
+}
+
 /** 区域编辑的状态与拖拽。 */
 function useRegionEditing(req: { edit?: RegionTarget }) {
   const stage = useRef<HTMLImageElement>(null);
@@ -77,23 +98,7 @@ function useRegionEditing(req: { edit?: RegionTarget }) {
     setDrag(next.drag);
   };
 
-  useEffect(() => {
-    if (!drag) return;
-    const move = (e: PointerEvent) => setDrag((d) => (d ? dragPoint(d, pointAt(stage, e)) : d));
-    const up = (e: PointerEvent) => {
-      const p = pointAt(stage, e);
-      setRects((rs) => rectsAfter(drag, rs, p));
-      setDrag(null);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
-    return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
-    };
-  }, [drag]);
+  useDragWindow(drag, stage, setRects, setDrag);
 
   const removeOne = () => {
     setRects((rs) => removeSelected(rs, selected));

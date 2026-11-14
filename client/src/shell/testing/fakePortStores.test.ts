@@ -69,6 +69,19 @@ describe("画板存储", () => {
 });
 
 describe("画板包存储", () => {
+  it("没有脚本的结局：回 done", async () => {
+    const calls = emptyFakeCalls();
+    const store = fakePackStore([], calls);
+    const result = await store.import(new File(["x"], "a.ugcpack"), { file: new File(["x"], "a.ugcpack"), openBoard: async () => undefined, slotsRefusal: async () => null, onStage: () => undefined, onPhase: () => undefined, log: () => undefined });
+    expect(result.kind).toBe("done");
+  });
+
+  it("结局不是 done：原样返回", async () => {
+    const calls = emptyFakeCalls();
+    const store = fakePackStore([{ kind: "slotsFull", message: "画板位满了" }], calls);
+    const result = await store.import(new File(["x"], "a.ugcpack"), { file: new File(["x"], "a.ugcpack"), openBoard: async () => undefined, slotsRefusal: async () => null, onStage: () => undefined, onPhase: () => undefined, log: () => undefined });
+    expect(result.kind).toBe("slotsFull");
+  });
   it("导入：记下调用并按结局返回", async () => {
     const calls = emptyFakeCalls();
     const store = fakePackStore([{ kind: "done", summary: { imported: 1, skipped: 0, conflicts: [], message: "已导入" }, written: [] }], calls);

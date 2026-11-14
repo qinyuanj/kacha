@@ -52,6 +52,13 @@ function isMissingError(e: unknown): boolean {
   return kind === "missing";
 }
 
+/** 落盘待写的改动：有时计时器就直接写，有时等之前的写完。 */
+export async function flushPending(key: string, saverOf: (key: string) => Saver, flush: (key: string) => Promise<void>): Promise<void> {
+  const saver = saverOf(key);
+  if (saver?.timer) await flush(key);
+  else if (saver) await saver.chain;
+}
+
 /** 去抖自动保存：每块画板一个计时器与一条串行写入链。 */
 export function useAutosave(
   patch: (key: string, fn: (s: OkSession) => OkSession) => void,

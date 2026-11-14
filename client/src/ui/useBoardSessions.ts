@@ -9,7 +9,7 @@ import { basename, resolveFromRoot } from "../core/paths";
 import { knownImageInfo } from "./context";
 import { useShell } from "./shell";
 import { isReadOnly, samePath } from "./boardSessions";
-import { useAutosave, type Saver } from "./boardSessionsAutosave";
+import { flushPending, useAutosave, type Saver } from "./boardSessionsAutosave";
 import {
   applyChange,
   archiveBoardSession,
@@ -191,13 +191,6 @@ export function useSessionLifecycle(options: {
     [store, setActiveKey, cancelTimer],
   );
   return { closeAll, openPath, createBoard, moveOutStage, openImportedBoard, dropSession, closeBoardRef };
-}
-
-/** 落盘待写的改动：有时计时器就直接写，有时等之前的写完。 */
-export async function flushPending(key: string, saverOf: (key: string) => Saver, flush: (key: string) => Promise<void>): Promise<void> {
-  const saver = saverOf(key);
-  if (saver?.timer) await flush(key);
-  else if (saver) await saver.chain;
 }
 
 /** 会话的存档接线：关闭、删除、归档、复制、改名与重载。 */
