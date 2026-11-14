@@ -76,6 +76,29 @@ def run_build(root: Path, env: dict[str, str], *args: str) -> subprocess.Complet
     )
 
 
+def assert_prints_produced_exe(case: unittest.TestCase, root: Path, stdout: str) -> None:
+    """断言脚本打印的正是它实际产出的 exe。
+
+    只核对仓库内的相对位置（build/windows-amd64/Kacha.exe）并确认该文件确实存在，
+    不比对临时目录的绝对路径：在 Windows runner 上，构建子进程经 __file__.resolve()
+    得到的临时目录可能与测试进程拼成不同的用户段（如 RUNNER~1 与 runneradmin），
+    绝对路径字符串不同却指向同一个产物，按字符串相等断言会误报失败。
+    """
+    relative_exe = os.path.join("build", "windows-amd64", "Kacha.exe")
+    printed = [
+        line.split("客户端：", 1)[1].strip()
+        for line in stdout.splitlines()
+        if "客户端：" in line
+    ]
+    case.assertTrue(printed, f"脚本没有打印客户端路径：{stdout!r}")
+    case.assertTrue(
+        printed[0].endswith(relative_exe),
+        f"打印的路径不是产出的 exe（应以 {relative_exe} 结尾）：{printed[0]!r}",
+    )
+    produced = root / relative_exe
+    case.assertTrue(produced.exists(), f"打印的产物不存在：{produced}")
+
+
 class VersionParsingTest(unittest.TestCase):
     """版本解析：从命令输出里取出要记录的那一段，读不到就是 None。"""
 
@@ -113,7 +136,9 @@ class BuildDesktopTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             exe = root / "build" / "windows-amd64" / "Kacha.exe"
             self.assertTrue(exe.exists())
-            self.assertIn(str(exe), result.stdout)
+            # 不比对临时目录的绝对路径（见 assert_prints_produced_exe）：runner 上两个进程
+            # 可能把同一临时根拼成不同的用户段，绝对路径字符串相等并不代表产物不同。
+            assert_prints_produced_exe(self, root, result.stdout)
 
             info = json.loads((root / "build" / "windows-amd64" / "build-info.json").read_text(encoding="utf-8"))
             self.assertEqual(info["app"], "Kacha")
@@ -151,3 +176,31 @@ class BuildDesktopTest(unittest.TestCase):
             result = run_build(root, env)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Kacha.exe", result.stderr)
+
+
+class PrintedExeAssertionTest(unittest.TestCase):
+    """打印路径断言本身：被拼成不同临时根的同一产物要放行，错误路径要能识别。"""
+
+    def made_repo(self, tmp: str) -> Path:
+        root = Path(tmp)
+        (root / "build" / "windows-amd64").mkdir(parents=True)
+        (root / "build" / "windows-amd64" / "Kacha.exe").write_bytes(b"exe")
+        return root
+
+    def test_accepts_differently_spelled_temp_root(self):
+        # 临时根被拼成另一个用户段但指向同一产物：不按绝对路径字符串比对，应当通过。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.made_repo(tmp)
+            other_root = Path("C:/Users/other/AppData/Local/Temp/tmp8l75n9li")
+            printed = other_root / "build" / "windows-amd64" / "Kacha.exe"
+            stdout = "  √ Built Kacha 0.1.0 in 6.8s\n客户端：" + str(printed) + "\n"
+            assert_prints_produced_exe(self, root, stdout)
+
+    def test_rejects_wrong_printed_path(self):
+        # 产物存在但脚本打印了错路径：断言必须失败，防止改宽后形同虚设。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.made_repo(tmp)
+            wrong = root / "build" / "windows-amd64" / "Wrong.exe"
+            with self.assertRaises(AssertionError):
+                assert_prints_produced_exe(self, root, "客户端：" + str(wrong) + "\n")
+
