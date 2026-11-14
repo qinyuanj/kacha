@@ -1,7 +1,7 @@
 // 系统剪贴板的分派（#129）：桌面壳从系统剪贴板读到的快照，决定一个 Ctrl+V 落在哪条路上。
 // 纯逻辑：不碰 DOM、不起 MyGo runtime、不发请求——读取由壳端口的 media.readClipboard 负责，
 // 这里只按快照的类别与界面状态给出意图（与 #96 的 dispatchPaste 同一套语义，只是输入更具体）。
-import { isNodeMarker, type PasteContext, type PasteRefusal } from "./pageInput";
+import { isNodeMarker, markerPaste, type PasteContext, type PasteRefusal } from "./pageInput";
 
 /**
  * 剪贴板快照的类别：与 Go 侧 desktop/internal/clipboard 的 Kind 一一对应。
@@ -61,19 +61,17 @@ function noticeOf(content: ClipboardContent): ClipboardPasteAction {
  * 读不出东西时一律给提示（notice / refuse），不静默丢弃。
  */
 export function dispatchClipboardPaste(content: ClipboardContent, context: PasteContext): ClipboardPasteAction {
-  if (!context.board) return { kind: "pass" };
-  if (context.modal) return { kind: "pass" };
-  if (hasMark(content)) {
-    if (context.readOnly) return { kind: "refuse", reason: "readOnly" };
-    return context.hasNodeClip ? { kind: "pasteNodes" } : { kind: "refuse", reason: "staleNodeClip" };
-  }
+  if (!context.board || context.modal) return { kind: "pass" };
+  // 标记那条路与 #96 的事件分派是同一份判定（只读拒绝 / 内存剪贴板空了按失效处理）。
+  if (hasMark(content)) return markerPaste(context);
   // 输入框里粘文本照旧：只有「没有文本」（纯图片或文件）时才轮到下面的分支。
   if (context.textFocus && content.text !== null) return { kind: "pass" };
-  if (content.images.length > 0) {
-    if (context.readOnly) return { kind: "refuse", reason: "readOnly" };
-    return { kind: "importImages", at: context.at };
-  }
+  if (content.images.length > 0) return imagePaste(context);
   // 普通文本放行（画布上的文字仍能自己粘）。
-  if (content.kind === "text") return { kind: "pass" };
-  return noticeOf(content);
+  return content.kind === "text" ? { kind: "pass" } : noticeOf(content);
+}
+
+/** 剪贴板里是图片：只读拒绝，否则落成参考图。 */
+function imagePaste(context: PasteContext): ClipboardPasteAction {
+  return context.readOnly ? { kind: "refuse", reason: "readOnly" } : { kind: "importImages", at: context.at };
 }

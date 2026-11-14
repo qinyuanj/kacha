@@ -1,6 +1,6 @@
 // 桌面壳端口的各个分组（#137）：本地调用的异常折算与没有的能力。
 import { describe, expect, it } from "vitest";
-import { base64ToBytes, checked, localRun, unavailable } from "./desktopStores";
+import { checked, localRun, unavailable } from "./desktopStores";
 import { PortError } from "./port";
 
 describe("本地调用", () => {
@@ -44,11 +44,5 @@ describe("没有的能力", () => {
     } catch (e) {
       expect(e).toMatchObject({ kind: "unavailable" });
     }
-  });
-});
-
-describe("base64", () => {
-  it("转成字节", () => {
-    expect([...base64ToBytes(btoa("AB"))]).toEqual([65, 66]);
   });
 });

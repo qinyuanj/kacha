@@ -1,7 +1,8 @@
 // 系统剪贴板的页面侧转换（#129）：Go 侧快照 → 界面要的 ClipboardContent。
 // 纯函数：不碰 DOM、不起 MyGo runtime、不发请求。
 import { describe, expect, it } from "vitest";
-import { base64Of, clipboardContentOf, extensionOf } from "./desktopClipboard";
+import { base64Of } from "../core/base64";
+import { clipboardContentOf, extensionOf } from "./desktopClipboard";
 
 const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 const snapshot = (over: Partial<Parameters<typeof clipboardContentOf>[0]> = {}) => ({ kind: "empty", text: "", images: [], reason: "", formats: [], ...over });

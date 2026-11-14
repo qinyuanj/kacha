@@ -76,7 +76,7 @@ export type PasteRefusal = "readOnly" | "staleNodeClip" | "filesNotReadable";
 export type PasteAction = { kind: "pass" } | { kind: "pasteNodes" } | { kind: "importImages"; at: PastePos } | { kind: "refuse"; reason: PasteRefusal };
 
 /** 剪贴板里是本应用的节点标记：只读画板先拒绝；内存剪贴板空了就是刷新过页面或来自另一个标签页，只能提示重新复制。 */
-function markerPaste(context: PasteContext): PasteAction {
+export function markerPaste(context: PasteContext): PasteAction {
   if (context.readOnly) return { kind: "refuse", reason: "readOnly" };
   return context.hasNodeClip ? { kind: "pasteNodes" } : { kind: "refuse", reason: "staleNodeClip" };
 }

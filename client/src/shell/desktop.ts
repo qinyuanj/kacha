@@ -11,7 +11,8 @@ import { portFailureOf, type ClipboardContent, type MediaStore, type ShellFeatur
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
 import type { BrowserOptions, ImageInfo, SessionPort, UsagePort } from "./types";
 import type { LogKind } from "./log";
-import { base64Of, clipboardContentOf, extensionOf } from "./desktopClipboard";
+import { base64Of } from "../core/base64";
+import { clipboardContentOf, extensionOf } from "./desktopClipboard";
 import { sha256Hex } from "../core/sha256";
 import { IMPORTED_REFERENCES_DIR } from "../core/boardPack";
 import { joinPath, toRootRelative } from "../core/paths";

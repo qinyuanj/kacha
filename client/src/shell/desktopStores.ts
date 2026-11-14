@@ -2,6 +2,7 @@
 // 拆开之后每个函数的复杂度单独看得到，门禁也按函数计。
 import { PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore, type PackStore } from "./port";
 import type { BoardListing, BoardTexts, BoardWriteOptions, ImageInfo, UsagePort } from "./types";
+import { base64ToBytes } from "../core/base64";
 import { joinPath } from "../core/paths";
 import type { DirEntry } from "../core/relocate";
 import type { PackIo } from "../core/boardPack";
@@ -83,14 +84,6 @@ export function desktopBoardStore(local: DesktopLocalBridge, userRoot: string): 
       }),
     measure: async (): Promise<never> => unavailable("tidy"),
   };
-}
-
-/** base64 文本 → 字节。 */
-export function base64ToBytes(text: string): Uint8Array {
-  const binary = atob(text);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
 }
 
 /** 文件那一组。 */

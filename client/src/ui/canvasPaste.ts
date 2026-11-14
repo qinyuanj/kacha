@@ -1,14 +1,15 @@
 // 页面级粘贴接管（#96 / #129）：分派是纯逻辑（core/clipboardDispatch 与 core/pageInput），
 // 这里只做事件读数、粘贴落点与画板写入。
 // 监听挂在 window 上而不是画布元素：焦点在工具栏、标签栏时粘贴也落图；没有画板时画布不挂载，登录页粘贴不受影响。
-// 判定与落点在 ui/canvasPasteFacts.ts（#137），这里只留事件读数与接线。
+// 判定与落点在 ui/canvasPasteFacts.ts，落地动作在 ui/canvasPasteApply.ts（#137），这里只留事件读数与接线。
 import { useEffect, useRef, type RefObject } from "react";
 import type { BoardChange } from "../core/edit";
-import type { ClipboardContent, ClipboardPasteAction } from "../core/clipboardDispatch";
-import type { PasteAction, PasteContext } from "../core/pageInput";
+import type { ClipboardContent } from "../core/clipboardDispatch";
+import type { PasteContext } from "../core/pageInput";
 import { clipboardNoticeText, pasteRefusalText } from "./boardText";
 import { isImageFile } from "./canvasDrop";
 import { nextPasteClip, readClipboard, writeClipboard } from "./canvasKeyboard";
+import { applyPasteEffect, pasteEffect, type PasteSinks } from "./canvasPasteApply";
 import { decideClipboardPaste, decidePaste, pastePosition, pastedFacts } from "./canvasPasteFacts";
 
 interface Options {
@@ -40,11 +41,11 @@ interface Options {
   nativeClipboard: boolean;
 }
 
-/** paste 事件里带的剪贴板内容（Web 的路：页面读不到系统剪贴板，只能看事件）。 */
-function factsOfEvent(data: DataTransfer | null) {
-  const files = [...(data?.files ?? [])];
-  return { files, text: data?.getData("text/plain") || null };
-}
+/** paste 事件带的内容：文件与纯文本（合成事件可能没有 clipboardData）。 */
+const eventContent = (data: DataTransfer | null) => ({ files: [...(data?.files ?? [])], text: data?.getData("text/plain") || null });
+
+/** 这一批文件里能读出内容的图片：读不到内容的（只有名字）不算。 */
+const imagesOf = (files: File[]) => files.filter((f) => isImageFile(f) && f.size > 0);
 
 /** 页面级粘贴：剪贴板里是本应用的节点标记就粘节点，是图片就落成参考图，其余（文本、读不到的文件）放行或提示。 */
 export function useCanvasPaste({
@@ -77,6 +78,13 @@ export function useCanvasPaste({
   }, [wrapper]);
 
   useEffect(() => {
+    /** 落地动作接到的界面能力：提示、落图、写画板、错开剪贴板。 */
+    const sinks: PasteSinks = {
+      toast,
+      importPastedImages,
+      apply,
+      writeClipboard: (clip) => writeClipboard(nextPasteClip(clip)),
+    };
     /** 分派时要看的界面状态（与 #96 同一份）。 */
     const context = (at: [number, number]): PasteContext => ({
       // board 恒为 true：画布只在有画板时挂载，「没有画板就放行」由登录页 / 空工作台不挂载兑现。
@@ -94,39 +102,20 @@ export function useCanvasPaste({
         center: centerPosition,
         toFlow: (client) => positionOf.current(client),
       });
-    /** 落到这一步都是本应用要处理 / 要拒绝的粘贴：吞掉，免得浏览器再往别处塞一份。 */
-    const handle = (action: PasteAction | ClipboardPasteAction, images: () => File[]) => {
-      if (action.kind === "pass") return false;
-      if (action.kind === "refuse") toast(pasteRefusalText(action.reason));
-      else if (action.kind === "notice") toast(clipboardNoticeText(action.notice));
-      else if (action.kind === "importImages") {
-        const files = images();
-        if (!files.length) return true;
-        void importPastedImages(files, { x: action.at[0], y: action.at[1] });
-      } else {
-        // 含节点标记却内存剪贴板为空的分支已被分派拦下，这里必有内容。
-        const clip = readClipboard();
-        if (!clip?.nodes.length) return true;
-        apply({ kind: "paste", clip });
-        // 连续粘贴逐次错开。
-        writeClipboard(nextPasteClip(clip));
-      }
-      return true;
-    };
+    /** 分派结局 → 落地动作 → 接上界面；返回是否吞掉这次粘贴。 */
+    const run = (action: Parameters<typeof pasteEffect>[0], images: () => File[]): boolean =>
+      applyPasteEffect(pasteEffect(action, { images, readClipboard, refuseText: pasteRefusalText, noticeText: clipboardNoticeText }), sinks);
 
     /** Web 的路：内容只能从 paste 事件里读，同步分派，放行时一点都不拦（输入框、页面文字照旧）。 */
     const pasteFromEvent = (event: ClipboardEvent) => {
-      const data = event.clipboardData;
-      const files = [...(data?.files ?? [])];
-      const facts = pastedFacts(null, files, factsOfEvent(data).text, isImageFile);
-      const action = decidePaste(facts, context(landing()));
-      if (action.kind !== "pass") event.preventDefault();
-      handle(action, () => files.filter((f) => isImageFile(f) && f.size > 0));
+      const { files, text } = eventContent(event.clipboardData);
+      const action = decidePaste(pastedFacts(null, files, text, isImageFile), context(landing()));
+      if (run(action, () => imagesOf(files))) event.preventDefault();
     };
 
     /** 桌面壳的路：系统剪贴板要经 Go 读，是异步的（等主线程）。 */
     const pasteFromNative = (event: ClipboardEvent) => {
-      const { files, text } = factsOfEvent(event.clipboardData);
+      const { files, text } = eventContent(event.clipboardData);
       const at = landing();
       void (async () => {
         const snapshot = await readClipboardPort().catch(() => null);
@@ -134,10 +123,8 @@ export function useCanvasPaste({
         const action = snapshot
           ? decideClipboardPaste(snapshot, context(at))
           : decidePaste(pastedFacts(null, files, text, isImageFile), context(at));
-        if (action.kind === "pass") return;
         // 先吞掉默认行为，否则同一个 Ctrl+V 会既落一份到页面、又落一份到画板。
-        event.preventDefault();
-        handle(action, () => (snapshot ? snapshot.images : files.filter((f) => isImageFile(f) && f.size > 0)));
+        if (run(action, () => (snapshot ? snapshot.images : imagesOf(files)))) event.preventDefault();
       })();
     };
 
