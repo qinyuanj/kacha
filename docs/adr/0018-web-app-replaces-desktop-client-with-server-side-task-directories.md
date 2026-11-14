@@ -40,3 +40,5 @@ status: accepted
   > 同日补记：读文件接口的缓存头与缩略图是否生成，都只按相对路径的形状判定——`<UTC 日期>/<task_id>/<文件>` 且不在 `.staging/` 下的是不可变的任务目录文件，给 `Cache-Control: private, max-age=31536000, immutable` 并可生成缩略图；其余路径给 `no-cache`、缩略图接口直接回原图。不看扩展名，不加 ETag / Last-Modified。服务端本不持有任务目录格式知识（ADR 0010），这里沿用 `references::is_date_dir` 与清理（`cleanup`）认日期目录形状的先例，不读 `task.json`。决定见[任务目录图片能否用长期不可变缓存](https://github.com/qinyuanj/kacha/issues/47)与[大画板节点缩略图方案](https://github.com/qinyuanj/kacha/issues/49)。
 - 部署：在开发机 release 编译，复制产物到 lzxsvn（Windows，8 GB），注册为 Windows 服务，单进程托管前端静态文件，使用独立端口；版本号以 `server/Cargo.toml` 为准并显示在页面上。
 - 身份即密钥：用户换密钥就被视为新用户，看不到原有数据，需由管理员手动把旧数据目录挪到新指纹下；new-api 开放注册，任何持有有效密钥的人都能使用 Kacha。
+
+> 2026-11-14 补记：已被 [ADR 0023](0023-local-first-desktop-client-replaces-web.md) 取代，Kacha 回到本地优先的 Windows 桌面客户端，画板与任务目录回到本机由客户端管理的用户数据根，Web 路线不再是方向。上面记的 Web 部署形态（服务端用户数据根、密钥指纹身份、会话 cookie、服务端清理与回收区、服务端不备份）随之失效；任务目录为真源、画板包是交换物等仍在的领域决定按本机用户数据根继续成立。
