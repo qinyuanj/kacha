@@ -32,6 +32,8 @@ import { useBoardSessions } from "./ui/useBoardSessions";
 import { errorText } from "./core/errors";
 import { useShell } from "./ui/shell";
 import { downloadBoardResults } from "./ui/packMenu";
+import { packMenuEntries } from "./ui/packMenuEntries";
+import { unavailableMessage } from "./shell/port";
 
 export function App({ onLogout, version, sessionExpired = false }: { onLogout?: () => void; version?: string | null; sessionExpired?: boolean } = {}) {
   const port = useShell();
@@ -91,6 +93,8 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
   const undoActive = useCallback(() => activeKey && undoBoard(activeKey), [activeKey, undoBoard]);
   const redoActive = useCallback(() => activeKey && redoBoard(activeKey), [activeKey, redoBoard]);
   const toast = useCallback((message: string) => setToastText(message), []);
+  // 本切片还没做的能力（#127）：入口标「尚不可用」并置灰，不假装能跑。
+  const packExportOff = !port.features.packExport;
   const pack = useBoardPack(userRoot, boards, toast);
   /** 新建画板；画板位满时提示统一文案（#89）。 */
   const createBoardOrExplain = useCallback(async () => {
@@ -462,15 +466,15 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
       {packMenu && (
         <ContextMenu
           at={packMenu}
-          items={[
-            { action: "importPack", label: "导入画板包…", disabledReason: null },
-            { action: "exportPack", label: "导出画板包…", disabledReason: active?.status === "ok" ? null : active ? "画板无法打开，不能导出" : "没有打开的画板" },
-            { action: "downloadResults" as const, label: "下载整板结果（zip）", disabledReason: active?.status === "ok" ? null : active ? "画板无法打开，不能下载" : "没有打开的画板" },
-          ]}
+          items={packMenuEntries(port, active?.status === "ok").map((entry, index) => ({
+            action: (["importPack", "exportPack", "downloadResults"] as const)[index],
+            label: entry.label,
+            disabledReason: entry.disabledReason ?? (active?.status === "ok" ? null : active ? "画板无法打开" : "没有打开的画板"),
+          }))}
           onPick={(action) => {
             setPackMenu(null);
-            if (action === "importPack") void pack.importPack();
-            else if (action === "exportPack" && active) void pack.prepareExport(active.key);
+            if (action === "importPack") void pack.importPack().catch((e) => toast(unavailableMessage(e) ?? `导入画板包失败：${errorText(e)}`));
+            else if (action === "exportPack" && active) void pack.prepareExport(active.key).catch((e) => toast(unavailableMessage(e) ?? `导出画板包失败：${errorText(e)}`));
             else if (action === "downloadResults" && active) {
               // 端口可能说这项能力还没有（桌面壳本切片没有结果下载）：说清「尚不可用」，
               // 不能报成功，也不能让拒绝冒成未捕获异常。
@@ -489,7 +493,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
                 {s.missing ? "" : s.conflicted ? "（改动保留在本页，不会自动合并）" : "（之后每次修改都会重试）"}
               </span>
               {s.missing ? null : s.conflicted ? <button onClick={() => void boards.reload(s.key)}>重新载入</button> : <button onClick={() => void boards.retrySave(s.key)}>重试保存</button>}
-              <button onClick={() => void pack.prepareExport(s.key)}>导出画板包</button>
+              <button onClick={() => void pack.prepareExport(s.key)} disabled={packExportOff}>导出画板包{packExportOff ? "（尚不可用）" : ""}</button>
               {s.missing && <button onClick={() => void discardMissing(s.key)}>关闭</button>}
             </div>
           ),
@@ -575,8 +579,8 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
                   <button className="primary" onClick={() => void createBoardOrExplain()} disabled={!userRoot}>
                     新建画板
                   </button>
-                  <button onClick={() => void pack.importPack()} disabled={!userRoot}>
-                    导入画板包…
+                  <button onClick={() => void pack.importPack()} disabled={!userRoot || packExportOff}>
+                    导入画板包…{packExportOff ? "（尚不可用）" : ""}
                   </button>
                 </div>
               </>
