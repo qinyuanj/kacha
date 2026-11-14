@@ -466,10 +466,10 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
       {packMenu && (
         <ContextMenu
           at={packMenu}
-          items={packMenuEntries(port, active?.status === "ok").map((entry, index) => ({
+          items={packMenuEntries(port, { open: active?.status === "ok", broken: !!active && active.status !== "ok" }).map((entry, index) => ({
             action: (["importPack", "exportPack", "downloadResults"] as const)[index],
             label: entry.label,
-            disabledReason: entry.disabledReason ?? (active?.status === "ok" ? null : active ? "画板无法打开" : "没有打开的画板"),
+            disabledReason: entry.disabledReason,
           }))}
           onPick={(action) => {
             setPackMenu(null);
