@@ -10,5 +10,5 @@ export default defineConfig({
   server: { port: 1420, strictPort: true, watch: { ignored: ["**/server/**"] }, proxy: { "/api": "http://localhost:3004" }, fs: { allow: [".", "../docs/release"] } },
   build: { target: "es2022" },
   // e2e/common 下是 rig 用的纯逻辑（如端口判断），单测与 src 一起跑；playwright 只收 e2e/web。
-  test: { include: ["src/**/*.test.ts", "e2e/common/**/*.test.ts"] },
+  test: { include: ["src/**/*.test.ts", "src/**/*.test.tsx", "e2e/common/**/*.test.ts"] },
 });

@@ -14,6 +14,7 @@
   "dependencies": {
     "@noble/hashes": "^2.4.0",
     "@xyflow/react": "^12.11.6",
+    "mygo-runtime": "^0.9.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
