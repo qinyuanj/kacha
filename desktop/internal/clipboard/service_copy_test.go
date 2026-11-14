@@ -2,8 +2,12 @@ package clipboard
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
 // fakeWriter 记下写进系统剪贴板的字节；err 模拟剪贴板被占用等写入失败。
@@ -131,6 +135,37 @@ func TestBoundCopyImageReadFailure(t *testing.T) {
 	}
 	if writer.call != 0 {
 		t.Fatal("读不到字节时不该碰系统剪贴板")
+	}
+}
+
+// TestBoundCopyImageReadsThroughStore 绑定服务用真实 store 读绝对路径：用户数据根内的绝对路径照用，
+// 越出根的路径被拒绝（复制不能把任意本机文件写进剪贴板）。
+func TestBoundCopyImageReadsThroughStore(t *testing.T) {
+	root := t.TempDir()
+	store := localstore.New(root)
+	abs := filepath.Join(root, "参考", "cat.jpg")
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatalf("建目录: %v", err)
+	}
+	if err := os.WriteFile(abs, fixture(t, "photo.jpg"), 0o644); err != nil {
+		t.Fatalf("写 fixture: %v", err)
+	}
+	writer := &fakeWriter{}
+	out := Bound{Service: Service{Writer: writer}, read: store.ReadFile}.CopyImage(abs, "jpeg")
+	if !out.OK {
+		t.Fatalf("结局 = %+v，期望成功", out)
+	}
+	if !IsPNG(writer.got) {
+		t.Fatal("写进系统剪贴板的不是 PNG")
+	}
+
+	outside := filepath.Join(t.TempDir(), "secret.png")
+	if err := os.WriteFile(outside, fixture(t, "alpha.png"), 0o644); err != nil {
+		t.Fatalf("写越界文件: %v", err)
+	}
+	refused := Bound{Service: Service{Writer: &fakeWriter{}}, read: store.ReadFile}.CopyImage(outside, "png")
+	if refused.OK {
+		t.Fatal("越出用户数据根的路径不该被读")
 	}
 }
 

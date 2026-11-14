@@ -172,6 +172,19 @@ describe("原生剪贴板：失败与空", () => {
     // 退回 paste 事件（这里事件是空的）：什么都不做，与 Web 一致。
     expect(importPastedImages).not.toHaveBeenCalled();
   });
+
+  it("读不到快照、事件里带图片：退回事件内容，与 Web 同一套语义", async () => {
+    snapshotValue = null;
+    const image = png();
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { files: [image], getData: () => "" } });
+    await act(async () => {
+      window.dispatchEvent(event);
+      await Promise.resolve();
+    });
+    expect(event.defaultPrevented).toBe(true);
+    expect(importPastedImages).toHaveBeenCalledWith([image], { x: 0, y: 0 });
+  });
 });
 
 describe("Web 的路不变", () => {
