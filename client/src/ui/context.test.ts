@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 图片信息缓存（#137）：读过就缓存，读不到不缓存。
+// 图片信息缓存与读取（#137）：读过就缓存，读不到不缓存。
 import { describe, expect, it } from "vitest";
 import { createImageInfoCache } from "./imageInfoCache";
 import type { ImageInfo } from "../shell/port";

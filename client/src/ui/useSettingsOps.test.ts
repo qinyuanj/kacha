@@ -1,6 +1,6 @@
 // 高级设置的各个操作（#137）：载入、保存、模型刷新与文件状态文案。
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS } from "../core/settings";
+import { DEFAULT_SETTINGS, type SettingsPorts } from "../core/settings";
 import {
   connectionResultOf,
   discoveryApplies,
@@ -9,6 +9,7 @@ import {
   keyOnlyState,
   loadedState,
   saveProblemOf,
+  saveSettingsState,
 } from "./useSettingsOps";
 import { SETTINGS_UNREADABLE_TEXT, settingsNewerText } from "./settingsText";
 
@@ -82,5 +83,51 @@ describe("结果", () => {
   it("保存失败：给一句说明", () => {
     expect(saveProblemOf({ ok: false, error: "写不进去" })).toBe("保存设置失败：写不进去");
     expect(saveProblemOf({ ok: true, settingsWritten: true, keyPersistence: "persisted" })).toBeNull();
+  });
+});
+
+describe("保存设置", () => {
+  it("写成功：界面上的设置换成新的", async () => {
+    const ports = {
+      readSettings: async () => null,
+      writeSettings: async () => undefined,
+      readApiKey: async () => null,
+      writeApiKey: async () => undefined,
+      deleteApiKey: async () => undefined,
+      readModelsCache: async () => null,
+      writeModelsCache: async () => undefined,
+      defaultBaseUrl: async () => "http://gw",
+      fetch: async () => new Response(null, { status: 500 }),
+      now: () => new Date(0),
+      log: () => undefined,
+    } as unknown as SettingsPorts;
+    const current = { ...initialSettingsState(), loaded: true };
+    const next = { ...DEFAULT_SETTINGS, base_url: "http://gw2" };
+    const result = await saveSettingsState(ports, current, next, "sk-x");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.state.settings.base_url).toBe("http://gw2");
+      expect(result.baseChanged).toBe(true);
+    }
+  });
+
+  it("写失败：给一句说明", async () => {
+    const ports = {
+      writeSettings: async () => {
+        throw new Error("写不进去");
+      },
+      readApiKey: async () => null,
+      writeApiKey: async () => undefined,
+      readSettings: async () => null,
+      readModelsCache: async () => null,
+      writeModelsCache: async () => undefined,
+      defaultBaseUrl: async () => "http://gw",
+      fetch: async () => new Response(null, { status: 500 }),
+      now: () => new Date(0),
+      log: () => undefined,
+    } as unknown as SettingsPorts;
+    const current = { ...initialSettingsState(), loaded: true };
+    const result = await saveSettingsState(ports, current, DEFAULT_SETTINGS, "sk-x");
+    expect(result.ok).toBe(false);
   });
 });
