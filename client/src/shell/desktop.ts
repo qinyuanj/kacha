@@ -6,6 +6,7 @@
 // 调用时以 kind: "unavailable" 拒绝：界面据此标「尚不可用」，不失败得更晚，也不伪装成功。
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
+import { joinPath } from "../core/paths";
 import { PortError, type FeatureId, type ShellFeatures, type ShellPort } from "./port";
 import { copyTextToClipboard } from "./clipboard";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
@@ -150,7 +151,9 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
       run(async () => {
         const listing = await local.listBoards();
         return {
-          boards: listing.boards.map((b) => ({ name: b.name, path: b.path, archived: b.archived, bytes: b.bytes })),
+          // Go 侧给的是相对用户数据根的路径；这里拼成绝对路径，
+          // 与界面别处（画板目录、标签页会话路径）同一形状：列表 → 打开 → 保存 → 删除一路对得上。
+          boards: listing.boards.map((b) => ({ name: b.name, path: joinPath(info.user_data_root, b.path), archived: b.archived, bytes: b.bytes })),
           slots: listing.slots,
           size_lines: listing.size_lines,
         };
