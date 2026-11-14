@@ -78,14 +78,11 @@ function CleanConfirm({ usage, busy, onConfirm, onCancel }: { usage: Usage; busy
   );
 }
 
-export function UsageSection() {
+/** 用量的读取与刷新。 */
+function useUsageRead() {
   const port = useShell();
   const [usage, setUsage] = useState<Usage | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-
   const load = useCallback(async () => {
     setError(null);
     try {
@@ -97,6 +94,14 @@ export function UsageSection() {
   useEffect(() => {
     void load();
   }, [load]);
+  return { port, usage, setUsage, error, setError, load };
+}
+
+export function UsageSection() {
+  const { port, usage, error, setError, load } = useUsageRead();
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
 
   const clean = async () => {
     setBusy(true);
@@ -114,17 +119,7 @@ export function UsageSection() {
 
   return (
     <div className="usage-section">
-      <div className="form-row">
-        <span>用量</span>
-        {usage ? (
-          <span data-testid="usage-total" className="mono">
-            {formatBytes(usage.total_bytes)}
-            {usage.limit_bytes !== null && ` / 上限 ${formatBytes(usage.limit_bytes)}`}
-          </span>
-        ) : (
-          <span className="muted small">正在统计…</span>
-        )}
-      </div>
+      <UsageTotal usage={usage} />
       {usage && (
         <>
           <UsageSummary usage={usage} />
@@ -134,6 +129,23 @@ export function UsageSection() {
       {note && <div className="muted small form-hint">{note}</div>}
       {error && <div className="form-error">{error}</div>}
       {confirm && usage && <CleanConfirm usage={usage} busy={busy} onConfirm={() => void clean()} onCancel={() => setConfirm(false)} />}
+    </div>
+  );
+}
+
+/** 用量总数那一行。 */
+function UsageTotal({ usage }: { usage: Usage | null }) {
+  return (
+    <div className="form-row">
+      <span>用量</span>
+      {usage ? (
+        <span data-testid="usage-total" className="mono">
+          {formatBytes(usage.total_bytes)}
+          {usage.limit_bytes !== null && ` / 上限 ${formatBytes(usage.limit_bytes)}`}
+        </span>
+      ) : (
+        <span className="muted small">正在统计…</span>
+      )}
     </div>
   );
 }

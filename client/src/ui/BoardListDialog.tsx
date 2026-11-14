@@ -75,6 +75,44 @@ function BoardRow({ entry, openPaths, listing, onOpen, onClose, actions }: { ent
   );
 }
 
+/** 画板位用量那一行。 */
+function SlotsRow({ listing, error }: { listing: BoardListing | null; error: string | null }) {
+  if (!listing || error) return null;
+  return (
+    <div className="board-list-slots" data-slots-full={slotsFull(listing)}>
+      <span className={slotsFull(listing) ? "board-list-slots-full" : "muted"}>{slotsUsageText(listing.slots)}</span>
+      {/* 超出画板位的老用户（#89）：现有画板照常编辑，只是不能新建。 */}
+      {overSlots(listing) && <span className="board-list-over" role="status">{OVER_SLOTS_TEXT}</span>}
+    </div>
+  );
+}
+
+/** 一组画板（普通或归档）。 */
+function BoardGroup({
+  entries,
+  listing,
+  openPaths,
+  onOpen,
+  onClose,
+  actions,
+}: {
+  entries: BoardListEntry[];
+  listing: BoardListing | null;
+  openPaths: string[];
+  onOpen(path: string): void;
+  onClose(): void;
+  actions: RowActions;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <ul className="board-list">
+      {entries.map((entry) => (
+        <BoardRow key={entry.path} entry={entry} openPaths={openPaths} listing={listing} onOpen={onOpen} onClose={onClose} actions={actions} />
+      ))}
+    </ul>
+  );
+}
+
 /** 列表主体：画板位用量、分组与每一行。 */
 function BoardListBody({
   listing,
@@ -96,26 +134,14 @@ function BoardListBody({
   const groups = boardGroups(listing, manage);
   return (
     <>
-      {listing && !error && (
-        <div className="board-list-slots" data-slots-full={slotsFull(listing)}>
-          <span className={slotsFull(listing) ? "board-list-slots-full" : "muted"}>{slotsUsageText(listing.slots)}</span>
-          {/* 超出画板位的老用户（#89）：现有画板照常编辑，只是不能新建。 */}
-          {overSlots(listing) && <span className="board-list-over" role="status">{OVER_SLOTS_TEXT}</span>}
-        </div>
-      )}
+      <SlotsRow listing={listing} error={error} />
       {listing === null ? (
         <div>正在加载…</div>
       ) : listing.boards.length === 0 ? (
         <div>还没有画板</div>
       ) : (
         <>
-          {groups.editable.length > 0 && (
-            <ul className="board-list">
-              {groups.editable.map((entry) => (
-                <BoardRow key={entry.path} entry={entry} openPaths={openPaths} listing={listing} onOpen={onOpen} onClose={onClose} actions={actions} />
-              ))}
-            </ul>
-          )}
+          <BoardGroup entries={groups.editable} listing={listing} openPaths={openPaths} onOpen={onOpen} onClose={onClose} actions={actions} />
           {groups.archived.length > 0 && (
             <>
               <div className="board-list-group muted">{ARCHIVE_TEXT.group}</div>

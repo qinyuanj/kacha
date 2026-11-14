@@ -340,11 +340,7 @@ export async function renameBoardSession(
   if (readOnlyPath(session.path)) return store.patch(key, (x) => ({ ...x, notice: moveOutBlockedText("readOnly") }));
   // 先落盘挂起的修改，避免去抖写入在改名途中把旧文件重新写出来。
   await flush(key);
-  const dir = dirname(session.path);
-  const self = basename(session.path);
-  const onDisk = await ports.board.listNames(dir).catch(() => [] as string[]);
-  const openHere = store.sessionsRef.current.filter((x) => x.key !== key && samePath(dirname(x.path), dir)).map((x) => basename(x.path));
-  const nextPath = joinPath(dir, uniqueBoardFileName(title, [...onDisk, ...openHere], self));
+  const nextPath = await renamedPath(store, ports, session.path, title, key);
   try {
     if (nextPath !== session.path) await ports.board.rename(session.path, nextPath, session.version ?? undefined);
   } catch (e) {
@@ -354,6 +350,15 @@ export async function renameBoardSession(
   movedTo(session.path, nextPath);
   apply(key, { kind: "title", title });
   await flush(key);
+}
+
+/** 改名后的路径：文件名由标题派生，重名加 (2)。 */
+export async function renamedPath(store: SessionStore, ports: SessionPorts, path: string, title: string, key: string): Promise<string> {
+  const dir = dirname(path);
+  const self = basename(path);
+  const onDisk = await ports.board.listNames(dir).catch(() => [] as string[]);
+  const openHere = store.sessionsRef.current.filter((x) => x.key !== key && samePath(dirname(x.path), dir)).map((x) => basename(x.path));
+  return joinPath(dir, uniqueBoardFileName(title, [...onDisk, ...openHere], self));
 }
 
 /** 冲突后由用户显式重新载入服务端的画板；本页未保存的改动随之放弃（不做自动合并）。 */
@@ -460,6 +465,18 @@ async function moveOutWrite(
   if (boardOf() !== latest) return TIDY_TEXT.moveOutFailed("移出期间本画板有了新的改动，请重试");
   const written = await writeMovedOut(ports, path, fresh);
   if (written) return written;
+  return finishMoveOut(boardOf, apply, key, stageId, fresh, latest);
+}
+
+/** 写好新画板之后：从原画板删去这些节点。 */
+function finishMoveOut(
+  boardOf: () => Board | null,
+  apply: (key: string, change: BoardChange) => EditResult | null,
+  key: string,
+  stageId: string,
+  fresh: Board,
+  latest: Board,
+): string {
   if (boardOf() !== latest) return TIDY_TEXT.movedOutKept(fresh.title, "移出期间本画板有了新的改动");
   const result = apply(key, { kind: "moveOutStage", stageId });
   // 写好之后才被拒（期间有任务开始运行）：新画板已在列表里，原画板不动。
