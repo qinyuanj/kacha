@@ -11,8 +11,8 @@ import type { BoardChange, EditResult, EdgeRef } from "../core/edit";
 import { canConnect } from "../core/graph";
 import { LOCKED_HINT } from "../core/iterate";
 import type { DragFrom } from "../core/ports";
+import type { BrowserOptions } from "../shell/types";
 import type { SelectChange } from "../core/selection";
-import { browser } from "../shell/ipc";
 import { DELETE_TASK_TEXT } from "./boardText";
 import { clientPointOf, dropTargetAt, edgeIdOf, nodeDims, type DropTarget } from "./canvasPoint";
 import { toConnection } from "./canvasFrame";
@@ -79,6 +79,8 @@ export interface FlowHandlerDeps {
   /** 按当前画板试算一次变更，不写入：删除前的整体拒绝判定。 */
   check: (change: BoardChange) => EditResult | null;
   toast: (message: string) => void;
+  /** 确认框（端口：Web 是 window.confirm，桌面壳可换原生对话框）。 */
+  ask: (message: string, options?: BrowserOptions) => Promise<boolean>;
   /** 已确认「先取消再删除」时逐个取消任务。 */
   onCancelTask: (taskId: string) => void;
   nav: FlowNav;
@@ -258,7 +260,7 @@ function beforeDeleteAction(deps: FlowHandlerDeps): (input: { nodes: Node[]; edg
       return false;
     }
     if (running.length) {
-      const confirmed = await browser.ask(DELETE_TASK_TEXT.confirm(running.length), {
+      const confirmed = await deps.ask(DELETE_TASK_TEXT.confirm(running.length), {
         title: DELETE_TASK_TEXT.title,
         kind: "warning",
         okLabel: DELETE_TASK_TEXT.ok,

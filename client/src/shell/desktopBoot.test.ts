@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const isMyGo = vi.fn();
 const call = vi.fn();
-vi.mock("mygo-runtime", () => ({ isMyGo: () => isMyGo(), call: (method: string) => call(method) }));
+vi.mock("mygo-runtime", () => ({ isMyGo: () => isMyGo(), call: (method: string, ...args: unknown[]) => call(method, ...args) }));
 
 const INFO = {
   version: "0.1.0",
@@ -36,8 +36,8 @@ describe("桌面壳启动", () => {
     call.mockResolvedValue(INFO);
     const boot = await freshBoot();
     const shell = await boot();
-    expect(shell?.version).toBe("0.1.0");
-    expect(shell?.userRoot).toBe("C:/Kacha/data");
+    expect(shell?.port.userRoot).toBe("C:/Kacha/data");
+    expect(shell?.info.version).toBe("0.1.0");
     expect(call).toHaveBeenCalledWith("Shell.Info");
     await expect(boot()).resolves.toBe(shell);
     expect(call).toHaveBeenCalledTimes(1);

@@ -3,7 +3,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 import type { BoardChange } from "../core/edit";
 import { dispatchPaste } from "../core/pageInput";
-import { isEditableTarget } from "../shell/pageInput";
+import type { ClipboardSnapshot } from "../shell/port";
 import { pasteRefusalText } from "./boardText";
 import { isImageFile } from "./canvasDrop";
 import { nextPasteClip, readClipboard, writeClipboard } from "./canvasKeyboard";
@@ -27,6 +27,10 @@ interface Options {
   toast: (message: string) => void;
   /** 粘贴进来的图片落成参考图节点（超限过滤、显示名与落盘见 canvasDrop.importPastedImages）。 */
   importPastedImages: (files: File[], at: { x: number; y: number }) => void;
+  /** 焦点 / 点击是否落在可编辑控件里（端口：桌面壳按自己的 DOM 判定）。 */
+  isEditableTarget: (target: EventTarget | null) => boolean;
+  /** 读系统剪贴板（端口）：桌面壳能直接读，Web 返回 null，改用 paste 事件带的内容。 */
+  readClipboard: () => ClipboardSnapshot | null;
 }
 
 /** 页面级粘贴：剪贴板里是本应用的节点标记就粘节点，是图片就落成参考图，其余（文本、读不到的文件）放行或提示。 */
@@ -40,6 +44,8 @@ export function useCanvasPaste({
   apply,
   toast,
   importPastedImages,
+  isEditableTarget,
+  readClipboard: readClipboardPort,
 }: Options): void {
   // 粘贴落点跟着鼠标：记下最后在画布内的位置（没有则取视口中心）。
   const lastPointer = useRef<{ x: number; y: number } | null>(null);
@@ -59,12 +65,15 @@ export function useCanvasPaste({
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const data = event.clipboardData;
-      const files = [...(data?.files ?? [])];
+      // 桌面壳直接读系统剪贴板（Web 读不到，返回 null）：有快照就以它为准，没有再用 paste 事件带的内容。
+      const snapshot = readClipboardPort();
+      const files = snapshot ? snapshot.images : [...(data?.files ?? [])];
       // 读得到内容才算图片；资源管理器里复制的文件只有名字没有内容，归到 opaqueFiles 里提示改为拖入。
       const images = files.filter((f) => isImageFile(f) && f.size > 0);
+      const opaque = snapshot ? snapshot.readFailureCount : files.length - images.length;
       const at = posOf(lastPointer.current ? positionOf.current(lastPointer.current) : centerPosition());
       const action = dispatchPaste(
-        { text: data?.getData("text/plain") || null, images: images.length, opaqueFiles: files.length - images.length },
+        { text: snapshot ? snapshot.text : data?.getData("text/plain") || null, images: images.length, opaqueFiles: opaque },
         // board 恒为 true：画布只在有画板时挂载，「没有画板就放行」由登录页 / 空工作台不挂载兑现。
         { board: true, readOnly, modal: modalOpen || dialogOpen.current, textFocus: isEditableTarget(document.activeElement), hasNodeClip: (readClipboard()?.nodes.length ?? 0) > 0, at },
       );
@@ -82,5 +91,5 @@ export function useCanvasPaste({
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [apply, centerPosition, dialogOpen, importPastedImages, modalOpen, readOnly, toast]);
+  }, [apply, centerPosition, dialogOpen, importPastedImages, isEditableTarget, modalOpen, readClipboardPort, readOnly, toast]);
 }

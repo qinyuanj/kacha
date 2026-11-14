@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Board, BoardNode } from "../core/board";
 import { MAX_PASTE_BYTES } from "../core/pageInput";
-import type { ImageInfo } from "../shell/ipc";
+import type { ImageInfo } from "../shell/port";
 import { IMPORT_TEXT, PASTE_TEXT } from "./boardText";
 import { addImportedReferences, dropAttachOf, imageFilesOf, importImages, importPastedImages, isImageFile } from "./canvasDrop";
 

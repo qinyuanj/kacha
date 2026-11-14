@@ -4,20 +4,11 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { newBoard, type Board, type BoardNode } from "../core/board";
-import { ipc, transfer } from "../shell/ipc";
+import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { ARCHIVE_TEXT, IMPORT_TEXT } from "./boardText";
 import { knownImageInfo } from "./context";
+import { ShellProvider } from "./shell";
 import { imageImportPorts, useCanvasDrop } from "./useCanvasDrop";
-
-// 本机图片的上传与元信息读取走壳层端口：这里换成替身，避免真的发请求。
-vi.mock("../shell/ipc", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../shell/ipc")>();
-  return {
-    ...actual,
-    ipc: { ...actual.ipc, inspectImage: vi.fn() },
-    transfer: { ...actual.transfer, uploadReference: vi.fn() },
-  };
-});
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -51,6 +42,7 @@ let apply: Mock;
 let toast: Mock;
 let screenToFlowPosition: Mock;
 let elementAt: Mock;
+let port: FakePort;
 
 function Probe(): null {
   useCanvasDrop(opts);
@@ -58,7 +50,7 @@ function Probe(): null {
 }
 
 async function show(): Promise<void> {
-  await act(async () => root?.render(createElement(Probe)));
+  await act(async () => root?.render(createElement(ShellProvider, { port, children: createElement(Probe) })));
 }
 
 /** 等拖入后的上传 / 读元信息 / 落盘走完（真定时器，拍平微任务链）。 */
@@ -78,10 +70,9 @@ function dragEvent(kind: "dragover" | "drop", dataTransfer: unknown, at = { x: 3
 const fileDrag = (...files: File[]) => ({ types: ["Files"], files });
 
 beforeEach(async () => {
-  vi.mocked(transfer.uploadReference).mockReset();
-  vi.mocked(ipc.inspectImage).mockReset();
-  vi.mocked(transfer.uploadReference).mockImplementation(async (file: File) => ({ path: `导入参考图/${file.name}`, sha256: "sha-a" }));
-  vi.mocked(ipc.inspectImage).mockImplementation(async () => imageInfo);
+  port = createFakePort();
+  port.media.uploadReference = vi.fn(async (file: File) => ({ path: `导入参考图/${file.name}`, sha256: "sha-a" }));
+  port.files.inspectImage = vi.fn(async () => imageInfo);
 
   container = document.createElement("div");
   document.body.append(container);
@@ -112,6 +103,7 @@ beforeEach(async () => {
     toast,
     userRoot: "/~",
     readOnly: false,
+    port,
   };
   await show();
 });
@@ -127,13 +119,14 @@ afterEach(async () => {
 describe("imageImportPorts", () => {
   it("三个方法分别转发到壳层上传、元信息读取与画布缓存（选图加参考图也走这一组）", async () => {
     const file = fileOf("a.png", "image/png");
-    await expect(imageImportPorts.upload(file)).resolves.toEqual({ path: "导入参考图/a.png", sha256: "sha-a" });
-    expect(transfer.uploadReference).toHaveBeenCalledWith(file);
+    const ports = imageImportPorts(port);
+    await expect(ports.upload(file)).resolves.toEqual({ path: "导入参考图/a.png", sha256: "sha-a" });
+    expect(port.media.uploadReference).toHaveBeenCalledWith(file);
 
-    await expect(imageImportPorts.inspect("/~/导入参考图/a.png")).resolves.toEqual(imageInfo);
-    expect(ipc.inspectImage).toHaveBeenCalledWith("/~/导入参考图/a.png");
+    await expect(ports.inspect("/~/导入参考图/a.png")).resolves.toEqual(imageInfo);
+    expect(port.files.inspectImage).toHaveBeenCalledWith("/~/导入参考图/a.png");
 
-    imageImportPorts.prime("/~/导入参考图/cached.png", imageInfo);
+    ports.prime("/~/导入参考图/cached.png", imageInfo);
     expect(knownImageInfo("/~/导入参考图/cached.png")).toEqual(imageInfo);
   });
 });
@@ -160,14 +153,14 @@ describe("drop", () => {
     canvasEl.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
     expect(toast).toHaveBeenCalledWith(ARCHIVE_TEXT.readOnly);
-    expect(transfer.uploadReference).not.toHaveBeenCalled();
+    expect(port.media.uploadReference).not.toHaveBeenCalled();
     expect(apply).not.toHaveBeenCalled();
   });
 
   it("拖的不是图片：提示只支持图片文件，不导入", () => {
     canvasEl.dispatchEvent(dragEvent("drop", fileDrag(fileOf("note.txt", "text/plain"))));
     expect(toast).toHaveBeenCalledWith(IMPORT_TEXT.imageOnly);
-    expect(transfer.uploadReference).not.toHaveBeenCalled();
+    expect(port.media.uploadReference).not.toHaveBeenCalled();
   });
 
   it("拖入图片：捕获阶段先接并阻断冒泡，按松手处落成参考图节点", async () => {
@@ -182,8 +175,8 @@ describe("drop", () => {
     expect(event.defaultPrevented).toBe(true);
     await settle();
 
-    expect(transfer.uploadReference).toHaveBeenCalledTimes(1);
-    expect(ipc.inspectImage).toHaveBeenCalledWith("/~/导入参考图/a.png");
+    expect(port.media.uploadReference).toHaveBeenCalledTimes(1);
+    expect(port.files.inspectImage).toHaveBeenCalledWith("/~/导入参考图/a.png");
     // 图片信息写进了画布缓存：随后渲染不用再读一次。
     expect(knownImageInfo("/~/导入参考图/a.png")).toEqual(imageInfo);
     expect(apply).toHaveBeenCalledWith({
@@ -222,7 +215,9 @@ describe("drop", () => {
   });
 
   it("上传失败：提示原因，不落盘", async () => {
-    vi.mocked(transfer.uploadReference).mockRejectedValue(new Error("服务端拒绝"));
+    port.media.uploadReference = async () => {
+      throw new Error("服务端拒绝");
+    };
     canvasEl.dispatchEvent(dragEvent("drop", fileDrag(fileOf("a.png", "image/png"))));
     await settle();
     expect(toast).toHaveBeenCalledWith(IMPORT_TEXT.failed("a.png", "服务端拒绝"));

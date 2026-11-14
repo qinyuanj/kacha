@@ -7,7 +7,6 @@ import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, t
 import type { Board } from "../core/board";
 import type { BoardChange, EditResult } from "../core/edit";
 import { applySelection, type SelectChange } from "../core/selection";
-import { isEditableTarget } from "../shell/pageInput";
 import { altDragPending, altDragSettle, altDragStart, type AltDrag } from "./altDrag";
 import { canvasFlowProps, ZOOM_DURATION_MS } from "./canvasFlowProps";
 import { canvasKeyCommand, pointerKeepsSelection, wheelPansCanvas, type CanvasKeyCommand, type KeyContext } from "./canvasKeys";
@@ -30,6 +29,8 @@ interface Options {
   dialogOpen: MutableRefObject<boolean>;
   /** 画板写入（见 core/edit），由调用方照建议选中切换选区。 */
   apply: (change: BoardChange) => EditResult | null;
+  /** 焦点 / 点击是否落在可编辑控件里（端口）。 */
+  isEditableTarget: (target: EventTarget | null) => boolean;
 }
 
 const NONE: { nodes: Ids; edges: Ids } = { nodes: new Set(), edges: new Set() };
@@ -90,7 +91,7 @@ function applyChange(apply: (change: BoardChange) => EditResult | null, change: 
   return change ? apply(change) : null;
 }
 
-export function useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen, apply }: Options) {
+export function useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen, apply, isEditableTarget }: Options) {
   const flow = useReactFlow();
   const store = useStoreApi();
 
@@ -159,7 +160,7 @@ export function useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen,
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [wrapper, flow, store, selection, dialogOpen, apply]);
+  }, [wrapper, flow, store, selection, dialogOpen, apply, isEditableTarget]);
 
   return { flowProps: canvasFlowProps, selectNodes, selectEdges, startDrag, stopDrag, onPointerDownCapture, onPointerUpCapture };
 }

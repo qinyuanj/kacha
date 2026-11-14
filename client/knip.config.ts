@@ -6,8 +6,8 @@ import type { KnipConfig } from "knip";
 // 测试/工具入口（*.test.ts、e2e、playwright/vite 配置）由 vitest/playwright/vite 插件识别，--production 下自动排除。
 const config: KnipConfig = {
   entry: ["src/shell/packHash.worker.ts!"],
-  // src/core/testing/** 是测试夹具与替身，只被 *.test.ts 引用：不属于生产项目文件。
-  project: ["src/**/*.{ts,tsx}!", "!src/core/testing/**!", "e2e/**/*.ts", "*.config.ts"],
+  // src/core/testing/** 与 src/shell/testing/** 是测试夹具与替身，只被 *.test.ts 引用：不属于生产项目文件。
+  project: ["src/**/*.{ts,tsx}!", "!src/core/testing/**!", "!src/shell/testing/**!", "e2e/**/*.ts", "*.config.ts"],
   // 本文件内仍有生产调用的导出不算死代码（只是同时作为单测接缝导出）；
   // 真正要抓的是「整个生产图里都没有调用方」的符号。
   ignoreExportsUsedInFile: true,

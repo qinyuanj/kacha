@@ -12,9 +12,6 @@ import { sizeNotice, type SizeTier } from "./core/boardSize";
 import { useActiveBoardSize } from "./ui/useBoardSize";
 import { shouldShowUpdateNotice } from "./core/changelog";
 import { ChangelogDialog } from "./ui/ChangelogDialog";
-import { imageProbe } from "./shell/adapters";
-import { copyTextToClipboard } from "./shell/clipboard";
-import { browser, ipc, transfer, userRoot } from "./shell/ipc";
 import { isArchivedPath } from "./core/archive";
 import { ARCHIVE_TEXT, BACKUP_HINT_TEXT, MANAGE_BOARDS_TEXT, sizeNoticeText, TIDY_TEXT, usageLimitText } from "./ui/boardText";
 import { useUsageLimit } from "./ui/useUsageLimit";
@@ -33,8 +30,11 @@ import { TabBar } from "./ui/TabBar";
 import { useBoardPack } from "./ui/useBoardPack";
 import { useBoardSessions } from "./ui/useBoardSessions";
 import { errorText } from "./core/errors";
+import { useShell } from "./ui/shell";
 
 export function App({ onLogout, version, sessionExpired = false }: { onLogout?: () => void; version?: string | null; sessionExpired?: boolean } = {}) {
+  const port = useShell();
+  const userRoot = port.userRoot;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [lastSeenVersion, setLastSeenVersion] = useState<string | undefined>();
@@ -105,7 +105,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
   useEffect(() => {
     void (async () => {
       try {
-        const override = await ipc.readCapabilityOverride().catch((e) => {
+        const override = await port.meta.readCapabilityOverride().catch((e) => {
           setTableError(`读取能力表覆盖文件失败：${e}`);
           return null;
         });
@@ -113,7 +113,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
         setTable(effective.table);
         if (effective.error) setTableError(effective.error);
         let uiReadFailed = false;
-        initialUi.current = parseUiState(await ipc.readUiState().catch(() => ((uiReadFailed = true), null)));
+        initialUi.current = parseUiState(await port.meta.readUiState().catch(() => ((uiReadFailed = true), null)));
         setLastSeenVersion(initialUi.current.last_seen_version);
         setSizeNotices(initialUi.current.size_notices ?? {});
         uiReadFailedRef.current = uiReadFailed;
@@ -127,7 +127,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
   /** 与运行时相同的上下文算确认项：逐张检测参考图（缺失 / 透明通道）。运行与查看发送文本共用。 */
   const confirmItemsOf = useCallback(
     async (board: Board, ids: string[], root: string) => {
-      const { missingNodes, alphaByNode } = await collectRunFacts(imageProbe, board, ids, root);
+      const { missingNodes, alphaByNode } = await collectRunFacts(port.core.imageProbe, board, ids, root);
       return buildConfirmItems(board, table, ids, { discovery: settings.discovery, concurrency: settings.settings.concurrency, missingNodes, alphaByNode });
     },
     [settings.discovery, settings.settings.concurrency, table],
@@ -181,7 +181,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
 
   const copyText = useCallback(
     // 内网 HTTP 不是安全上下文，navigator.clipboard 不可用；壳层用 textarea 回退。
-    (text: string) => void copyTextToClipboard(text).then(() => toast("已复制发送文本"), (e) => toast(`复制失败：${e}`)),
+    (text: string) => void port.media.copyText(text).then(() => toast("已复制发送文本"), (e) => toast(`复制失败：${e}`)),
     [toast],
   );
 
@@ -202,7 +202,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
         const dispatch = regenerateDispatch(board, table, taskNodeId, settings.settings.concurrency);
         if (dispatch.kind === "confirm") {
           const text = `将生成 ${dispatch.copies} 份，模型 ${dispatch.modelName}。${dispatch.note ? `\n${dispatch.note}。` : ""}`;
-          if (!(await browser.ask(text, { title: "确认重新生成", okLabel: `重新生成 ${dispatch.copies} 份`, cancelLabel: "取消" }))) return;
+          if (!(await port.ui.ask(text, { title: "确认重新生成", okLabel: `重新生成 ${dispatch.copies} 份`, cancelLabel: "取消" }))) return;
         }
         request = { kind: "regenerate", copies: dispatch.copies };
       } else request = { kind: "variant", fromTaskId };
@@ -216,7 +216,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
 
   /** 画板还有排队 / 执行中的任务时，关闭前阻断式二选一；不后台续跑。 */
   const confirmStopTasks = (count: number) =>
-    browser.ask(`还有 ${count} 个任务在排队或执行。关闭后不会在后台继续；已在执行的只停止本地等待，网关侧计算可能仍在继续。`, {
+    port.ui.ask(`还有 ${count} 个任务在排队或执行。关闭后不会在后台继续；已在执行的只停止本地等待，网关侧计算可能仍在继续。`, {
       title: "任务未完成",
       kind: "warning",
       okLabel: "取消全部并关闭",
@@ -239,7 +239,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
   const deleteBoardAt = useCallback(
     async (path: string) => {
       const key = boards.keyOf(path);
-      if (!key) return ipc.deleteBoard(path);
+      if (!key) return port.board.remove(path);
       const count = runner.getSnapshot().pending(key);
       if (count > 0 && !(await confirmStopTasks(count))) return;
       // 先停任务（与关闭标签页同序）再删，免得结果落进一块正在删除的画板；删除失败时停掉的任务不恢复。
@@ -282,7 +282,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
   /** 放弃一块服务端已不存在的画板：本页内容随之丢弃，先确认。 */
   const discardMissing = useCallback(
     async (key: string) => {
-      const ok = await browser.ask("服务端已没有这块画板，关闭后本页内容将丢失。需要保留的话请先导出画板包。", {
+      const ok = await port.ui.ask("服务端已没有这块画板，关闭后本页内容将丢失。需要保留的话请先导出画板包。", {
         title: "关闭画板",
         kind: "warning",
         okLabel: "关闭",
@@ -334,7 +334,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
     const { sessions: list, activeKey: key } = boards.snapshot();
     const active = list.find((s) => s.key === key);
     const text = serializeUiState({ open_boards: list.map((s) => s.path), active_board: active?.path ?? null, last_seen_version: lastSeenVersion, size_notices: sizeNotices });
-    const write = uiWriteChain.current.then(() => ipc.writeUiState(text));
+    const write = uiWriteChain.current.then(() => port.meta.writeUiState(text));
     uiWriteChain.current = write.catch(() => undefined);
     return write;
   }, [boards, lastSeenVersion, sizeNotices]);
@@ -471,7 +471,7 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
             if (action === "importPack") void pack.importPack();
             else if (action === "exportPack" && active) void pack.prepareExport(active.key);
             else if (action === "downloadResults" && active) {
-              transfer.downloadBoardResults(active.path);
+              port.media.downloadBoardResults(active.path);
               toast("已开始下载整板结果（含各结果的图层），缺失的结果列在包内 缺失文件.txt");
             }
           }}

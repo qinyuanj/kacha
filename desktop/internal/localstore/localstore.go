@@ -1,0 +1,447 @@
+// Package localstore 是桌面壳的本地文件层：画板、用户数据根里的文件与元数据。
+//
+// 一切都在用户数据根里：画板在 画板/，元数据在 .kacha/，删除的画板进 回收区/。
+// 写入是原子的（临时文件 + 改名），覆盖前把旧主文件留一份 .bak；内容版本是主文件字节的 sha256。
+// 这里不碰界面，go test 就能跑。
+package localstore
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+const (
+	// BoardsDir 是画板目录名（与 Web 服务端一致，见 core/paths.ts 的 BOARDS_DIR_NAME）。
+	BoardsDir = "画板"
+	// ArchiveDir 是归档画板目录名（画板目录下的子目录）。
+	ArchiveDir = "归档"
+	// MetaDir 是元数据目录名：settings.json、ui-state.json 等。
+	MetaDir = ".kacha"
+	// RecycleDir 是回收区目录名：删掉的画板移到这里，不直接抹掉。
+	RecycleDir = "回收区"
+	// BoardExt 是画板文件扩展名。
+	BoardExt = ".ugcboard.json"
+	// BoardSlots 是画板位上限：本切片本地没有服务端配额，给一个宽松的默认值。
+	BoardSlots = 20
+)
+
+// 失败类别：前端按类别分支（见 shell/port.ts 的 PortFailureKind），不是按文案。
+const (
+	KindMissing      = "missing"
+	KindConflict     = "conflict"
+	KindAlreadyExist = "alreadyExists"
+	KindInvalid      = "invalid"
+	KindFailed       = "failed"
+)
+
+// Result 是一次写入的结局：成功时 Kind 为空，失败时 Message 说明原因。
+type Result struct {
+	OK      bool   `json:"ok"`
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
+	Version string `json:"version"`
+}
+
+func fail(kind, message string) Result {
+	return Result{OK: false, Kind: kind, Message: message}
+}
+
+func ok(version string) Result {
+	return Result{OK: true, Version: version}
+}
+
+// BoardTexts 是画板的主文件、备份与内容版本；画板不存在时 Main 与 Bak 为空。
+type BoardTexts struct {
+	Main    *string `json:"main"`
+	Bak     *string `json:"bak"`
+	Version *string `json:"version"`
+}
+
+// BoardEntry 是画板列表的一行：字节数读不出来时为 null（度量留给后面的切片）。
+type BoardEntry struct {
+	Name     string  `json:"name"`
+	Path     string  `json:"path"`
+	Archived bool    `json:"archived"`
+	Bytes    *int64  `json:"bytes"`
+}
+
+// BoardListing 是画板列表：画板、画板位与体量提醒线。
+type BoardListing struct {
+	Boards []BoardEntry `json:"boards"`
+	Slots  Slots        `json:"slots"`
+	SizeLines SizeLines `json:"size_lines"`
+}
+
+// Slots 是画板位：已用与总数。
+type Slots struct {
+	Used  int `json:"used"`
+	Total int `json:"total"`
+}
+
+// SizeLines 是体量提醒线（字节）：黄线与红线。
+type SizeLines struct {
+	Warn  int64 `json:"warn"`
+	Alert int64 `json:"alert"`
+}
+
+// DirEntry 是目录里的一项。
+type DirEntry struct {
+	Name  string `json:"name"`
+	IsDir bool   `json:"is_dir"`
+}
+
+// Store 是用户数据根上的文件层。
+type Store struct {
+	root string
+}
+
+// New 造一个以 root 为用户数据根的 Store。
+func New(root string) *Store {
+	return &Store{root: root}
+}
+
+// Root 返回用户数据根。
+func (s *Store) Root() string { return s.root }
+
+// BoardDir 返回画板目录的绝对路径。
+func (s *Store) BoardDir() string { return filepath.Join(s.root, BoardsDir) }
+
+// MetaPath 返回元数据文件（settings.json、ui-state.json 等）的绝对路径。
+func (s *Store) MetaPath(name string) string { return filepath.Join(s.root, MetaDir, name) }
+
+// Resolve 把界面给的路径解析成绝对路径：绝对路径照用，相对路径按用户数据根拼。
+// 越出用户数据根的路径一律拒绝（导入与外部引用都不能跑出去）。
+func (s *Store) Resolve(path string) (string, error) {
+	if path == "" {
+		return "", errors.New("路径为空")
+	}
+	abs := path
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(s.root, filepath.FromSlash(path))
+	}
+	abs = filepath.Clean(abs)
+	root := filepath.Clean(s.root)
+	if !strings.EqualFold(abs, root) && !strings.HasPrefix(strings.ToLower(abs), strings.ToLower(root)+string(os.PathSeparator)) {
+		return "", fmt.Errorf("路径越出用户数据根：%s", path)
+	}
+	return abs, nil
+}
+
+// ReadBoard 读画板的主文件、备份与内容版本；画板不存在时返回空值而不报错。
+func (s *Store) ReadBoard(path string) (BoardTexts, error) {
+	abs, err := s.Resolve(path)
+	if err != nil {
+		return BoardTexts{}, err
+	}
+	main, err := os.ReadFile(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return BoardTexts{}, nil
+		}
+		return BoardTexts{}, err
+	}
+	texts := BoardTexts{Main: ptr(string(main)), Version: ptr(hashOf(main))}
+	if bak, err := os.ReadFile(abs + ".bak"); err == nil {
+		texts.Bak = ptr(string(bak))
+	}
+	return texts, nil
+}
+
+// WriteOptions 是写画板的约定：version 非空表示内容版本已变则拒绝，createOnly 表示只新建。
+type WriteOptions struct {
+	Version    string `json:"version"`
+	CreateOnly bool   `json:"create_only"`
+}
+
+// WriteBoard 写画板：原子落盘，覆盖前把旧主文件留成 .bak（只留读得出 JSON 的那份）。
+func (s *Store) WriteBoard(path, text string, opts WriteOptions) Result {
+	abs, err := s.Resolve(path)
+	if err != nil {
+		return fail(KindInvalid, err.Error())
+	}
+	old, readErr := os.ReadFile(abs)
+	exists := readErr == nil
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return fail(KindFailed, readErr.Error())
+	}
+	if exists && opts.CreateOnly {
+		return fail(KindAlreadyExist, "目标已存在，只新建不覆盖")
+	}
+	if exists && opts.Version != "" && hashOf(old) != opts.Version {
+		return fail(KindConflict, "画板已在别处修改")
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	if exists && isJSON(old) {
+		_ = writeAtomic(abs+".bak", old)
+	}
+	if err := writeAtomic(abs, []byte(text)); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	return ok(hashOf([]byte(text)))
+}
+
+// ListBoardNames 列出目录里的画板文件名（含只剩下的 .bak 孤儿，按服务端口径算）。
+func (s *Store) ListBoardNames(dir string) ([]string, error) {
+	abs, err := s.Resolve(dir)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, err
+	}
+	names := []string{}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(name, BoardExt) || strings.HasSuffix(name, BoardExt+".bak") {
+			names = append(names, strings.TrimSuffix(strings.TrimSuffix(name, BoardExt+".bak"), BoardExt))
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// List 列出画板目录与归档目录里的画板，以及画板位与体量提醒线。
+func (s *Store) List() (BoardListing, error) {
+	listing := BoardListing{
+		Boards:    []BoardEntry{},
+		Slots:     Slots{Total: BoardSlots},
+		SizeLines: SizeLines{Warn: 500 << 20, Alert: 1024 << 20},
+	}
+	for _, spec := range []struct {
+		dir      string
+		archived bool
+	}{
+		{s.BoardDir(), false},
+		{filepath.Join(s.BoardDir(), ArchiveDir), true},
+	} {
+		entries, err := os.ReadDir(spec.dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), BoardExt) {
+				continue
+			}
+			full := filepath.Join(spec.dir, e.Name())
+			listing.Boards = append(listing.Boards, BoardEntry{
+				Name:     strings.TrimSuffix(e.Name(), BoardExt),
+				Path:     s.rel(full),
+				Archived: spec.archived,
+				Bytes:    nil,
+			})
+			if !spec.archived {
+				listing.Slots.Used++
+			}
+		}
+	}
+	return listing, nil
+}
+
+// RenameBoard 改画板名：主文件与 .bak 一起搬；目标已存在则拒绝。
+func (s *Store) RenameBoard(from, to string) Result {
+	src, err := s.Resolve(from)
+	if err != nil {
+		return fail(KindInvalid, err.Error())
+	}
+	dst, err := s.Resolve(to)
+	if err != nil {
+		return fail(KindInvalid, err.Error())
+	}
+	if _, err := os.Stat(src); err != nil {
+		return fail(KindMissing, "画板不存在")
+	}
+	if _, err := os.Stat(dst); err == nil {
+		return fail(KindAlreadyExist, "目标已存在")
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	if err := os.Rename(src, dst); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	if bak, err := os.Stat(src + ".bak"); err == nil && !bak.IsDir() {
+		_ = os.Rename(src+".bak", dst+".bak")
+	}
+	return ok("")
+}
+
+// RemoveBoard 删画板：主文件与 .bak 移进回收区（可恢复），不是抹掉。
+func (s *Store) RemoveBoard(path string) Result {
+	abs, err := s.Resolve(path)
+	if err != nil {
+		return fail(KindInvalid, err.Error())
+	}
+	if _, err := os.Stat(abs); err != nil {
+		return fail(KindMissing, "画板不存在")
+	}
+	recycle := filepath.Join(s.root, RecycleDir)
+	if err := os.MkdirAll(recycle, 0o755); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	base := filepath.Base(abs)
+	target := filepath.Join(recycle, base)
+	for i := 2; ; i++ {
+		if _, err := os.Stat(target); err != nil {
+			break
+		}
+		target = filepath.Join(recycle, fmt.Sprintf("%s (%d)", base, i))
+	}
+	if err := os.Rename(abs, target); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	if bak, err := os.Stat(abs + ".bak"); err == nil && !bak.IsDir() {
+		_ = os.Rename(abs+".bak", target+".bak")
+	}
+	return ok("")
+}
+
+// ReadFile 读用户数据根里的文件字节。
+func (s *Store) ReadFile(path string) ([]byte, error) {
+	abs, err := s.Resolve(path)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(abs)
+}
+
+// WriteNewFile 写新文件：目标已存在就拒绝（不覆盖）。
+func (s *Store) WriteNewFile(path string, data []byte) Result {
+	abs, err := s.Resolve(path)
+	if err != nil {
+		return fail(KindInvalid, err.Error())
+	}
+	if _, err := os.Stat(abs); err == nil {
+		return fail(KindAlreadyExist, "目标已存在，只新建不覆盖")
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	if err := writeAtomic(abs, data); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	return ok("")
+}
+
+// IsFile 报告路径是不是一个文件。
+func (s *Store) IsFile(path string) bool {
+	abs, err := s.Resolve(path)
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(abs)
+	return err == nil && !info.IsDir()
+}
+
+// ListDir 列目录里的项；目录不存在返回空。
+func (s *Store) ListDir(path string) ([]DirEntry, error) {
+	abs, err := s.Resolve(path)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []DirEntry{}, nil
+		}
+		return nil, err
+	}
+	out := []DirEntry{}
+	for _, e := range entries {
+		out = append(out, DirEntry{Name: e.Name(), IsDir: e.IsDir()})
+	}
+	return out, nil
+}
+
+// Sha256 返回文件的 sha256（小写十六进制）。
+func (s *Store) Sha256(path string) (string, error) {
+	data, err := s.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return hashOf(data), nil
+}
+
+// ReadMeta 读元数据文本；文件不存在返回空串。
+func (s *Store) ReadMeta(name string) (string, error) {
+	data, err := os.ReadFile(s.MetaPath(name))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return string(data), nil
+}
+
+// WriteMeta 写元数据文本（原子）。
+func (s *Store) WriteMeta(name, text string) Result {
+	path := s.MetaPath(name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	if err := writeAtomic(path, []byte(text)); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	return ok("")
+}
+
+// rel 把绝对路径写成相对用户数据根的正斜杠路径；根目录外的保留绝对路径。
+func (s *Store) rel(abs string) string {
+	root := filepath.Clean(s.root)
+	if strings.HasPrefix(strings.ToLower(abs), strings.ToLower(root)+string(os.PathSeparator)) {
+		return filepath.ToSlash(strings.TrimPrefix(abs, root+string(os.PathSeparator)))
+	}
+	return filepath.ToSlash(abs)
+}
+
+// writeAtomic 先写同目录临时文件再改名：成功只看见完整内容，失败不留半截文件。
+func writeAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+// hashOf 是文件字节的 sha256（小写十六进制）。
+func hashOf(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// isJSON 判断是不是读得出的 JSON（留 .bak 备份的前提）。
+func isJSON(data []byte) bool {
+	var v any
+	return json.Unmarshal(data, &v) == nil
+}
+
+func ptr[T any](v T) *T { return &v }

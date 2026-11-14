@@ -1,6 +1,6 @@
 // 画板包（ADR 0013）的模态：导出前确认（含完整提示词、预估大小、缺图清单）、可取消的进度、导入后的冲突清单。
-import { browser } from "../shell/ipc";
 import { useEffect, useState } from "react";
+import { useShell } from "./shell";
 import type { ExportPlan, PackContents } from "../core/boardPack";
 
 export type PackDialogState =
@@ -20,10 +20,11 @@ export interface BoardPackDialogProps {
 const formatSize = (bytes: number) => (bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
 
 function Progress({ title, detail, onCancel }: { title: string; detail?: string; onCancel: () => void }) {
+  const port = useShell();
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [cancelling, setCancelling] = useState(false);
   useEffect(() => {
-    const unlisten = browser.onPackProgress(setProgress);
+    const unlisten = port.ui.onPackProgress(setProgress);
     return () => void unlisten.then((fn) => fn());
   }, []);
   return (

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BUILTIN_TABLE, type CapabilityTable, type ModelCapability, type SizeRule } from "../core/capabilities";
 import type { TaskStatus } from "../core/run";
 import type { SizeSpec } from "../core/size";
-import { thumbUrl } from "../shell/ipc";
+import { webPort } from "../shell/webPort";
 import { BoardContext, type BoardActions } from "./context";
 import { ImageNode, ModelInfo, RatioCombo, StatusBadge } from "./nodes";
 import { AUTO_RATIO } from "./ratioCombo";
@@ -216,7 +216,7 @@ describe("ImageNode", () => {
     const actions = board();
     await show(inBoard(image({ selected: true, badges: ["透明", "2 图层"] }), actions));
     const thumb = container.querySelector("img")!;
-    expect(thumb.getAttribute("src")).toBe(thumbUrl("/~/.data/a.png"));
+    expect(thumb.getAttribute("src")).toBe(webPort.media.thumbUrl("/~/.data/a.png"));
     expect(thumb.getAttribute("alt")).toBe("a.png");
     expect(container.querySelector('[data-testid="resizer"]')?.getAttribute("data-visible")).toBe("true");
     expect([...container.querySelectorAll(".badge")].map((b) => b.textContent)).toEqual(["透明", "2 图层"]);

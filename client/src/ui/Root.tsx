@@ -2,12 +2,14 @@
 // 会话失效（HTTP 层统一识别 401）时只盖一层重新粘贴的模态，不卸载工作台，未保存的画板改动保留。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App } from "../App";
-import { session } from "../shell/ipc";
 import { errorText } from "../core/errors";
+import { useShell } from "./shell";
 
 type Phase = "loading" | "enter" | "ready";
 
 export function Root() {
+  const port = useShell();
+  const session = port.session;
   const [phase, setPhase] = useState<Phase>("loading");
   const [version, setVersion] = useState<string | null>(null);
   const [key, setKey] = useState("");
