@@ -35,10 +35,11 @@ type Service struct{}
 func (Service) Read() Snapshot {
 	formats := formatNames(mygo.Clipboard.Formats())
 	data, err := mygo.Clipboard.Read(transfer.Text, transfer.PNG, transfer.FileList)
-	if err != nil {
+	if err != nil && !isFormatMiss(err) {
 		// 读不动：被占用、读取期间换了主人、图片超上限，都有自己的原因码。
 		return Snapshot{Kind: string(KindBusy), Reason: reasonOf(err), Formats: formats}
 	}
+	// 一种请求的表示都没有（transfer.ErrFormat）时 data 是空值：往下走，Classify 会给 empty / unsupported。
 	content := Content{}
 	if text, err := data.Read(transfer.Text); err == nil {
 		content.Text = string(text)
@@ -82,6 +83,14 @@ func formatNames(formats []transfer.Format) []string {
 		names = append(names, string(f))
 	}
 	return names
+}
+
+// isFormatMiss 报告错误是不是「请求的表示一个都没有」。
+//
+// MyGo 的 Read 按请求的格式读：剪贴板里只有图片而请求里带了文本时返回 transfer.ErrFormat。
+// 那不是失败——内容仍然读到了，只是没有那一种表示，不能报成 busy 让用户白重试。
+func isFormatMiss(err error) bool {
+	return errors.Is(err, transfer.ErrFormat)
 }
 
 // reasonOf 把读取错误折成原因码。

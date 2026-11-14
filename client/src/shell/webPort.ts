@@ -111,7 +111,8 @@ const media: MediaStore = {
     const failure = await copyImageToClipboard(fileUrl(absPath));
     return failure === null ? { ok: true } : { ok: false, reason: failure };
   },
-  readClipboard: () => null,
+  // Web 读不到系统剪贴板（内网 HTTP 不是安全上下文）：粘贴内容由 paste 事件带。
+  readClipboard: async () => null,
   saveCopyAs: async (absPath) => transfer.downloadImage(absPath),
   downloadImage: (path, name) => transfer.downloadImage(path, name),
   downloadBoardResults: (boardPath) => transfer.downloadBoardResults(boardPath),

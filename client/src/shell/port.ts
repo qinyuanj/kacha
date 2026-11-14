@@ -8,6 +8,7 @@ import type { RunDeps } from "../core/run";
 import type { SettingsPorts } from "../core/settings";
 import type { ImageProbe } from "../core/submission";
 import type { TaskFs } from "../core/taskDir";
+import type { ClipboardContent } from "../core/clipboardDispatch";
 import type { BoardMeasure } from "../core/tidy";
 import type { LogKind } from "./log";
 import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, SessionPort, UsagePort } from "./types";
@@ -32,6 +33,11 @@ export interface ShellFeatures {
    * 不声明按有处理（Web 版有）。
    */
   readonly tidy?: boolean;
+  /**
+   * 能直接读系统剪贴板（#129）：桌面壳为 true，粘贴先读原生快照；Web 不声明，
+   * 继续用 paste 事件带的内容（内网 HTTP 下页面读不到剪贴板，见 ADR 0018）。
+   */
+  readonly nativeClipboard?: boolean;
 }
 
 /** 端口失败的类别：界面只按它分支。 */
@@ -129,14 +135,11 @@ export interface MetaStore {
   readCapabilityOverride(): Promise<string | null>;
 }
 
-/** 系统剪贴板快照：桌面适配器直接读系统剪贴板；Web 读不到（返回 null），只能靠 paste 事件。 */
-export interface ClipboardSnapshot {
-  text: string | null;
-  /** 能读出内容的图片。 */
-  images: File[];
-  /** 读不到内容的文件个数（资源管理器里复制的文件只有名字没有内容）。 */
-  readFailureCount: number;
-}
+/**
+ * 系统剪贴板快照（#129）：桌面适配器直接读系统剪贴板，给出类型化内容；
+ * Web 读不到（返回 null），只能靠 paste 事件。类别与 Go 侧 desktop/internal/clipboard 的 Kind 一一对应。
+ */
+export type { ClipboardContent } from "../core/clipboardDispatch";
 
 export type ImageCopyFailure = "decode" | "unavailable";
 
@@ -156,8 +159,8 @@ export interface MediaStore {
   copyText(text: string): Promise<void>;
   /** 复制一张图到系统剪贴板（读不到字节时由实现自己取源）。 */
   copyImage(absPath: string): Promise<ImageCopyResult>;
-  /** 读系统剪贴板；Web 没有同步读法，返回 null 时调用方改用 paste 事件的内容。 */
-  readClipboard(): ClipboardSnapshot | null;
+  /** 读系统剪贴板；返回 null 表示这一端读不到（Web），调用方改用 paste 事件带的内容。 */
+  readClipboard(): Promise<ClipboardContent | null>;
   /** 结果另存为（带图层的结果是 zip）。 */
   saveCopyAs(absPath: string): Promise<void>;
   downloadImage(path: string, name?: string): void;
