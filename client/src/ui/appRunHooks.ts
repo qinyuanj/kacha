@@ -92,24 +92,21 @@ function useRunSubmit(options: {
   return { runNow };
 }
 
-/** 运行相关的其余接线：确认、查看文本、复制与重新生成。 */
-function useRunActions(options: {
+/** 运行的分派：单个干净任务直接提交，其余弹二次确认。 */
+function useOpenRun(options: {
   activeKey: string | null;
   userRoot: string | null;
   apiKey: string;
-  boards: { getBoard(key: string): Board | null; boardFileName(key: string): string | null };
+  boards: { getBoard(key: string): Board | null };
   runner: Runner;
   runState: RunSnapshot;
   ctx: RunContext;
-  targetOf(boardKey: string): RunTarget;
   toast(message: string): void;
   openSettings(): void;
   setConfirm(confirm: { boardKey: string; board: Board; items: ConfirmItem[]; scope: "selection" | "board" } | null): void;
-  setSendText(item: ConfirmItem): void;
   runNow(boardKey: string, board: Board, taskIds: string[]): Promise<void>;
-}): Omit<RunCallbacks, "runState" | "runNow"> {
-  const { activeKey, userRoot, apiKey, boards, runner, runState, ctx, targetOf, toast, openSettings, setConfirm, setSendText, runNow } = options;
-  const port = useShell();
+}): { openRun(selectedIds: string[]): Promise<void> } {
+  const { activeKey, userRoot, apiKey, boards, runState, ctx, toast, openSettings, setConfirm, runNow } = options;
   // 单个干净任务直接提交，单个标红 / 没有任务只提示；其余弹二次确认（分派规则见 runDispatch）。
   const openRun = useCallback(
     async (selectedIds: string[]) => {
@@ -129,6 +126,20 @@ function useRunActions(options: {
     },
     [activeKey, userRoot, apiKey, boards, runState, ctx, runNow, toast, openSettings, setConfirm],
   );
+  return { openRun };
+}
+
+/** 查看发送文本与复制。 */
+function useTextActions(options: {
+  activeKey: string | null;
+  userRoot: string | null;
+  boards: { getBoard(key: string): Board | null };
+  ctx: RunContext;
+  toast(message: string): void;
+  setSendText(item: ConfirmItem): void;
+}): { viewSendText(taskNodeId: string): Promise<void>; copyText(text: string): void } {
+  const { activeKey, userRoot, boards, ctx, toast, setSendText } = options;
+  const port = useShell();
   const viewSendText = useCallback(
     async (taskNodeId: string) => {
       if (!activeKey || !userRoot) return;
@@ -144,6 +155,23 @@ function useRunActions(options: {
     (text: string) => void copySendText({ copyText: (t) => port.media.copyText(t), toast }, text),
     [toast],
   );
+  return { viewSendText, copyText };
+}
+
+/** 重新生成与取消任务。 */
+function useRegenerateActions(options: {
+  activeKey: string | null;
+  userRoot: string | null;
+  apiKey: string;
+  boards: { getBoard(key: string): Board | null };
+  runner: Runner;
+  ctx: RunContext;
+  targetOf(boardKey: string): RunTarget;
+  toast(message: string): void;
+  openSettings(): void;
+}): { doRegenerate(taskNodeId: string, fromTaskId?: string): Promise<void>; cancelTask(taskNodeId: string): void } {
+  const { activeKey, userRoot, apiKey, boards, runner, ctx, targetOf, toast, openSettings } = options;
+  const port = useShell();
   const doRegenerate = useCallback(
     async (taskNodeId: string, fromTaskId?: string) => {
       await regenerateAction(
@@ -169,5 +197,28 @@ function useRunActions(options: {
     (taskNodeId: string) => (activeKey ? runner.cancel({ kind: "task", boardKey: activeKey, taskNodeId }) : undefined),
     [runner, activeKey],
   );
-  return { openRun, viewSendText, copyText, doRegenerate, cancelTask };
+  return { doRegenerate, cancelTask };
+}
+
+/** 运行相关的其余接线：确认、查看文本、复制与重新生成。 */
+function useRunActions(options: {
+  activeKey: string | null;
+  userRoot: string | null;
+  apiKey: string;
+  boards: { getBoard(key: string): Board | null; boardFileName(key: string): string | null };
+  runner: Runner;
+  runState: RunSnapshot;
+  ctx: RunContext;
+  targetOf(boardKey: string): RunTarget;
+  toast(message: string): void;
+  openSettings(): void;
+  setConfirm(confirm: { boardKey: string; board: Board; items: ConfirmItem[]; scope: "selection" | "board" } | null): void;
+  setSendText(item: ConfirmItem): void;
+  runNow(boardKey: string, board: Board, taskIds: string[]): Promise<void>;
+}): Omit<RunCallbacks, "runState" | "runNow"> {
+  const { activeKey, userRoot, apiKey, boards, runner, runState, ctx, targetOf, toast, openSettings, setConfirm, setSendText, runNow } = options;
+  const open = useOpenRun({ activeKey, userRoot, apiKey, boards, runner, runState, ctx, toast, openSettings, setConfirm, runNow });
+  const text = useTextActions({ activeKey, userRoot, boards, ctx, toast, setSendText });
+  const regen = useRegenerateActions({ activeKey, userRoot, apiKey, boards, runner, ctx, targetOf, toast, openSettings });
+  return { openRun: open.openRun, viewSendText: text.viewSendText, copyText: text.copyText, doRegenerate: regen.doRegenerate, cancelTask: regen.cancelTask };
 }

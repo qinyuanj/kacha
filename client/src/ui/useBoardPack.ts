@@ -38,13 +38,13 @@ function importDeps(port: ReturnType<typeof useShell>, openImportedBoard: (path:
   };
 }
 
-/** 导出：算计划、hash 阶段与确认。 */
-function useExport(
+/** 导出：算计划与 hash 阶段。 */
+function useExportPrepare(
   userRoot: string | null,
   boards: PackBoards,
   toast: (message: string) => void,
   setDialog: React.Dispatch<React.SetStateAction<PackDialogState | null>>,
-): { prepareExport(key: string): Promise<void>; confirmExport(state: PackDialogState): Promise<void> } {
+): { prepareExport(key: string): Promise<void> } {
   const port = useShell();
   const progress = (title: string) => () => setDialog(progressDialog(title));
   const prepareExport = useCallback(
@@ -64,6 +64,17 @@ function useExport(
     },
     [userRoot, boards, toast],
   );
+  return { prepareExport };
+}
+
+/** 导出：确认之后打包与下载。 */
+function useExportConfirm(
+  userRoot: string | null,
+  toast: (message: string) => void,
+  setDialog: React.Dispatch<React.SetStateAction<PackDialogState | null>>,
+): { confirmExport(state: PackDialogState): Promise<void> } {
+  const port = useShell();
+  const progress = (title: string) => () => setDialog(progressDialog(title));
   const confirmExport = useCallback(
     async (state: PackDialogState) => {
       if (!userRoot || state.stage !== "confirmExport") return;
@@ -74,7 +85,19 @@ function useExport(
     },
     [userRoot, toast],
   );
-  return { prepareExport, confirmExport };
+  return { confirmExport };
+}
+
+/** 导出：算计划、hash 阶段与确认。 */
+function useExport(
+  userRoot: string | null,
+  boards: PackBoards,
+  toast: (message: string) => void,
+  setDialog: React.Dispatch<React.SetStateAction<PackDialogState | null>>,
+): { prepareExport(key: string): Promise<void>; confirmExport(state: PackDialogState): Promise<void> } {
+  const prepare = useExportPrepare(userRoot, boards, toast, setDialog);
+  const confirm = useExportConfirm(userRoot, toast, setDialog);
+  return { prepareExport: prepare.prepareExport, confirmExport: confirm.confirmExport };
 }
 
 /** 导入：选包、预检、上传与判定。 */
