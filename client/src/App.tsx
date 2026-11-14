@@ -94,7 +94,9 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
   const redoActive = useCallback(() => activeKey && redoBoard(activeKey), [activeKey, redoBoard]);
   const toast = useCallback((message: string) => setToastText(message), []);
   // 本切片还没做的能力（#127）：入口标「尚不可用」并置灰，不假装能跑。
+  // 导入与导出是两项能力（#131）：桌面壳能导入、还不能导出。
   const packExportOff = !port.features.packExport;
+  const packImportOff = port.features.packImport === false;
   const pack = useBoardPack(userRoot, boards, toast);
   /** 新建画板；画板位满时提示统一文案（#89）。 */
   const createBoardOrExplain = useCallback(async () => {
@@ -579,8 +581,8 @@ export function App({ onLogout, version, sessionExpired = false }: { onLogout?: 
                   <button className="primary" onClick={() => void createBoardOrExplain()} disabled={!userRoot}>
                     新建画板
                   </button>
-                  <button onClick={() => void pack.importPack()} disabled={!userRoot || packExportOff}>
-                    导入画板包…{packExportOff ? "（尚不可用）" : ""}
+                  <button onClick={() => void pack.importPack()} disabled={!userRoot || packImportOff}>
+                    导入画板包…{packImportOff ? "（尚不可用）" : ""}
                   </button>
                 </div>
               </>

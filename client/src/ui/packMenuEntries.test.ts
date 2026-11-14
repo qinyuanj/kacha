@@ -21,15 +21,19 @@ function fakeBridge(): DesktopBridge {
 }
 
 describe("画板包菜单", () => {
-  it("桌面壳：导出与导入画板包标「尚不可用」并置灰", async () => {
+  it("桌面壳：导出画板包标「尚不可用」并置灰", async () => {
     const { port } = await createDesktopPort(fakeBridge());
     const entries = packMenuEntries(port, { open: true, broken: false });
     const exportEntry = entries.find((e) => e.label.startsWith("导出画板包"));
     expect(exportEntry?.label).toContain("尚不可用");
     expect(exportEntry?.disabledReason).not.toBeNull();
-    const importEntry = entries.find((e) => e.label.startsWith("导入画板包"));
+  });
+
+  it("桌面壳：桥上没有 Pack 服务时导入才标「尚不可用」", async () => {
+    const { port } = await createDesktopPort(fakeBridge());
+    const importEntry = packMenuEntries(port, { open: true, broken: false }).find((e) => e.label.startsWith("导入画板包"));
     expect(importEntry?.label).toContain("尚不可用");
-    expect(importEntry?.disabledReason).not.toBeNull();
+    expect(importEntry?.disabledReason).toBe("画板包导入尚不可用");
   });
 
   it("桌面壳：下载整板结果标「尚不可用」并置灰", async () => {

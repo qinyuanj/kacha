@@ -22,6 +22,10 @@ const IMPORT_PHASES: Record<ImportPhase, string> = {
   hash: "正在计算内容校验值…",
   upload: "正在上传缺少的内容…",
   merge: "正在合并任务目录…",
+  // 桌面壳在本机解压合并（#131）：不经过服务端，说的是本地那几步。
+  extract: "正在解压画板包…",
+  restore: "正在还原重复内容…",
+  boards: "正在写入画板…",
 };
 
 export function useBoardPack(userRoot: string | null, boards: PackBoards, toast: (message: string) => void) {

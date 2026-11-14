@@ -11,7 +11,7 @@ import { copyTextToClipboard } from "./clipboard";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
 import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, SessionPort, UsagePort } from "./types";
 import type { DirEntry } from "../core/relocate";
-import type { PackIo } from "../core/boardPack";
+import type { ImportOptions, ImportPhase, ImportResult, PackIo } from "../core/boardPack";
 import type { LogKind } from "./log";
 import { base64Of, clipboardContentOf, extensionOf } from "./desktopClipboard";
 import { sha256Hex } from "../core/sha256";
@@ -84,12 +84,57 @@ export interface DesktopClipboardBridge {
   read(): Promise<DesktopClipboardSnapshot>;
 }
 
+/** Go 侧导入进度（Pack.Snapshot 的 progress）。 */
+export interface DesktopPackProgress {
+  step: string;
+  done: number;
+  total: number;
+  detail: string;
+  bytes_done: number;
+  bytes_total: number;
+}
+
+/** Go 侧一次导入的结局（Pack.Snapshot 的 outcome）。 */
+export interface DesktopPackOutcome {
+  ok: boolean;
+  kind: string;
+  step: string;
+  message: string;
+  report?: {
+    outcomes: { path: string; outcome: string }[];
+    bytes: number;
+    boards: string[];
+    imported: number;
+    skipped: number;
+    conflicts: string[];
+    missing: string[];
+    message: string;
+  } | null;
+}
+
+/** Go 侧导入状态快照。 */
+export interface DesktopPackSnapshot {
+  running: boolean;
+  progress: DesktopPackProgress;
+  outcome: DesktopPackOutcome | null;
+}
+
+/** Go 侧画板包服务（Pack 服务，#131）：选包、开始导入、轮询状态、取消。 */
+export interface DesktopPackBridge {
+  pick(): Promise<string>;
+  start(path: string): Promise<DesktopPackOutcome>;
+  snapshot(): Promise<DesktopPackSnapshot>;
+  cancel(): Promise<void>;
+}
+
 /** MyGo 桥：Go 侧绑定与测试替身都满足它。 */
 export interface DesktopBridge {
   info(): Promise<DesktopInfo>;
   local: DesktopLocalBridge;
   /** 系统剪贴板（#129）；没有这一项的替身按读不到处理。 */
   clipboard?: DesktopClipboardBridge;
+  /** 画板包导入（#131）；没有这一项的替身按「尚不可用」处理。 */
+  pack?: DesktopPackBridge;
 }
 
 /** 能力的中文名，用来写「尚不可用」的提示。 */
@@ -97,6 +142,7 @@ const FEATURE_LABEL: Record<FeatureId, string> = {
   generation: "生成",
   usage: "用量统计",
   packExport: "画板包导出",
+  packImport: "画板包导入",
   archive: "归档",
   tidy: "整理",
   relay: "结果中转",
@@ -143,6 +189,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     generation: info.features.generation,
     usage: info.features.usage,
     packExport: info.features.pack_export,
+    // 画板包导入（#131）在本机做：桥上有 Pack 服务就能导入（导入与导出是两项能力）。
+    packImport: bridge.pack !== undefined,
     // 整理模式本切片还没实现（度量画板体量留给后续切片）。
     tidy: false,
     // 桌面壳直接读系统剪贴板（#129）：粘贴截图不必先存成文件。
@@ -244,7 +292,16 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     imageUrl: (absPath: string): string => fileUrl(absPath),
     thumbUrl: (absPath: string): string => fileUrl(absPath),
     pickImages: async (): Promise<never> => unavailable("generation"),
-    pickPackFile: async (): Promise<never> => unavailable("packExport"),
+    // 选画板包：系统对话框给出本机路径，之后交给 Pack.Import（#131）。
+    pickPackFile: async (): Promise<File | null> => {
+      if (!bridge.pack) unavailable("packImport");
+      const path = await run(() => bridge.pack!.pick());
+      if (!path) return null;
+      const name = path.slice(Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/")) + 1);
+      const file = new File([], name, { type: "application/zip" });
+      pickedPacks.set(file, path);
+      return file;
+    },
     // 本机图片进 导入参考图/：文件名就是内容的 sha256，同图重复上传天然去重（写新文件只新建不覆盖）。
     uploadReference: (file: File): Promise<{ path: string; sha256: string }> => uploadReference(file),
     copyText: (text: string): Promise<void> => copyTextToClipboard(text),
@@ -259,11 +316,104 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     },
   };
 
+  /**
+   * 选中的包文件 → 本机绝对路径。选包走系统对话框（页面拿不到 File 的路径），
+   * 路径记在这里而不是把整个包读进内存：大包不该被复制一遍。
+   */
+  const pickedPacks = new WeakMap<File, string>();
+
+  /** 进度订阅者：进度对话框经 ui.onPackProgress 挂上来。 */
+  const progressHandlers = new Set<(progress: { done: number; total: number }) => void>();
+
+  /** 把一次快照的字节进度报给订阅者。 */
+  const reportProgress = (progress: { bytes_done: number; bytes_total: number }): void => {
+    for (const handler of progressHandlers) handler({ done: progress.bytes_done, total: progress.bytes_total });
+  };
+
+  /** 等一次导入跑完：每 100ms 取一次快照，直到 running 变 false（大包不会让界面卡住）。 */
+  const awaitImport = async (options: ImportOptions): Promise<DesktopPackSnapshot> => {
+    const phases: Record<string, ImportPhase> = { extract: "extract", restore: "restore", merge: "merge", boards: "boards" };
+    let lastStep = "";
+    for (;;) {
+      const snapshot = await run(() => bridge.pack!.snapshot());
+      reportProgress(snapshot.progress);
+      const phase = phases[snapshot.progress.step];
+      if (phase && snapshot.progress.step !== lastStep) {
+        lastStep = snapshot.progress.step;
+        options.onPhase?.(phase);
+      }
+      if (!snapshot.running) return snapshot;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+
+  /** 把 Go 侧的结局折成 core 的 ImportResult（界面按 kind 分支的那一套）。 */
+  const importResultOf = async (snapshot: DesktopPackSnapshot, options: ImportOptions): Promise<ImportResult> => {
+    const outcome = snapshot.outcome;
+    if (!outcome) return { kind: "failed", error: "导入没有给出结局" };
+    if (!outcome.ok) {
+      switch (outcome.kind) {
+        case "corrupt":
+          return { kind: "corrupt", reason: outcome.message };
+        case "newer":
+          return { kind: "newer", message: outcome.message };
+        case "cancelled":
+          return { kind: "cancelled" };
+        case "conflict":
+        case "failed":
+          // 画板没有写入；合并中途失败时已移入的任务目录保留（与 Web 版同一说法）。
+          return { kind: "commitFailed", error: outcome.message };
+        default:
+          return { kind: "failed", error: outcome.message };
+      }
+    }
+    const report = outcome.report;
+    if (!report) return { kind: "failed", error: "导入没有给出报告" };
+    const written: string[] = [];
+    let writeError: string | null = null;
+    try {
+      for (const path of report.boards) {
+        await options.openBoard(path);
+        written.push(path.slice(path.lastIndexOf("/") + 1));
+      }
+    } catch (e) {
+      writeError = e instanceof Error ? e.message : String(e);
+    }
+    return {
+      kind: "done",
+      summary: { imported: report.imported, skipped: report.skipped, conflicts: report.conflicts, message: report.message },
+      written,
+      writeError,
+    };
+  };
+
   const pack = {
+    // 去重上传协议是 Web 版的路子：桌面壳整包在本机合并，不走 io。
+    // 只有取消是真的：进度对话框上的「取消」经 io.cancel 落到 Pack.Cancel（#131）。
     io: new Proxy({} as PackIo, {
-      get: () => async (): Promise<never> => unavailable("packExport"),
+      get: (_target, prop: string) =>
+        prop === "cancel"
+          ? async (cancelled: boolean): Promise<void> => {
+              if (cancelled && bridge.pack) await run(() => bridge.pack!.cancel());
+            }
+          : async (): Promise<never> => unavailable("packExport"),
     }),
-    import: async (): Promise<never> => unavailable("packExport"),
+    /**
+     * 导入画板包（#131）：本机解压合并，画板作为新画板提交。
+     * 选包在 media.pickPackFile 里用系统对话框做；这里只认那次选中的路径。
+     */
+    import: async (file: File, options: ImportOptions): Promise<ImportResult> => {
+      if (!bridge.pack) unavailable("packImport");
+      const path = pickedPacks.get(file);
+      if (!path) return { kind: "failed", error: "没有选中画板包" };
+      options.onStage("progress");
+      const started = await run(() => bridge.pack!.start(path));
+      if (!started.ok) {
+        // 开不了就按结局处理：不必再轮询（start 已把原因说清）。
+        return importResultOf({ running: false, progress: { step: started.step, done: 0, total: 0, detail: "", bytes_done: 0, bytes_total: 0 }, outcome: started }, options);
+      }
+      return importResultOf(await awaitImport(options), options);
+    },
     facts: async (): Promise<never> => unavailable("packExport"),
     exportPack: async (): Promise<never> => unavailable("packExport"),
   };
@@ -275,7 +425,13 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
       window.alert(text);
       return Promise.resolve();
     },
-    onPackProgress: async (): Promise<never> => unavailable("packExport"),
+    // 进度订阅：导入期间由 Pack.Snapshot 的字节进度推送（#131）。
+    onPackProgress: async (handler: (progress: { done: number; total: number }) => void): Promise<() => void> => {
+      progressHandlers.add(handler);
+      return () => {
+        progressHandlers.delete(handler);
+      };
+    },
     openExternal: (url: string): void => {
       window.open(url, "_blank", "noopener");
     },
