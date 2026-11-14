@@ -3,7 +3,7 @@
 import { act, createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
-import { newBoard, serializeBoard } from "../core/board";
+import { newBoard, serializeBoard, type Board } from "../core/board";
 import { BUILTIN_TABLE } from "../core/capabilities";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { ShellProvider } from "./shell";
@@ -43,13 +43,14 @@ async function openAndEdit(port: FakePort, title: string): Promise<{ key: string
 
 
 it("打开本机画板：节点、连线与结果关系照常显示", async () => {
-  const board = {
+  const base = { pos: [0, 0] as [number, number], size: [200, 200] as [number, number], extra: {} };
+  const board: Board = {
     ...newBoard("本地"),
     nodes: [
-      { id: "p", type: "prompt", pos: [0, 0] as [number, number], size: [200, 200] as [number, number], text: "一个提示", extra: {} },
-      { id: "r", type: "result", pos: [400, 0] as [number, number], size: [200, 200] as [number, number], task_id: "20261107T000000Z-r", path: "2026-11-07/20261107T000000Z-r/result.png", file: "result.png", layer_count: 0, record: { model: "m", prompt: "", negative_prompt: "", size_spec: { tier: "2K", ratio: "1:1", width: null, height: null }, submitted_at: "2026-11-07T00:00:00Z" }, extra: {} },
+      { ...base, id: "p", type: "prompt", text: "一个提示" },
+      { ...base, id: "r", type: "result", task_id: "20261107T000000Z-r", path: "2026-11-07/20261107T000000Z-r/result.png", file: "result.png", layer_count: 0, record: { model: "m", prompt: "", negative_prompt: "", size_spec: { tier: "2K", ratio: "1:1", width: null, height: null }, submitted_at: "2026-11-07T00:00:00Z" } },
     ],
-    edges: [{ from: ["r", "out"] as [string, string], to: ["p", "in"] as [string, string], source_layer: null, region: null, system: false, extra: {} }],
+    edges: [{ from: ["r", "out"], to: ["p", "in"], source_layer: null, region: null, system: false, extra: {} }],
   };
   const port = createFakePort({
     boards: [{ path: BOARD_PATH, main: serializeBoard(board), version: "v1" }],
