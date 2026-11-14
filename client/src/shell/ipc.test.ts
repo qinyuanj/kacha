@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./apiError";
-import { browser, ipc, packUpload } from "./ipc";
+import { browser, ipc, packContent, packUpload } from "./ipc";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -67,5 +67,35 @@ describe("画板包的 HTTP 出口", () => {
     stop();
     expect(got).toEqual([]);
     expect(seen).toEqual([]);
+  });
+});
+
+describe("画板包的内容接口", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("比对服务端已有的目录：问服务端", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      seen.push(String(url));
+      return new Response(JSON.stringify([]), { status: 200 });
+    });
+    await packContent.existing([]);
+    expect(seen[0]).toContain("/api/packs/existing");
+  });
+
+  it("建暂存目录：问服务端要目录 id", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      seen.push(String(url));
+      return new Response(JSON.stringify({ id: "staging-1" }), { status: 200 });
+    });
+    const id = await packContent.stage();
+    expect(id).toBe("staging-1");
+    expect(seen[0]).toContain("/api/packs/staging");
+  });
+
+  it("服务��出错时抛 ApiError", async () => {
+    vi.stubGlobal("fetch", async () => new Response("炸了", { status: 500 }));
+    await expect(packContent.stage()).rejects.toBeInstanceOf(ApiError);
   });
 });

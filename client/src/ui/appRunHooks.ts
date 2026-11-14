@@ -57,8 +57,21 @@ export function useRunCallbacks(options: {
   applyOne(key: string, change: BoardChange): unknown;
 }): RunCallbacks {
   const { activeKey, userRoot, apiKey, boards, runner, runState, ctx, targetOf, toast, openSettings, setConfirm, setSendText } = options;
-  const port = useShell();
+  const run = useRunSubmit({ userRoot, runner, ctx, targetOf, toast, setConfirm });
+  const actions = useRunActions({ activeKey, userRoot, apiKey, boards, runner, runState, ctx, targetOf, toast, openSettings, setConfirm, setSendText, runNow: run.runNow });
+  return { ...actions, runState, runNow: run.runNow };
+}
 
+/** 提交一次运行的接线。 */
+function useRunSubmit(options: {
+  userRoot: string | null;
+  runner: Runner;
+  ctx: RunContext;
+  targetOf(boardKey: string): RunTarget;
+  toast(message: string): void;
+  setConfirm(confirm: { boardKey: string; board: Board; items: ConfirmItem[]; scope: "selection" | "board" } | null): void;
+}): { runNow(boardKey: string, board: Board, taskIds: string[]): Promise<void> } {
+  const { userRoot, runner, ctx, targetOf, toast, setConfirm } = options;
   const runNow = useCallback(
     async (boardKey: string, board: Board, taskIds: string[]) => {
       setConfirm(null);
@@ -76,7 +89,27 @@ export function useRunCallbacks(options: {
     },
     [userRoot, targetOf, ctx.concurrency, runner, toast, setConfirm],
   );
+  return { runNow };
+}
 
+/** 运行相关的其余接线：确认、查看文本、复制与重新生成。 */
+function useRunActions(options: {
+  activeKey: string | null;
+  userRoot: string | null;
+  apiKey: string;
+  boards: { getBoard(key: string): Board | null; boardFileName(key: string): string | null };
+  runner: Runner;
+  runState: RunSnapshot;
+  ctx: RunContext;
+  targetOf(boardKey: string): RunTarget;
+  toast(message: string): void;
+  openSettings(): void;
+  setConfirm(confirm: { boardKey: string; board: Board; items: ConfirmItem[]; scope: "selection" | "board" } | null): void;
+  setSendText(item: ConfirmItem): void;
+  runNow(boardKey: string, board: Board, taskIds: string[]): Promise<void>;
+}): Omit<RunCallbacks, "runState" | "runNow"> {
+  const { activeKey, userRoot, apiKey, boards, runner, runState, ctx, targetOf, toast, openSettings, setConfirm, setSendText, runNow } = options;
+  const port = useShell();
   // 单个干净任务直接提交，单个标红 / 没有任务只提示；其余弹二次确认（分派规则见 runDispatch）。
   const openRun = useCallback(
     async (selectedIds: string[]) => {
@@ -96,7 +129,6 @@ export function useRunCallbacks(options: {
     },
     [activeKey, userRoot, apiKey, boards, runState, ctx, runNow, toast, openSettings, setConfirm],
   );
-
   const viewSendText = useCallback(
     async (taskNodeId: string) => {
       if (!activeKey || !userRoot) return;
@@ -107,13 +139,11 @@ export function useRunCallbacks(options: {
     },
     [activeKey, userRoot, boards, ctx, setSendText],
   );
-
   const copyText = useCallback(
     // 内网 HTTP 不是安全上下文，navigator.clipboard 不可用；壳层用 textarea 回退。
     (text: string) => void copySendText({ copyText: (t) => port.media.copyText(t), toast }, text),
     [toast],
   );
-
   const doRegenerate = useCallback(
     async (taskNodeId: string, fromTaskId?: string) => {
       await regenerateAction(
@@ -135,11 +165,9 @@ export function useRunCallbacks(options: {
     },
     [activeKey, userRoot, apiKey, boards, ctx, runner, targetOf, toast, openSettings],
   );
-
   const cancelTask = useCallback(
     (taskNodeId: string) => (activeKey ? runner.cancel({ kind: "task", boardKey: activeKey, taskNodeId }) : undefined),
     [runner, activeKey],
   );
-
-  return { openRun, viewSendText, copyText, doRegenerate, cancelTask, runState, runNow };
+  return { openRun, viewSendText, copyText, doRegenerate, cancelTask };
 }
