@@ -1003,3 +1003,36 @@ describe("导入画板包", () => {
     }
   });
 });
+
+describe("拆出的节点归属与清单判定（planExport / checkPack）", () => {
+  it("纯提示词节点原样保留：不带任务目录 / 参考图 / 缺图", async () => {
+    const prompt = { ...base, id: "p", type: "prompt" as const, text: "一段提示" };
+    const board = boardWith(prompt);
+    const plan = await planExport(board, ROOT, memoryFs({}));
+    expect(plan.taskDirs).toEqual([]);
+    expect(plan.files).toEqual([]);
+    expect(plan.missing).toEqual([]);
+    expect(plan.board.nodes[0]).toBe(prompt);
+  });
+
+  it("任务节点没有上次提交时不带任何任务目录", async () => {
+    const task: TaskNode = { ...base, id: "t", type: "task", model: "qwen-image-3.0-pro", size_spec: { tier: "2K", ratio: "1:1", width: null, height: null }, image_ports: 0, layer_decomposition: false, transparent_background: false, last_submitted: null };
+    const plan = await planExport(boardWith(task), ROOT, memoryFs({}));
+    expect(plan.taskDirs).toEqual([]);
+    expect(plan.board.nodes[0]).toBe(task);
+  });
+
+  it("包格式版本高于本机时先判过新，早于其余字段与画板判定", () => {
+    const manifest = JSON.stringify({ pack_format_version: PACK_FORMAT_VERSION + 1, app_version: 123, boards: "不是数组" });
+    expect(checkPack(manifest, {}).kind).toBe("newer");
+  });
+
+  it("v1 包即使带 duplicates 也不读取（只 v2 认），还原清单为空", () => {
+    const boardText = serializeBoard(newBoard("豆包测试"));
+    const entry = "画板/豆包测试.ugcboard.json";
+    const manifest = JSON.stringify({ pack_format_version: 1, app_version: "0.2.0", boards: [entry], duplicates: { [entry]: "x" } });
+    const check = checkPack(manifest, { [entry]: boardText });
+    expect(check.kind).toBe("ok");
+    if (check.kind === "ok") expect(check.duplicates).toEqual({});
+  });
+});
