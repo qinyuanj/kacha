@@ -163,6 +163,17 @@ describe("桌面壳：画板包导入（#131）", () => {
     off();
   });
 
+  it("取消导入经 io.cancel 落到 Pack.Cancel；其余去重上传方法仍报「尚不可用」", async () => {
+    const { bridge, calls } = fakeBridge({ picked: "C:/包.ugcpack" });
+    const { port } = await createDesktopPort(bridge);
+    await port.pack.io.cancel(true);
+    expect(calls.cancel).toBe(1);
+    // false 只是复位取消标记，不该再打扰 Go 侧。
+    await port.pack.io.cancel(false);
+    expect(calls.cancel).toBe(1);
+    await expect(port.pack.io.stage()).rejects.toMatchObject({ kind: "unavailable", feature: "packExport" });
+  });
+
   it("桥上没有 Pack 服务：导入与选包都报 unavailable", async () => {
     const local = new Proxy({} as DesktopLocalBridge, { get: () => () => Promise.reject(new Error("没实现的本地调用")) });
     const bridge: DesktopBridge = { info: () => Promise.resolve(INFO), local };
