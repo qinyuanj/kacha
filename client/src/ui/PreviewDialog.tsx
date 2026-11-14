@@ -3,17 +3,16 @@
 // 区域编辑与图层判定在 ui/previewRegion.ts、ui/previewLayers.ts、ui/previewState.ts（#137），这里只留接线与 DOM 摆放。
 import { useEffect, useRef, useState } from "react";
 import type { PortRef, RegionRender } from "../core/board";
-import { regionCss } from "../core/overlay";
 import { type LayerRecord } from "../core/taskDir";
-import type { ImageInfo } from "../shell/port";
 import { useBoardActions, useImageInfos } from "./context";
 import { useShell } from "./shell";
 import type { Point01, Rect01 } from "./rects";
 import { errorText } from "../core/errors";
 import { rectsAfterDrag, regionModeOf, regionSetting, shownRects, type Drag, type RegionMode } from "./previewRegion";
-import { baseImageAlt, baseImagePath, layerIndexOf, layerName, layerStyleOf } from "./previewLayers";
+import { layerIndexOf, layerName } from "./previewLayers";
 import { beginDrag, pointInStage, removeSelected, startEditState, toggleChecked, toggleSolo } from "./previewState";
 import { PreviewFooter, PreviewHeader } from "./previewViews";
+import { PreviewStage } from "./previewStage";
 
 export interface PreviewLayer {
   record: LayerRecord;
@@ -53,8 +52,6 @@ interface Props {
   toast: (message: string) => void;
   onClose: () => void;
 }
-
-const CORNERS = ["nw", "ne", "sw", "se"] as const;
 
 /** 图层侧栏：勾选叠加显示、点缩略图看单层、导出与继续编辑的入口。 */
 function LayerSidebar(props: {
@@ -131,71 +128,6 @@ function LayerSidebar(props: {
         <button disabled={busy} onClick={props.onExportAll} title="选一个目录，写入底图、全部图层文件与 layers.json（重名自动加序号）">
           保存全部图层 + layers.json
         </button>
-      </div>
-    </div>
-  );
-}
-
-/** 预览舞台：底图、叠加图层、区域轮廓与可拖动的区域框。 */
-function PreviewStage(props: {
-  stageRef: React.RefObject<HTMLImageElement | null>;
-  absPath: string;
-  title: string;
-  layers: PreviewLayer[];
-  baseInfo: ImageInfo | null | undefined;
-  checked: ReadonlySet<number>;
-  solo: number | null;
-  showOutlines: boolean;
-  outlines: Rect01[];
-  editing: RegionTarget | null;
-  selected: number | null;
-  shown: Rect01[];
-  regionMode: RegionMode;
-  first: number;
-  /** 图片地址（端口给）。 */
-  imageUrl(path: string): string;
-  onPointerDown(e: React.PointerEvent): void;
-}) {
-  const { layers, checked, solo, showOutlines, outlines, editing, selected, shown, regionMode, first } = props;
-  return (
-    <div className="preview-stage nodrag" onPointerDown={props.onPointerDown}>
-      <div className="preview-canvas">
-        <img ref={props.stageRef} src={props.imageUrl(baseImagePath({ absPath: props.absPath }, layers, solo))} alt={baseImageAlt({ title: props.title }, layers, solo)} draggable={false} />
-        {solo === null &&
-          layers.map((layer, i) =>
-            checked.has(i) ? <img key={layer.record.file} className="preview-layer" style={layerStyleOf(layer.record, props.baseInfo)} src={props.imageUrl(layer.absPath)} alt={layer.record.file} draggable={false} /> : null,
-          )}
-        {solo === null &&
-          showOutlines &&
-          outlines.map((r, i) => (
-            <div
-              key={`outline-${i}`}
-              className="preview-outline"
-              style={{ left: `${r[0] * 100}%`, top: `${r[1] * 100}%`, width: `${(r[2] - r[0]) * 100}%`, height: `${(r[3] - r[1]) * 100}%` }}
-            />
-          ))}
-        {solo === null &&
-          shown.map((r, i) => (
-            <div
-              key={i}
-              className={`preview-rect ${editing && selected === i ? "preview-rect-selected" : ""}`}
-              data-rect-index={editing ? i : undefined}
-              style={{
-                left: `${r[0] * 100}%`,
-                top: `${r[1] * 100}%`,
-                width: `${(r[2] - r[0]) * 100}%`,
-                height: `${(r[3] - r[1]) * 100}%`,
-                background: regionMode === "overlay" ? regionCss(first + i, 0.5) : "transparent",
-                borderColor: regionCss(first + i, 0.9),
-              }}
-            >
-              <span className="preview-rect-label" style={{ background: regionCss(first + i, 0.9) }}>
-                区域{first + i + 1}
-              </span>
-              {editing && selected === i &&
-                CORNERS.map((c) => <span key={c} className={`preview-handle preview-handle-${c}`} data-rect-index={i} data-corner={c} />)}
-            </div>
-          ))}
       </div>
     </div>
   );
