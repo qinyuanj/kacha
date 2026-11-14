@@ -38,12 +38,15 @@ function importDeps(port: ReturnType<typeof useShell>, openImportedBoard: (path:
   };
 }
 
-export function useBoardPack(userRoot: string | null, boards: PackBoards, toast: (message: string) => void) {
+/** 导出：算计划、hash 阶段与确认。 */
+function useExport(
+  userRoot: string | null,
+  boards: PackBoards,
+  toast: (message: string) => void,
+  setDialog: React.Dispatch<React.SetStateAction<PackDialogState | null>>,
+): { prepareExport(key: string): Promise<void>; confirmExport(state: PackDialogState): Promise<void> } {
   const port = useShell();
-  const [dialog, setDialog] = useState<PackDialogState | null>(null);
-
   const progress = (title: string) => () => setDialog(progressDialog(title));
-
   const prepareExport = useCallback(
     async (key: string) => {
       if (!userRoot) return;
@@ -61,15 +64,28 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
     },
     [userRoot, boards, toast],
   );
+  const confirmExport = useCallback(
+    async (state: PackDialogState) => {
+      if (!userRoot || state.stage !== "confirmExport") return;
+      const { boardFile, plan, contents } = state;
+      const result = await exportPackStep(exportDeps(port), boardFile, plan, contents, progress);
+      setDialog(null);
+      toast(result.text);
+    },
+    [userRoot, toast],
+  );
+  return { prepareExport, confirmExport };
+}
 
-  const confirmExport = useCallback(async () => {
-    if (!userRoot || dialog?.stage !== "confirmExport") return;
-    const { boardFile, plan, contents } = dialog;
-    const result = await exportPackStep(exportDeps(port), boardFile, plan, contents, progress);
-    setDialog(null);
-    toast(result.text);
-  }, [userRoot, dialog, toast]);
-
+/** 导入：选包、预检、上传与判定。 */
+function useImport(
+  userRoot: string | null,
+  boards: PackBoards,
+  toast: (message: string) => void,
+  setDialog: React.Dispatch<React.SetStateAction<PackDialogState | null>>,
+): { importPack(): Promise<void> } {
+  const port = useShell();
+  const progress = (title: string) => () => setDialog(progressDialog(title));
   const importPack = useCallback(async () => {
     if (!userRoot) return;
     const outcome = await packImportOutcome(importDeps(port, boards.openImportedBoard), progress, (phase) =>
@@ -79,13 +95,21 @@ export function useBoardPack(userRoot: string | null, boards: PackBoards, toast:
     setDialog(null);
     if (outcome.text) toast(outcome.text);
   }, [userRoot, boards, toast]);
+  return { importPack };
+}
+
+export function useBoardPack(userRoot: string | null, boards: PackBoards, toast: (message: string) => void) {
+  const port = useShell();
+  const [dialog, setDialog] = useState<PackDialogState | null>(null);
+  const { prepareExport, confirmExport } = useExport(userRoot, boards, toast, setDialog);
+  const { importPack } = useImport(userRoot, boards, toast, setDialog);
 
   return {
     prepareExport,
     importPack,
     dialog: dialog && {
       state: dialog,
-      onExport: () => void confirmExport(),
+      onExport: () => void confirmExport(dialog),
       onCancelProgress: () => void port.pack.io.cancel(true),
       onClose: () => setDialog(null),
     },

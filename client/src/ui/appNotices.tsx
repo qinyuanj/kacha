@@ -45,9 +45,8 @@ export interface AppNoticesProps {
   onCloseMissing(key: string): void;
 }
 
-/** 工作台的所有提示条。 */
-export function AppNotices(props: AppNoticesProps) {
-  const { failures, tableError, settingsFileProblem, settingsOpen, usageNotice, sizeNotice, activeArchived, boardNotice } = props;
+/** 保存失败的那些画板。 */
+function SaveFailures({ failures, onReload, onRetrySave, onExportPack, onCloseMissing }: { failures: SaveFailure[] } & Pick<AppNoticesProps, "onReload" | "onRetrySave" | "onExportPack" | "onCloseMissing">) {
   return (
     <>
       {failures.map((f) => (
@@ -57,31 +56,47 @@ export function AppNotices(props: AppNoticesProps) {
           saveError={f.saveError}
           missing={f.missing}
           conflicted={f.conflicted}
-          onReload={() => props.onReload(f.key)}
-          onRetry={() => props.onRetrySave(f.key)}
-          onExport={() => props.onExportPack(f.key)}
-          onClose={() => props.onCloseMissing(f.key)}
+          onReload={() => onReload(f.key)}
+          onRetry={() => onRetrySave(f.key)}
+          onExport={() => onExportPack(f.key)}
+          onClose={() => onCloseMissing(f.key)}
         />
       ))}
+    </>
+  );
+}
+
+/** 能力表与设置文件的问题提示。 */
+function ConfigWarnings({ tableError, settingsFileProblem, settingsOpen, onDismissTableError, onOpenSettings }: { tableError: string | null; settingsFileProblem: string | null; settingsOpen: boolean } & Pick<AppNoticesProps, "onDismissTableError" | "onOpenSettings">) {
+  return (
+    <>
       {tableError && (
         <div className="bar bar-warn">
           <span>{tableError}（已使用内置能力表）</span>
-          <button onClick={props.onDismissTableError}>知道了</button>
+          <button onClick={onDismissTableError}>知道了</button>
         </div>
       )}
       {settingsFileProblem && !settingsOpen && (
         <div className="bar bar-warn">
           <span>{settingsFileProblem}</span>
-          <button onClick={props.onOpenSettings}>打开高级设置</button>
+          <button onClick={onOpenSettings}>打开高级设置</button>
         </div>
       )}
+    </>
+  );
+}
+
+/** 用量提醒与当前画板的体量提醒。 */
+function UsageAndSize({ usageNotice, sizeNotice, activeArchived, onManageBoards, onDismissUsage, onTidy, onDismissSize }: { usageNotice: AppNoticesProps["usageNotice"]; sizeNotice: AppNoticesProps["sizeNotice"]; activeArchived: boolean } & Pick<AppNoticesProps, "onManageBoards" | "onDismissUsage" | "onTidy" | "onDismissSize">) {
+  return (
+    <>
       {usageNotice && (
         <UsageLimitBar
           level={usageNotice.level}
           total={usageNotice.total}
           limit={usageNotice.limit}
-          onManage={props.onManageBoards}
-          onDismiss={props.onDismissUsage}
+          onManage={onManageBoards}
+          onDismiss={onDismissUsage}
         />
       )}
       {sizeNotice && (
@@ -89,13 +104,43 @@ export function AppNotices(props: AppNoticesProps) {
           bytes={sizeNotice.bytes}
           tier={sizeNotice.tier}
           canTidy={!activeArchived}
-          onTidy={props.onTidy}
-          onDismiss={props.onDismissSize}
+          onTidy={onTidy}
+          onDismiss={onDismissSize}
         />
       )}
-      {activeArchived && (
-        <ArchivedBar onUnarchive={props.onUnarchive} onCopy={props.onCopyArchived} />
-      )}
+    </>
+  );
+}
+
+/** 工作台的所有提示条。 */
+export function AppNotices(props: AppNoticesProps) {
+  const { failures, tableError, settingsFileProblem, settingsOpen, usageNotice, sizeNotice, activeArchived, boardNotice } = props;
+  return (
+    <>
+      <SaveFailures
+        failures={failures}
+        onReload={props.onReload}
+        onRetrySave={props.onRetrySave}
+        onExportPack={props.onExportPack}
+        onCloseMissing={props.onCloseMissing}
+      />
+      <ConfigWarnings
+        tableError={tableError}
+        settingsFileProblem={settingsFileProblem}
+        settingsOpen={settingsOpen}
+        onDismissTableError={props.onDismissTableError}
+        onOpenSettings={props.onOpenSettings}
+      />
+      <UsageAndSize
+        usageNotice={usageNotice}
+        sizeNotice={sizeNotice}
+        activeArchived={activeArchived}
+        onManageBoards={props.onManageBoards}
+        onDismissUsage={props.onDismissUsage}
+        onTidy={props.onTidy}
+        onDismissSize={props.onDismissSize}
+      />
+      {activeArchived && <ArchivedBar onUnarchive={props.onUnarchive} onCopy={props.onCopyArchived} />}
       {boardNotice && (
         <div className="bar bar-warn">
           <span>{boardNotice}</span>

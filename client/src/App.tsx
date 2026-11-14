@@ -10,6 +10,7 @@ import { useUsageLimit } from "./ui/useUsageLimit";
 import { useRunner } from "./ui/useRunner";
 import { useSettings } from "./ui/useSettings";
 import { useBoardPack } from "./ui/useBoardPack";
+import { useRunCallbacks } from "./ui/appRunHooks";
 import { useBoardSessions } from "./ui/useBoardSessions";
 import { errorText } from "./core/errors";
 import { useShell } from "./ui/shell";
@@ -58,14 +59,9 @@ import {
   applyGuarded,
   archiveBoardAt as archiveBoardAction,
   closeBoard as closeBoardAction,
-  confirmItemsOf,
-  copySendText,
   deleteBoardAt as deleteBoardAction,
   discardMissing as discardMissingAction,
   exportBoardAt as exportBoardAction,
-  openRunConfirm,
-  regenerate as regenerateAction,
-  startRun,
 } from "./ui/appActions";
 
 /** 没有画板时的占位画板（工作区这时不渲染画布）。 */
@@ -125,82 +121,21 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
     [boards, table, userRoot, settings.settings.base_url, settings.apiKey],
   );
 
-  const runNow = useCallback(
-    async (boardKey: string, board: Board, taskIds: string[]) => {
-      store.setConfirm(null);
-      await startRun(
-        {
-          userRoot,
-          target: targetOf(boardKey),
-          concurrency: settings.settings.concurrency,
-          submit: (t, b, ids, copies) => runner.submit(t, b, ids, copies),
-          toast,
-        },
-        board,
-        taskIds,
-      );
-    },
-    [userRoot, targetOf, settings.settings.concurrency, runner, toast, store],
-  );
-
-  // 单个干净任务直接提交，单个标红 / 没有任务只提示；其余弹二次确认（分派规则见 runDispatch）。
-  const openRun = useCallback(
-    async (selectedIds: string[]) => {
-      await openRunConfirm({
-        activeKey,
-        userRoot,
-        hasApiKey: !!settings.apiKey,
-        board: activeKey ? boards.getBoard(activeKey) : null,
-        locked: runState.board(activeKey ?? "").locked,
-        selectedIds,
-        ctx: confirmCtx,
-        startRun: (k, b, ids) => void runNow(k, b, ids),
-        toast,
-        openSettings: () => store.setSettingsOpen(true),
-        confirm: (boardKey, board, items, scope) => store.setConfirm({ boardKey, board, items, scope }),
-      });
-    },
-    [activeKey, userRoot, settings.apiKey, boards, runState, confirmCtx, runNow, toast, store],
-  );
-
-  const viewSendText = useCallback(
-    async (taskNodeId: string) => {
-      if (!activeKey || !userRoot) return;
-      const board = boards.getBoard(activeKey);
-      if (!board) return;
-      const [item] = await confirmItemsOf(confirmCtx, board, [taskNodeId], userRoot);
-      if (item) store.setSendText(item);
-    },
-    [activeKey, userRoot, boards, confirmCtx, store],
-  );
-
-  const copyText = useCallback(
-    // 内网 HTTP 不是安全上下文，navigator.clipboard 不可用；壳层用 textarea 回退。
-    (text: string) => void copySendText({ copyText: (t) => port.media.copyText(t), toast }, text),
-    [toast],
-  );
-
-  const doRegenerate = useCallback(
-    async (taskNodeId: string, fromTaskId?: string) => {
-      await regenerateAction(
-        {
-          activeKey,
-          userRoot,
-          hasApiKey: !!settings.apiKey,
-          board: activeKey ? boards.getBoard(activeKey) : null,
-          ctx: confirmCtx,
-          ask: (text, options) => port.ui.ask(text, options),
-          regenerate: (t, b, id, request) => runner.regenerate(t, b, id, request),
-          targetOf,
-          toast,
-          openSettings: () => store.setSettingsOpen(true),
-        },
-        taskNodeId,
-        fromTaskId,
-      );
-    },
-    [activeKey, userRoot, settings.apiKey, boards, confirmCtx, runner, targetOf, toast, store],
-  );
+  const { openRun, viewSendText, copyText, doRegenerate, runNow } = useRunCallbacks({
+    activeKey,
+    userRoot,
+    apiKey: settings.apiKey,
+    boards,
+    runner,
+    runState,
+    ctx: confirmCtx,
+    targetOf,
+    toast,
+    openSettings: () => store.setSettingsOpen(true),
+    setConfirm: (c) => store.setConfirm(c),
+    setSendText: (item) => store.setSendText(item),
+    applyOne,
+  });
 
   const cancelTask = useCallback((taskNodeId: string) => cancelTaskOn(runner, activeKey, taskNodeId), [runner, activeKey]);
 

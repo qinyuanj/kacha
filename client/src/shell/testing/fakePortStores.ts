@@ -39,10 +39,9 @@ export function toImportResult(outcome: FakeImportOutcome): ImportResult {
   }
 }
 
-/** 画板那一组：内存里的画板文件。 */
-export function fakeBoardStore(boards: Map<string, FakeBoard>, calls: FakeCalls, options: FakePortOptions): BoardStore {
-  const slots = options.slots ?? { used: 0, total: 20 };
-  const write = async (path: string, text: string, writeOptions?: BoardWriteOptions) => {
+/** 写一份画板：新建则只新建不覆盖；版本不符是冲突。 */
+export function fakeWrite(boards: Map<string, FakeBoard>, calls: FakeCalls, options: FakePortOptions) {
+  return async (path: string, text: string, writeOptions?: BoardWriteOptions) => {
     calls.write.push({ path, text, options: writeOptions });
     const failure = options.writeFailures?.get(path);
     if (failure) throw fakeFailureOf(failure, failure === "conflict" ? "画板已在别处修改" : "写入失败");
@@ -51,12 +50,23 @@ export function fakeBoardStore(boards: Map<string, FakeBoard>, calls: FakeCalls,
     if (writeOptions?.version && existing && existing.version !== writeOptions.version) throw fakeFailureOf("conflict", "画板已在别处修改");
     boards.set(path, { path, main: text, bak: existing?.main ?? null, version: `v-${calls.write.length}` });
   };
-  const move = async (from: string, to: string, archived: boolean) => {
+}
+
+/** 搬一块画板：源不存在就报 missing。 */
+export function fakeMove(boards: Map<string, FakeBoard>) {
+  return async (from: string, to: string, archived: boolean) => {
     const found = boards.get(from);
     if (!found) throw fakeFailureOf("missing", "画板不存在");
     boards.delete(from);
     boards.set(to, { ...found, path: to, archived });
   };
+}
+
+/** 画板那一组：内存里的画板文件。 */
+export function fakeBoardStore(boards: Map<string, FakeBoard>, calls: FakeCalls, options: FakePortOptions): BoardStore {
+  const slots = options.slots ?? { used: 0, total: 20 };
+  const write = fakeWrite(boards, calls, options);
+  const move = fakeMove(boards);
   return {
     read: async (path) => {
       calls.read.push(path);

@@ -5,7 +5,8 @@ import type { Usage } from "../shell/types";
 import { errorText } from "../core/errors";
 import { useShell } from "./shell";
 import { formatBytes, IDLE_USER_RULE_TEXT } from "./boardText";
-import { canClean, cleanupNote, unreadableNotice, unreferencedSummary, usageBreakdown, usageByDate } from "./usageView";
+import { canClean, unreadableNotice, unreferencedSummary, usageBreakdown, usageByDate } from "./usageView";
+import { cleanUnreferenced } from "./usageClean";
 
 /** 用量汇总那几行：总数、分项、按日期与说明。 */
 function UsageSummary({ usage }: { usage: Usage }) {
@@ -98,19 +99,17 @@ export function UsageSection() {
   }, [load]);
 
   const clean = async () => {
-    if (!usage?.unreferenced) return;
     setBusy(true);
     setError(null);
-    try {
-      const result = await port.usage.cleanupUnreferenced(usage.unreferenced.map((d) => d.dir));
-      setNote(cleanupNote(result));
+    const result = await cleanUnreferenced(port, usage);
+    if (result.kind === "failed") {
+      setError(result.error);
+    } else {
+      setNote(result.note);
       setConfirm(false);
       await load();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
     }
+    setBusy(false);
   };
 
   return (
