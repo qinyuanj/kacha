@@ -42,5 +42,10 @@ dist/
 # 已退役桌面客户端在旧检出里残留的构建缓存
 /client/src-tauri/
 
+# MyGo 生成物（#127）：绑定客户端与嵌入前端的临时包，每次构建重新生成
+/client/src/mygo.ts
+desktop/mygo_frontend_gen.go
+desktop/mygo_frontend/
+
 # e2e 截图与 Playwright 输出（以仓库根为 cwd 运行时产生）
 test-results/

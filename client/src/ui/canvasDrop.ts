@@ -7,7 +7,7 @@ import { errorText } from "../core/errors";
 import { MAX_PASTE_BYTES, pasteDisplayNames } from "../core/pageInput";
 import { resolveFromRoot } from "../core/paths";
 import { IMAGE_EXTENSIONS } from "../core/relocate";
-import type { ImageInfo } from "../shell/ipc";
+import type { ImageInfo } from "../shell/port";
 import { IMPORT_TEXT, PASTE_TEXT } from "./boardText";
 import type { DropTarget } from "./canvasPoint";
 

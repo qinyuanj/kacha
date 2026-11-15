@@ -1,19 +1,20 @@
 // 放大预览弹窗：纯预览、编辑图片连线的指示区域（拖拽画矩形）、结果节点的图层侧栏与导出。
 // 弹窗必须挂在画布根（BoardCanvas），不能挂进 React Flow 节点内：变换容器里 position:fixed 会失效。
+// 区域编辑与图层判定在 ui/previewRegion.ts、ui/previewLayers.ts、ui/previewState.ts（#137），这里只留接线与 DOM 摆放。
 import { useEffect, useRef, useState } from "react";
 import type { PortRef, RegionRender } from "../core/board";
-import { MAX_REGIONS, regionCss } from "../core/overlay";
-import { type LayerRecord } from "../core/taskDir";
-import { fileUrl, transfer } from "../shell/ipc";
-import { saveCopyAs } from "../shell/saveFile";
 import { useBoardActions, useImageInfos } from "./context";
-import { dragRect, isMeaningful, moveRect, resizeRect, type Corner, type Point01, type Rect01 } from "./rects";
-import { errorText } from "../core/errors";
+import { useShell } from "./shell";
+import type { Rect01 } from "./rects";
+import { shownRects, type Drag, type RegionMode } from "./previewRegion";
 
-export interface PreviewLayer {
-  record: LayerRecord;
-  absPath: string;
-}
+import { clearRects, regionChange, removeSelected, toggleChecked, toggleSolo } from "./previewState";
+import { PreviewFooter, PreviewHeader } from "./previewViews";
+import { PreviewStage } from "./previewStage";
+import { LayerSidebar, type PreviewLayer } from "./previewSidebar";
+import { exportAllImages, exportOneImage } from "./previewExport";
+import { dragPoint, editStateOf, pointAt, rectsAfter, startDragAt } from "./previewDrag";
+import { initialEditTarget, previewLayers, previewOutlines, previewTargets } from "./previewHandlers";
 
 /** 弹窗里可编辑区域的一条目标连线（任务端口行单条，或参考图 / 结果扇出的多条）。 */
 export interface RegionTarget {
@@ -49,86 +50,14 @@ interface Props {
   onClose: () => void;
 }
 
-type Drag =
-  | { kind: "draw"; start: Point01; current: Point01 }
-  | { kind: "move"; index: number; start: Point01; origin: Rect01; current: Point01 }
-  | { kind: "resize"; index: number; corner: Corner; origin: Rect01; current: Point01 };
-
-const CORNERS: Corner[] = ["nw", "ne", "sw", "se"];
-
-export function PreviewDialog({ req, toast, onClose }: Props) {
-  const { apply, addAsReference, continueEditing } = useBoardActions();
-  const stage = useRef<HTMLImageElement>(null);
-  const [editing, setEditing] = useState<RegionTarget | null>(req.edit ?? null);
-  const [regionMode, setRegionMode] = useState(req.edit?.render === "bbox_tag" ? req.edit.coordinateKind ?? "bbox" : "overlay");
-  const [rects, setRects] = useState<Rect01[]>(() => (req.edit ? req.edit.rects.map((r) => [...r] as Rect01) : []));
-  const [selected, setSelected] = useState<number | null>(null);
-  const [drag, setDrag] = useState<Drag | null>(null);
-  const [checked, setChecked] = useState<ReadonlySet<number>>(new Set());
-  const [solo, setSolo] = useState<number | null>(null);
-  const [showOutlines, setShowOutlines] = useState(false);
-  const [pickSource, setPickSource] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const layers = req.layers ?? [];
-  const baseInfo = useImageInfos([req.absPath]).get(req.absPath);
-  const layerStyle = (layer: LayerRecord) => {
-    const box = layer.bounding_box;
-    if (Array.isArray(box)) return undefined; // historical results retain their existing preview
-    if (!baseInfo) return { visibility: "hidden" as const };
-    const [left, top, right, bottom] = box.absolute;
-    return { inset: "auto", left: `${left / baseInfo.width * 100}%`, top: `${top / baseInfo.height * 100}%`, width: `${(right - left) / baseInfo.width * 100}%`, height: `${(bottom - top) / baseInfo.height * 100}%`, zIndex: layer.z_index };
-  };
-  const targets = req.regionTargets ?? [];
-  const outlines = req.regionOutlines ?? [];
-  const first = editing?.firstRegion ?? 0;
-  const layerInfos = useImageInfos(layers.map((l) => l.absPath));
-
-  const pointAt = (e: PointerEvent | React.PointerEvent): Point01 => {
-    const box = stage.current!.getBoundingClientRect();
-    return { x: Math.min(1, Math.max(0, (e.clientX - box.left) / box.width)), y: Math.min(1, Math.max(0, (e.clientY - box.top) / box.height)) };
-  };
-
-  const startEdit = (target: RegionTarget) => {
-    setEditing(target);
-    setRegionMode(target.render === "bbox_tag" ? target.coordinateKind ?? "bbox" : "overlay");
-    setRects(target.rects.map((r) => [...r] as Rect01));
-    setSelected(null);
-    setSolo(null);
-  };
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    if (!editing || e.button !== 0 || !stage.current) return;
-    const p = pointAt(e);
-    const handle = (e.target as HTMLElement).closest<HTMLElement>("[data-rect-index]");
-    const index = handle ? Number(handle.dataset.rectIndex) : null;
-    const corner = handle?.dataset.corner as Corner | undefined;
-    e.preventDefault();
-    if (index !== null && corner) setDrag({ kind: "resize", index, corner, origin: rects[index], current: p });
-    else if (index !== null) {
-      setSelected(index);
-      setDrag({ kind: "move", index, start: p, origin: rects[index], current: p });
-    } else {
-      setSelected(null);
-      setDrag({ kind: "draw", start: p, current: p });
-    }
-  };
-
+/** 拖拽时的窗口事件：移动跟手，松手落框。 */
+function useDragWindow(drag: Drag | null, stage: React.RefObject<HTMLImageElement | null>, setRects: (fn: (rs: Rect01[]) => Rect01[]) => void, setDrag: (drag: Drag | null) => void): void {
   useEffect(() => {
     if (!drag) return;
-    const move = (e: PointerEvent) => setDrag((d) => (d ? { ...d, current: pointAt(e) } : d));
+    const move = (e: PointerEvent) => setDrag(drag ? dragPoint(drag, pointAt(stage, e)) : drag);
     const up = (e: PointerEvent) => {
-      const p = pointAt(e);
-      if (drag.kind === "draw") {
-        const r = dragRect(drag.start, p);
-        if (isMeaningful(r)) {
-          setRects((rs) => [...rs, r]);
-          setSelected(rects.length);
-        }
-      } else if (drag.kind === "move") {
-        setRects((rs) => rs.map((r, i) => (i === drag.index ? moveRect(drag.origin, p.x - drag.start.x, p.y - drag.start.y) : r)));
-      } else {
-        setRects((rs) => rs.map((r, i) => (i === drag.index ? resizeRect(drag.origin, drag.corner, p) : r)));
-      }
+      const p = pointAt(stage, e);
+      setRects((rs) => rectsAfter(drag, rs, p));
       setDrag(null);
     };
     window.addEventListener("pointermove", move);
@@ -139,226 +68,141 @@ export function PreviewDialog({ req, toast, onClose }: Props) {
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
     };
-  }, [drag, rects.length]);
+  }, [drag]);
+}
 
-  const shown: Rect01[] = rects.map((r, i) => {
-    if (drag?.kind === "move" && drag.index === i) return moveRect(drag.origin, drag.current.x - drag.start.x, drag.current.y - drag.start.y);
-    if (drag?.kind === "resize" && drag.index === i) return resizeRect(drag.origin, drag.corner, drag.current);
-    return r;
-  });
-  if (drag?.kind === "draw") shown.push(dragRect(drag.start, drag.current));
-  const removeSelected = () => {
-    if (selected === null) return;
-    setRects((rs) => rs.filter((_, i) => i !== selected));
+/** 区域编辑的状态与拖拽。 */
+function useRegionEditing(req: { edit?: RegionTarget }) {
+  const stage = useRef<HTMLImageElement>(null);
+  const initial = initialEditTarget(req);
+  const [editing, setEditing] = useState<RegionTarget | null>(initial.editing);
+  const [regionMode, setRegionMode] = useState<RegionMode>(initial.regionMode);
+  const [rects, setRects] = useState<Rect01[]>(initial.rects);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [drag, setDrag] = useState<Drag | null>(null);
+
+  const startEdit = (target: RegionTarget) => {
+    const next = editStateOf(target);
+    setEditing(next.editing);
+    setRegionMode(next.regionMode);
+    setRects(next.rects);
+    setSelected(next.selected);
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!editing || e.button !== 0 || !stage.current) return;
+    const p = pointAt(stage, e);
+    const next = startDragAt({ editing, regionMode, rects, selected, drag }, e.target, p);
+    e.preventDefault();
+    setSelected(next.selected);
+    setDrag(next.drag);
+  };
+
+  useDragWindow(drag, stage, setRects, setDrag);
+
+  const removeOne = () => {
+    setRects((rs) => removeSelected(rs, selected));
     setSelected(null);
   };
+  const clearAll = () => {
+    setRects(clearRects());
+    setSelected(null);
+  };
+  return { stage, editing, regionMode, setRegionMode, rects, selected, startEdit, onPointerDown, removeOne, clearAll, shown: shownRects(drag, rects) };
+}
+
+export function PreviewDialog({ req, toast, onClose }: Props) {
+  const port = useShell();
+  const { apply, addAsReference, continueEditing } = useBoardActions();
+  const region = useRegionEditing(req);
+  const { stage, editing, regionMode, setRegionMode, rects, selected, startEdit, onPointerDown, removeOne, clearAll, shown } = region;
+  const [checked, setChecked] = useState<ReadonlySet<number>>(new Set());
+  const [solo, setSolo] = useState<number | null>(null);
+  const [showOutlines, setShowOutlines] = useState(false);
+  const [pickSource, setPickSource] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const layers = previewLayers(req.layers);
+  const baseInfo = useImageInfos([req.absPath]).get(req.absPath);
+  const targets = previewTargets(req.regionTargets);
+  const outlines = previewOutlines(req.regionOutlines);
+  const first = editing?.firstRegion ?? 0;
+  const layerInfos = useImageInfos(layers.map((l) => l.absPath));
+
   const saveRegion = () => {
     if (!editing) return;
-    apply({ kind: "setRegion", edge: editing.edgeRef, region: rects.length ? { rects, render: regionMode === "overlay" ? "highlight_overlay" : "bbox_tag", ...(regionMode !== "overlay" ? { coordinate_kind: regionMode as "point" | "bbox" } : {}) } : null });
+    apply(regionChange(editing.edgeRef, rects, regionMode));
     onClose();
   };
 
-  const runExport = async (fn: () => Promise<string | null>) => {
-    setBusy(true);
-    try {
-      const done = await fn();
-      if (done) toast(done);
-    } catch (e) {
-      toast(`导出失败：${errorText(e)}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const exportOne = (absPath: string) =>
-    runExport(async () => {
-      await saveCopyAs(absPath);
-      return "已开始下载";
-    });
-  const exportAll = () =>
-    runExport(async () => {
-      transfer.downloadImage(req.absPath);
-      return "已开始下载：底图、全部图层与 layers.json（zip）";
-    });
-
-  const layerIndex = pickSource > 0 && pickSource <= layers.length ? pickSource : null;
+  const exportOne = (absPath: string) => void exportOneImage(port.media, toast, setBusy, absPath);
+  const exportAll = () => void exportAllImages(port.media, toast, setBusy, req.absPath);
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`modal modal-preview ${layers.length ? "modal-preview-wide" : ""}`} role="dialog" aria-label={req.title}>
-        <div className="modal-head">
-          <strong>{req.title}</strong>
-          {editing && <span className="badge">编辑区域：{editing.label}</span>}
-          {editing?.coordinateAvailable && (
-            <label className="small">区域表达
-              <select aria-label="区域表达" value={regionMode} onChange={(e) => setRegionMode(e.target.value)}>
-                <option value="overlay">高亮叠加</option>
-                <option value="bbox">坐标框</option>
-                <option value="point">坐标点（框中心）</option>
-              </select>
-            </label>
-          )}
-          {solo !== null && <span className="badge">单层：图层{solo + 1}</span>}
-          {outlines.length > 0 && !editing && (
-            <label className="small" title="本次编辑框选的修改区域（只读描边，来自产出任务的提交快照）">
-              <input type="checkbox" checked={showOutlines} onChange={(e) => setShowOutlines(e.target.checked)} />
-              区域轮廓
-            </label>
-          )}
-          <button className="link" onClick={onClose}>
-            关闭
-          </button>
-        </div>
+        <PreviewHeader
+          title={req.title}
+          editing={editing}
+          regionMode={regionMode}
+          onRegionMode={setRegionMode}
+          solo={solo}
+          showOutlines={showOutlines}
+          onShowOutlines={setShowOutlines}
+          outlineCount={outlines.length}
+          onClose={onClose}
+        />
         <div className="preview-body">
-          <div className="preview-stage nodrag" onPointerDown={onPointerDown}>
-            <div className="preview-canvas">
-              {solo !== null ? (
-                <img ref={stage} src={fileUrl(layers[solo].absPath)} alt={layers[solo].record.file} draggable={false} />
-              ) : (
-                <img ref={stage} src={fileUrl(req.absPath)} alt={req.title} draggable={false} />
-              )}
-              {solo === null &&
-                layers.map((layer, i) =>
-                  checked.has(i) ? <img key={layer.record.file} className="preview-layer" style={layerStyle(layer.record)} src={fileUrl(layer.absPath)} alt={layer.record.file} draggable={false} /> : null,
-                )}
-              {solo === null &&
-                showOutlines &&
-                outlines.map((r, i) => (
-                  <div
-                    key={`outline-${i}`}
-                    className="preview-outline"
-                    style={{ left: `${r[0] * 100}%`, top: `${r[1] * 100}%`, width: `${(r[2] - r[0]) * 100}%`, height: `${(r[3] - r[1]) * 100}%` }}
-                  />
-                ))}
-              {solo === null &&
-                shown.map((r, i) => (
-                  <div
-                    key={i}
-                    className={`preview-rect ${editing && selected === i ? "preview-rect-selected" : ""}`}
-                    data-rect-index={editing ? i : undefined}
-                    style={{
-                      left: `${r[0] * 100}%`,
-                      top: `${r[1] * 100}%`,
-                      width: `${(r[2] - r[0]) * 100}%`,
-                      height: `${(r[3] - r[1]) * 100}%`,
-                      background: regionMode === "overlay" ? regionCss(first + i, 0.5) : "transparent",
-                      borderColor: regionCss(first + i, 0.9),
-                    }}
-                  >
-                    <span className="preview-rect-label" style={{ background: regionCss(first + i, 0.9) }}>
-                      区域{first + i + 1}
-                    </span>
-                    {editing && selected === i &&
-                      CORNERS.map((c) => <span key={c} className={`preview-handle preview-handle-${c}`} data-rect-index={i} data-corner={c} />)}
-                  </div>
-                ))}
-            </div>
-          </div>
+          <PreviewStage
+            stageRef={stage}
+            absPath={req.absPath}
+            title={req.title}
+            layers={layers}
+            baseInfo={baseInfo}
+            checked={checked}
+            solo={solo}
+            showOutlines={showOutlines}
+            outlines={outlines}
+            editing={editing}
+            selected={selected}
+            shown={shown}
+            regionMode={regionMode}
+            first={first}
+            imageUrl={(p) => port.media.imageUrl(p)}
+            onPointerDown={onPointerDown}
+          />
           {layers.length > 0 && (
-            <div className="preview-side">
-              <div className="muted small">图层（点缩略图看单层，勾选叠加显示）</div>
-              <ul className="layer-list">
-                {layers.map((layer, i) => (
-                  <li key={layer.record.file}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={checked.has(i)}
-                        onChange={() =>
-                          setChecked((s) => {
-                            const next = new Set(s);
-                            if (next.has(i)) next.delete(i);
-                            else next.add(i);
-                            return next;
-                          })
-                        }
-                      />
-                      <img
-                        src={fileUrl(layer.absPath)}
-                        alt={layer.record.file}
-                        draggable={false}
-                        className={solo === i ? "layer-solo" : ""}
-                        title="点选只显示该层（再点取消）"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setSolo((s) => (s === i ? null : i));
-                        }}
-                      />
-                      <span title={layer.record.description}>
-                        {layer.record.name ?? `图层${i + 1}`}
-                        {layerInfos.get(layer.absPath)?.has_alpha && <span className="badge">透明</span>}
-                      </span>
-                    </label>
-                    <button className="link small" disabled={busy} onClick={() => void exportOne(layer.absPath)}>
-                      保存
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              {req.resultId && (
-                <div className="preview-pick">
-                  <select value={pickSource} onChange={(e) => setPickSource(Number(e.target.value))}>
-                    <option value={0}>底图（合成结果）</option>
-                    {layers.map((layer, i) => (
-                      <option key={layer.record.file} value={i + 1}>
-                        图层{i + 1}
-                      </option>
-                    ))}
-                  </select>
-                  <button disabled={busy} onClick={() => continueEditing(req.resultId!, layerIndex)}>
-                    以此继续编辑
-                  </button>
-                  <button disabled={busy} onClick={() => addAsReference(req.resultId!, layerIndex)}>
-                    加为参考图
-                  </button>
-                </div>
-              )}
-              <div className="preview-export">
-                <button disabled={busy} onClick={() => void exportOne(req.absPath)}>
-                  保存底图
-                </button>
-                <button disabled={busy} onClick={() => void exportAll()} title="选一个目录，写入底图、全部图层文件与 layers.json（重名自动加序号）">
-                  保存全部图层 + layers.json
-                </button>
-              </div>
-            </div>
+            <LayerSidebar
+              layers={layers}
+              checked={checked}
+              solo={solo}
+              pickSource={pickSource}
+              busy={busy}
+              resultId={req.resultId}
+              layerInfos={layerInfos}
+              onToggle={(i) => setChecked((s) => toggleChecked(s, i))}
+              onSolo={(i) => setSolo((s) => toggleSolo(s, i))}
+              onPickSource={setPickSource}
+              onExportOne={(path) => void exportOne(path)}
+              onExportBase={() => void exportOne(req.absPath)}
+              onExportAll={() => void exportAll()}
+              onContinueEditing={(id, index) => continueEditing(id, index)}
+              onAddAsReference={(id, index) => addAsReference(id, index)}
+            />
           )}
         </div>
-        <div className="modal-foot">
-          {editing ? (
-            <>
-              <span className={first + rects.length > MAX_REGIONS ? "region-limit-exceeded" : "muted"}>
-                拖拽空白处画新矩形；拖动矩形移动，拖动角柄缩放。提示词里写「区域N」指代对应区域，每个任务最多 {MAX_REGIONS} 个。{regionMode === "point" && "坐标点取每个框的中心，影响范围由模型判断。"}
-              </span>
-              <button disabled={selected === null} onClick={removeSelected}>
-                删除选中
-              </button>
-              <button disabled={rects.length === 0} onClick={() => (setRects([]), setSelected(null))}>
-                清空
-              </button>
-              <button onClick={onClose}>取消</button>
-              <button className="primary" onClick={saveRegion}>
-                保存区域
-              </button>
-            </>
-          ) : (
-            <>
-              <span className="muted">
-                {targets.length > 0 && (
-                  <>
-                    框选修改区域：
-                    {targets.map((t) => (
-                      <button key={`${t.edgeRef.from.join(":")}->${t.edgeRef.to.join(":")}`} className="link" onClick={() => startEdit(t)}>
-                        {t.label}
-                        {t.rects.length > 0 ? `（${t.rects.length} 区域）` : ""}
-                      </button>
-                    ))}
-                  </>
-                )}
-              </span>
-              <button onClick={onClose}>关闭</button>
-            </>
-          )}
-        </div>
+        <PreviewFooter
+          editing={editing}
+          targets={targets}
+          rects={rects}
+          selected={selected}
+          regionMode={regionMode}
+          first={first}
+          onRemove={removeOne}
+          onClear={clearAll}
+          onSave={saveRegion}
+          onClose={onClose}
+          onStartEdit={startEdit}
+        />
       </div>
     </div>
   );

@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { TidyMeter } from "../core/tidyMeter";
 import { serializeBoard, type Board } from "../core/board";
 import { boardBytes, type BoardMeasure } from "../core/tidy";
-import { ipc } from "../shell/ipc";
 import { TIDY_TEXT } from "./boardText";
+import { useShell } from "./shell";
 
 /** 节点变化后等这么久再量：连续拖动只量一次。 */
 const REMEASURE_DELAY_MS = 800;
@@ -19,6 +19,7 @@ export interface TidyMeasure {
 
 /** 整理模式期间量当前画板（含未保存的改动）；只看节点，平移缩放不重量。退出即清空。 */
 export function useTidyMeasure(board: Board, tidying: boolean): TidyMeasure {
+  const port = useShell();
   const [state, setState] = useState<TidyMeasure>({ measure: null, before: null });
   const meter = useRef<TidyMeter | null>(null);
   const boardRef = useRef(board);
@@ -28,7 +29,7 @@ export function useTidyMeasure(board: Board, tidying: boolean): TidyMeasure {
       setState({ measure: null, before: null });
       return;
     }
-    const active = new TidyMeter(serializeBoard(boardRef.current), ipc.measureBoard, setState);
+    const active = new TidyMeter(serializeBoard(boardRef.current), port.board.measure, setState);
     meter.current = active;
     active.update(serializeBoard(boardRef.current));
     return () => { active.dispose(); meter.current = null; };

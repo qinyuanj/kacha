@@ -142,6 +142,11 @@ export interface PackUploadPort {
 export type PackContentPort = Required<Pick<PackIo, "existing" | "hash" | "stage" | "uploadContent" | "importContent" | "discardStaging">>;
 
 export interface SessionPort {
+  /**
+   * 是否需要登录界面：桌面壳没有服务端会话，恒为 false，界面直接进工作台（#127）。
+   * 缺省按需要登录处理（Web 版）。
+   */
+  readonly requiresLogin?: boolean;
   login(key: string): Promise<{ fingerprint: string }>;
   current(): Promise<{ fingerprint: string }>;
   logout(): Promise<void>;

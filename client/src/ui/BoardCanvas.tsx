@@ -22,8 +22,6 @@ import { lineage } from "../core/iterate";
 import { connectablePorts, type DragFrom, type DragState } from "../core/ports";
 import type { NodeRunState } from "../core/runner";
 import type { Discovery } from "../core/settings";
-import { transfer } from "../shell/ipc";
-import { saveCopyAs } from "../shell/saveFile";
 import { canvasBoardActions } from "./canvasBoardActions";
 import { canvasCommands, canvasDragCreate, type CanvasCommandDeps } from "./canvasCommands";
 import { addImportedReferences, importImages, importPastedImages } from "./canvasDrop";
@@ -54,6 +52,9 @@ import { useCanvasPaste } from "./canvasPaste";
 import { canvasClassName, posOf } from "./canvasPoint";
 import { CanvasToolbar } from "./canvasToolbar";
 import { BoardContext, primeImageInfo, type BoardActions } from "./context";
+import { useShell } from "./shell";
+import { unavailableMessage } from "../shell/port";
+import { errorText } from "../core/errors";
 import { edgeTypes } from "./edges";
 import { HoverProvider, useHoverLayer } from "./hoverInfo";
 import { nodeTypes } from "./nodes";
@@ -149,6 +150,7 @@ export function BoardCanvas({
   readOnly = false,
   modalOpen = false,
 }: Props) {
+  const port = useShell();
   const flow = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
   const [measured, setMeasured] = useState<Record<string, { width?: number; height?: number }>>({});
@@ -167,7 +169,7 @@ export function BoardCanvas({
   const overlays = useCanvasOverlaysState({ flow, selectedRef, setSelectedNodes, clearPromptFocus: () => requestPromptFocus(null) });
   const actionBar = useActionBarHover();
   const stageView = useCanvasStageView({ board, boardRef, readOnly, measured, tidying, apply, toast, onMoveOutStage });
-  const nav = useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen: overlays.dialogOpenRef, apply });
+  const nav = useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen: overlays.dialogOpenRef, apply, isEditableTarget: port.ui.isEditableTarget });
   const hover = useHoverLayer();
 
   // 选中任一节点即高亮其谱系。
@@ -201,7 +203,7 @@ export function BoardCanvas({
   const bookkeeping = useRef(flowBookkeeping());
   const performDragCreateRef = useRef<DragCreate>(() => {});
   const handlers = flowHandlers({
-    board, table, locked, apply, check, toast, onCancelTask, nav, setMeasured, setSelectedNodes,
+    board, table, locked, apply, check, toast, ask: port.ui.ask, onCancelTask, nav, setMeasured, setSelectedNodes,
     performDragCreate: performDragCreateRef,
     screenToFlowPosition: (client) => flow.screenToFlowPosition(client),
     setCenter: (x, y, options) => flow.setCenter(x, y, options),
@@ -216,24 +218,24 @@ export function BoardCanvas({
       canvasBoardActions({
         table, boardFile, userRoot, discovery, concurrency, apply, boardRef, selectedRef, lockedRef,
         focusPromptRef, requestPromptFocus, setPromptDrafts, setExpandOverrides,
-        unhoverNode: actionBar.unhoverNode, showPreview: overlays.openPreview, primeImageInfo, onRegenerate, toast, performRef,
+        unhoverNode: actionBar.unhoverNode, showPreview: overlays.openPreview, primeImageInfo, onRegenerate, toast, performRef, port,
       }),
-    [table, boardFile, userRoot, discovery, concurrency, apply, requestPromptFocus, setPromptDrafts, setExpandOverrides, actionBar.unhoverNode, overlays.openPreview, onRegenerate, toast],
+    [table, boardFile, userRoot, discovery, concurrency, apply, requestPromptFocus, setPromptDrafts, setExpandOverrides, actionBar.unhoverNode, overlays.openPreview, onRegenerate, toast, port],
   );
 
   // 本机图片先上传到用户数据根的 导入参考图/，再按服务端给出的路径导入（端口见 canvasDrop 的 ImagePorts）。
   const importLocalFiles = useCallback(
     async (files: File[], at: { x: number; y: number }, attach?: { taskId: string; place: "asIs" | "left" }) => {
-      const images: ImportedImage[] = await importImages(files, { userRoot, toast, ports: imageImportPorts });
+      const images: ImportedImage[] = await importImages(files, { userRoot, toast, ports: imageImportPorts(port) });
       addImportedReferences(images, at, attach, apply);
     },
-    [apply, userRoot, toast],
+    [apply, userRoot, toast, port],
   );
   // 粘贴进来的图片（#96）：超限的当场提示、不发请求；显示名按「粘贴-年月日-时分」算，一次粘多张仍算一个撤销步。
   const pasteImages = useCallback(
     (files: File[], at: { x: number; y: number }) =>
-      void importPastedImages(files, at, { board: boardRef.current, userRoot, toast, ports: imageImportPorts, apply }),
-    [apply, userRoot, toast],
+      void importPastedImages(files, at, { board: boardRef.current, userRoot, toast, ports: imageImportPorts(port), apply }),
+    [apply, userRoot, toast, port],
   );
 
   const center = handlers.centerPosition;
@@ -244,10 +246,20 @@ export function BoardCanvas({
   /** attachTo = 任务节点 id：只选一张，接到该任务的空图片端口（从图片端口反向拖线建节点）。 */
   const pickReferences = useCallback(
     (at?: { x: number; y: number }, attachTo?: string) =>
-      void pickReferencesOf({ pickLocalImages: (multiple) => transfer.pickLocalImages(multiple), importFiles: importLocalFiles, centerPosition: center }, at, attachTo),
-    [center, importLocalFiles],
+      void pickReferencesOf({ pickImages: (multiple) => port.media.pickImages(multiple), importFiles: importLocalFiles, centerPosition: center }, at, attachTo).catch((e) => {
+        // 端口说这项能力还没有（桌面壳本切片没有文件选择器）：说清「尚不可用」，不冒成未捕获异常。
+        toast(unavailableMessage(e) ?? `选择参考图失败：${errorText(e)}`);
+      }),
+    [center, importLocalFiles, port, toast],
   );
-  const saveNodeAs = useCallback((nodeId: string) => saveNodeAsOf(nodeId, { board: boardRef.current, userRoot, toast, save: saveCopyAs }), [userRoot, toast]);
+  const saveNodeAs = useCallback(
+    (nodeId: string) =>
+      saveNodeAsOf(nodeId, { board: boardRef.current, userRoot, toast, save: (absPath) => port.media.saveCopyAs(absPath) }).catch((e) => {
+        // 同上：另存为在桌面壳本切片还没有，说清「尚不可用」。
+        toast(unavailableMessage(e) ?? `另存失败：${errorText(e)}`);
+      }),
+    [userRoot, toast, port],
+  );
 
   const commandDeps: CanvasCommandDeps = {
     apply, flow, boardRef, selectedRef, lockedRef, actions, onUndo, onRedo, onRun, onCancelTask, onRegenerate, onViewSendText,
@@ -258,8 +270,8 @@ export function BoardCanvas({
   performRef.current = (action, target, at) => commands[action]?.(target, at);
   performDragCreateRef.current = canvasDragCreate(commandDeps);
 
-  useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen: overlays.dialogOpenRef, onUndo, onRedo, toast });
-  useCanvasDrop({ wrapper, boardRef, screenToFlowPosition: (client) => flow.screenToFlowPosition(client), apply, toast, userRoot, readOnly });
+  useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen: overlays.dialogOpenRef, onUndo, onRedo, toast, port });
+  useCanvasDrop({ wrapper, boardRef, screenToFlowPosition: (client) => flow.screenToFlowPosition(client), apply, toast, userRoot, readOnly, port });
   // 页面级粘贴接管（#96）：分派在 core/pageInput（纯逻辑），这里只把落点、模态与图片导入接上。
   useCanvasPaste({
     wrapper,
@@ -271,6 +283,10 @@ export function BoardCanvas({
     apply,
     toast,
     importPastedImages: pasteImages,
+    isEditableTarget: port.ui.isEditableTarget,
+    readClipboard: port.media.readClipboard,
+    // 桌面壳能直接读系统剪贴板（#129）：粘贴先读原生快照，Web 仍用 paste 事件带的内容。
+    nativeClipboard: port.features.nativeClipboard ?? false,
   });
   useEffect(() => handlers.focusNode(focus), [focus]);
 
@@ -285,7 +301,7 @@ export function BoardCanvas({
           <div
             className={canvasClassName(dragging, tidying)}
             ref={wrapper}
-            onContextMenu={blockNativeContextMenu}
+            onContextMenu={(e) => blockNativeContextMenu(port.ui.isEditableTarget, e)}
             onPointerDownCapture={nav.onPointerDownCapture}
             onPointerUpCapture={nav.onPointerUpCapture}
           >
@@ -337,7 +353,7 @@ export function BoardCanvas({
               onSelectionDragStop={handlers.onNodeDragStop}
               onMoveStart={overlays.onMoveStart}
               onPaneContextMenu={(e) => openPaneContextMenu(overlays.openMenu, e)}
-              onNodeContextMenu={(e, n) => openNodeContextMenu(overlays.openMenu, e, n.id)}
+              onNodeContextMenu={(e, n) => openNodeContextMenu(overlays.openMenu, port.ui.isEditableTarget, e, n.id)}
               onSelectionContextMenu={(e, ns) => openSelectionContextMenu(overlays.openMenu, e, ns)}
               onEdgeContextMenu={(e, fe) => openEdgeMenu(overlays.openMenu, board, e, fe.id)}
               onNodeMouseEnter={(_, n) => hoveredActionBarOf(actionBar.showActionBar, n)}

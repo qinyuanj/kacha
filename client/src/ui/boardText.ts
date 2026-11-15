@@ -1,5 +1,6 @@
 // 画板相关的用户可见提示文案；跨语言的值由共享契约定义。
 import policy from "../../../contracts/board-policy.json" with { type: "json" };
+import type { ClipboardNotice } from "../core/clipboardDispatch";
 import { MAX_PASTE_BYTES, type PasteRefusal } from "../core/pageInput";
 
 /** 画板已不存在（另一页面删除或改名）。 */
@@ -40,9 +41,6 @@ export const boardSlotsFullText = ({ used, total }: Slots) => policy.slots_full.
 
 /** 服务端合并前按画板位拒绝时，导入报错原文就是统一文案（错误码在 runCancellable 里变成了文本）。 */
 export const isSlotsFullText = (text: string) => text.startsWith(SLOTS_FULL_HEAD);
-
-/** 服务端画板位满的错误码（409）。 */
-export const BOARD_SLOTS_FULL = "board_slots_full";
 
 /** 要新增 adding 块画板时：放不下给出统一文案，放得下为 null。 */
 export const slotsRefusal = (slots: Slots, adding: number): string | null =>
@@ -142,9 +140,18 @@ export const PASTE_TEXT = {
   tooLarge: `图片超过 ${MAX_PASTE_BYTES / (1024 * 1024)} MB 上限，先压缩再粘贴`,
   /** 节点标记写不进系统剪贴板：Ctrl+V 粘节点会失效，给一条不等粘贴的替代动作。 */
   markerUnwritable: "无法写入系统剪贴板：Ctrl+V 粘贴节点可能不生效，可用 Ctrl+J 原地复制",
+  /** 剪贴板里什么都没有（#129）：桌面壳读得到剪贴板，空的时候要说一声，不能按了没反应。 */
+  empty: "剪贴板里没有可粘贴的内容",
+  /** 剪贴板里是不受支持的内容（HEIC、TIFF 等非 PNG 图片，或别的富文本）：说清是什么不行。 */
+  unsupported: "剪贴板里的内容不受支持：请复制图片（PNG）或本应用的节点",
+  /** 剪贴板正被别的程序占用（#129）：可重试，不要说得像永久失败。 */
+  busy: "剪贴板正被其他程序占用，请稍后重试",
   /** 工具栏「＋ 参考图…」的悬浮提示：粘贴没有按钮入口（内网 HTTP 下页面读不到剪贴板），只能用文案告诉用户。 */
   toolbarHint: "选择图片文件加为参考图节点（也可以直接按 Ctrl+V 粘贴截图）",
 } as const;
+
+/** 读不出剪贴板内容时给用户的话（#129）：空、格式不支持、被占用（可重试）。 */
+export const clipboardNoticeText = (notice: ClipboardNotice): string => PASTE_TEXT[notice];
 
 /** 粘贴被拒时给用户的话：拒绝原因到文案的映射只在这里，界面不各自写一份。 */
 export const pasteRefusalText = (reason: PasteRefusal): string => (reason === "readOnly" ? ARCHIVE_TEXT.readOnly : PASTE_TEXT[reason]);

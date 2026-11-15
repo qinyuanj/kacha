@@ -11,8 +11,9 @@ import { canConnect, type Connection } from "../core/graph";
 import type { HoverInfo } from "../core/hoverInfo";
 import { resolveFromRoot } from "../core/paths";
 import { dragKind, type DragFrom, type DragState } from "../core/ports";
-import { isEditableTarget } from "../shell/pageInput";
+
 import type { CSSProperties } from "react";
+import type { SaveCopyOutcome } from "../shell/port";
 import { SAVE_TEXT } from "./boardText";
 import { canvasFlowProps } from "./canvasFlowProps";
 import { edgeIdOf } from "./canvasPoint";
@@ -25,8 +26,8 @@ export function dragFromOf(c: ConnectionState): DragFrom | null {
 }
 
 /** 画布内屏蔽 WebView 默认右键菜单；可编辑元素保留原生菜单（复制粘贴）。 */
-export function blockNativeContextMenu(e: { target: EventTarget | null; preventDefault: () => void }): void {
-  if (!isEditableTarget(e.target)) e.preventDefault();
+export function blockNativeContextMenu(isEditable: (target: EventTarget | null) => boolean, e: { target: EventTarget | null; preventDefault: () => void }): void {
+  if (!isEditable(e.target)) e.preventDefault();
 }
 
 /** 归档画板的菜单 / 动作条过滤：只读时把条目换成查看类，可编辑时原样返回。 */
@@ -83,12 +84,14 @@ export function edgeHoverMove(
 /** 「另存为」：参考图 / 结果节点才有；结果带图层时下载的是 zip。 */
 export async function saveNodeAsOf(
   nodeId: string,
-  deps: { board: Board; userRoot: string; toast: (message: string) => void; save: (absPath: string) => Promise<unknown> },
+  deps: { board: Board; userRoot: string; toast: (message: string) => void; save: (absPath: string) => Promise<SaveCopyOutcome> },
 ): Promise<void> {
   const node = deps.board.nodes.find((n) => n.id === nodeId);
   if (node?.type !== "reference" && node?.type !== "result") return;
   try {
-    await deps.save(resolveFromRoot(deps.userRoot, node.path));
+    const outcome = await deps.save(resolveFromRoot(deps.userRoot, node.path));
+    // 用户取消系统「另存为」不是保存：什么都不说，绝不提示「已开始下载」。
+    if (outcome.kind === "cancelled") return;
     deps.toast(SAVE_TEXT.started);
   } catch (e) {
     deps.toast(SAVE_TEXT.failed(errorText(e)));
@@ -97,11 +100,11 @@ export async function saveNodeAsOf(
 
 /** 选图加参考图：attachTo = 任务节点 id 时只选一张并接到该任务的空图片端口。 */
 export async function pickReferencesOf(
-  deps: { pickLocalImages: (multiple: boolean) => Promise<File[]>; importFiles: (files: File[], at: { x: number; y: number }, attach?: { taskId: string; place: "asIs" | "left" }) => Promise<void>; centerPosition: () => { x: number; y: number } },
+  deps: { pickImages: (multiple: boolean) => Promise<File[]>; importFiles: (files: File[], at: { x: number; y: number }, attach?: { taskId: string; place: "asIs" | "left" }) => Promise<void>; centerPosition: () => { x: number; y: number } },
   at?: { x: number; y: number },
   attachTo?: string,
 ): Promise<void> {
-  const files = await deps.pickLocalImages(!attachTo);
+  const files = await deps.pickImages(!attachTo);
   if (!files.length) return;
   await deps.importFiles(files, at ?? deps.centerPosition(), attachTo ? { taskId: attachTo, place: "asIs" } : undefined);
 }
@@ -134,8 +137,8 @@ export function openPaneContextMenu(openMenu: OpenMenu, e: MenuEvent): void {
 }
 
 /** 节点右键：落在可编辑元素（节点里的输入框）上时保留原生菜单。 */
-export function openNodeContextMenu(openMenu: OpenMenu, e: MenuEvent, nodeId: string): void {
-  if (isEditableTarget(e.target ?? null)) return;
+export function openNodeContextMenu(openMenu: OpenMenu, isEditable: (target: EventTarget | null) => boolean, e: MenuEvent, nodeId: string): void {
+  if (isEditable(e.target ?? null)) return;
   openMenu(e, { kind: "node", nodeId });
 }
 

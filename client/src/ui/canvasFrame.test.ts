@@ -8,6 +8,9 @@ import { BUILTIN_TABLE } from "../core/capabilities";
 import { menuItems, type MenuFacts, type MenuItem } from "../core/contextMenu";
 import type { HoverInfo } from "../core/hoverInfo";
 import { SAVE_TEXT } from "./boardText";
+
+const isEditableTarget = webPort.ui.isEditableTarget;
+import { webPort } from "../shell/webPort";
 import {
   blockNativeContextMenu,
   connectionAllowed,
@@ -109,10 +112,10 @@ describe("拖线起点选择器", () => {
 describe("右键菜单", () => {
   it("画布内屏蔽原生菜单，输入控件上保留", () => {
     const preventDefault = vi.fn();
-    blockNativeContextMenu({ target: document.createElement("div"), preventDefault });
+    blockNativeContextMenu(isEditableTarget, { target: document.createElement("div"), preventDefault });
     expect(preventDefault).toHaveBeenCalled();
     preventDefault.mockClear();
-    blockNativeContextMenu({ target: input, preventDefault });
+    blockNativeContextMenu(isEditableTarget, { target: input, preventDefault });
     expect(preventDefault).not.toHaveBeenCalled();
   });
 
@@ -220,7 +223,7 @@ describe("边悬浮", () => {
 
 describe("另存为", () => {
   it("参考图与结果节点都按绝对路径下载并提示", async () => {
-    const save = vi.fn(async () => undefined);
+    const save = vi.fn(async () => ({ kind: "saved" as const }));
     const toast = vi.fn();
     const board = boardOf([reference("r"), result("x")]);
     await saveNodeAsOf("r", { board, userRoot: "/~", toast, save });
@@ -231,11 +234,19 @@ describe("另存为", () => {
   });
 
   it("其它类型与不存在的节点什么都不做", async () => {
-    const save = vi.fn(async () => undefined);
+    const save = vi.fn(async () => ({ kind: "saved" as const }));
     const board = boardOf([prompt("p")]);
     await saveNodeAsOf("p", { board, userRoot: "/~", toast: vi.fn(), save });
     await saveNodeAsOf("gone", { board, userRoot: "/~", toast: vi.fn(), save });
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it("用户取消系统另存为：什么都不提示，绝不提示已开始下载", async () => {
+    const save = vi.fn(async () => ({ kind: "cancelled" as const }));
+    const toast = vi.fn();
+    await saveNodeAsOf("r", { board: boardOf([reference("r")]), userRoot: "/~", toast, save });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it("下载失败时提示另存失败", async () => {
@@ -254,24 +265,24 @@ describe("选图加参考图", () => {
 
   it("没选文件就什么都不做", async () => {
     const importFiles = vi.fn(async () => undefined);
-    await pickReferencesOf({ pickLocalImages: async () => [], importFiles, centerPosition });
+    await pickReferencesOf({ pickImages: async () => [], importFiles, centerPosition });
     expect(importFiles).not.toHaveBeenCalled();
   });
 
   it("没有落点时用视口中央，没有 attachTo 时可选多张", async () => {
     const importFiles = vi.fn(async () => undefined);
-    const pickLocalImages = vi.fn(async () => [new File(["a"], "a.png")]);
-    await pickReferencesOf({ pickLocalImages, importFiles, centerPosition });
-    // 原实现是 `transfer.pickLocalImages(!attachTo)`：没有 attachTo 时可多选。
-    expect(pickLocalImages).toHaveBeenCalledWith(true);
+    const pickImages = vi.fn(async () => [new File(["a"], "a.png")]);
+    await pickReferencesOf({ pickImages, importFiles, centerPosition });
+    // 端口约定：没有 attachTo 时可多选。
+    expect(pickImages).toHaveBeenCalledWith(true);
     expect(importFiles).toHaveBeenCalledWith([expect.any(File)], { x: 9, y: 9 }, undefined);
   });
 
   it("给了落点与 attachTo：只选一张并接到任务的原处", async () => {
     const importFiles = vi.fn(async () => undefined);
-    const pickLocalImages = vi.fn(async () => [new File(["a"], "a.png")]);
-    await pickReferencesOf({ pickLocalImages, importFiles, centerPosition }, at, "t1");
-    expect(pickLocalImages).toHaveBeenCalledWith(false);
+    const pickImages = vi.fn(async () => [new File(["a"], "a.png")]);
+    await pickReferencesOf({ pickImages, importFiles, centerPosition }, at, "t1");
+    expect(pickImages).toHaveBeenCalledWith(false);
     expect(importFiles).toHaveBeenCalledWith([expect.any(File)], at, { taskId: "t1", place: "asIs" });
   });
 });
@@ -319,9 +330,9 @@ describe("右键入口", () => {
 
   it("节点右键在输入控件上不弹菜单", () => {
     openMenu.mockClear();
-    openNodeContextMenu(openMenu, event(input), "n1");
+    openNodeContextMenu(openMenu, isEditableTarget, event(input), "n1");
     expect(openMenu).not.toHaveBeenCalled();
-    openNodeContextMenu(openMenu, event(document.createElement("div")), "n1");
+    openNodeContextMenu(openMenu, isEditableTarget, event(document.createElement("div")), "n1");
     expect(openMenu).toHaveBeenCalledWith(expect.anything(), { kind: "node", nodeId: "n1" });
   });
 

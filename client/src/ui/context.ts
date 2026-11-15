@@ -7,9 +7,9 @@ import { nodeImages } from "../core/graph";
 import type { NodeRunState } from "../core/runner";
 import { createInterruptedLog, interruptedCandidates, storedStatuses } from "../core/submission";
 import type { TaskFs } from "../core/taskDir";
-import { taskFs } from "../shell/adapters";
-import { ipc, type ImageInfo } from "../shell/ipc";
-import { logEvent } from "../shell/log";
+import type { ImageInfo } from "../shell/port";
+import { useShell } from "./shell";
+import { createImageInfoCache } from "./imageInfoCache";
 
 export interface BoardActions {
   table: CapabilityTable;
@@ -57,15 +57,16 @@ export function useBoardActions(): BoardActions {
   return ctx;
 }
 
-// 读到过的图片只检查一次；null = 读取失败（缺图），不缓存，下次再查（文件可能被放回原处）。
-const imageInfoCache = new Map<string, Promise<ImageInfo | null>>();
+// 图片信息的缓存与同步视图（见 ui/imageInfoCache.ts）。
+const imageInfoCache = createImageInfoCache();
 
 export function useImageInfo(absPath: string | null): ImageInfo | null | undefined {
+  const port = useShell();
   const [info, setInfo] = useState<ImageInfo | null | undefined>(undefined);
   useEffect(() => {
     if (absPath === null) return setInfo(undefined);
     let alive = true;
-    void cachedImageInfo(absPath).then((value) => alive && setInfo(value));
+    void imageInfoCache.read(port.files.inspectImage, absPath).then((value) => alive && setInfo(value));
     return () => {
       alive = false;
     };
@@ -74,25 +75,22 @@ export function useImageInfo(absPath: string | null): ImageInfo | null | undefin
 }
 
 export function primeImageInfo(absPath: string, info: ImageInfo): void {
-  imageInfoCache.set(absPath, Promise.resolve(info));
-  resolvedImageInfo.set(absPath, info);
+  imageInfoCache.prime(absPath, info);
 }
-
-// 已读到的图片信息的同步视图：画板变更当场重算自动宽高比时用，等不了 Promise。
-const resolvedImageInfo = new Map<string, ImageInfo>();
 
 /** 已经读到过的图片信息；还没读到或读取失败为 undefined。 */
 export function knownImageInfo(absPath: string): ImageInfo | undefined {
-  return resolvedImageInfo.get(absPath);
+  return imageInfoCache.known(absPath);
 }
 
 /** 批量读取图片信息（画布级：透明通道接线等）；path → 信息，读取失败为 null。 */
 export function useImageInfos(absPaths: string[]): ReadonlyMap<string, ImageInfo | null> {
+  const port = useShell();
   const [infos, setInfos] = useState<ReadonlyMap<string, ImageInfo | null>>(new Map());
   const signature = JSON.stringify(absPaths);
   useEffect(() => {
     let alive = true;
-    void Promise.all(absPaths.map(async (abs) => [abs, await cachedImageInfo(abs)] as const)).then(
+    void Promise.all(absPaths.map(async (abs) => [abs, await imageInfoCache.read(port.files.inspectImage, abs)] as const)).then(
       (entries) => alive && setInfos(new Map(entries)),
     );
     return () => {
@@ -103,33 +101,15 @@ export function useImageInfos(absPaths: string[]): ReadonlyMap<string, ImageInfo
   return infos;
 }
 
-function cachedImageInfo(absPath: string): Promise<ImageInfo | null> {
-  let pending = imageInfoCache.get(absPath);
-  if (!pending) {
-    pending = ipc.inspectImage(absPath).then(
-      (info) => {
-        resolvedImageInfo.set(absPath, info);
-        return info;
-      },
-      () => {
-        imageInfoCache.delete(absPath);
-        resolvedImageInfo.delete(absPath);
-        return null;
-      },
-    );
-    imageInfoCache.set(absPath, pending);
-  }
-  return pending;
-}
-
 /** 图片文件读不到的参考图 / 结果节点 id；读完之前为空（不闪缺图占位）。结果节点的图层文件按 imageKey 分键，与底图互不株连。 */
 export function useMissingImages(board: Board, userRoot: string): ReadonlySet<string> {
+  const port = useShell();
   const [missing, setMissing] = useState<ReadonlySet<string>>(new Set());
   const images = board.nodes.flatMap((n) => nodeImages(n, userRoot));
   const signature = JSON.stringify(images);
   useEffect(() => {
     let alive = true;
-    void Promise.all(images.map(async ({ key, absPath }) => ((await cachedImageInfo(absPath)) ? null : key))).then(
+    void Promise.all(images.map(async ({ key, absPath }) => ((await imageInfoCache.read(port.files.inspectImage, absPath)) ? null : key))).then(
       (ids) => alive && setMissing(new Set(ids.filter((id): id is string => id !== null))),
     );
     return () => {
@@ -143,7 +123,7 @@ export function useMissingImages(board: Board, userRoot: string): ReadonlySet<st
 // 按路径缓存读到的文件：只交给 storedStatuses 读结局记录——结局记录只写一次，读过就不再读。
 // 失败不缓存：401 / 断网恢复后要能重读，否则一次故障就永久显示成已中断。
 const fileReads = new Map<string, Promise<Uint8Array>>();
-const cachedReadFs: Pick<TaskFs, "readFile"> = {
+const cachedReadFs = (taskFs: Pick<TaskFs, "readFile">): Pick<TaskFs, "readFile"> => ({
   readFile: (path) => {
     let pending = fileReads.get(path);
     if (!pending) {
@@ -153,7 +133,7 @@ const cachedReadFs: Pick<TaskFs, "readFile"> = {
     }
     return pending;
   },
-};
+});
 
 /** 已中断只在本次运行里首次发现时记一次日志（去重规则见 core/submission.ts 的 createInterruptedLog）。 */
 const interruptedLog = createInterruptedLog();
@@ -162,12 +142,13 @@ const interruptedLog = createInterruptedLog();
  * 本次运行没经手过、提交过却没有结果的任务的状态（规则在 core/submission.ts 的 storedStatuses）。读完之前不显示徽标。
  */
 export function useStoredStatuses(board: Board, boardFile: string, userRoot: string, handled: ReadonlySet<string>): ReadonlyMap<string, NodeRunState> {
+  const port = useShell();
   const [statuses, setStatuses] = useState<ReadonlyMap<string, NodeRunState>>(new Map());
   const signature = JSON.stringify([userRoot, boardFile, interruptedCandidates(board, handled)]);
   useEffect(() => {
     let alive = true;
-    void storedStatuses(cachedReadFs, board, handled, userRoot, boardFile).then(({ statuses, interruptedEvents }) => {
-      for (const event of interruptedLog.take(interruptedEvents)) logEvent("task", { ...event });
+    void storedStatuses(cachedReadFs(port.core.taskFs), board, handled, userRoot, boardFile).then(({ statuses, interruptedEvents }) => {
+      for (const event of interruptedLog.take(interruptedEvents)) port.ui.log("task", { ...event });
       if (alive) setStatuses(statuses);
     }, () => {
       // 结局记录读失败（401 / 5xx / 断网）：保持原状态，不虚构「已中断」。下一次签名变化会重试。

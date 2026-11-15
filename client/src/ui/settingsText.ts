@@ -6,3 +6,20 @@ export const settingsNewerText = (version: number) => `settings.json 由更新�
 
 /** 本次没能从服务端读到 settings.json（unreadable）。 */
 export const SETTINGS_UNREADABLE_TEXT = "无法从服务端读取 settings.json，本次使用默认设置且不会覆盖该文件；请刷新页面重试";
+
+/** settings.json 已损坏：本次用默认设置。 */
+export const settingsCorruptText = (reason: string) => `settings.json 已损坏（${reason}），本次使用默认设置`;
+
+/** 文件状态的提示：ok 时没有提示，其余各给一句。 */
+export function settingsFileProblem(kind: "ok" | "newer" | "corrupt" | "unreadable", version?: number, reason?: string): string | null {
+  switch (kind) {
+    case "ok":
+      return null;
+    case "newer":
+      return settingsNewerText(version ?? 0);
+    case "corrupt":
+      return settingsCorruptText(reason ?? "");
+    case "unreadable":
+      return SETTINGS_UNREADABLE_TEXT;
+  }
+}

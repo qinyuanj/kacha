@@ -1,9 +1,11 @@
 // 画板工具栏（顶部第二行左侧）：新建节点、撤销 / 重做、运行。只负责摆放与置灰；
 // 有画板时由画布经 portal 渲染并接上动作，没有画板时由 App 渲染置灰占位（布局不跳）。
+// 文案与提示在 ui/boardToolbarText.ts（#137），这里只留摆放与接线。
 import type { ReactNode } from "react";
 import { textHoverInfo } from "../core/hoverInfo";
 import { HoverButton } from "./hoverInfo";
-import { PASTE_TEXT, TIDY_TEXT } from "./boardText";
+import { PASTE_TEXT } from "./boardText";
+import { newTaskHint, newTaskSuffix, redoHint, runHint, runSuffix, tidyHint, tidyLabel, toolbarHint, undoHint } from "./boardToolbarText";
 
 interface Props {
   /** 没有打开的画板：全部置灰。 */
@@ -20,16 +22,34 @@ interface Props {
   /** 当前选中节点数：> 0 时运行按钮写「运行选中」。 */
   selectedCount?: number;
   onRun?: () => void;
+  /** 生成尚不可用：运行与新建任务入口标「尚不可用」并置灰。 */
+  generationUnavailable?: boolean;
   /** 是否在整理模式；按钮按下态。 */
   tidying?: boolean;
+  /** 整理尚不可用：整理入口标「尚不可用」并置灰。 */
+  tidyUnavailable?: boolean;
   /** 进入 / 退出整理模式。 */
   onTidy?: () => void;
 }
 
-const NO_BOARD = "没有打开的画板";
-
-export function BoardToolbar({ disabled = false, modelSelect, onNewPrompt, onAddReferences, onNewTask, onUndo, onRedo, undoLabel = null, redoLabel = null, selectedCount = 0, onRun, tidying = false, onTidy }: Props) {
-  const hint = (text: string) => textHoverInfo(disabled ? NO_BOARD : text);
+export function BoardToolbar({
+  disabled = false,
+  modelSelect,
+  onNewPrompt,
+  onAddReferences,
+  onNewTask,
+  onUndo,
+  onRedo,
+  undoLabel = null,
+  redoLabel = null,
+  selectedCount = 0,
+  onRun,
+  generationUnavailable = false,
+  tidying = false,
+  tidyUnavailable = false,
+  onTidy,
+}: Props) {
+  const hint = (text: string) => textHoverInfo(toolbarHint(disabled, text));
   return (
     <div className="board-toolbar-left" role="toolbar" aria-label="画板工具栏">
       <div className="toolbar-group">
@@ -40,34 +60,43 @@ export function BoardToolbar({ disabled = false, modelSelect, onNewPrompt, onAdd
           ＋ 参考图…
         </HoverButton>
         <span className="toolbar-pair">
-          <HoverButton disabled={disabled} onClick={onNewTask} info={hint("用右侧模型在视口中央新建一个生成任务节点")}>
-            ＋ 生成任务
+          <HoverButton
+            disabled={disabled || generationUnavailable}
+            onClick={onNewTask}
+            info={hint(newTaskHint(generationUnavailable))}
+          >
+            ＋ 生成任务{newTaskSuffix(generationUnavailable)}
           </HoverButton>
           {modelSelect ?? <select className="toolbar-model" disabled aria-label="新建任务模型" />}
         </span>
       </div>
       <div className="toolbar-group">
-        <HoverButton onClick={onUndo} disabled={disabled || !undoLabel} info={hint(undoLabel ? `撤销 ${undoLabel}（Ctrl+Z）` : "没有可撤销的操作")} aria-label="撤销">
+        <HoverButton onClick={onUndo} disabled={disabled || !undoLabel} info={hint(undoHint(undoLabel))} aria-label="撤销">
           ↶
         </HoverButton>
-        <HoverButton onClick={onRedo} disabled={disabled || !redoLabel} info={hint(redoLabel ? `重做 ${redoLabel}（Ctrl+Shift+Z）` : "没有可重做的操作")} aria-label="重做">
+        <HoverButton onClick={onRedo} disabled={disabled || !redoLabel} info={hint(redoHint(redoLabel))} aria-label="重做">
           ↷
         </HoverButton>
       </div>
       <div className="toolbar-group">
-        <HoverButton className="primary" disabled={disabled} onClick={onRun} info={hint("有选中时只运行选中子图，否则运行整个画板中需要运行的任务")}>
-          ▶ 运行{selectedCount > 0 ? "选中" : ""}
+        <HoverButton
+          className="primary"
+          disabled={disabled || generationUnavailable}
+          onClick={onRun}
+          info={hint(runHint(generationUnavailable))}
+        >
+          ▶ 运行{runSuffix(selectedCount, generationUnavailable)}
         </HoverButton>
       </div>
       <div className="toolbar-group">
         <HoverButton
           className={tidying ? "toolbar-tidy active" : "toolbar-tidy"}
-          disabled={disabled}
+          disabled={disabled || tidyUnavailable}
           onClick={onTidy}
           aria-pressed={tidying}
-          info={hint(tidying ? "退出整理模式" : "整理模式：看各阶段体量，收掉未定稿的结果")}
+          info={hint(tidyHint(tidying, tidyUnavailable))}
         >
-          {TIDY_TEXT.enter}
+          {tidyLabel(tidyUnavailable)}
         </HoverButton>
       </div>
     </div>
