@@ -1,5 +1,6 @@
-# 行尾规则随仓库走，不依赖各机器的 core.autocrlf：文本在仓库里统一存 LF，检出时按平台转换。
-* text=auto
+# 行尾规则随仓库走，不依赖各机器的 core.autocrlf：文本在仓库里存 LF，检出也一律 LF。
+# 不写 eol=lf 时 core.autocrlf=true 的机器会把文本检出成 CRLF，gofmt 之类的工具于是把每个文件都报成待格式化。
+* text=auto eol=lf
 
 # shell 脚本在任何平台检出都保持 LF，否则 sh 会把 \r 当作命令的一部分。
 *.sh text eol=lf
