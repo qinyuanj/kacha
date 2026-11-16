@@ -5,11 +5,15 @@
 // 预览弹窗用替身（它自己要画布上下文与图片信息，那是它自己的测试范围）。
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { newBoard, type Board, type BoardEdge, type ResultNode, type TaskNode } from "../core/board";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { newBoard, type Board, type BoardEdge, type ResultNode, type Stage, type TaskNode } from "../core/board";
 import type { MenuItem } from "../core/contextMenu";
+import type { BoardMeasure } from "../core/tidy";
+import type { ShellPort } from "../shell/port";
+import { createFakePort } from "../shell/testing/fakePort";
 import { TIDY_TEXT } from "./boardText";
 import { CanvasActionBar, CanvasOverlays, type CanvasActionBarProps, type CanvasOverlaysProps } from "./canvasOverlays";
+import { ShellProvider } from "./shell";
 import type { CanvasMenuState, CanvasPreviewState } from "./useCanvasOverlaysState";
 
 // React 19 的 act() 要在测试环境里显式打开。
@@ -56,6 +60,10 @@ vi.mock("./PreviewDialog", async () => {
 
 let container: HTMLDivElement;
 let root: Root;
+/** 壳端口替身：整理条的确认框走 port.ui.ask（#145）；其它浮层不碰壳。 */
+let port: ReturnType<typeof createFakePort>;
+/** 确认框替身：签名借用壳端口，不另写一份。 */
+let ask: Mock<ShellPort["ui"]["ask"]>;
 
 beforeEach(() => {
   container = document.createElement("div");
@@ -63,6 +71,9 @@ beforeEach(() => {
   root = createRoot(container);
   dialog.mounts = 0;
   dialog.last = null;
+  port = createFakePort();
+  ask = vi.fn<ShellPort["ui"]["ask"]>().mockResolvedValue(true);
+  port.ui.ask = ask;
 });
 
 afterEach(async () => {
@@ -87,8 +98,31 @@ const result = (id: string, taskId: string): ResultNode => ({
 
 const systemEdge = (taskId: string, resultId: string): BoardEdge => ({ from: [taskId, "result"], to: [resultId, "in"], source_layer: null, region: null, system: true, extra: {} });
 
+/** 结果被下游拿去当参考图：这条结果不会被收掉。 */
+const downstreamEdge = (resultId: string): BoardEdge => ({ from: [resultId, "result"], to: ["t2", "in"], source_layer: null, region: null, system: false, extra: {} });
+
+const stage = (id: string, nodes: string[]): Stage => ({ id, name: `阶段 ${id}`, nodes, collapsed: false, extra: {} });
+
 /** 两次尝试：各是一个生成任务带一张结果，都没进阶段。 */
 const twoAttempts = (): Board => ({ ...newBoard(), nodes: [task("t1"), result("r1", "t1"), task("t2"), result("r2", "t2")], edges: [systemEdge("t1", "r1"), systemEdge("t2", "r2")] });
+
+/**
+ * 两个阶段（#145）：
+ * s1 是 t1 带两张未定稿结果、且同一结果列（r2 是画板顺序上最新的一张）；s2 是 t2 带一张结果。
+ * 三条结果都没定稿、也都没有下游连线，所以整板可收掉 3 张，其中 r2 / r3 是建议保留的。
+ */
+const stagedBoard = (): Board => ({
+  ...newBoard(),
+  nodes: [task("t1"), result("r1", "t1"), result("r2", "t1"), task("t2"), result("r3", "t2")],
+  edges: [systemEdge("t1", "r1"), systemEdge("t1", "r2"), systemEdge("t2", "r3")],
+  stages: [stage("s1", ["t1", "r1", "r2"]), stage("s2", ["t2", "r3"])],
+});
+
+/** 服务端量出的体量：三条结果的目录各自独占，收掉即释放 1.0 + 0.5 + 0.5 KiB。 */
+const STAGED_MEASURE: BoardMeasure = {
+  nodes: { t1: ["t1-run"], t2: ["t2-run"], r1: ["d1"], r2: ["d2"], r3: ["d3"] },
+  dirs: { "t1-run": 100, "t2-run": 100, d1: 1024, d2: 512, d3: 512 },
+};
 
 const BAR_ITEMS: MenuItem[] = [
   { action: "preview", label: "放大预览", disabledReason: null },
@@ -127,8 +161,11 @@ function actionBar(overrides: Partial<CanvasActionBarProps> = {}): CanvasActionB
   };
 }
 
+/** 同一棵树：换状态重渲染也走这里，根组件不变（否则整棵树会重挂，弹窗的挂载次数就变了）。 */
+const tree = (ui: ReactElement): ReactElement => createElement(ShellProvider, { port, children: ui });
+
 async function show(ui: ReactElement): Promise<void> {
-  await act(async () => root.render(ui));
+  await act(async () => root.render(tree(ui)));
 }
 
 const buttons = (selector = "button"): HTMLButtonElement[] => [...container.querySelectorAll<HTMLButtonElement>(selector)];
@@ -180,12 +217,12 @@ describe("CanvasOverlays", () => {
     expect(dialog.last!.toast).toBe(props.toast);
     expect(dialog.last!.onClose).toBe(props.onClosePreview);
     // 别的状态变化不动弹窗（key 没变就不重挂）。
-    await act(async () => root.render(createElement(CanvasOverlays, { ...props, tidying: true })));
+    await act(async () => root.render(tree(createElement(CanvasOverlays, { ...props, tidying: true }))));
     expect(dialog.mounts).toBe(1);
     // 再打开同一个节点：nonce 变了，弹窗从头开始。
-    await act(async () => root.render(createElement(CanvasOverlays, { ...props, preview: { ...PREVIEW, nonce: 2 } })));
+    await act(async () => root.render(tree(createElement(CanvasOverlays, { ...props, preview: { ...PREVIEW, nonce: 2 } }))));
     expect(dialog.mounts).toBe(2);
-    await act(async () => root.render(createElement(CanvasOverlays, { ...props, preview: null })));
+    await act(async () => root.render(tree(createElement(CanvasOverlays, { ...props, preview: null }))));
     expect(container.querySelector('[data-testid="preview-dialog"]')).toBeNull();
   });
 
@@ -232,6 +269,112 @@ describe("整理条上的「自动划分阶段」（#143）", () => {
   it("体量度量暂时算不出不影响按钮可用", async () => {
     await show(createElement(CanvasOverlays, overlays({ tidying: true, board: twoAttempts(), tidyMeasure: { measure: null, before: null } })));
     expect(buttonByText(TIDY_TEXT.autoStages(2)).disabled).toBe(false);
+  });
+});
+
+describe("整理条上的「收掉整板未定稿」（#145）", () => {
+  /** 确认框是 port.ui.ask 的异步结局：点完要等它 resolve。 */
+  async function clickButton(label: string): Promise<HTMLButtonElement> {
+    const button = buttonByText(label);
+    await act(async () => button.click());
+    await act(async () => {});
+    return button;
+  }
+
+  it("按钮上的 N 是整板可收掉的张数：多阶段一次收，确认后只发一次 pruneUnfinal", async () => {
+    const props = overlays({ tidying: true, board: stagedBoard(), tidyMeasure: { measure: STAGED_MEASURE, before: 1000 } });
+    await show(createElement(CanvasOverlays, props));
+
+    // 三个阶段的成员共 3 张可收掉的结果。
+    await clickButton("收掉整板未定稿（3）");
+
+    // 一次点击一个变更：stageIds 是全部阶段 id，不是逐个阶段发多次。
+    expect(props.apply).toHaveBeenCalledTimes(1);
+    expect(props.apply).toHaveBeenCalledWith({ kind: "pruneUnfinal", stageIds: ["s1", "s2"] });
+  });
+
+  it("N 只算阶段成员：散在画板上没进任何阶段的未定稿结果不算", async () => {
+    // 规格把这条动作定义成「一次 pruneUnfinal 传全部阶段 id」，所以散落的结果不在作用面里。
+    const board: Board = { ...stagedBoard(), nodes: [...stagedBoard().nodes, result("r9", "t9")] };
+    const props = overlays({ tidying: true, board, tidyMeasure: { measure: STAGED_MEASURE, before: 1000 } });
+    await show(createElement(CanvasOverlays, props));
+
+    // 仍然是 3（r9 没进阶段），确认框里的总张数也是 3。
+    await clickButton("收掉整板未定稿（3）");
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(ask.mock.calls[0][0]).toContain("将收掉 3 张");
+  });
+
+  it("没有阶段时不可点，并说明整块画板没有可收掉的未定稿结果", async () => {
+    const props = overlays({ tidying: true, board: twoAttempts() });
+    await show(createElement(CanvasOverlays, props));
+
+    const button = await clickButton("收掉整板未定稿（0）");
+    expect(button.disabled).toBe(true);
+    // 逐阶段那条讲的是「这个阶段」，整板这条要讲整块画板：两者不是同一句文案。
+    expect(button.getAttribute("title")).toBe("整块画板没有可收掉的未定稿结果：只算阶段里的结果，定稿与已被下游使用的结果会保留。");
+    expect(ask).not.toHaveBeenCalled();
+    expect(props.apply).not.toHaveBeenCalled();
+  });
+
+  it("全部已是定稿或都有下游连线时 N = 0、不可点", async () => {
+    const board: Board = {
+      ...newBoard(),
+      // r1 已定稿；r2 被拿去当参考图（有下游连线）：两条都不会被收掉。
+      nodes: [task("t1"), { ...result("r1", "t1"), final: true as const }, task("t2"), result("r2", "t2")],
+      edges: [systemEdge("t1", "r1"), downstreamEdge("r2")],
+      stages: [stage("s1", ["t1", "r1"]), stage("s2", ["t2", "r2"])],
+    };
+    const props = overlays({ tidying: true, board });
+    await show(createElement(CanvasOverlays, props));
+
+    const button = await clickButton("收掉整板未定稿（0）");
+    expect(button.disabled).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+    expect(props.apply).not.toHaveBeenCalled();
+  });
+
+  it("确认框写清总张数、画板约减少多少与其中几张是建议保留的", async () => {
+    const props = overlays({ tidying: true, board: stagedBoard(), tidyMeasure: { measure: STAGED_MEASURE, before: 1000 } });
+    await show(createElement(CanvasOverlays, props));
+
+    await clickButton("收掉整板未定稿（3）");
+
+    // 期望值手写（见 CODING_STANDARDS「一个含义只定义一处」的例外）：确认框是用户逐字看到的东西。
+    expect(ask).toHaveBeenCalledWith("将收掉 3 张，其中 2 张是建议保留的，画板约减少 2.0 KiB。\n定稿与已被下游使用的结果保留；可以撤销。", {
+      title: "收掉未定稿",
+      okLabel: "收掉",
+      cancelLabel: "取消",
+    });
+  });
+
+  it("体量暂时算不出时确认框仍给张数，减少量写「暂时算不出」", async () => {
+    const props = overlays({ tidying: true, board: stagedBoard(), tidyMeasure: { measure: null, before: null } });
+    await show(createElement(CanvasOverlays, props));
+
+    // 量不出体量不影响动作：按钮照样可点，确认框里只把减少量写成暂时算不出。
+    await clickButton("收掉整板未定稿（3）");
+    expect(ask).toHaveBeenCalledWith("将收掉 3 张，其中 2 张是建议保留的，画板体量暂时算不出。\n定稿与已被下游使用的结果保留；可以撤销。", expect.anything());
+  });
+
+  it("只读 / 归档画板不可点，也不弹确认框", async () => {
+    const props = overlays({ tidying: true, board: stagedBoard(), readOnly: true, tidyMeasure: { measure: STAGED_MEASURE, before: 1000 } });
+    await show(createElement(CanvasOverlays, props));
+
+    const button = await clickButton("收掉整板未定稿（3）");
+    expect(button.disabled).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+    expect(props.apply).not.toHaveBeenCalled();
+  });
+
+  it("确认框取消时不动画板", async () => {
+    ask.mockResolvedValue(false);
+    const props = overlays({ tidying: true, board: stagedBoard(), tidyMeasure: { measure: STAGED_MEASURE, before: 1000 } });
+    await show(createElement(CanvasOverlays, props));
+
+    await clickButton("收掉整板未定稿（3）");
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(props.apply).not.toHaveBeenCalled();
   });
 });
 
