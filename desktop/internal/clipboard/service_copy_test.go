@@ -12,6 +12,12 @@ import (
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
+// mygoClipboardError 拼出 MyGo 在 Windows 上写剪贴板失败时的真实文案形状：
+// fmt.Errorf("mygo: %s failed (HRESULT %#08x)", what, hr)（见 mygo@v0.9.0 internal/windows/com.go）。
+// 手写这份字面量是为了让期望值独立于被测代码：要验的正是「按哪种 HRESULT 归类」。
+func mygoClipboardError(what string, hresult string) error {
+	return errors.New("mygo: " + what + " failed (HRESULT " + hresult + ")")
+}
 // fakeWriter 记下写进系统剪贴板的字节；err 模拟剪贴板被占用等写入失败。
 type fakeWriter struct {
 	got  []byte
@@ -115,6 +121,23 @@ func TestCopyImageBusy(t *testing.T) {
 	}
 }
 
+// TestCopyImageBusyFromMyGoHResult MyGo 的写入走 OleSetClipboard：剪贴板一直被别的程序占着时它等 1 秒
+// 再返回 HRESULT CLIPBRD_E_CANT_OPEN（0x800401D0），文案里没有 "busy"。真机验收（#132）见到这条被折成
+// 普通失败，用户看到「写入系统剪贴板失败」而不是可重试的占用，所以这里按真实错误文案钉住。
+func TestCopyImageBusyFromMyGoHResult(t *testing.T) {
+	real := mygoClipboardError("OleSetClipboard", "0x800401d0")
+	out := Service{Writer: &fakeWriter{err: real}}.CopyImage(fixture(t, "alpha.png"), "png")
+	if out.OK {
+		t.Fatal("写失败不能报成功")
+	}
+	if out.Kind != ImageBusy {
+		t.Fatalf("类别 = %q，期望 %q", out.Kind, ImageBusy)
+	}
+	if !strings.Contains(out.Message, "重试") {
+		t.Fatalf("消息没说可以重试：%q", out.Message)
+	}
+}
+
 // TestCopyImageInvalid 内容坏掉是 invalid：与「容器不受支持」分开，界面给的话不一样。
 func TestCopyImageInvalid(t *testing.T) {
 	writer := &fakeWriter{}
@@ -204,8 +227,11 @@ func TestBoundStillReadsClipboard(t *testing.T) {
 }
 
 // TestCopyImageOtherFailure 别的写失败按 failed 收，不伪装成 busy 让用户白重试。
+//
+// 例子用 E_FAIL（0x80004005）：剪贴板被别的程序占着是 CLIPBRD_E_CANT_OPEN（0x800401D0），
+// 那一条属于 busy（见 TestCopyImageBusyFromMyGoHResult），真机验收（#132）纠正过这个分类。
 func TestCopyImageOtherFailure(t *testing.T) {
-	service := Service{Writer: &fakeWriter{err: errors.New("OleSetClipboard failed: 0x800401D0")}}
+	service := Service{Writer: &fakeWriter{err: mygoClipboardError("OleSetClipboard", "0x80004005")}}
 	out := service.CopyImage(fixture(t, "alpha.png"), "png")
 	if out.OK || out.Kind != ImageFailed {
 		t.Fatalf("结局 = %+v，期望 failed", out)

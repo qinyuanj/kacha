@@ -50,4 +50,17 @@ status: accepted
 >
 > 已知限制：真实系统剪贴板只能在已解锁的交互会话里验收。会话锁屏时 Windows 拒绝后台进程访问剪贴板（`clip.exe` 返回 `Access is denied`，`OpenClipboard` 返回 `ERROR_ACCESS_DENIED`=5），此时既不能投递外部截图，也不能验证复制成功 / 失败面。
 >
-> 未实测：外部截图粘贴进画板、画板图片复制到 Word / 微信、透明 PNG 的 alpha、剪贴板被占用时的可重试失败、HEIC/TIFF 复制失败的提示、Word / 微信里的真实粘贴结果，以及焦点许可下客户端复制粘贴动作的真实剪贴板观察——验收时会话锁屏、剪贴板不可访问，均记为未实测，待会话解锁后按 #132 矩阵补测。Adobe Photoshop 本机未安装，无法实测。
+> 以上 2026-11-15 那一轮的「未实测」清单**由下面的 2026-11-16 复验取代**：会话锁屏期间无法访问剪贴板，那批结论不代表失败，也不代表通过。
+>
+> 2026-11-16 复验（会话已解锁，同一固定版本 release 构建：Kacha 0.1.0 / MyGo 0.9.0 / go1.27.3 / WebView2 158.0.4370.21，代码基线 `b546ef9`），逐项按外部观察补测：
+> - 外部截图经系统剪贴板粘进画板：画板新增参考图节点，落盘文件与源截图的字节数相同（6387）。
+> - 画板图片复制到 Word：docx 的 `word/media/image1.png` 与剪贴板里的 PNG 是同长度同内容的 167 字节，3072 个像素中 768 个全透明，透明保留。
+> - 透明 PNG：注册的 `PNG` 格式保留 alpha；同时给出的 `CF_DIB`/`CF_DIBV5` 是 32bpp 但 `biCompression=BI_RGB`，不带 alpha 语义，只认 DIB 的软件会把透明区域当不透明。
+> - 不受支持的容器（TIFF）：复制侧明确失败并指向「另存为…」，剪贴板不被触碰。
+> - 剪贴板被别的程序占用：见下条修复，现在给出可重试的失败，且不破坏原有剪贴板内容。
+> - 画板包导入后重开：见上一条已验证；本轮用 `client/fixtures/packs/v0.3.2-flash-layers.ugcpack` 重跑，任务目录与图层文件齐备。
+> - 焦点许可：复制粘贴都经 Go 原生剪贴板，不经 `navigator.clipboard` 或 `execCommand`。外部观察：Ctrl+C 之后剪贴板里出现 MyGo 专有格式 `MyGo.Transfer.Length:image/png`（Chromium 的复制不会产生它），Ctrl+V 时外部进程写入的 `PNG`/`CF_DIB` 被正确读成参考图节点。
+>
+> 本轮验收纠正了一处实现偏差：MyGo 在 Windows 上用 `OleSetClipboard` 写剪贴板，被别的程序占着时等 1 秒后返回 HRESULT `CLIPBRD_E_CANT_OPEN`（`0x800401D0`），错误文案里没有 "busy"。原先「占用」只按文案认，这条可重试的失败因此被折成普通写入失败。现在 Go 侧按 HRESULT 归类为「占用」（`desktop/internal/clipboard/service.go`），提示文案仍只在 `client/src/ui/copyText.ts` 定义一处（页面按类别取文案）。**升级 MyGo 时要重新核对这条映射。**
+>
+> 仍未实测：画板图片粘进微信（微信停在「需在手机上完成登录」，需机主手机确认，本机无人值守该账号）、Photoshop 粘贴（本机未安装）。这两项保持开放，不能用合成事件替代。
