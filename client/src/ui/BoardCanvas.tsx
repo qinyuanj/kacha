@@ -393,6 +393,9 @@ export function BoardCanvas({
               toast={toast}
               tidying={tidying}
               tidyMeasure={stageView.tidyMeasure}
+              board={board}
+              apply={apply}
+              readOnly={readOnly}
               onTidyDone={() => onTidyChange(false)}
               hoverLayer={hover.layer}
             />
