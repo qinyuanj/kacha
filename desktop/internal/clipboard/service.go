@@ -278,8 +278,20 @@ func isBusy(err error) bool {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, mygoClipboardCantOpenHRESULT) {
+		return true
+	}
 	return strings.Contains(msg, "busy") || strings.Contains(msg, "cannot lock") || strings.Contains(msg, "reentrant")
 }
+
+// mygoClipboardCantOpenHRESULT 是「剪贴板被别的程序占着」在 MyGo 写入路径上的样子。
+//
+// MyGo 在 Windows 上用 OleSetClipboard 写（只有读才走 OpenClipboard）：被占用时它先等 clipboardPatience
+// （1 秒）再放弃，返回 HRESULT CLIPBRD_E_CANT_OPEN（0x800401D0），文案是
+// "mygo: OleSetClipboard failed (HRESULT 0x800401d0)"——里面没有 "busy"。只按字面认 busy 会把这条
+// 可重试的失败降级成普通失败：用户看到的是「写入系统剪贴板失败」，而不是「稍后重试」（#132 真机验收发现）。
+// 升级 MyGo 时要重新核对这条：它若换措辞或改导出哨兵值，这里要跟着改。
+const mygoClipboardCantOpenHRESULT = "0x800401d0"
 
 // copyMessage 是失败时给用户的那句话：说清哪种失败，并指向该节点已有的「另存为…」。
 //
@@ -338,7 +350,7 @@ func reasonOf(err error) string {
 	switch {
 	case errors.Is(err, mygo.ErrClipboardChanged):
 		return ReasonChanged
-	case strings.Contains(err.Error(), "busy"), strings.Contains(err.Error(), "cannot lock"):
+	case isBusy(err):
 		return ReasonBusy
 	case strings.Contains(err.Error(), "exceeds 64 MiB"):
 		return ReasonTooLarge
