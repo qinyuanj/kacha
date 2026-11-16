@@ -1,9 +1,15 @@
 // 整理模式（#92）：画布的一种界面状态，不是弹窗。进入后按任务目录量画板（服务端，口径与画板体量一致），
-// 顶部显示整理前后的体量对比与「完成」；阶段框上显示各阶段体量与「收掉未定稿」（见 stages.tsx）。其它编辑照常可用。
+// 顶部显示整理前后的体量对比、「自动划分阶段」、「收掉整板未定稿」与「完成」；阶段框上显示各阶段体量与
+// 「收掉未定稿」（见 stages.tsx）。
+// 进入整理模式不写画板：自动划分阶段是整理条上的按钮，点了才写（#143）；收掉整板未定稿同样只弹确认框（#145）。
+// 其它编辑照常可用。
 import { useEffect, useRef, useState } from "react";
 import { TidyMeter } from "../core/tidyMeter";
-import { serializeBoard, type Board } from "../core/board";
-import { boardBytes, type BoardMeasure } from "../core/tidy";
+import { autoStageGroups } from "../core/autoStages";
+import { serializeBoard, stagesOf, type Board } from "../core/board";
+import type { BoardChange, EditResult } from "../core/edit";
+import { prunableResults, suggestKeep } from "../core/stages";
+import { boardBytes, pruneSavings, type BoardMeasure } from "../core/tidy";
 import { TIDY_TEXT } from "./boardText";
 import { useShell } from "./shell";
 
@@ -43,10 +49,57 @@ export function useTidyMeasure(board: Board, tidying: boolean): TidyMeasure {
   return state;
 }
 
-export function TidyBar({ measure, before, onDone }: TidyMeasure & { onDone: () => void }) {
+/** 整理条：前后体量对比、自动划分阶段（#143）、收掉整板未定稿（#145）与「完成」。 */
+export function TidyBar({
+  measure,
+  before,
+  board,
+  readOnly,
+  apply,
+  onDone,
+}: TidyMeasure & { board: Board; readOnly: boolean; apply: (change: BoardChange) => EditResult | null; onDone: () => void }) {
+  const port = useShell();
+  // 会建几个阶段按当前画板现算；算不出与体量量不到是两回事，按钮照样可用。
+  const stages = autoStageGroups(board).length;
+  // 整板收掉就是一次 pruneUnfinal 传全部阶段 id：作用面只算阶段成员，散在画板上、没进任何阶段的
+  // 未定稿结果不算（与逐阶段同一个判定，规格把这条动作定义成「一次 pruneUnfinal 传全部阶段 id」）。
+  const stageIds = stagesOf(board).map((s) => s.id);
+  const prunable = prunableResults(board, stageIds);
+  // 建议保留只在整理模式里存在：确认框点明其中几张，免得连建议保留的一起删掉。
+  const suggested = suggestKeep(board);
+  const onPruneBoard = () => {
+    // 体量算不出（measure 为 null）不拦住动作，只让确认框写「暂时算不出」。
+    const saved = measure ? pruneSavings(measure, prunable) : null;
+    const keep = prunable.filter((id) => suggested.has(id)).length;
+    void port.ui.ask(TIDY_TEXT.pruneConfirm(prunable.length, saved, keep), {
+      title: TIDY_TEXT.pruneTitle,
+      okLabel: TIDY_TEXT.pruneOk,
+      cancelLabel: TIDY_TEXT.cancelLabel,
+    }).then((ok) => {
+      if (ok) apply({ kind: "pruneUnfinal", stageIds });
+    });
+  };
   return (
     <div className="tidy-bar" role="status" aria-label="整理模式">
       <span>{measure && before !== null ? TIDY_TEXT.compare(before, boardBytes(measure)) : TIDY_TEXT.measuring}</span>
+      <button
+        type="button"
+        className="auto-stages"
+        disabled={readOnly || stages === 0}
+        title={stages === 0 ? TIDY_TEXT.autoStagesEmpty : undefined}
+        onClick={() => apply({ kind: "autoStages" })}
+      >
+        {TIDY_TEXT.autoStages(stages)}
+      </button>
+      <button
+        type="button"
+        className="prune-board"
+        disabled={readOnly || prunable.length === 0}
+        title={prunable.length === 0 ? TIDY_TEXT.nothingToPruneBoard : undefined}
+        onClick={onPruneBoard}
+      >
+        {TIDY_TEXT.pruneBoard(prunable.length)}
+      </button>
       <button className="primary" onClick={onDone}>
         {TIDY_TEXT.done}
       </button>

@@ -49,6 +49,8 @@ export interface CanvasNodeInput {
   promptDrafts: ReadonlyMap<string, string>;
   /** 图片文件读不到的节点 / 图层键。 */
   missing: ReadonlySet<string>;
+  /** 建议保留的结果节点（#144）：只在整理模式里有，空集即不标。 */
+  suggestKeep: ReadonlySet<string>;
   /** 图片绝对路径 → 读到的图片信息；未读到或读不出为 null / 不在表里。 */
   imageInfos: ReadonlyMap<string, ImageInfo | null>;
   /** 节点 id → 是否带透明通道；不在 Map 里 = 未知。 */
@@ -153,9 +155,14 @@ function promptNodeOf(input: CanvasNodeInput, n: PromptNode): Node {
   };
 }
 
-/** 结果节点：结果回灌到任务上才按下游模型规则提示；没接任务不提示。 */
+/** 结果节点：结果回灌到任务上才按下游模型规则提示；没接任务不提示。建议保留只在整理模式里有。 */
 function resultNodeOf(input: CanvasNodeInput, n: ResultNode): Node {
-  return { ...baseNodeOf(input, n), ...imageBox(input, n), type: "result", data: { node: n, rules: rulesOf(input, n.id), missing: input.missing.has(n.id) } };
+  return {
+    ...baseNodeOf(input, n),
+    ...imageBox(input, n),
+    type: "result",
+    data: { node: n, rules: rulesOf(input, n.id), missing: input.missing.has(n.id), suggestKeep: input.suggestKeep.has(n.id) },
+  };
 }
 
 /** 参考图节点：没接任务时按新建任务会用的默认模型提示。 */

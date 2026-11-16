@@ -274,7 +274,8 @@ describe("阶段框上的整理附加内容", () => {
 
     // 预计减少的体量 = r1 独占的 d3（200）——d1 / d2 仍被别的节点引用。
     // cancelLabel 在源码里是字面量（没有对应文案常量），这里照抄一份，就当作与源码独立的期望值。
-    expect(shell.ask).toHaveBeenCalledWith(TIDY_TEXT.pruneConfirm(1, 200), {
+    // r1 是这条结果列的最新一张，所以确认框里点明「其中 1 张是建议保留的」。
+    expect(shell.ask).toHaveBeenCalledWith(TIDY_TEXT.pruneConfirm(1, 200, 1), {
       title: TIDY_TEXT.pruneTitle,
       okLabel: TIDY_TEXT.pruneOk,
       cancelLabel: TIDY_TEXT.cancelLabel,
@@ -302,7 +303,7 @@ describe("阶段框上的整理附加内容", () => {
     await run(() => view.stageTidy!.onPrune("s1"));
     await act(async () => {});
 
-    expect(shell.ask).toHaveBeenCalledWith(TIDY_TEXT.pruneConfirm(1, null), expect.anything());
+    expect(shell.ask).toHaveBeenCalledWith(TIDY_TEXT.pruneConfirm(1, null, 1), expect.anything());
   });
 
   it("没有可收掉的结果：只提示，不问也不写", async () => {
@@ -351,5 +352,72 @@ describe("阶段框上的整理附加内容", () => {
 
     expect(toasts).toEqual([TIDY_TEXT.moveOutFailed("画板位已满")]);
     expect(view.stageTidy!.movingOut).toBe(false);
+  });
+});
+
+// ---- 建议保留（#144）----
+
+/** 同一结果列（task_id 相同）的另一张：用来锁住「只取最新一张」。 */
+const sameColumn = (base: BoardNode): BoardNode => ({ ...base, task_id: "task-r1" }) as BoardNode;
+
+describe("建议保留", () => {
+  it("不在整理模式没有标记；进入整理模式才标出每条结果列最新的一张", async () => {
+    const board = boardOf([promptNode("p"), resultNode("r1"), sameColumn(resultNode("r2")), resultNode("r3", true)], [stage("s1", ["r1", "r2", "r3"])]);
+    await show(propsOf(board));
+    expect(view.suggestKeep.size).toBe(0);
+
+    await show(propsOf(board, { tidying: true }));
+    // r2 是这条结果列的最新一张；r3 已定稿，不打标记。
+    expect([...view.suggestKeep]).toEqual(["r2"]);
+  });
+
+  it("阶段框上的「保留这 N 张」：N 是该阶段成员里建议保留的张数", async () => {
+    const board = boardOf(
+      [promptNode("p"), resultNode("r1"), sameColumn(resultNode("r2")), resultNode("r3"), resultNode("r4", true)],
+      [stage("s1", ["r1", "r2"]), stage("s2", ["r3"]), stage("s3", ["r4"])],
+    );
+    await show(propsOf(board, { tidying: true }));
+
+    expect(view.stageTidy!.keepable("s1")).toBe(1);
+    expect(view.stageTidy!.keepable("s2")).toBe(1);
+    expect(view.stageTidy!.keepable("s3")).toBe(0);
+    expect(view.stageTidy!.keepable("不在画板上的阶段")).toBe(0);
+  });
+
+  it("点「保留这 N 张」等价于一次标记定稿", async () => {
+    const board = boardOf([promptNode("p"), resultNode("r1"), resultNode("r2"), resultNode("r3", true)], [stage("s1", ["r1", "r2", "r3"]), stage("s2", ["r3"])]);
+    await show(propsOf(board, { tidying: true }));
+
+    await run(() => view.stageTidy!.onKeep("s1"));
+    // 只标这个阶段里建议保留的：r3 已定稿，r1 / r2 各是一条结果列的最新一张。
+    expect(applied).toEqual([{ kind: "setFinal", nodes: ["r1", "r2"], final: true }]);
+  });
+
+  it("阶段里没有建议保留时不发变更", async () => {
+    const board = boardOf([resultNode("r1", true)], [stage("s1", ["r1"])]);
+    await show(propsOf(board, { tidying: true }));
+
+    await run(() => view.stageTidy!.onKeep("s1"));
+    expect(applied).toEqual([]);
+  });
+
+  it("「收掉未定稿」的确认框写明其中几张是建议保留的", async () => {
+    const board = boardOf([promptNode("p"), resultNode("r1"), resultNode("r2"), resultNode("r3", true)], [stage("s1", ["r1", "r2", "r3"])]);
+    await show(propsOf(board, { tidying: true }));
+
+    await run(() => view.stageTidy!.onPrune("s1"));
+    await act(async () => {});
+
+    // 会收掉 r1、r2（r3 已定稿），其中这两张都是建议保留的；只剩 r1 的 d3 不再被引用（200）。
+    expect(shell.ask).toHaveBeenCalledWith(TIDY_TEXT.pruneConfirm(2, 200, 2), expect.anything());
+  });
+
+  it("建议保留不改变「收掉未定稿」会收掉哪些结果", async () => {
+    // 同一列里旧的一张未定稿、新的一张已定稿：不打标记，但旧的那张照旧会被收掉。
+    const board = boardOf([resultNode("r1"), sameColumn(resultNode("r2", true))], [stage("s1", ["r1", "r2"])]);
+    await show(propsOf(board, { tidying: true }));
+
+    expect(view.suggestKeep.size).toBe(0);
+    expect(view.stageTidy!.prunable("s1")).toBe(1);
   });
 });

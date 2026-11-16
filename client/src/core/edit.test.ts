@@ -3,6 +3,7 @@ import { isFinal, newBoard, stagesOf, type Board, type BoardEdge, type BoardNode
 import { BUILTIN_TABLE } from "./capabilities";
 import { continueEditingChange, editBoard, type BoardChange, type EditEnv } from "./edit";
 import { cardDropConnection } from "./dragCreate";
+import type { LayerSize } from "./gateway";
 import { emptyHistory, MERGE_PAUSE_MS, recordChange, redo, undo } from "./history";
 import { copySelection, LOCKED_HINT, PASTE_OFFSET } from "./iterate";
 import type { RunResult } from "./layout";
@@ -213,6 +214,20 @@ describe("用户变更：结果画板、撤销步、建议选中", () => {
     expect(set.board.edges[0].region).toEqual(region);
     expect(set.step).toEqual({ label: "框选修改区域" });
     expect(editBoard(set.board, { kind: "setRegion", edge: { from: ["a", "out"], to: ["t", "image:0"] }, region: null }, env()).step).toEqual({ label: "清除修改区域" });
+  });
+
+  it("图层尺寸 / 输出选项：合法才改，表外的档位不构成步", () => {
+    const b = board([task("t")]);
+    const layer = editBoard(b, { kind: "setLayerSize", taskId: "t", size: "2K" }, env());
+    expect(taskOf(layer.board).layer_size).toBe("2K");
+    expect(layer.step).toEqual({ label: "修改图层尺寸" });
+    // 界面只放出合法档位（isLayerSize 在控件那侧先拦一道）；表外来的值当没发生。
+    expect(editBoard(b, { kind: "setLayerSize", taskId: "t", size: "3K" as LayerSize }, env())).toEqual({ board: b, step: null });
+
+    const options = { output_format: "jpeg" as const, response_format: "b64_json" as const, watermark: true };
+    const out = editBoard(b, { kind: "setOutputOptions", taskId: "t", options }, env());
+    expect(taskOf(out.board).output_options).toEqual(options);
+    expect(out.step).toEqual({ label: "修改输出选项" });
   });
 
   it("份数：新建任务默认为 1；修改份数构成一个撤销步，不改别的参数", () => {
@@ -594,6 +609,75 @@ describe("收掉未定稿：用户变更的结果与撤销", () => {
     expect(prunableResults(noLoose, ["s1"])).toEqual([]);
     expect(editBoard(noLoose, { kind: "pruneUnfinal", stageIds: ["s1"] }, env()).step).toBeNull();
     expect(editBoard(b, { kind: "pruneUnfinal", stageIds: ["zz"] }, env()).step).toBeNull();
+  });
+});
+
+describe("自动划分阶段：用户变更的结果与撤销", () => {
+  function undoable(b: Board, change: BoardChange) {
+    const r = editBoard(b, change, env());
+    if (!r.step) throw new Error(`应构成撤销步：${r.hint ?? ""}`);
+    const h = recordChange(emptyHistory(), b, r.step, 0);
+    const back = undo(h, r.board, new Set())!;
+    expect(back.board).toEqual(b);
+    expect(redo(back.history, back.board, new Set())!.board).toEqual(r.board);
+    return r;
+  }
+  const stages = (b: Board) => stagesOf(b).map(({ name, nodes }) => ({ name, nodes }));
+
+  /** 两次互不相干的尝试：各带一个提示词与一张结果。 */
+  function twoAttempts(): Board {
+    return board(
+      [prompt("p1"), task("t1"), result("r1", "t1"), prompt("p2"), task("t2"), result("r2", "t2")],
+      [edge("p1", "t1", "positive"), systemEdge("t1", "r1"), edge("p2", "t2", "positive"), systemEdge("t2", "r2")],
+    );
+  }
+
+  it("划出阶段：按一次生成尝试建阶段，追加在已有阶段之后；只写结构，不删节点、不写定稿", () => {
+    const b = twoAttempts();
+    const r = undoable(b, { kind: "autoStages" });
+    expect(r.step).toEqual({ label: "自动划分 2 个阶段" });
+    expect(stages(r.board)).toEqual([
+      { name: "阶段 1", nodes: ["p1", "t1", "r1"] },
+      { name: "阶段 2", nodes: ["p2", "t2", "r2"] },
+    ]);
+    expect(r.board.nodes).toBe(b.nodes);
+    expect(r.board.edges).toBe(b.edges);
+  });
+
+  it("重复点击是空操作：没有新长出来的尝试就不构成撤销步，画板不变", () => {
+    const first = editBoard(twoAttempts(), { kind: "autoStages" }, env());
+    const again = editBoard(first.board, { kind: "autoStages" }, env());
+    expect(again.board).toBe(first.board);
+    expect(again.step).toBeNull();
+  });
+
+  it("之后新长出来的尝试补成新阶段，已归好的阶段与名字都不动", () => {
+    const first = editBoard(twoAttempts(), { kind: "autoStages" }, env());
+    const grown: Board = {
+      ...first.board,
+      nodes: [...first.board.nodes, prompt("p3"), task("t3"), result("r3", "t3")],
+      edges: [...first.board.edges, edge("p3", "t3", "positive"), systemEdge("t3", "r3")],
+    };
+    const r = undoable(grown, { kind: "autoStages" });
+    expect(r.step).toEqual({ label: "自动划分 1 个阶段" });
+    expect(stages(r.board)).toEqual([
+      { name: "阶段 1", nodes: ["p1", "t1", "r1"] },
+      { name: "阶段 2", nodes: ["p2", "t2", "r2"] },
+      { name: "阶段 3", nodes: ["p3", "t3", "r3"] },
+    ]);
+  });
+
+  it("连续建多个阶段时名字逐个往后推，跳过已有重名", () => {
+    const b: Board = { ...twoAttempts(), nodes: [prompt("p0"), ...twoAttempts().nodes], stages: [{ id: "s1", name: "阶段 2", nodes: ["p0"], collapsed: false, extra: {} }] };
+    const r = undoable(b, { kind: "autoStages" });
+    expect(stagesOf(r.board).map((s) => s.name)).toEqual(["阶段 2", "阶段 3", "阶段 4"]);
+  });
+
+  it("没有可以划成阶段的东西：画板不变（同一引用）、不留撤销步", () => {
+    const b = board([prompt("p"), task("t")]);
+    expect(editBoard(b, { kind: "autoStages" }, env())).toEqual({ board: b, step: null });
+    const empty = board([]);
+    expect(editBoard(empty, { kind: "autoStages" }, env())).toEqual({ board: empty, step: null });
   });
 });
 

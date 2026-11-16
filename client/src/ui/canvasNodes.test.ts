@@ -96,6 +96,7 @@ function defaults(): CanvasNodeInput {
     concurrency: 1,
     expanded: new Set(),
     locked: new Set(),
+    suggestKeep: new Set(),
     runStateOf: () => undefined,
     statusOf: () => null,
     menuFacts: (selected) => ({ board: b, table: BUILTIN_TABLE, selected, locked: new Set(), expanded: new Set(), undoLabel: null, redoLabel: null }),
@@ -239,6 +240,13 @@ describe("参考图与结果节点", () => {
     const b = board([result("res1"), task("t1", { model: QWEN })], [edge(["res1", "out"], ["t1", "image:0"])]);
     const connected = dataOf<ResultFlowNode["data"]>(canvasNodes(makeInput({ board: b }))[0]);
     expect(connected.rules).toEqual([findModel(BUILTIN_TABLE, QWEN)!.input_image_rule]);
+  });
+
+  it("建议保留（#144）：只有集合里的结果节点带标记", () => {
+    const b = board([result("res1"), result("res2")]);
+    const nodes = canvasNodes(makeInput({ board: b, suggestKeep: new Set(["res2"]) }));
+    expect(dataOf<ResultFlowNode["data"]>(nodeById(nodes, "res1")).suggestKeep).toBe(false);
+    expect(dataOf<ResultFlowNode["data"]>(nodeById(nodes, "res2")).suggestKeep).toBe(true);
   });
 });
 

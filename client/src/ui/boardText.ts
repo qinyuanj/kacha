@@ -102,6 +102,18 @@ export const usageLimitText = (level: "warn" | "alert", total: number, limit: nu
 /** 当前画板越过体量提醒线时画布顶部的提示。 */
 export const sizeNoticeText = (bytes: number) => `这块画板已经${approxSizeText(bytes)} 了，整理一下？`;
 
+/** 建议保留（#144）：系统在整理模式里推断该留、尚未定稿的结果。只在整理模式里存在，不写进画板。 */
+export const SUGGEST_KEEP_TEXT = {
+  /** 结果节点上的标记。 */
+  badge: "建议保留",
+  /** 阶段框上的动作：一次把这个阶段里建议保留的结果标成定稿。 */
+  keep: (n: number) => `保留这 ${n} 张`,
+  /** 这个阶段没有建议保留的结果时，按钮置灰的原因。 */
+  nothingToKeep: "这个阶段没有建议保留的结果",
+  /** 收掉的确认框里点明其中几张是建议保留的（逐阶段与整板共用这一句）。 */
+  note: (n: number) => `其中 ${n} 张是建议保留的`,
+} as const;
+
 /** 整理模式（#92）。 */
 export const TIDY_TEXT = {
   /** 越线提示与工具栏上进入整理模式的按钮。 */
@@ -114,9 +126,9 @@ export const TIDY_TEXT = {
   prune: (n: number) => `收掉未定稿（${n}）`,
   pruneTitle: "收掉未定稿",
   pruneOk: "收掉",
-  /** 确认框；saved 为 null = 体量暂时算不出。 */
-  pruneConfirm: (n: number, saved: number | null) =>
-    `将收掉 ${n} 张，${saved === null ? "画板体量暂时算不出" : `画板约减少 ${formatBytes(saved)}`}。\n定稿与已被下游使用的结果保留；可以撤销。`,
+  /** 确认框；saved 为 null = 体量暂时算不出；suggested = 其中几张是建议保留的（0 时不提）。 */
+  pruneConfirm: (n: number, saved: number | null, suggested = 0) =>
+    `将收掉 ${n} 张${suggested > 0 ? `，${SUGGEST_KEEP_TEXT.note(suggested)}` : ""}，${saved === null ? "画板体量暂时算不出" : `画板约减少 ${formatBytes(saved)}`}。\n定稿与已被下游使用的结果保留；可以撤销。`,
   nothingToPrune: "这个阶段没有可收掉的结果：定稿与已被下游使用的结果会保留。",
   /** 阶段框上的「移出为新画板」（#93）。 */
   moveOut: "移出为新画板",
@@ -126,6 +138,17 @@ export const TIDY_TEXT = {
   movedOutKept: (title: string, reason: string | null) => `新画板「${title}」已建好，但本画板没有删去这些节点${reason ? `：${reason}` : ""}`,
   moveOutFailed: (reason: string) => `移出失败：${reason}`,
   moveOutBusy: "正在移出另一个阶段，请稍候",
+  /** 整理条上的「自动划分阶段」（#143）：N = 这次会建几个阶段，渲染时按画板现算。 */
+  autoStages: (n: number) => `自动划分阶段（${n}）`,
+  /** 没有可以划成阶段的东西时按钮的说明。 */
+  autoStagesEmpty: "没找到可以划成阶段的东西",
+  /** 整理条上的「收掉整板未定稿」（#145）：N = 整板可收掉的未定稿张数，只算阶段成员。 */
+  pruneBoard: (n: number) => `收掉整板未定稿（${n}）`,
+  /**
+   * 整板没有可收掉的未定稿结果时按钮置灰的原因。逐阶段的 nothingToPrune 讲的是「这个阶段」，
+   * 整板这条要讲整块画板：只算阶段里的结果，所以阶段外的未定稿与全空画板也落在这句里。
+   */
+  nothingToPruneBoard: "整块画板没有可收掉的未定稿结果：只算阶段里的结果，定稿与已被下游使用的结果会保留。",
   /** 「收掉未定稿」确认框的取消按钮（确认框见 canvasStageView）。 */
   cancelLabel: "取消",
 } as const;
