@@ -1,6 +1,6 @@
 """质量门禁的判定：改动集只取业务源码，dryer 配对只在碰到改动文件时算违规，范围只有 uml-quality.json 一处；
 
-工具从 dsh-uml-viewer 的单一二进制按子命令调用，mutator 额外复制仓库的 contracts/，未覆盖变异点从包内
+工具从 dsh-uml-viewer 的单一二进制按子命令调用，mutator 额外复制仓库里被基线测试读到的包外依赖，未覆盖变异点从包内
 `.metrics/mutate/*.edn` 快照统计（见 docs/adr/0022）。
 """
 
@@ -96,7 +96,7 @@ class ToolCommandTest(unittest.TestCase):
 
 
 class MutationCommandTest(unittest.TestCase):
-    """mutator 的变异副本里要有仓库根的 contracts/，否则包外 JSON 不在副本里，基线测试就失败（见 #102）。"""
+    """mutator 的变异副本里要有仓库根的包外依赖，否则基线测试一读就失败（见 #102、#141）。"""
 
     scope = Scope(roots=("client/src", "server/src"), excludes=("client/src/**/*.test.ts",))
 
@@ -105,16 +105,17 @@ class MutationCommandTest(unittest.TestCase):
         self.assertEqual(mutation_command(BINARY, client, ["src/a.ts"]),
                          [str(BINARY), "mutate", "--root", "client", "-s", "src", "--exclude", "src/**/*.test.ts",
                           "--copy", "../contracts", "--copy", "../docs/release", "--copy", "../server/Cargo.toml",
-                          "src/a.ts"])
+                          "--copy", "../mygo.config.ts", "src/a.ts"])
 
     def test_both_packages_are_one_level_below_the_repository_root(self):
         client, server = packages(self.scope)
-        # 包外依赖：contracts/ 与 docs/release 是目录，server/Cargo.toml 是单个文件。
-        self.assertEqual(MUTATION_COPIES, ("../contracts", "../docs/release", "../server/Cargo.toml"))
+        # 包外依赖：contracts/ 与 docs/release 是目录，server/Cargo.toml 与 mygo.config.ts 是单个文件。
+        self.assertEqual(MUTATION_COPIES, ("../contracts", "../docs/release", "../server/Cargo.toml",
+                                          "../mygo.config.ts"))
         self.assertEqual(mutation_command(BINARY, client, [])[2:6], ["--root", "client", "-s", "src"])
         self.assertEqual(mutation_command(BINARY, server, [])[2:],
                          ["--root", "server", "-s", "src", "--copy", "../contracts", "--copy", "../docs/release",
-                          "--copy", "../server/Cargo.toml"])
+                          "--copy", "../server/Cargo.toml", "--copy", "../mygo.config.ts"])
 
     def test_only_the_mutator_gets_the_copy_flag(self):
         self.assertNotIn("--copy", tool_command(BINARY, "crap", []))

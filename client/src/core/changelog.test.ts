@@ -60,15 +60,22 @@ describe("更新说明解析 parseChangelog", () => {
   });
 });
 
-describe("仓库里的网页版更新说明", () => {
-  it("能被解析，且含服务端 Cargo 当前版本的一节、至少一条", () => {
-    const md = readFileSync(new URL("../../../docs/release/web-changelog.md", import.meta.url), "utf8");
-    const cargo = readFileSync(new URL("../../../server/Cargo.toml", import.meta.url), "utf8");
-    const current = /^version\s*=\s*"([^"]+)"/m.exec(cargo)?.[1];
-    expect(current).toBeDefined();
-    const section = parseChangelog(md).find((v) => v.version === current);
-    expect(section, `docs/release/web-changelog.md 缺少 ${current} 一节`).toBeDefined();
-    expect(section!.groups.flatMap((g) => g.items).length).toBeGreaterThan(0);
+describe("仓库里的更新说明与两张清单", () => {
+  /** 仓库根下的文件原文；路径相对本测试文件。 */
+  const read = (relative: string): string => readFileSync(new URL(`../../../${relative}`, import.meta.url), "utf8");
+
+  it("更新说明、服务端清单与桌面配置写的是同一个版本号，该版本一节至少有一条", () => {
+    // 两张清单的版本号在这里手写正则读：Cargo.toml 与 mygo.config.ts 不是 TypeScript 能导入的东西，
+    // 跨语言只能各读一遍（CODING_STANDARDS「一个含义只定义一处」的例外）。
+    const notes = read("docs/release/web-changelog.md");
+    const server = /^version\s*=\s*"([^"]+)"/m.exec(read("server/Cargo.toml"))?.[1];
+    const desktop = /^\s*version:\s*["']([^"']+)["']/m.exec(read("mygo.config.ts"))?.[1];
+    expect(server, "server/Cargo.toml 里读不到 version").toBeDefined();
+    expect(desktop, "mygo.config.ts 里读不到 version").toBeDefined();
+    expect(desktop, `桌面配置 mygo.config.ts 的版本 ${desktop} 与服务端清单 server/Cargo.toml 的 ${server} 不同号`).toBe(server);
+    const section = parseChangelog(notes).find((v) => v.version === server);
+    expect(section, `docs/release/web-changelog.md 缺少当前版本 ${server} 的一节`).toBeDefined();
+    expect(section!.groups.flatMap((g) => g.items).length, `docs/release/web-changelog.md 中 ${server} 一节没有条目`).toBeGreaterThan(0);
   });
 });
 

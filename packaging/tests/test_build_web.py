@@ -11,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from build_web import SERVER_BINARY  # noqa: E402
 
+PACKAGING = Path(__file__).resolve().parents[1]
+
 
 def write_stub(tools: Path, name: str, body: str) -> None:
     """在 tools 下放一个名为 name 的命令桩，用当前 Python 执行 body。
@@ -34,18 +36,24 @@ VALID_CHANGELOG = (
 )
 
 
-def make_repo(root: Path, version: str, changelog: str) -> dict[str, str]:
-    """在 root 下搭一个最小仓库：打包脚本、Cargo 版本、更新说明与会留下调用记录的 npm/cargo 桩。
+def make_repo(root: Path, version: str, changelog: str, desktop_version: str | None = None) -> dict[str, str]:
+    """在 root 下搭一个最小仓库：打包脚本与门禁模块、两张清单、更新说明，以及会留下调用记录的 npm/cargo 桩。
 
-    返回运行打包脚本所用的环境变量。桩每次被调用都会在 root/calls.log 记一行。
+    desktop_version 默认与服务端清单同号；传另一个值即可搭出「两张清单不同号」的仓库。
+
+    返回运行打包脚本所用的环境变量；桩每次被调用都会在 root/calls.log 记一行。
+    门禁规则本身在 test_release_gate 里测，这里只测入口：门禁不通过就不构建。
     """
     (root / "packaging").mkdir()
-    script = Path(__file__).parents[1] / "build_web.py"
-    shutil.copy2(script, root / "packaging" / script.name)
+    for name in ("build_web.py", "release_gate.py"):
+        shutil.copy2(PACKAGING / name, root / "packaging" / name)
     (root / "client").mkdir()
     (root / "server").mkdir()
     (root / "server" / "Cargo.toml").write_text(
         f'[package]\nname = "kacha-server"\nversion = "{version}"\nedition = "2021"\n', encoding="utf-8"
+    )
+    (root / "mygo.config.ts").write_text(
+        f'export default {{\n  name: "Kacha",\n  version: "{desktop_version or version}",\n}};\n', encoding="utf-8"
     )
     (root / "docs" / "release").mkdir(parents=True)
     (root / "docs" / "release" / "web-changelog.md").write_text(changelog, encoding="utf-8")
@@ -83,29 +91,30 @@ def run_build(root: Path, env: dict[str, str], *args: str) -> subprocess.Complet
     )
 
 
-class BuildWebChangelogTest(unittest.TestCase):
-    """打包入口在构建前检查更新说明：当前版本缺说明就失败，且不产出部署目录。"""
+class BuildWebGateTest(unittest.TestCase):
+    """打包入口在构建前过门禁：更新说明缺当前版本就拒绝，构建命令一次都不跑、部署目录不动。"""
 
-    def assert_rejected_before_build(self, version: str, changelog: str) -> str:
+    def test_rejects_without_producing_a_deploy_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            env = make_repo(root, version, changelog)
+            env = make_repo(root, "1.3.0", "# 1.2.0\n\n## 修复\n\n- 旧版本的一条。\n")
             result = run_build(root, env)
             self.assertNotEqual(result.returncode, 0, result.stdout)
-            self.assertIn(version, result.stderr)
+            self.assertIn("1.3.0", result.stderr)
             self.assertIn("更新说明", result.stderr)
             self.assertFalse((root / "release" / "kacha-web").exists())
             self.assertFalse((root / "calls.log").exists(), "检查失败前不应运行任何构建命令")
-            return result.stderr
 
-    def test_fails_without_section_for_current_version(self):
-        self.assert_rejected_before_build("1.3.0", "# 1.2.0\n\n## 修复\n\n- 旧版本的一条。\n")
-
-    def test_heading_must_equal_version_exactly(self):
-        self.assert_rejected_before_build("1.3.0", "# v1.3.0\n\n## 新增\n\n- 一条。\n")
-
-    def test_items_outside_known_groups_do_not_count(self):
-        self.assert_rejected_before_build("1.3.0", "# 1.3.0\n\n- 没有分组的一条。\n\n## 其他\n\n- 未知分组的一条。\n")
+    def test_rejects_when_the_two_manifests_differ(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = make_repo(root, "1.3.0", VALID_CHANGELOG, desktop_version="0.2.0")
+            result = run_build(root, env)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn("1.3.0", result.stderr)
+            self.assertIn("0.2.0", result.stderr)
+            self.assertFalse((root / "release" / "kacha-web").exists())
+            self.assertFalse((root / "calls.log").exists(), "检查失败前不应运行任何构建命令")
 
     def test_keeps_previous_deploy_directory_when_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -118,14 +127,6 @@ class BuildWebChangelogTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(previous.read_text(encoding="utf-8"), "上一次的产物")
             self.assertFalse((root / "calls.log").exists())
-
-    def test_ignores_section_inside_html_comment(self):
-        self.assert_rejected_before_build(
-            "1.3.0", "<!--\n# 1.3.0\n\n## 新增\n\n- 还没定稿。\n-->\n\n# 1.2.0\n\n## 修复\n\n- 旧版本的一条。\n"
-        )
-
-    def test_fails_when_current_section_has_no_items(self):
-        self.assert_rejected_before_build("1.3.0", "# 1.3.0\n\n## 新增\n\n# 1.2.0\n\n## 修复\n\n- 旧版本的一条。\n")
 
 
 class BuildWebCliTest(unittest.TestCase):

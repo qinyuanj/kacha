@@ -2,6 +2,8 @@
 
 Kacha 由一个 `kacha-server` 进程同时托管前端静态文件和 API，默认地址为 `http://lzxsvn:3004/`。桌面安装器、自动更新与 Gitea 发布脚本已退役；旧版本只从 tag `v0.3.2` 查阅。
 
+产品只有一条版本线（[ADR 0024](../docs/adr/0024-one-version-line-for-the-product.md)）：服务端清单 `server/Cargo.toml` 与桌面配置 `mygo.config.ts` 同号。**发布纪律**：1.5.0 的 Web 构建与桌面客户端同一批发布；在那之前，部署机继续跑 1.4.0。
+
 ## 构建与复制
 
 在开发机（原生 Windows）安装 Rust、Node 与 Python 3.11+，在仓库根目录的 PowerShell 中执行：
@@ -12,7 +14,12 @@ python packaging\build_web.py
 python packaging\build_web.py --skip-npm-ci
 ```
 
-脚本先检查更新说明 [docs/release/web-changelog.md](../docs/release/web-changelog.md)：去掉 HTML 注释后，必须有一个一级标题与 `server/Cargo.toml` 的 `version` 完全相同（如 `# 1.2.0`），且该节的「新增 / 改进 / 修复」至少一组下有一条列表项。不满足时以中文原因退出，不运行任何构建，也不动已有的 `release/kacha-web`。发版改版本号时同时在更新说明最上面加这一节。
+脚本先过打包共用的门禁 [packaging/release_gate.py](release_gate.py)，桌面入口用的是同一份：
+
+- `check_version_line`：`server/Cargo.toml` 与 `mygo.config.ts` 必须同号，不同号时说清两边各是什么。
+- `check_release_notes`：更新说明 [docs/release/web-changelog.md](../docs/release/web-changelog.md) 去掉 HTML 注释后，必须有一个一级标题与当前版本完全相同（如 `# 1.5.0`），且该节的「新增 / 改进 / 修复」至少一组下有一条列表项。
+
+不满足时以中文原因退出，不运行任何构建，也不动已有的 `release/kacha-web`。发版时同时改两张清单的版本号，并在更新说明最上面加这一节。
 
 检查通过后，脚本运行前端 release 构建和 `cargo build --release`，输出：
 
@@ -41,7 +48,7 @@ python packaging\build_desktop.py
 python packaging\build_desktop.py --skip-install
 ```
 
-脚本跑固定版本的 CLI（`go.mod` 的 tool 指令钉住 MyGo 0.9.0），由它先构建 `client/`、再把 `client/dist` 嵌进可执行文件，最后输出：
+脚本先过与 web 相同的门禁（`packaging/release_gate.py`）：两张清单不同号、或更新说明缺少当前版本一节，都以中文原因退出，**不跑任何构建命令**。通过后跑固定版本的 CLI（`go.mod` 的 tool 指令钉住 MyGo 0.9.0），由它先构建 `client/`、再把 `client/dist` 嵌进可执行文件，最后输出：
 
 ```text
 build/windows-amd64/
@@ -258,6 +265,6 @@ PR CI 是本地工具发现规则的固定来源例外：从 npm 官方 registry
 
 门禁其余前置：Rust 1.99.1 MSVC 工具链、git。crapper 缺 `cargo-llvm-cov` 时会自动装；如果 `%USERPROFILE%\.cargo\bin\cargo-llvm-cov.exe` 带 Low 完整性标签（被 Low 进程装上时会这样），它在 `server\target` 下建不了目录，Rust 覆盖率失败，门禁报「没有 CRAP 分」；用 `icacls <该 exe> /setintegritylevel M` 改回 Medium。
 
-变异测试要求二进制认 `--copy`：在 Windows 上 mutator 只为每个变异体复制被运行的那个包，包外依赖要靠 `--copy` 补进副本（[#102](https://github.com/qinyuanj/kacha/issues/102)）——现在是 `../contracts`、`../docs/release`、`../server/Cargo.toml` 三条（见 `packaging/quality.py` 的 `MUTATION_COPIES`）。带 `--mutate` 时门禁先读 `uml-viewer mutate --help`，没有这个开关就明确失败并说明需要带它的构建。
+变异测试要求二进制认 `--copy`：在 Windows 上 mutator 只为每个变异体复制被运行的那个包，包外依赖要靠 `--copy` 补进副本（[#102](https://github.com/qinyuanj/kacha/issues/102)）——现在是 `../contracts`、`../docs/release`、`../server/Cargo.toml`、`../mygo.config.ts` 四条（见 `packaging/quality.py` 的 `MUTATION_COPIES`）。带 `--mutate` 时门禁先读 `uml-viewer mutate --help`，没有这个开关就明确失败并说明需要带它的构建。
 
 看架构图用 `uml-viewer ir examples/kacha.policy.edn` 生成 `examples/kacha.edn`；在 DSH 里也可以用 `uml_ir` 生成、`uml_display` 打开。policy 在 [examples/kacha.policy.edn](../examples/kacha.policy.edn)。
