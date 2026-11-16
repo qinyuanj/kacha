@@ -4,7 +4,7 @@ import { ViewportPortal } from "@xyflow/react";
 import { useEffect, useRef, useState } from "react";
 import type { BoardChange } from "../core/edit";
 import type { StageBox } from "../core/stages";
-import { approxSizeText, STAGE_TEXT, TIDY_TEXT } from "./boardText";
+import { approxSizeText, STAGE_TEXT, SUGGEST_KEEP_TEXT, TIDY_TEXT } from "./boardText";
 
 /** 整理模式下阶段框多出的内容：体量与「收掉未定稿」。 */
 export interface StageTidy {
@@ -13,6 +13,10 @@ export interface StageTidy {
   /** 「收掉未定稿」会收掉几张。 */
   prunable: (stageId: string) => number;
   onPrune: (stageId: string) => void;
+  /** 这个阶段里建议保留的张数（#144）。 */
+  keepable: (stageId: string) => number;
+  /** 把这个阶段里建议保留的结果标成定稿（一步撤销）。 */
+  onKeep: (stageId: string) => void;
   /** 移出为新画板（#93）。 */
   onMoveOut: (stageId: string) => void;
   /** 正在移出（按钮置灰）。 */
@@ -105,11 +109,16 @@ function StageFrame({ box, selected, apply, editing, onEditingDone, tidy, readOn
 function StageTidyActions({ stageId, tidy }: { stageId: string; tidy: StageTidy }) {
   const bytes = tidy.bytes(stageId);
   const n = tidy.prunable(stageId);
+  const keep = tidy.keepable(stageId);
   return (
     <>
       <span className="stage-size" aria-label="阶段体量">
         {bytes === null ? "…" : approxSizeText(bytes)}
       </span>
+      {/* 建议保留只是建议：点了才成为定稿（一步撤销）。没有建议时置灰。 */}
+      <button type="button" className="stage-keep" disabled={keep === 0} title={keep === 0 ? SUGGEST_KEEP_TEXT.nothingToKeep : undefined} onClick={() => tidy.onKeep(stageId)}>
+        {SUGGEST_KEEP_TEXT.keep(keep)}
+      </button>
       <button type="button" className="stage-prune" disabled={n === 0} title={n === 0 ? TIDY_TEXT.nothingToPrune : undefined} onClick={() => tidy.onPrune(stageId)}>
         {TIDY_TEXT.prune(n)}
       </button>

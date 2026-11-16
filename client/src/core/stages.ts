@@ -149,6 +149,19 @@ export function prunableResults(board: Board, stageIds: readonly string[]): stri
   return board.nodes.filter((n) => n.type === "result" && members.has(n.id) && !isFinal(n) && !downstream.has(n.id)).map((n) => n.id);
 }
 
+/**
+ * 「建议保留」：每条结果列（结果节点 task_id 相同）里画板顺序上最新的那一张。
+ * 只在整理模式里显示，不写进画板、不进撤销步；它不改变「收掉未定稿」会收掉哪些结果。
+ * 已定稿、或已有下游连线（被拿去当参考图，本来就不会被收掉）的不参与标记——也不回退到次新的一张。
+ */
+export function suggestKeep(board: Board): ReadonlySet<string> {
+  const downstream = new Set(board.edges.map((e) => e.from[0]));
+  // 画板顺序覆盖：同一列的后来者即最新的一张。
+  const latest = new Map<string, BoardNode>();
+  for (const n of board.nodes) if (n.type === "result") latest.set(n.task_id, n);
+  return new Set([...latest.values()].flatMap((n) => (!isFinal(n) && !downstream.has(n.id) ? [n.id] : [])));
+}
+
 /** 标记 / 取消定稿：只作用于结果节点。 */
 export function setFinal(board: Board, ids: readonly string[], final: boolean): Board {
   const wanted = new Set(ids);

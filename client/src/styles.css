@@ -458,6 +458,15 @@ textarea {
 .canvas.tidying .react-flow__node-result .node-image:not(.node-final) {
   opacity: 0.4;
 }
+/* 建议保留（#144）：系统推断该留的那一张不跟着未定稿一起压暗，标记也排在角标最前。 */
+.canvas.tidying .react-flow__node-result .node-image.node-suggest:not(.node-final) {
+  opacity: 1;
+}
+.node-suggest .image-badges .badge:first-child {
+  background: #0969da;
+  color: #fff;
+  font-weight: 600;
+}
 .tidy-bar {
   position: absolute;
   top: 10px;

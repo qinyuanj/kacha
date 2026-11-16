@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { newBoard, type Board, type BoardNode } from "./board";
-import { collapsedMembers, stageBoxes, STAGE_PADDING } from "./stages";
+import { collapsedMembers, stageBoxes, STAGE_PADDING, suggestKeep } from "./stages";
 
 const ref = (id: string, pos: [number, number], size: [number, number] = [100, 50]): BoardNode => ({ id, type: "reference", pos, size, extra: {}, path: `${id}.png`, sha256: "0", display_name: id });
 
@@ -29,5 +29,53 @@ describe("阶段在画布上的呈现", () => {
   it("成员都不在画板上的阶段不画", () => {
     const b = { ...staged(), stages: [{ id: "s", name: "空", nodes: ["gone"], collapsed: false, extra: {} }] };
     expect(stageBoxes(b, () => undefined)).toEqual([]);
+  });
+});
+
+// ---- 建议保留（#144）----
+
+const resultNode = (id: string, taskId: string, final = false): BoardNode => ({
+  id,
+  type: "result",
+  pos: [0, 0],
+  size: [100, 100],
+  task_id: taskId,
+  file: `${id}.png`,
+  path: `2026-01-01/${id}/${id}.png`,
+  layer_count: 0,
+  record: { model: "m", prompt: "", negative_prompt: "", size_spec: { tier: null, ratio: null, width: null, height: null }, submitted_at: "" },
+  ...(final ? { final: true as const } : {}),
+  extra: {},
+});
+
+/** 把某张结果拿去当参考图：结果节点在这条连线的起点。 */
+const usedAsReference = (resultId: string, taskId: string) => ({ from: [resultId, "out"] as [string, string], to: [taskId, "image:0"] as [string, string], source_layer: null, region: null, system: false, extra: {} });
+
+const keepBoard = (nodes: BoardNode[], edges: ReturnType<typeof usedAsReference>[] = []): Board => ({ ...newBoard(), nodes, edges });
+
+describe("建议保留", () => {
+  it("同一结果列里只标画板顺序上最新的那一张", () => {
+    const b = keepBoard([resultNode("r1", "t1"), resultNode("r2", "t1"), resultNode("r3", "t1")]);
+    expect([...suggestKeep(b)]).toEqual(["r3"]);
+  });
+
+  it("不同结果列各标各的最新一张", () => {
+    const b = keepBoard([resultNode("r1", "t1"), resultNode("r2", "t2"), resultNode("r3", "t1")]);
+    expect([...suggestKeep(b)].sort()).toEqual(["r2", "r3"]);
+  });
+
+  it("最新一张已定稿：这一列不标，也不回退到次新的一张", () => {
+    const b = keepBoard([resultNode("r1", "t1"), resultNode("r2", "t1", true)]);
+    expect([...suggestKeep(b)]).toEqual([]);
+  });
+
+  it("最新一张已有下游连线（被拿去当参考图）：不标，也不回退到次新的一张", () => {
+    const b = keepBoard([resultNode("r1", "t1"), resultNode("r2", "t1")], [usedAsReference("r2", "t9")]);
+    expect([...suggestKeep(b)]).toEqual([]);
+  });
+
+  it("只标结果节点，别的节点不参与", () => {
+    const b = keepBoard([ref("a", [0, 0]), resultNode("r1", "t1")]);
+    expect([...suggestKeep(b)]).toEqual(["r1"]);
   });
 });
