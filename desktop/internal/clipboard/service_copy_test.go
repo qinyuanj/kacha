@@ -18,6 +18,7 @@ import (
 func mygoClipboardError(what string, hresult string) error {
 	return errors.New("mygo: " + what + " failed (HRESULT " + hresult + ")")
 }
+
 // fakeWriter 记下写进系统剪贴板的字节；err 模拟剪贴板被占用等写入失败。
 type fakeWriter struct {
 	got  []byte
