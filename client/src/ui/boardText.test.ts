@@ -157,6 +157,14 @@ describe("整理模式与画板包导入文案", () => {
     expect(TIDY_TEXT.autoStagesEmpty).toBe("没找到可以划成阶段的东西");
   });
 
+  it("整理条上的「收掉整板未定稿」（#145）：按钮带整板张数，N 为 0 时说明整块画板的口径", () => {
+    expect(TIDY_TEXT.pruneBoard(3)).toBe("收掉整板未定稿（3）");
+    expect(TIDY_TEXT.pruneBoard(0)).toBe("收掉整板未定稿（0）");
+    // 与逐阶段的 nothingToPrune（讲「这个阶段」）不是同一句：整板这条要说清只算阶段里的结果。
+    expect(TIDY_TEXT.nothingToPruneBoard).toBe("整块画板没有可收掉的未定稿结果：只算阶段里的结果，定稿与已被下游使用的结果会保留。");
+    expect(TIDY_TEXT.nothingToPruneBoard).not.toBe(TIDY_TEXT.nothingToPrune);
+  });
+
   it("画板包导入失败的两种说明", () => {
     expect(PACK_IMPORT_TEXT.failed("包坏了")).toBe("导入画板包失败：包坏了");
     expect(PACK_IMPORT_TEXT.openFailed("打不开")).toBe("画板已导入，但打开失败：打不开。可从画板列表打开。");

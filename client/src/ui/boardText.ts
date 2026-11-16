@@ -142,6 +142,13 @@ export const TIDY_TEXT = {
   autoStages: (n: number) => `自动划分阶段（${n}）`,
   /** 没有可以划成阶段的东西时按钮的说明。 */
   autoStagesEmpty: "没找到可以划成阶段的东西",
+  /** 整理条上的「收掉整板未定稿」（#145）：N = 整板可收掉的未定稿张数，只算阶段成员。 */
+  pruneBoard: (n: number) => `收掉整板未定稿（${n}）`,
+  /**
+   * 整板没有可收掉的未定稿结果时按钮置灰的原因。逐阶段的 nothingToPrune 讲的是「这个阶段」，
+   * 整板这条要讲整块画板：只算阶段里的结果，所以阶段外的未定稿与全空画板也落在这句里。
+   */
+  nothingToPruneBoard: "整块画板没有可收掉的未定稿结果：只算阶段里的结果，定稿与已被下游使用的结果会保留。",
   /** 「收掉未定稿」确认框的取消按钮（确认框见 canvasStageView）。 */
   cancelLabel: "取消",
 } as const;
