@@ -126,6 +126,10 @@ export const TIDY_TEXT = {
   movedOutKept: (title: string, reason: string | null) => `新画板「${title}」已建好，但本画板没有删去这些节点${reason ? `：${reason}` : ""}`,
   moveOutFailed: (reason: string) => `移出失败：${reason}`,
   moveOutBusy: "正在移出另一个阶段，请稍候",
+  /** 整理条上的「自动划分阶段」（#143）：N = 这次会建几个阶段，渲染时按画板现算。 */
+  autoStages: (n: number) => `自动划分阶段（${n}）`,
+  /** 没有可以划成阶段的东西时按钮的说明。 */
+  autoStagesEmpty: "没找到可以划成阶段的东西",
   /** 「收掉未定稿」确认框的取消按钮（确认框见 canvasStageView）。 */
   cancelLabel: "取消",
 } as const;

@@ -4,6 +4,7 @@
 import type { OutputOptions } from "./gateway";
 import { isLayerSize, outputOptions } from "./gateway";
 import { syncAutoRatios } from "./autoRatio";
+import { autoStageGroups } from "./autoStages";
 import { taskCount, type Board, type BoardEdge, type PortRef, type PromptNode, type Region, type TaskNode } from "./board";
 import { findModel, type CapabilityTable } from "./capabilities";
 import { attachReferences, newTask } from "./dragCreate";
@@ -17,7 +18,7 @@ import { removeMovedStage } from "./moveOut";
 import { duplicateNodes, nudgeNodes, settleAltDrag } from "./selection";
 import type { Discovery } from "./settings";
 import { autoSizeSpec, manualSizeSpec, withSizeTier } from "./size";
-import { addToStage, createStage, deleteStage, prunableResults, pruneStages, removeFromStage, renameStage, setFinal, setStageCollapsed } from "./stages";
+import { addToStage, createStage, deleteStage, nextStageName, prunableResults, pruneStages, removeFromStage, renameStage, setFinal, setStageCollapsed } from "./stages";
 
 type Pos = [number, number];
 
@@ -113,6 +114,8 @@ export type BoardChange =
   | { kind: "setFinal"; nodes: string[]; final: boolean }
   /** 收掉未定稿：删去选中阶段里未定稿且没有下游连线的结果（判定见 prunableResults）；任务目录不删，按清理规则释放。 */
   | { kind: "pruneUnfinal"; stageIds: string[] }
+  /** 自动划分阶段：把还没进任何阶段的节点按一次生成尝试划成阶段（划分规则见 autoStages）；算不出要动的东西就不动画板。 */
+  | { kind: "autoStages" }
   /** 移出为新画板之后，原画板删去移出的节点（见 moveOut.movedIds）；新画板已由界面写好，撤销只恢复本画板。 */
   | { kind: "moveOutStage"; stageId: string }
   // ---- 视图变更 ----
@@ -361,6 +364,15 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
       const ids = prunableResults(board, change.stageIds);
       if (!ids.length) return { board };
       return { board: removeNodes(board, ids).board, step: { label: countLabel("收掉", ids.length, "张未定稿") } };
+    }
+    case "autoStages": {
+      const groups = autoStageGroups(board);
+      if (!groups.length) return { board };
+      // 一次点击一步：不设归并键；阶段名沿用 nextStageName，连续建多个时逐个往后推。
+      return {
+        board: groups.reduce((next, ids) => createStage(next, env.newId(), nextStageName(next), ids), board),
+        step: { label: countLabel("自动划分", groups.length, "个阶段") },
+      };
     }
     case "moveOutStage": {
       return { board: removeMovedStage(board, change.stageId), step: { label: "移出为新画板" }, selection: [] };

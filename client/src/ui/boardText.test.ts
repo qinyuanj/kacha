@@ -132,6 +132,12 @@ describe("整理模式与画板包导入文案", () => {
     expect(TIDY_TEXT.moveOutFailed("磁盘满了")).toBe("移出失败：磁盘满了");
   });
 
+  it("整理条上的自动划分阶段（#143）：按钮带会建的阶段数，没有可划的时说明原因", () => {
+    expect(TIDY_TEXT.autoStages(3)).toBe("自动划分阶段（3）");
+    expect(TIDY_TEXT.autoStages(0)).toBe("自动划分阶段（0）");
+    expect(TIDY_TEXT.autoStagesEmpty).toBe("没找到可以划成阶段的东西");
+  });
+
   it("画板包导入失败的两种说明", () => {
     expect(PACK_IMPORT_TEXT.failed("包坏了")).toBe("导入画板包失败：包坏了");
     expect(PACK_IMPORT_TEXT.openFailed("打不开")).toBe("画板已导入，但打开失败：打不开。可从画板列表打开。");
