@@ -14,6 +14,9 @@ import shutil
 import subprocess
 import sys
 
+# parse_config_version 是给既有调用点的同名转发（规则在 release_gate 里，这里不重写一遍）。
+from release_gate import check_release_notes, check_version_line, parse_config_version
+
 MYGO_VERSION = "0.9.0"
 """固定的 MyGo 版本：go.mod 的 tool 指令也钉在同一版本，升级要单独验证（ADR 0023）。"""
 
@@ -65,12 +68,6 @@ def parse_webview2_version(output: str) -> str | None:
     return match.group(1) if match else None
 
 
-def parse_config_version(text: str) -> str | None:
-    """从 mygo.config.ts 里取 version：配置是普通对象，版本只在那一处定义。"""
-    match = re.search(r"""^\s*version:\s*["']([^"']+)["']""", text, re.MULTILINE)
-    return match.group(1) if match else None
-
-
 def webview2_version() -> str | None:
     """Windows 上读注册表；其他平台没有 WebView2。"""
     if os.name != "nt":
@@ -83,9 +80,9 @@ def main() -> int:
     parser.add_argument("--skip-install", action="store_true", help="沿用已按 package-lock.json 安装的前端依赖")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
-    config_version = parse_config_version((root / "mygo.config.ts").read_text(encoding="utf-8"))
-    if config_version is None:
-        raise SystemExit("mygo.config.ts 里没有 version")
+    # 门禁：两张清单同号、更新说明有当前版本一节；不通过就不跑任何构建。
+    version = check_version_line(root)
+    check_release_notes(root, version)
 
     if not args.skip_install:
         run(["npm", "ci"], root / "client")
@@ -102,7 +99,7 @@ def main() -> int:
         raise SystemExit(f"CLI 版本是 {mygo}，本切片固定在 {MYGO_VERSION}：检查 go.mod 的 tool 指令")
     info = {
         "app": "Kacha",
-        "version": config_version,
+        "version": version,
         "platform": PLATFORM,
         "mygo": mygo,
         "go": parse_go_version(capture(["go", "version"], root)),

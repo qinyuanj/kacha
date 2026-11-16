@@ -11,6 +11,13 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import build_desktop  # noqa: E402
+from release_gate import parse_config_version  # noqa: E402
+
+PACKAGING = Path(__file__).resolve().parents[1]
+
+CONFIG = 'export default {\n  name: "Kacha",\n  version: "0.1.0",\n};\n'
+
+VALID_CHANGELOG = "# 0.1.0\n\n## 新增\n\n- 一条。\n"
 
 
 def write_stub(tools: Path, name: str, body: str) -> None:
@@ -25,15 +32,21 @@ def write_stub(tools: Path, name: str, body: str) -> None:
         launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
 
 
-CONFIG = 'export default {\n  name: "Kacha",\n  version: "0.1.0",\n};\n'
+def make_repo(root: Path, changelog: str = VALID_CHANGELOG, server_version: str = "0.1.0") -> dict[str, str]:
+    """最小仓库：打包脚本与门禁模块、两张清单、更新说明，与会写产物、记下调用参数的 go 桩。
 
-
-def make_repo(root: Path) -> dict[str, str]:
-    """最小仓库：mygo.config.ts、打包脚本与会写产物、记下调用参数的 go 桩。"""
+    门禁规则本身在 test_release_gate 里测，这里只测入口：门禁不通过就不构建。
+    """
     (root / "packaging").mkdir()
-    script = Path(__file__).parents[1] / "build_desktop.py"
-    shutil.copy2(script, root / "packaging" / script.name)
+    for name in ("build_desktop.py", "release_gate.py"):
+        shutil.copy2(PACKAGING / name, root / "packaging" / name)
     (root / "mygo.config.ts").write_text(CONFIG, encoding="utf-8")
+    (root / "server").mkdir()
+    (root / "server" / "Cargo.toml").write_text(
+        f'[package]\nname = "kacha-server"\nversion = "{server_version}"\n', encoding="utf-8"
+    )
+    (root / "docs" / "release").mkdir(parents=True)
+    (root / "docs" / "release" / "web-changelog.md").write_text(changelog, encoding="utf-8")
     (root / "client").mkdir()
     tools = root / "tools"
     tools.mkdir()
@@ -121,8 +134,35 @@ class VersionParsingTest(unittest.TestCase):
     def test_webview2_missing(self):
         self.assertIsNone(build_desktop.parse_webview2_version("错误: 系统找不到指定的注册表项或值。"))
 
-    def test_config_version(self):
-        self.assertEqual(build_desktop.parse_config_version(CONFIG), "0.1.0")
+    def test_config_version_is_forwarded_from_the_gate_module(self):
+        # 解析规则在 test_release_gate 里测；这里只证明入口仍能以同名拿到同一个函数，既有调用点不改。
+        self.assertIs(build_desktop.parse_config_version, parse_config_version)
+
+
+class BuildDesktopGateTest(unittest.TestCase):
+    """打包入口在构建前过门禁：更新说明缺当前版本就拒绝，构建命令一次都不跑。"""
+
+    def test_rejects_without_release_notes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = make_repo(root, "# 0.0.9\n\n## 修复\n\n- 旧版本的一条。\n")
+            result = run_build(root, env)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn("更新说明", result.stderr)
+            self.assertIn("0.1.0", result.stderr)
+            self.assertFalse((root / "build" / "windows-amd64" / "Kacha.exe").exists())
+            self.assertFalse((root / "calls.log").exists(), "门禁失败前不应运行任何构建命令")
+
+    def test_rejects_when_the_two_manifests_differ(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = make_repo(root, server_version="0.9.9")
+            result = run_build(root, env)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn("0.1.0", result.stderr)
+            self.assertIn("0.9.9", result.stderr)
+            self.assertFalse((root / "build" / "windows-amd64" / "Kacha.exe").exists())
+            self.assertFalse((root / "calls.log").exists(), "门禁失败前不应运行任何构建命令")
 
 
 class BuildDesktopTest(unittest.TestCase):
@@ -204,3 +244,6 @@ class PrintedExeAssertionTest(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 assert_prints_produced_exe(self, root, "客户端：" + str(wrong) + "\n")
 
+
+if __name__ == "__main__":
+    unittest.main()
