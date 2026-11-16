@@ -188,11 +188,11 @@ export function BoardCanvas({
     () =>
       canvasNodes({
         board, table, userRoot, selected: selectedNodes, measured, hidden: stageView.hidden,
-        lineageNodes: highlighted.nodes, drag, focusPrompt, promptDrafts, missing: canvasData.missing,
+        lineageNodes: highlighted.nodes, drag, focusPrompt, promptDrafts, missing: canvasData.missing, suggestKeep: stageView.suggestKeep,
         imageInfos: canvasData.imageInfos, alphaByNode: canvasData.alphaByNode, discovery, concurrency, expanded, locked,
         runStateOf: canvasData.runStateOf, statusOf: canvasData.statusOf, menuFacts,
       }),
-    [board, table, userRoot, selectedNodes, measured, stageView.hidden, highlighted, drag, focusPrompt, promptDrafts, canvasData.missing, canvasData.imageInfos, canvasData.alphaByNode, discovery, concurrency, expanded, locked, canvasData.runStateOf, canvasData.statusOf, menuFacts],
+    [board, table, userRoot, selectedNodes, measured, stageView.hidden, stageView.suggestKeep, highlighted, drag, focusPrompt, promptDrafts, canvasData.missing, canvasData.imageInfos, canvasData.alphaByNode, discovery, concurrency, expanded, locked, canvasData.runStateOf, canvasData.statusOf, menuFacts],
   );
   const edges = useMemo<Edge[]>(
     () => canvasEdges({ board, selectedEdges, selectedNodes, lineageEdges: highlighted.edges, dragging }),

@@ -11,7 +11,7 @@ import type {
   TaskNode as TaskModel,
 } from "../core/board";
 import { taskCount } from "../core/board";
-import { FINAL_BADGE_TEXT } from "./boardText";
+import { FINAL_BADGE_TEXT, SUGGEST_KEEP_TEXT } from "./boardText";
 import {
   findModel,
   modelsByTier,
@@ -62,8 +62,8 @@ export interface PromptReferenceGuideTask {
 export type PromptFlowNode = Node<{ node: PromptModel; recorded: boolean; autoFocus: boolean; draft: string | null; portKind: PortKind; guides: PromptReferenceGuideTask[] }, "prompt">;
 /** missing：图片文件读不到，显示占位与「重新定位」。 */
 export type ReferenceFlowNode = Node<{ node: ReferenceModel; rules: InputImageRule[]; missing: boolean }, "reference">;
-/** rules = 下游任务模型的输入规则；没接任务时为空。 */
-export type ResultFlowNode = Node<{ node: ResultModel; rules: InputImageRule[]; missing: boolean }, "result">;
+/** rules = 下游任务模型的输入规则，没接任务时为空；suggestKeep = 整理模式里系统推断该留、尚未定稿（#144），不是定稿。 */
+export type ResultFlowNode = Node<{ node: ResultModel; rules: InputImageRule[]; missing: boolean; suggestKeep: boolean }, "result">;
 export interface ImagePortInfo {
   label: string;
   /** 源图片绝对路径（端口槽缩略图用）；源节点不存在时为 null。 */
@@ -375,13 +375,18 @@ export const ReferenceNodeView = memo(function ReferenceNodeView({ data, selecte
 
 export const ResultNodeView = memo(function ResultNodeView({ data, selected, width, height }: NodeProps<ResultFlowNode>) {
   const { userRoot, table } = useBoardActions();
-  const { node, rules, missing } = data;
+  const { node, rules, missing, suggestKeep } = data;
   const abs = resolveFromRoot(userRoot, node.path);
   const info = useImageInfo(abs);
   const modelName = findModel(table, node.record.model)?.display_name ?? node.record.model;
   const { warnings, notes } = inputImageAdviceAll(info, rules);
   const hover = useHover(resultHoverInfo({ node, modelName, image: info, missing, warnings, notes }));
-  const badges = [...(node.final ? [FINAL_BADGE_TEXT] : []), ...(info?.has_alpha ? ["透明"] : []), ...(node.layer_count > 0 ? [`${node.layer_count} 图层`] : [])];
+  const badges = [
+    ...(suggestKeep ? [SUGGEST_KEEP_TEXT.badge] : []),
+    ...(node.final ? [FINAL_BADGE_TEXT] : []),
+    ...(info?.has_alpha ? ["透明"] : []),
+    ...(node.layer_count > 0 ? [`${node.layer_count} 图层`] : []),
+  ];
   return (
     <ImageNode
       id={node.id}
@@ -391,7 +396,7 @@ export const ResultNodeView = memo(function ResultNodeView({ data, selected, wid
       selected={selected}
       width={width}
       height={height}
-      className={[warnings.length ? "node-warn" : "", node.final ? "node-final" : ""].join(" ").trim()}
+      className={[warnings.length ? "node-warn" : "", node.final ? "node-final" : "", suggestKeep ? "node-suggest" : ""].join(" ").trim()}
       badges={badges}
       hover={hover}
     >

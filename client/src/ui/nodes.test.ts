@@ -4,13 +4,18 @@
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { NodeProps } from "@xyflow/react";
+import type { ResultNode } from "../core/board";
 import { BUILTIN_TABLE, type CapabilityTable, type ModelCapability, type SizeRule } from "../core/capabilities";
 import type { TaskStatus } from "../core/run";
 import type { SizeSpec } from "../core/size";
+import { createFakePort } from "../shell/testing/fakePort";
 import { webPort } from "../shell/webPort";
 import { BoardContext, type BoardActions } from "./context";
-import { ImageNode, ModelInfo, RatioCombo, StatusBadge } from "./nodes";
+import { ImageNode, ModelInfo, RatioCombo, ResultNodeView, StatusBadge } from "./nodes";
+import type { ResultFlowNode } from "./nodes";
 import { AUTO_RATIO } from "./ratioCombo";
+import { ShellProvider } from "./shell";
 
 // React 19 的 act() 要在测试环境里显式打开。
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -402,5 +407,48 @@ describe("RatioCombo", () => {
     await show(combo(manual, onPick, { disabled: true }));
     expect(input().value).toBe("16:9");
     expect(onPick).not.toHaveBeenCalled();
+  });
+});
+
+// ---- 建议保留标记（#144）----
+
+describe("结果节点上的建议保留标记", () => {
+  const resultModel = (patch: Partial<ResultNode> = {}): ResultNode => ({
+    type: "result",
+    id: "r1",
+    pos: [0, 0],
+    size: [200, 100],
+    task_id: "t1",
+    file: "out.png",
+    path: "2026-01-01/t1/out.png",
+    layer_count: 0,
+    record: { model: "m", prompt: "", negative_prompt: "", size_spec: { tier: null, ratio: null, width: null, height: null }, submitted_at: "" },
+    extra: {},
+    ...patch,
+  });
+
+  const dataOf = (patch: Partial<ResultFlowNode["data"]> = {}): ResultFlowNode["data"] => ({ node: resultModel(), rules: [], missing: false, suggestKeep: false, ...patch });
+
+  /** 结果节点渲染：壳端口给内存替身（图片信息读不到即可），画板上下文照画布那样给。 */
+  async function showResult(data: ResultFlowNode["data"]): Promise<void> {
+    const view = createElement(ResultNodeView, { id: data.node.id, data, selected: false, width: 200, height: 100 } as unknown as NodeProps<ResultFlowNode>);
+    await show(createElement(ShellProvider, { port: createFakePort(), children: inBoard(view) }));
+  }
+
+  const badgeTexts = () => [...container.querySelectorAll(".badge")].map((b) => b.textContent);
+
+  it("整理模式里带建议保留的结果节点上有标记", async () => {
+    await showResult(dataOf({ suggestKeep: true }));
+    expect(badgeTexts()).toEqual(["建议保留"]);
+  });
+
+  it("不在整理模式（没有建议）时不出现标记", async () => {
+    await showResult(dataOf());
+    expect(badgeTexts()).toEqual([]);
+  });
+
+  it("定稿的结果只显示定稿角标：建议保留不会出现在定稿的结果上", async () => {
+    await showResult(dataOf({ node: resultModel({ final: true }) }));
+    expect(badgeTexts()).toEqual(["定稿"]);
   });
 });

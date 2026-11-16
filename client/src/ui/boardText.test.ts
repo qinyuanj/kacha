@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approxSizeText, ARCHIVE_TEXT, boardSlotsFullText, DELETE_TASK_TEXT, formatBytes, IMPORT_TEXT, isSlotsFullText, PACK_IMPORT_TEXT, PASTE_TEXT, pasteRefusalText, REGION_TEXT, RELOCATE_TEXT, SAVE_TEXT, sizeNoticeText, slotsRefusal, slotsUsageText, STAGE_TEXT, TIDY_TEXT, usageLimitText, VARIANT_TEXT } from "./boardText";
+import { approxSizeText, ARCHIVE_TEXT, boardSlotsFullText, DELETE_TASK_TEXT, formatBytes, IMPORT_TEXT, isSlotsFullText, PACK_IMPORT_TEXT, PASTE_TEXT, pasteRefusalText, REGION_TEXT, RELOCATE_TEXT, SAVE_TEXT, sizeNoticeText, slotsRefusal, slotsUsageText, STAGE_TEXT, SUGGEST_KEEP_TEXT, TIDY_TEXT, usageLimitText, VARIANT_TEXT } from "./boardText";
 
 // 期望文案照抄票面（#89 已确认的简洁版），独立于源码，防止同义反复。
 describe("画板位文案（#89）", () => {
@@ -116,6 +116,25 @@ describe("画布动作文案", () => {
 
   it("整理模式的确认框取消按钮也在同一处", () => {
     expect(TIDY_TEXT.cancelLabel).toBe("取消");
+  });
+});
+
+// 建议保留（#144）：标记、阶段框上的动作、以及「收掉未定稿」确认框里补的那一句。
+describe("建议保留文案（#144）", () => {
+  it("结果节点上的标记、阶段框上的动作与置灰原因", () => {
+    expect(SUGGEST_KEEP_TEXT.badge).toBe("建议保留");
+    expect(SUGGEST_KEEP_TEXT.keep(3)).toBe("保留这 3 张");
+    expect(SUGGEST_KEEP_TEXT.nothingToKeep).toBe("这个阶段没有建议保留的结果");
+  });
+
+  it("「收掉未定稿」的确认框点明其中几张是建议保留的", () => {
+    expect(SUGGEST_KEEP_TEXT.note(2)).toBe("其中 2 张是建议保留的");
+    expect(TIDY_TEXT.pruneConfirm(2, 2048, 2)).toBe("将收掉 2 张，其中 2 张是建议保留的，画板约减少 2.0 KiB。\n定稿与已被下游使用的结果保留；可以撤销。");
+    expect(TIDY_TEXT.pruneConfirm(2, null, 1)).toBe("将收掉 2 张，其中 1 张是建议保留的，画板体量暂时算不出。\n定稿与已被下游使用的结果保留；可以撤销。");
+  });
+
+  it("没有建议保留时那句话不出现，确认框一字不改", () => {
+    expect(TIDY_TEXT.pruneConfirm(2, 2048, 0)).toBe("将收掉 2 张，画板约减少 2.0 KiB。\n定稿与已被下游使用的结果保留；可以撤销。");
   });
 });
 
