@@ -187,100 +187,172 @@ function sizeRuleOf(board: Board, table: CapabilityTable, task: TaskNode) {
   return findModel(table, task.model)?.workflows[workflowOf(board, task.id)].size_rule;
 }
 
-function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
+// ---- 变更处理：一个种类一项，按类别分组 ----
+// 分支多的单独一个函数；只是改一个字段、一句话能说清的，按类别合成一个 switch（每个函数都在 10 以内）。
+
+/** 某一变更种类（或几种）的收窄类型：处理函数只认自己那几种。 */
+type ChangeOf<K extends BoardChange["kind"]> = Extract<BoardChange, { kind: K }>;
+
+/** 一种变更的处理函数：change 已按 kind 收窄。 */
+type Handler<K extends BoardChange["kind"]> = (board: Board, change: ChangeOf<K>, env: EditEnv) => Draft;
+
+/** 查表分发用的表：每个变更种类一项，一项都不许少（用户、视图、系统变更都走这里）。 */
+type DraftHandlers = { [K in BoardChange["kind"]]: Handler<K> };
+
+// ---- 拖动与复制 ----
+
+/** 取整后换到新位置；位置没变的节点不动（画板换不换由 mapNodes 判断）。 */
+const mapMoved = (board: Board, moves: Map<string, Pos>): Board =>
+  mapNodes(board, (n) => {
+    const p = n.type !== "unknown" && moves.get(n.id);
+    return p && !samePos(n.pos, round(p)) ? { ...n, pos: round(p) } : n;
+  });
+
+function moveDraft(board: Board, change: ChangeOf<"move">): Draft {
+  const moves = new Map(change.moves);
+  const next = mapMoved(board, moves);
+  const { drag } = change;
+  const label = drag?.copies ? countLabel("复制", drag.copies) : countLabel("移动", moves.size);
+  return { board: next, step: drag ? { label, merge: { key: `drag:${drag.id}` } } : { label } };
+}
+
+function settleDragDraft(board: Board, change: ChangeOf<"settleDrag">): Draft {
+  const next = settleAltDrag(board, change.pairs, new Map(change.starts));
+  return { board: next, step: { label: countLabel("复制", change.pairs.length), merge: { key: `drag:${change.drag.id}` } }, selection: change.pairs.map(([, copy]) => copy) };
+}
+
+/** 按显示宽高重算尺寸；从左上角缩放时连位置一起换，位置与尺寸都没变的不动。 */
+const mapResized = (board: Board, boxes: Map<string, { id: string; width: number; height: number; pos: Pos | null }>): Board =>
+  mapNodes(board, (n) => {
+    const box = boxes.get(n.id);
+    if (!box || n.type === "unknown") return n;
+    const pos = box.pos ? round(box.pos) : n.pos;
+    const size = imageNodeSize(box.width, box.height / box.width);
+    return samePos(pos, n.pos) && samePos(size, n.size) ? n : { ...n, pos, size };
+  });
+
+function resizeDraft(board: Board, change: ChangeOf<"resize">): Draft {
+  const boxes = new Map(change.boxes.map((b) => [b.id, b]));
+  const next = mapResized(board, boxes);
+  return { board: next, step: { label: countLabel("缩放", boxes.size), merge: { key: `resize:${change.resize}` } } };
+}
+
+function nudgeDraft(board: Board, change: ChangeOf<"nudge">): Draft {
+  const ids = [...change.ids].sort();
+  return { board: nudgeNodes(board, ids, change.delta), step: { label: countLabel("微移", ids.length), merge: { key: `nudge:${ids.join(",")}`, windowMs: MERGE_PAUSE_MS } } };
+}
+
+function duplicateDraft(board: Board, change: ChangeOf<"duplicate">, env: EditEnv): Draft {
+  const { drag } = change;
+  const r = duplicateNodes(board, change.ids, env.newId, drag ? 0 : PASTE_OFFSET);
+  if (!r.pairs.length) return { board };
+  const label = countLabel("复制", r.pairs.length);
+  // Alt + 拖进行中选区不动（拖的仍是原节点），松手对调后才选中副本（settleDrag）。
+  return drag ? { board: r.board, step: { label, merge: { key: `drag:${drag.id}` } } } : { board: r.board, step: { label }, selection: r.ids };
+}
+
+function pasteDraft(board: Board, change: ChangeOf<"paste">, env: EditEnv): Draft {
+  if (!change.clip.nodes.length) return { board };
+  const r = pasteClip(board, change.clip, env.newId);
+  return { board: r.board, step: { label: countLabel("粘贴", change.clip.nodes.length) }, selection: r.ids };
+}
+
+// ---- 节点增删与重新定位 ----
+
+function newPromptDraft(board: Board, change: ChangeOf<"newPrompt">, env: EditEnv): Draft {
+  const node: PromptNode = { type: "prompt", id: env.newId(), pos: round(change.at), size: PROMPT_NODE_SIZE, text: "", extra: {} };
+  return { board: { ...board, nodes: [...board.nodes, node] }, step: { label: "新建提示词" }, selection: [node.id] };
+}
+
+function newTaskDraft(board: Board, change: ChangeOf<"newTask">, env: EditEnv): Draft {
+  const id = env.newId();
+  return fromOutcome(board, newTask(board, env.table, env.discovery, id, round(change.at), change.promptId ?? undefined), { label: "新建生成任务" }, [id]);
+}
+
+/** 逐张错开落点、尺寸按图片宽高算；id 按导入顺序取。 */
+const referenceNodes = (images: ImportedImage[], at: Pos, env: EditEnv) =>
+  images.map((img, i) => ({
+    type: "reference" as const,
+    id: env.newId(),
+    pos: round([at[0] + 32 * i, at[1] + 32 * i]),
+    size: imageNodeSize(IMAGE_NODE_WIDTH, img.width > 0 ? img.height / img.width : 1),
+    path: img.path,
+    sha256: img.sha256,
+    display_name: img.display_name,
+    extra: {},
+  }));
+
+function addReferencesDraft(board: Board, change: ChangeOf<"addReferences">, env: EditEnv): Draft {
+  if (!change.images.length) return { board };
+  const nodes = referenceNodes(change.images, change.at, env);
+  const step = { label: countLabel("添加", nodes.length, "张参考图") };
+  const selection = [nodes[nodes.length - 1].id];
+  if (!change.attach) return { board: { ...board, nodes: [...board.nodes, ...nodes] }, step, selection };
+  // 导入不因接不上而丢：节点总是加上，接不上时带原因（锁定任务不接线）。
+  const r = attachReferences(board, env.table, nodes, change.attach.taskId, env.locked, change.attach.place);
+  return { board: r.board, step, selection, hint: r.reason ?? undefined };
+}
+
+function connectDraft(board: Board, change: ChangeOf<"connect">, env: EditEnv): Draft {
+  if (!canConnect(board, env.table, change.connection).ok) return { board };
+  // 提示词连正向 / 负向即确定其角色；角色由连线端口体现，无需另存字段。
+  return { board: { ...board, edges: connect(board, change.connection) }, step: { label: "连线" } };
+}
+
+function deleteDraft(board: Board, change: ChangeOf<"delete">): Draft {
+  const cut = board.edges.filter((e) => !e.system && change.edges.some((r) => sameRef(e, r)));
+  let next = cut.length ? { ...board, edges: disconnect(board, cut) } : board;
+  if (!change.nodes.length) return { board: next, step: { label: countLabel("断开", change.edges.length, "条连线") } };
+  const removal = removeNodes(next, change.nodes);
+  next = removal.board;
+  const removed = removal.removedIds.length;
+  return {
+    board: next,
+    step: { label: countLabel("删除", removed) },
+    hint: `已删除 ${removed} 个节点${removal.severed ? `、断开 ${removal.severed} 条连线` : ""}，Ctrl+Z 撤销`,
+    selection: [],
+  };
+}
+
+/** 换文件：参考图换了文件即换了身份（哈希变了，下游任务随之变脏）；结果的身份是 task_id + 文件名，只改路径。 */
+const relocated = (n: Board["nodes"][number], change: ChangeOf<"relocate">): Board["nodes"][number] => {
+  if (n.id !== change.nodeId) return n;
+  if (n.type === "reference") return { ...n, path: change.path, sha256: change.sha256, display_name: change.picked ? change.fileName : n.display_name };
+  return n.type === "result" ? { ...n, path: change.path } : n;
+};
+
+function relocateDraft(board: Board, change: ChangeOf<"relocate">): Draft {
+  return { board: mapNodes(board, (n) => relocated(n, change)), step: { label: "重新定位图片" } };
+}
+
+// ---- 提示词与派生 ----
+
+function editPromptDraft(board: Board, change: ChangeOf<"editPrompt">): Draft {
+  const next = mapNodes(board, (n) => (n.id === change.promptId && n.type === "prompt" && n.text !== change.text ? { ...n, text: change.text } : n));
+  return { board: next, step: { label: "编辑提示词", merge: { key: `text:${change.promptId}`, windowMs: MERGE_PAUSE_MS } } };
+}
+
+function forkPromptDraft(board: Board, change: ChangeOf<"forkPrompt">, env: EditEnv): Draft {
+  return { board: forkPrompt(board, change.promptId, { newNodeId: env.newId(), text: change.text }), step: { label: "分叉提示词" } };
+}
+
+function continueEditingDraft(board: Board, change: ChangeOf<"continueEditing">, env: EditEnv): Draft {
+  const ids = { taskId: env.newId(), promptId: env.newId() };
+  const layers = change.sourceLayer === null ? null : new Map([[change.trigger, change.sourceLayer]]);
+  const r = continueEditing(board, env.table, env.discovery, change.sources, change.trigger, ids, layers, change.at && round(change.at));
+  return fromOutcome(board, r, { label: "以此继续编辑" }, [ids.promptId]);
+}
+
+function addAsReferenceDraft(board: Board, change: ChangeOf<"addAsReference">, env: EditEnv): Draft {
+  const target = addAsReferenceTarget(board, change.selected);
+  if (!target.ok) return { board, hint: target.reason };
+  return fromOutcome(board, addAsReference(board, env.table, change.resultId, target.taskId, change.sourceLayer), { label: "加为参考图" });
+}
+
+// ---- 任务参数：尺寸与输出、份数与开关、模型与连线 ----
+
+function sizeDraft(board: Board, change: ChangeOf<"setTier" | "setRatio">, env: EditEnv): Draft {
   switch (change.kind) {
-    case "move": {
-      const moves = new Map(change.moves);
-      const next = mapNodes(board, (n) => {
-        const p = n.type !== "unknown" && moves.get(n.id);
-        return p && !samePos(n.pos, round(p)) ? { ...n, pos: round(p) } : n;
-      });
-      const { drag } = change;
-      const label = drag?.copies ? countLabel("复制", drag.copies) : countLabel("移动", moves.size);
-      return { board: next, step: drag ? { label, merge: { key: `drag:${drag.id}` } } : { label } };
-    }
-    case "settleDrag": {
-      const next = settleAltDrag(board, change.pairs, new Map(change.starts));
-      return { board: next, step: { label: countLabel("复制", change.pairs.length), merge: { key: `drag:${change.drag.id}` } }, selection: change.pairs.map(([, copy]) => copy) };
-    }
-    case "resize": {
-      const boxes = new Map(change.boxes.map((b) => [b.id, b]));
-      const next = mapNodes(board, (n) => {
-        const box = boxes.get(n.id);
-        if (!box || n.type === "unknown") return n;
-        const pos = box.pos ? round(box.pos) : n.pos;
-        const size = imageNodeSize(box.width, box.height / box.width);
-        return samePos(pos, n.pos) && samePos(size, n.size) ? n : { ...n, pos, size };
-      });
-      return { board: next, step: { label: countLabel("缩放", boxes.size), merge: { key: `resize:${change.resize}` } } };
-    }
-    case "nudge": {
-      const ids = [...change.ids].sort();
-      return { board: nudgeNodes(board, ids, change.delta), step: { label: countLabel("微移", ids.length), merge: { key: `nudge:${ids.join(",")}`, windowMs: MERGE_PAUSE_MS } } };
-    }
-    case "duplicate": {
-      const { drag } = change;
-      const r = duplicateNodes(board, change.ids, env.newId, drag ? 0 : PASTE_OFFSET);
-      if (!r.pairs.length) return { board };
-      const label = countLabel("复制", r.pairs.length);
-      // Alt + 拖进行中选区不动（拖的仍是原节点），松手对调后才选中副本（settleDrag）。
-      return drag ? { board: r.board, step: { label, merge: { key: `drag:${drag.id}` } } } : { board: r.board, step: { label }, selection: r.ids };
-    }
-    case "paste": {
-      if (!change.clip.nodes.length) return { board };
-      const r = pasteClip(board, change.clip, env.newId);
-      return { board: r.board, step: { label: countLabel("粘贴", change.clip.nodes.length) }, selection: r.ids };
-    }
-    case "newPrompt": {
-      const node: PromptNode = { type: "prompt", id: env.newId(), pos: round(change.at), size: PROMPT_NODE_SIZE, text: "", extra: {} };
-      return { board: { ...board, nodes: [...board.nodes, node] }, step: { label: "新建提示词" }, selection: [node.id] };
-    }
-    case "newTask": {
-      const id = env.newId();
-      return fromOutcome(board, newTask(board, env.table, env.discovery, id, round(change.at), change.promptId ?? undefined), { label: "新建生成任务" }, [id]);
-    }
-    case "addReferences": {
-      if (!change.images.length) return { board };
-      const nodes = change.images.map((img, i) => ({
-        type: "reference" as const,
-        id: env.newId(),
-        pos: round([change.at[0] + 32 * i, change.at[1] + 32 * i]),
-        size: imageNodeSize(IMAGE_NODE_WIDTH, img.width > 0 ? img.height / img.width : 1),
-        path: img.path,
-        sha256: img.sha256,
-        display_name: img.display_name,
-        extra: {},
-      }));
-      const step = { label: countLabel("添加", nodes.length, "张参考图") };
-      const selection = [nodes[nodes.length - 1].id];
-      if (!change.attach) return { board: { ...board, nodes: [...board.nodes, ...nodes] }, step, selection };
-      // 导入不因接不上而丢：节点总是加上，接不上时带原因（锁定任务不接线）。
-      const r = attachReferences(board, env.table, nodes, change.attach.taskId, env.locked, change.attach.place);
-      return { board: r.board, step, selection, hint: r.reason ?? undefined };
-    }
-    case "connect": {
-      if (!canConnect(board, env.table, change.connection).ok) return { board };
-      // 提示词连正向 / 负向即确定其角色；角色由连线端口体现，无需另存字段。
-      return { board: { ...board, edges: connect(board, change.connection) }, step: { label: "连线" } };
-    }
-    case "delete": {
-      const cut = board.edges.filter((e) => !e.system && change.edges.some((r) => sameRef(e, r)));
-      let next = cut.length ? { ...board, edges: disconnect(board, cut) } : board;
-      if (!change.nodes.length) return { board: next, step: { label: countLabel("断开", change.edges.length, "条连线") } };
-      const removal = removeNodes(next, change.nodes);
-      next = removal.board;
-      const removed = removal.removedIds.length;
-      return {
-        board: next,
-        step: { label: countLabel("删除", removed) },
-        hint: `已删除 ${removed} 个节点${removal.severed ? `、断开 ${removal.severed} 条连线` : ""}，Ctrl+Z 撤销`,
-        selection: [],
-      };
-    }
-    case "editPrompt": {
-      const next = mapNodes(board, (n) => (n.id === change.promptId && n.type === "prompt" && n.text !== change.text ? { ...n, text: change.text } : n));
-      return { board: next, step: { label: "编辑提示词", merge: { key: `text:${change.promptId}`, windowMs: MERGE_PAUSE_MS } } };
-    }
     case "setTier":
       return {
         board: mapTask(board, change.taskId, (t) => {
@@ -299,11 +371,21 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
         }),
         step: { label: "修改尺寸" },
       };
+  }
+}
+
+function layerDraft(board: Board, change: ChangeOf<"setLayerSize" | "setOutputOptions">): Draft {
+  switch (change.kind) {
     case "setLayerSize":
       if (!isLayerSize(change.size)) return { board };
       return { board: mapTask(board, change.taskId, (t) => ({ ...t, layer_size: change.size })), step: { label: "修改图层尺寸" } };
     case "setOutputOptions":
       return { board: mapTask(board, change.taskId, (t) => ({ ...t, output_options: outputOptions(change.options) })), step: { label: "修改输出选项" } };
+  }
+}
+
+function countDraft(board: Board, change: ChangeOf<"setCount" | "setTaskFlag">): Draft {
+  switch (change.kind) {
     case "setCount":
       if (!Number.isInteger(change.count) || change.count < 1) return { board };
       return { board: mapTask(board, change.taskId, (t) => (taskCount(t) === change.count ? t : { ...t, count: change.count })), step: { label: "修改份数" } };
@@ -312,10 +394,16 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
         board: mapTask(board, change.taskId, (t) => (t[change.flag] === change.value ? t : { ...t, [change.flag]: change.value })),
         step: { label: change.flag === "layer_decomposition" ? "切换图层拆分" : "切换透明背景" },
       };
-    case "setModel": {
-      const next = mapTask(board, change.taskId, (t) => (t.model === change.model ? t : { ...t, model: change.model }));
-      return { board: next === board ? board : { ...next, last_model: change.model }, step: { label: "切换模型" } };
-    }
+  }
+}
+
+function modelDraft(board: Board, change: ChangeOf<"setModel">): Draft {
+  const next = mapTask(board, change.taskId, (t) => (t.model === change.model ? t : { ...t, model: change.model }));
+  return { board: next === board ? board : { ...next, last_model: change.model }, step: { label: "切换模型" } };
+}
+
+function edgeDraft(board: Board, change: ChangeOf<"moveImagePort" | "setRegion">): Draft {
+  switch (change.kind) {
     case "moveImagePort": {
       const edges = moveImagePort(board, change.taskId, change.from, change.to);
       return { board: edges === board.edges ? board : { ...board, edges }, step: { label: "调整图片顺序" } };
@@ -323,29 +411,13 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
     case "setRegion":
       if (!board.edges.some((e) => sameRef(e, change.edge))) return { board };
       return { board: setEdgeRegion(board, change.edge, change.region), step: { label: change.region ? "框选修改区域" : "清除修改区域" } };
-    case "forkPrompt":
-      return { board: forkPrompt(board, change.promptId, { newNodeId: env.newId(), text: change.text }), step: { label: "分叉提示词" } };
-    case "continueEditing": {
-      const ids = { taskId: env.newId(), promptId: env.newId() };
-      const layers = change.sourceLayer === null ? null : new Map([[change.trigger, change.sourceLayer]]);
-      const r = continueEditing(board, env.table, env.discovery, change.sources, change.trigger, ids, layers, change.at && round(change.at));
-      return fromOutcome(board, r, { label: "以此继续编辑" }, [ids.promptId]);
-    }
-    case "addAsReference": {
-      const target = addAsReferenceTarget(board, change.selected);
-      if (!target.ok) return { board, hint: target.reason };
-      return fromOutcome(board, addAsReference(board, env.table, change.resultId, target.taskId, change.sourceLayer), { label: "加为参考图" });
-    }
-    case "relocate":
-      return {
-        // 参考图换了文件即换了身份（哈希变了，下游任务随之变脏）；结果的身份是 task_id + 文件名，只改路径。
-        board: mapNodes(board, (n) => {
-          if (n.id !== change.nodeId) return n;
-          if (n.type === "reference") return { ...n, path: change.path, sha256: change.sha256, display_name: change.picked ? change.fileName : n.display_name };
-          return n.type === "result" ? { ...n, path: change.path } : n;
-        }),
-        step: { label: "重新定位图片" },
-      };
+  }
+}
+
+// ---- 阶段与定稿 ----
+
+function stageDraft(board: Board, change: ChangeOf<"newStage" | "renameStage" | "addToStage" | "removeFromStage" | "setStageCollapsed" | "deleteStage">, env: EditEnv): Draft {
+  switch (change.kind) {
     case "newStage":
       return { board: createStage(board, env.newId(), change.name, change.nodes), step: { label: "新建阶段" } };
     case "renameStage":
@@ -358,6 +430,11 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
       return { board: setStageCollapsed(board, change.stageId, change.collapsed), step: { label: change.collapsed ? "收起阶段" : "展开阶段" } };
     case "deleteStage":
       return { board: deleteStage(board, change.stageId), step: { label: "删除阶段" } };
+  }
+}
+
+function finalDraft(board: Board, change: ChangeOf<"setFinal" | "pruneUnfinal" | "autoStages" | "moveOutStage">, env: EditEnv): Draft {
+  switch (change.kind) {
     case "setFinal":
       return { board: setFinal(board, change.nodes, change.final), step: { label: change.final ? "标记定稿" : "取消定稿" } };
     case "pruneUnfinal": {
@@ -374,18 +451,30 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
         step: { label: countLabel("自动划分", groups.length, "个阶段") },
       };
     }
-    case "moveOutStage": {
+    case "moveOutStage":
       return { board: removeMovedStage(board, change.stageId), step: { label: "移出为新画板" }, selection: [] };
-    }
+  }
+}
+
+// ---- 视图与系统 ----
+
+const sameViewport = (a: Board["viewport"], b: Board["viewport"]) => a.x === b.x && a.y === b.y && a.zoom === b.zoom;
+
+function viewDraft(board: Board, change: ChangeOf<"viewport" | "lastModel" | "title">): Draft {
+  switch (change.kind) {
     case "viewport": {
       const { x, y, zoom } = change.viewport;
-      const v = board.viewport;
-      return { board: v.x === x && v.y === y && v.zoom === zoom ? board : { ...board, viewport: { x, y, zoom } } };
+      return { board: sameViewport(board.viewport, change.viewport) ? board : { ...board, viewport: { x, y, zoom } } };
     }
     case "lastModel":
       return { board: board.last_model === change.model ? board : { ...board, last_model: change.model } };
     case "title":
       return { board: board.title === change.title ? board : { ...board, title: change.title } };
+  }
+}
+
+function systemDraft(board: Board, change: ChangeOf<"submitted" | "runResult" | "syncAutoRatios">, env: EditEnv): Draft {
+  switch (change.kind) {
     case "submitted":
       return { board: mapTask(board, change.taskId, (t) => ({ ...t, last_submitted: change.lastSubmitted })) };
     case "runResult":
@@ -394,6 +483,58 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
       return { board };
   }
 }
+
+/** 变更种类 → 处理函数：分发只查这张表。 */
+const HANDLERS: DraftHandlers = {
+  move: moveDraft,
+  settleDrag: settleDragDraft,
+  resize: resizeDraft,
+  nudge: nudgeDraft,
+  duplicate: duplicateDraft,
+  paste: pasteDraft,
+  newPrompt: newPromptDraft,
+  newTask: newTaskDraft,
+  addReferences: addReferencesDraft,
+  connect: connectDraft,
+  delete: deleteDraft,
+  relocate: relocateDraft,
+  editPrompt: editPromptDraft,
+  forkPrompt: forkPromptDraft,
+  continueEditing: continueEditingDraft,
+  addAsReference: addAsReferenceDraft,
+  setTier: sizeDraft,
+  setRatio: sizeDraft,
+  setLayerSize: layerDraft,
+  setOutputOptions: layerDraft,
+  setCount: countDraft,
+  setTaskFlag: countDraft,
+  setModel: modelDraft,
+  moveImagePort: edgeDraft,
+  setRegion: edgeDraft,
+  newStage: stageDraft,
+  renameStage: stageDraft,
+  addToStage: stageDraft,
+  removeFromStage: stageDraft,
+  setStageCollapsed: stageDraft,
+  deleteStage: stageDraft,
+  setFinal: finalDraft,
+  pruneUnfinal: finalDraft,
+  autoStages: finalDraft,
+  moveOutStage: finalDraft,
+  viewport: viewDraft,
+  lastModel: viewDraft,
+  title: viewDraft,
+  submitted: systemDraft,
+  runResult: systemDraft,
+  syncAutoRatios: systemDraft,
+};
+
+/** 一次变更的草稿：查表分发（每个变更种类在 HANDLERS 里各有一项）。 */
+function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
+  const handler = HANDLERS[change.kind] as (board: Board, change: BoardChange, env: EditEnv) => Draft;
+  return handler(board, change, env);
+}
+
 
 /** 后置管线：阶段成员同步 → 图片端口同步 → 自动宽高比重算（锁定任务不动）。无变化时返回原画板。 */
 function settle(board: Board, env: EditEnv): Board {
@@ -430,18 +571,29 @@ function violatesLock(before: Board, after: Board, locked: ReadonlySet<string>, 
   return false;
 }
 
-/** 应用一次画板变更。被拒或无变化时返回原画板（同一引用）、撤销步为 null。 */
-export function editBoard(board: Board, change: BoardChange, env: EditEnv): EditResult {
-  const cls = changeClass(change);
-  const d = draft(board, change, env);
-  const extras = { ...(d.hint !== undefined ? { hint: d.hint } : {}), ...(d.selection ? { selection: d.selection } : {}) };
-  if (cls === "view") return { board: d.board, step: null, ...extras };
-  // 用户变更本身没改动（被拒、落点无效）就不跑管线，免得把无关的补算记成这一步。
-  if (cls === "user" && d.board === board) return { board, step: null, ...(d.hint !== undefined ? { hint: d.hint } : {}) };
+/** 草稿里要带出去的提示：没话要说就不带这个字段。 */
+const hintOf = (d: Draft) => (d.hint !== undefined ? { hint: d.hint } : {});
+
+/** 草稿里要带出去的提示与建议选中：视图 / 系统变更也照带。 */
+const extrasOf = (d: Draft) => ({ ...hintOf(d), ...(d.selection ? { selection: d.selection } : {}) });
+
+/** 分类之后的下半段：后置管线 → 锁定校验 → 落撤销步。 */
+function finishEdit(board: Board, change: BoardChange, cls: ChangeClass, d: Draft, env: EditEnv): EditResult {
+  const extras = extrasOf(d);
   const next = settle(d.board, env);
   if (next === board) return { board, step: null, ...extras };
   if (cls === "system") return { board: next, step: null, ...extras };
   const exempt = new Set(change.kind === "delete" ? change.cancelled : []);
   if (violatesLock(board, next, env.locked, exempt)) return { board, step: null, hint: LOCKED_HINT };
   return { board: next, step: d.step ?? null, ...extras };
+}
+
+/** 应用一次画板变更。被拒或无变化时返回原画板（同一引用）、撤销步为 null。 */
+export function editBoard(board: Board, change: BoardChange, env: EditEnv): EditResult {
+  const cls = changeClass(change);
+  const d = draft(board, change, env);
+  if (cls === "view") return { board: d.board, step: null, ...extrasOf(d) };
+  // 用户变更本身没改动（被拒、落点无效）就不跑管线，免得把无关的补算记成这一步。
+  if (cls === "user" && d.board === board) return { board, step: null, ...hintOf(d) };
+  return finishEdit(board, change, cls, d, env);
 }

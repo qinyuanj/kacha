@@ -3,6 +3,7 @@ import { isFinal, newBoard, stagesOf, type Board, type BoardEdge, type BoardNode
 import { BUILTIN_TABLE } from "./capabilities";
 import { continueEditingChange, editBoard, type BoardChange, type EditEnv } from "./edit";
 import { cardDropConnection } from "./dragCreate";
+import type { LayerSize } from "./gateway";
 import { emptyHistory, MERGE_PAUSE_MS, recordChange, redo, undo } from "./history";
 import { copySelection, LOCKED_HINT, PASTE_OFFSET } from "./iterate";
 import type { RunResult } from "./layout";
@@ -213,6 +214,20 @@ describe("用户变更：结果画板、撤销步、建议选中", () => {
     expect(set.board.edges[0].region).toEqual(region);
     expect(set.step).toEqual({ label: "框选修改区域" });
     expect(editBoard(set.board, { kind: "setRegion", edge: { from: ["a", "out"], to: ["t", "image:0"] }, region: null }, env()).step).toEqual({ label: "清除修改区域" });
+  });
+
+  it("图层尺寸 / 输出选项：合法才改，表外的档位不构成步", () => {
+    const b = board([task("t")]);
+    const layer = editBoard(b, { kind: "setLayerSize", taskId: "t", size: "2K" }, env());
+    expect(taskOf(layer.board).layer_size).toBe("2K");
+    expect(layer.step).toEqual({ label: "修改图层尺寸" });
+    // 界面只放出合法档位（isLayerSize 在控件那侧先拦一道）；表外来的值当没发生。
+    expect(editBoard(b, { kind: "setLayerSize", taskId: "t", size: "3K" as LayerSize }, env())).toEqual({ board: b, step: null });
+
+    const options = { output_format: "jpeg" as const, response_format: "b64_json" as const, watermark: true };
+    const out = editBoard(b, { kind: "setOutputOptions", taskId: "t", options }, env());
+    expect(taskOf(out.board).output_options).toEqual(options);
+    expect(out.step).toEqual({ label: "修改输出选项" });
   });
 
   it("份数：新建任务默认为 1；修改份数构成一个撤销步，不改别的参数", () => {
