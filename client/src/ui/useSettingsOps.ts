@@ -117,10 +117,17 @@ export async function saveSettingsState(
   const result = await saveSettings(ports, { fileKind: current.file, apiKey: current.apiKey, keyPersistence: current.keyPersistence }, next, apiKey);
   if (!result.ok) return { ok: false, error: result.error };
   const baseChanged = !discoveryApplies(current.settings.base_url, next.base_url);
+  // 发现缓存只属于当前网关 + 当前凭据：换密钥或清除后让旧缓存立即作废。
+  // 清缓存失败也不能把旧发现留在界面上（下次读取仍会读到旧文件，所以必须尽力写空）。
+  const credentialChanged = apiKey !== current.apiKey;
+  if (credentialChanged) await ports.writeModelsCache("").catch(() => undefined);
+  const noDiscovery: Discovery = { source: "none" };
   if (!result.settingsWritten) {
-    return { ok: true, state: keyOnlyState(current, apiKey, result.keyPersistence), baseChanged };
+    const state = keyOnlyState(current, apiKey, result.keyPersistence);
+    return { ok: true, state: credentialChanged ? { ...state, discovery: noDiscovery } : state, baseChanged };
   }
-  return { ok: true, state: savedState(current, next, apiKey, result.keyPersistence, baseChanged, null), baseChanged };
+  const state = savedState(current, next, apiKey, result.keyPersistence, baseChanged, null);
+  return { ok: true, state: credentialChanged ? { ...state, discovery: noDiscovery } : state, baseChanged };
 }
 
 /** 刷新模型（网关发现）。 */

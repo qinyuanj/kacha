@@ -172,6 +172,8 @@ function modelLabel(table: CapabilityTable, discovery: Discovery, modelId: strin
   if (isRetiredModel(modelId)) return { state: "unknown", label: "Lite（已停用，请切换到 Flash）" };
   const model = findModel(table, modelId);
   if (!model) return { state: "unknown", label: `${modelId}（未知模型）` };
+  // 还没发现过时保留画板里已有的模型身份；静态清单只是本地能力事实，不冒充网关发现成功。
+  if (discovery.source === "none" && !discovery.failed && model.tier !== null) return { state: "ok", label: model.display_name };
   if (availableModels(table, discovery).some((m) => m.model_id === modelId)) return { state: "ok", label: model.display_name };
   return model.tier !== null ? { state: "notFromGateway", label: `${model.display_name}（网关未提供）` } : { state: "unshelved", label: `${model.display_name}（未上架）` };
 }

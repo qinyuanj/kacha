@@ -20,7 +20,7 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults";
+export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
@@ -115,6 +115,7 @@ export function unavailableMessage(error: unknown): string | null {
 
 /** 能力名（界面用中文）：与 FeatureId 一一对应；桌面壳与本文件共用这一份（C1）。 */
 export const FEATURE_LABELS: Record<FeatureId, string> = {
+  gateway: "网关配置",
   generation: "生成",
   usage: "用量统计",
   packExport: "画板包导出",

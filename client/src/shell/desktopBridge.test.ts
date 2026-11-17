@@ -27,6 +27,39 @@ function recordingBridge() {
   return { bridge: mygoBridge(callFn), calls };
 }
 
+describe("网关与密钥句柄（#152）", () => {
+  it("桥上有 gateway 句柄：测试连接与密钥读写都走 Go 绑定", () => {
+    const { bridge } = recordingBridge();
+    expect(bridge.gateway).toBeDefined();
+  });
+
+  it("gateway.request() 调用 Gateway.Request——与 Go 侧 BindAs(\"Gateway\", ...) 一致", async () => {
+    const { calls } = recordingBridge();
+    const res = { status: 200, headers: {}, body: "{}" };
+    const callFn = (method: string, ...args: unknown[]): Promise<unknown> => {
+      calls.push({ method, args });
+      if (method === "Gateway.Request") return Promise.resolve(res);
+      return Promise.reject(new Error("没实现：" + method));
+    };
+    const direct = mygoBridge(callFn);
+    await expect(direct.gateway!.request("http://gw/v1/models", "GET", { Accept: "application/json" })).resolves.toEqual(res);
+    expect(calls.map((c) => c.method)).toEqual(["Gateway.Request"]);
+  });
+
+  it("密钥读写与清除分别调用 Gateway.ReadApiKey / WriteApiKey / DeleteApiKey", async () => {
+    const calls: string[] = [];
+    const direct = mygoBridge((method) => {
+      calls.push(method);
+      if (method === "Gateway.ReadApiKey") return Promise.resolve("sk-synthetic");
+      return Promise.resolve(undefined);
+    });
+    await expect(direct.gateway!.readApiKey()).resolves.toBe("sk-synthetic");
+    await direct.gateway!.writeApiKey("sk-new");
+    await direct.gateway!.deleteApiKey();
+    expect(calls).toEqual(["Gateway.ReadApiKey", "Gateway.WriteApiKey", "Gateway.DeleteApiKey"]);
+  });
+});
+
 describe("剪贴板句柄（#129）", () => {
   it("桥上有 clipboard 句柄：没有它，readClipboard 恒为 null，原生粘贴不会被调用", () => {
     const { bridge } = recordingBridge();
