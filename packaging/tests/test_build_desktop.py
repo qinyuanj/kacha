@@ -69,6 +69,8 @@ def make_repo(root: Path, changelog: str = VALID_CHANGELOG) -> dict[str, str]:
         "    out = Path(base) / 'windows-amd64'\n"
         "    out.mkdir(parents=True, exist_ok=True)\n"
         "    (out / 'Kacha.exe').write_bytes(b'exe')\n"
+        "    if '-debug' not in args and '-skip-installer' not in args:\n"
+        "        (out / 'kacha-setup-0.1.0-amd64.exe').write_bytes(b'installer')\n"
         "    print('  √ Built Kacha 0.1.0 in 6.8s')\n",
     )
     return dict(os.environ, PATH=f"{tools}{os.pathsep}{os.environ['PATH']}", PYTHONIOENCODING="utf-8")
@@ -169,7 +171,7 @@ class BuildDesktopTest(unittest.TestCase):
             self.assertEqual(info["platform"], "windows/amd64")
             self.assertEqual(info["exe"], "build/windows-amd64/Kacha.exe")
 
-    def test_pins_cli_and_skips_installer(self):
+    def test_release_build_uses_native_installer_and_signs_updates(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env = make_repo(root)
@@ -179,7 +181,8 @@ class BuildDesktopTest(unittest.TestCase):
             build = [line for line in calls if line.startswith("tool mygo build")]
             self.assertEqual(len(build), 1, calls)
             self.assertIn("-platform windows/amd64", build[0])
-            self.assertIn("-skip-installer", build[0])
+            self.assertNotIn("-skip-installer", build[0])
+            self.assertIn("kacha-setup-0.1.0-amd64.exe", (root / "build" / "windows-amd64" / "build-info.json").read_text(encoding="utf-8"))
 
     def test_debug_build_keeps_release_output_separate(self):
         with tempfile.TemporaryDirectory() as tmp:

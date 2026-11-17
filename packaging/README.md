@@ -22,7 +22,7 @@ python packaging\build_desktop.py --debug --skip-install
 python packaging\build_desktop.py
 ~~~
 
-输出为 `build/windows-amd64/Kacha.exe` 与 `build-info.json`。构建只产出可执行文件，不生成安装器、不上传 Release、不配置自动更新。`build-info.json` 记录应用版本、profile、MyGo / Go / WebView2 版本与产物路径。WebView2 Runtime 版本读不到时记 null。
+输出为 `build/windows-amd64/Kacha.exe`、MyGo 当前用户 NSIS 安装器 `kacha-setup-<版本>-amd64.exe` 与 `build-info.json`。debug 仍用 `-skip-installer`，不生成安装器。发布构建不上传 Release；签名、Gitea 发布与更新描述门禁见 [安装器与发布链](RELEASE_163.md)。`build-info.json` 记录应用版本、profile、MyGo / Go / WebView2 版本、安装器与产物路径。WebView2 Runtime 版本读不到时记 null。
 
 两个 profile 都先检查版本与更新说明：`mygo.config.ts` 是唯一产品版本源；`docs/release/changelog.md` 必须包含与它同号的一级标题，且该节「新增 / 改进 / 修复」至少一组下有条目。检查失败即退出，不运行构建命令。MyGo CLI 随后执行配置中的前端 `buildCommand`，再将 `client/dist` 嵌入程序；Go 模块位于仓库根，源码入口为 `./desktop`。
 
