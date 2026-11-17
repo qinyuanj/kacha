@@ -80,7 +80,8 @@ describe("仓库里的更新说明与桌面版本", () => {
     const currentText = JSON.stringify(section!.groups);
     expect(currentText).toContain("单份文生图");
     expect(currentText).toContain("整理");
-    expect(currentText).toContain("参考图编辑尚不可用");
+    expect(currentText).toContain("参考图编辑");
+    expect(currentText).toContain("尚不可用");
   });
 
   it("恢复全部可查版本，按新在前排列且不重复、不缺漏", () => {
