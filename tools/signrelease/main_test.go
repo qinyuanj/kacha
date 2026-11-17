@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -122,3 +123,21 @@ func TestRunRefusesWrongInstallerName(t *testing.T) {
 		t.Fatalf("安装器文件名不对时必须失败")
 	}
 }
+// 发布说明来自唯一来源 changelog.md：按一级标题切出当前版本那一节，历史版本不混进来。
+func TestNotesSectionTakesTheCurrentVersionOnly(t *testing.T) {
+	text := "# 1.6.0\n\n## 改进\n\n- 当前的一条。\n\n# 1.5.0\n\n## 修复\n\n- 旧的一条。\n"
+	section, ok := notesSection(text, "1.6.0")
+	if !ok {
+		t.Fatalf("备注里明明有 1.6.0 一节")
+	}
+	if !strings.HasPrefix(section, "# 1.6.0") || !strings.Contains(section, "- 当前的一条。") {
+		t.Fatalf("取到的不是当前版本那一节：%q", section)
+	}
+	if strings.Contains(section, "旧的一条") {
+		t.Fatalf("历史版本的条目混进来了：%q", section)
+	}
+	if _, ok := notesSection(text, "1.7.0"); ok {
+		t.Fatalf("没有这一节时必须报没有")
+	}
+}
+

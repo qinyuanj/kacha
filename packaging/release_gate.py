@@ -23,9 +23,11 @@ def desktop_version(root: Path) -> str:
     return version
 
 
-def check_release_notes(root: Path, version: str) -> None:
-    """当前版本节的「新增 / 改进 / 修复」下至少有一条，不把 HTML 注释算内容。"""
-    text = (root / CHANGELOG).read_text(encoding="utf-8")
+def changelog_section(text: str, version: str) -> list[str] | None:
+    """changelog.md 里「# <版本>」那一节的行（不含标题，到下一个一级标题前）；没有这一节时 None。
+
+    HTML 注释整段先去掉：还没定稿的内容不算已经发布。
+    """
     text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
     section: list[str] | None = None
     for line in text.splitlines():
@@ -36,6 +38,27 @@ def check_release_notes(root: Path, version: str) -> None:
                 section = []
         elif section is not None:
             section.append(line)
+    return section
+
+
+def release_notes_section(root: Path, version: str) -> str:
+    """发布说明：唯一来源 docs/release/changelog.md 里当前版本那一节（含一级标题，ADR 0024）。
+
+    发布脚本与安装器签名都从这里取说明，不另立 release-notes-<版本>.md 之类的第二份文件：
+    两份说明迟早会对不上，而用户只该看到一份。
+    """
+    text = (root / CHANGELOG).read_text(encoding="utf-8")
+    section = changelog_section(text, version)
+    if section is None:
+        raise SystemExit(f"更新说明 {CHANGELOG.as_posix()} 缺少当前版本 {version} 的一节")
+    body = "\n".join(section).strip("\n")
+    return f"# {version}\n\n{body}\n" if body else f"# {version}\n"
+
+
+def check_release_notes(root: Path, version: str) -> None:
+    """当前版本节的「新增 / 改进 / 修复」下至少有一条，不把 HTML 注释算内容。"""
+    text = (root / CHANGELOG).read_text(encoding="utf-8")
+    section = changelog_section(text, version)
     where = f"更新说明 {CHANGELOG.as_posix()}"
     if section is None:
         raise SystemExit(f"{where} 缺少当前版本 {version} 的一节")

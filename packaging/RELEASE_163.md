@@ -34,6 +34,10 @@ MyGo 固定在 `go.mod` 的 v0.9.0（ADR 0023）。已用该版本 CLI 核实：
 
 - token 只从 `GITEA_TOKEN` 读取，不接受命令行或仓库文件；
 - 每次发布前检查完整资产与 `SHA256SUMS`，不齐或哈希不一致时零远端写操作；
+- 门禁读**真实生成的** `update-windows-amd64.json`（`platform` / `url` / `signature`），不自己拼一份看起来对的清单；
+- 包地址必须等于 `--base-url` 与 `--repo` 指向的这次发布的 `/v<版本>/` 附件，指向别的宿主或别的版本即拒绝；
+- `.sig` 必须存在、与描述里的签名一致，并用客户端内置的发布者公钥验签（`desktop/cmd/verifyrelease`，与客户端装包前同一条路径）；这次构建没有内置公钥时拒绝发布；
+- 发布说明取 `docs/release/changelog.md` 的当前版本一节（ADR 0024），不读第二份说明文件；
 - 复用已有 `v<版本>` Release，不覆盖历史 tag；
 - 重复发布先撤下本端旧更新描述，再替换资产，最后上传 `update-windows-amd64.json`，避免暴露半套资产；
 - 上传失败可用同一命令重试，已存在的 Release 与旧资产不会被删除或新建虚假版本。

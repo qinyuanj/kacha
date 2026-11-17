@@ -101,14 +101,20 @@ go tool mygo keygen
 #    （覆盖注释行即可；只写 base64 那一行），然后重新构建客户端
 # 3. 构建安装器
 python packaging\build_desktop.py
-# 4. 给安装器签名并写更新描述（私钥只从环境变量读）
+# 4. 给安装器签名并写更新描述（私钥只从环境变量读；说明取 changelog.md 的当前版本一节）
 $env:MYGO_UPDATER_PRIVATE_KEY = Get-Content mygo-update.key -Raw
-go run ./tools/signrelease -installer build/windows-amd64/kacha-setup-<版本>-amd64.exe -version <版本> -notes docs/release/release-notes-<版本>.md -out build/windows-amd64
+go run ./tools/signrelease -installer build/windows-amd64/kacha-setup-<版本>-amd64.exe -version <版本> -notes docs/release/changelog.md -out build/windows-amd64
 # 5. 写 SHA256SUMS（只用来发现损坏，不能代替签名）
-# 6. 上传（需要 GITEA_TOKEN）
+# 6. 用内置公钥验一遍描述里的签名（与客户端同一条校验路径）
+go run ./desktop/cmd/verifyrelease -installer build/windows-amd64/kacha-setup-<版本>-amd64.exe -descriptor build/windows-amd64/update-windows-amd64.json
+# 7. 上传（需要 GITEA_TOKEN；脚本会再验一遍签名与包地址）
 $env:GITEA_TOKEN = "<token>"
 python packaging\publish_release.py
 ```
+
+发布说明只有一个来源：`docs/release/changelog.md` 的当前版本一节（ADR 0024）。
+签名工具与发布脚本都从那里取说明，不另写 `release-notes-<版本>.md`：
+两份说明迟早对不上，而用户只该看到一份。
 
 `mygo.config.ts` 刻意**不配** `updates` 段：MyGo 的 `updates` 签的是
 `<slug>-<版本>-windows-amd64.tar.gz` 应用归档，并写出同名的
