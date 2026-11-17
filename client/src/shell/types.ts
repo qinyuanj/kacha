@@ -64,7 +64,30 @@ export interface Usage {
   limit_level: SizeTier | null;
 }
 
+export interface RecycleEntry {
+  id: string;
+  dir: string;
+  bytes: number;
+  cleaned_at: number;
+  location: string;
+  expired: boolean;
+}
+
+export interface CleanupResult {
+  ok: boolean;
+  kind: string;
+  message: string;
+  moved: UsageCandidate[];
+  skipped: string[];
+  failed: string[];
+}
+
 export interface UsagePort {
   usage(): Promise<Usage>;
-  cleanupUnreferenced(dirs: string[]): Promise<{ moved: UsageCandidate[]; skipped: string[] }>;
+  cleanupUnreferenced(dirs: string[]): Promise<CleanupResult>;
+  /** 保存容量提醒阈值（字节）；0 表示清除。只提醒，不阻止生成。 */
+  setLimit(bytes: number): Promise<void>;
+  recycle(): Promise<RecycleEntry[]>;
+  restore(id: string): Promise<void>;
+  purgeExpired(): Promise<void>;
 }

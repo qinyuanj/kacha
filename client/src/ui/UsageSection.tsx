@@ -1,4 +1,4 @@
-// 用量与自助清理区块；桌面尚未实现时由壳端口能力隐藏入口。
+// 用量与自助清理区块：真实字节统计、未引用预览、阈值与回收恢复均由壳端口提供。
 // 可见判定在 ui/usageView.ts（#137），这里只留接线与 DOM 摆放。
 import { useCallback, useEffect, useState } from "react";
 import type { Usage } from "../shell/types";
@@ -7,6 +7,8 @@ import { useShell } from "./shell";
 import { formatBytes } from "./boardText";
 import { canClean, unreadableNotice, unreferencedSummary, usageBreakdown, usageByDate } from "./usageView";
 import { cleanUnreferenced } from "./usageClean";
+import { UsageLimitRow } from "./UsageLimitRow";
+import { UsageRecycle } from "./UsageRecycle";
 
 /** 用量汇总那几行：总数、分项、按日期与说明。 */
 function UsageSummary({ usage }: { usage: Usage }) {
@@ -119,10 +121,12 @@ export function UsageSection() {
   return (
     <div className="usage-section">
       <UsageTotal usage={usage} />
+      <UsageLimitRow limitBytes={usage?.limit_bytes ?? null} onSaved={() => void load()} />
       {usage && (
         <>
           <UsageSummary usage={usage} />
           <UnreferencedRow usage={usage} busy={busy} onClean={() => setConfirm(true)} />
+          <UsageRecycle onChanged={() => void load()} />
         </>
       )}
       {note && <div className="muted small form-hint">{note}</div>}
