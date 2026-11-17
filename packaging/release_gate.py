@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""桌面打包门禁：mygo.config.ts 是唯一产品版本源，当前版本必须有更新说明。"""
+"""桌面打包门禁：mygo.config.ts 是唯一产品版本源，当前版本必须有更新说明，历史说明不参与取版本。"""
 
 from pathlib import Path
 import re

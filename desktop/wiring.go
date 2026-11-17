@@ -2,10 +2,12 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 
 	"github.com/egoist/mygo"
 
 	"github.com/qinyuanj/kacha/desktop/internal/clipboard"
+	"github.com/qinyuanj/kacha/desktop/internal/gateway"
 	"github.com/qinyuanj/kacha/desktop/internal/localservice"
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 	"github.com/qinyuanj/kacha/desktop/internal/packservice"
@@ -25,6 +27,9 @@ func bindServices(shell *shellapp.Shell, root string) {
 	mygo.BindAs("Clipboard", clipboard.NewBound(store.ReadFile))
 	// Pack 选包并导入（#131）：包在本机解压合并，全程不出数据根。
 	mygo.BindAs("Pack", packservice.New(root))
+	// Gateway 在本机发网关请求并把密钥交给 Windows 系统保护（#152）：
+	// 密钥文件落在同一份数据根，不按凭据分身份。
+	mygo.BindAs("Gateway", gateway.New(filepath.Join(root, "api-key.protected")))
 }
 
 // assetScheme 是页面读数据根里本机文件（图片）用的自定义协议。
