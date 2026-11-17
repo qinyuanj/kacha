@@ -82,6 +82,8 @@ export interface CleanupResult {
   failed: string[];
 }
 
+export type { UpdatePort } from "./port";
+
 export interface UsagePort {
   usage(): Promise<Usage>;
   cleanupUnreferenced(dirs: string[]): Promise<CleanupResult>;
