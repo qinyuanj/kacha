@@ -42,3 +42,26 @@ func TestGatewayFollowsSwitchedRoot(t *testing.T) {
 		t.Fatalf("切换后读密钥 = %q, %v；应为 %q", key, err, syntheticKey)
 	}
 }
+// 迁移复制期间不写密钥：密钥文件是数据根里的一份数据，写进旧位置在切换后就丢了。
+// 拦下时给明确错误（ErrMoving），迁移结束后恢复。
+func TestApiKeyWritesAreRejectedWhileMovingRoot(t *testing.T) {
+	root := t.TempDir()
+	roots := dataroot.NewRoots(root)
+	svc := NewFollowing(roots)
+	if !roots.BeginMove() {
+		t.Fatal("开始迁移应当成功")
+	}
+	if err := svc.WriteApiKey(syntheticKey); !errors.Is(err, ErrMoving) {
+		t.Fatalf("迁移期间写密钥 = %v, want ErrMoving", err)
+	}
+	if err := svc.DeleteApiKey(); !errors.Is(err, ErrMoving) {
+		t.Fatalf("迁移期间清密钥 = %v, want ErrMoving", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "api-key.protected")); !os.IsNotExist(err) {
+		t.Fatalf("迁移期间仍然写出了密钥文件: %v", err)
+	}
+	roots.EndMove()
+	if err := svc.WriteApiKey(syntheticKey); err != nil && !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("迁移结束后写密钥: %v", err)
+	}
+}

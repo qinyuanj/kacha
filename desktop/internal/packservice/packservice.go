@@ -16,6 +16,9 @@ import (
 	"github.com/qinyuanj/kacha/desktop/internal/packimport"
 )
 
+// KindMoving 是迁移复制期间的拒绝类别：状态记录还没切，导入与导出都先停下（#161）。
+const KindMoving = "moving"
+
 // Progress 是一次导入的进度快照（与 packimport.Progress 同形，页面按它画进度条）。
 type Progress struct {
 	// Step 是当前步骤：check / extract / restore / merge / boards / done。
@@ -89,6 +92,14 @@ func (s *Service) Root() string {
 	return s.root
 }
 
+// moving 报告迁移复制是否正在进行：这一段里不开始新的导入与导出。
+//
+// 导入会往数据根里写任务目录与画板，写成旧位置在切换后就没用了；导出也在搬同一批文件，
+// 与迁移抢着读同一份内容。两边都直接失败，给用户一句「等迁移结束」，而不是静默丢写。
+func (s *Service) moving() bool {
+	return s.roots != nil && s.roots.Moving()
+}
+
 // Pick 让用户选一个画板包，返回它的绝对路径；取消时返回空串。
 //
 // 选包必须在 Go 侧做：页面拿不到本机文件的绝对路径（桌面壳的 File 没有路径信息）。
@@ -115,6 +126,9 @@ func (s *Service) Start(packPath string) Outcome {
 	}
 	if info, err := os.Stat(packPath); err != nil || info.IsDir() {
 		return Outcome{Kind: "invalid", Step: packimport.StepCheck, Message: "选中的画板包读不出来：" + packPath}
+	}
+	if s.moving() {
+		return Outcome{Kind: KindMoving, Step: packimport.StepCheck, Message: "正在迁移数据位置，完成前不能导入画板包"}
 	}
 	s.mu.Lock()
 	if s.running {

@@ -12,6 +12,9 @@ import (
 // ErrUnsupported 表示当前平台没有 Windows 系统保护；能力保持明确不可用。
 var ErrUnsupported = errors.New("当前平台不支持 Windows 系统保护")
 
+// ErrMoving 是迁移复制期间拒绝写密钥：状态记录还没切，写进旧位置的密钥在切换后就丢了（#161）。
+var ErrMoving = errors.New("正在迁移数据位置，完成前不能改密钥")
+
 // keyFile 是数据根下受保护密钥的文件名；迁移把它和别的数据一起复制过去。
 const keyFile = "api-key.protected"
 
@@ -62,12 +65,23 @@ func (s *Service) ReadApiKey() (string, error) {
 	return s.store().Load()
 }
 
+// moving 报告迁移复制是否正在进行：这一段里写密钥会被拦下。
+func (s *Service) moving() bool {
+	return s.roots != nil && s.roots.Moving()
+}
+
 // WriteApiKey 保存或替换密钥；明文不写进普通设置或日志。
 func (s *Service) WriteApiKey(key string) error {
+	if s.moving() {
+		return ErrMoving
+	}
 	return s.store().Save(key)
 }
 
 // DeleteApiKey 清除密钥；清除后重启读不到。
 func (s *Service) DeleteApiKey() error {
+	if s.moving() {
+		return ErrMoving
+	}
 	return s.store().Delete()
 }

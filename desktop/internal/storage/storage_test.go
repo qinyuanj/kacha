@@ -1,11 +1,15 @@
 package storage
 
 import (
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
+	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
 // write 在数据根里造一个文件（含父目录）。
@@ -207,5 +211,108 @@ func TestMoveRefusedWhileMoving(t *testing.T) {
 	close(release)
 	if out := <-done; !out.OK {
 		t.Fatalf("第一次迁移应当成功：%+v", out)
+	}
+}
+// 包文档名必须等于真实包名：写成别的服务名（storageservice）时 go doc 找不到这个包，
+// 读代码的人也会以为包名是 storageservice。
+func TestPackageDocUsesTheRealPackageName(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	found := false
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		parsed, err := parser.ParseFile(fset, name, nil, parser.ParseComments|parser.PackageClauseOnly)
+		if err != nil {
+			t.Fatalf("ParseFile(%s): %v", name, err)
+		}
+		if parsed.Doc == nil {
+			continue
+		}
+		found = true
+		doc := parsed.Doc.Text()
+		if !strings.HasPrefix(doc, "Package storage ") {
+			t.Fatalf("%s 的包文档没有以「Package storage」开头：%q", name, firstLine(doc))
+		}
+	}
+	if !found {
+		t.Fatal("没有找到包文档：doc.go 或任一源文件开头应有 Package 说明")
+	}
+}
+
+// firstLine 取文档的第一行，失败消息里只显示它。
+func firstLine(text string) string {
+	if i := strings.IndexByte(text, '\n'); i >= 0 {
+		return text[:i]
+	}
+	return text
+}
+// 迁移复制期间写数据根被拦下（不复现「切换重载后丢写」）：busy 回调在复制开始前跑，
+// 此刻写入必须已经拦下；迁移结束后写入恢复。
+func TestMoveRootBlocksDataWritesWhileCopying(t *testing.T) {
+	base := t.TempDir()
+	oldRoot := filepath.Join(base, "旧")
+	write(t, filepath.Join(oldRoot, "画板", "板.ugcboard.json"), "{\"format_version\":2,\"nodes\":[]}")
+	statePath := filepath.Join(base, "appdata", "shell-state.json")
+	roots := dataroot.NewRoots(oldRoot)
+	store := localstore.NewFollowing(roots)
+
+	checked := false
+	service := NewWithBusy(roots, statePath, func() string {
+		checked = true
+		if !roots.Moving() {
+			t.Error("复制开始前没有标记迁移中：写入不会被拦下")
+		}
+		if out := store.WriteMeta("settings.json", "{}"); out.OK || out.Kind != localstore.KindMoving {
+			t.Errorf("迁移期间的保存设置结局 = %+v, want kind %q", out, localstore.KindMoving)
+		}
+		if out := store.WriteBoard(filepath.Join(store.BoardDir(), "板.ugcboard.json"), "{\"format_version\":2,\"nodes\":[]}", localstore.WriteOptions{}); out.OK {
+			t.Errorf("迁移期间的保存画板被放行: %+v", out)
+		}
+		return ""
+	})
+
+	out := service.Move(filepath.Join(base, "新"))
+	if !checked {
+		t.Fatal("没走到在途检查：这条测试没覆盖迁移中的写入")
+	}
+	if !out.OK {
+		t.Fatalf("迁移失败: %+v", out)
+	}
+	if roots.Moving() {
+		t.Fatal("迁移结束后仍标记为迁移中：写入会一直被拦下")
+	}
+	if got := service.Status().Moving; got {
+		t.Fatalf("迁移结束后 Status().Moving = %v, want false", got)
+	}
+	if res := store.WriteMeta("settings.json", "{}"); !res.OK {
+		t.Fatalf("迁移结束后写入没有恢复: %+v", res)
+	}
+}
+
+// 迁移失败（目标不空）也要撤掉迁移标记：否则用户之后连设置都存不下去。
+func TestMoveRootFailureClearsMovingFlag(t *testing.T) {
+	base := t.TempDir()
+	oldRoot := filepath.Join(base, "旧")
+	write(t, filepath.Join(oldRoot, "画板", "板.ugcboard.json"), "{\"format_version\":2,\"nodes\":[]}")
+	target := filepath.Join(base, "新")
+	write(t, filepath.Join(target, "已有.txt"), "占位")
+	statePath := filepath.Join(base, "appdata", "shell-state.json")
+	roots := dataroot.NewRoots(oldRoot)
+	service := New(roots, statePath)
+
+	out := service.Move(target)
+	if out.OK {
+		t.Fatalf("目标已有内容时迁移应当失败: %+v", out)
+	}
+	if roots.Moving() {
+		t.Fatal("迁移失败后仍标记为迁移中：写入会一直被拦下")
+	}
+	if err := dataroot.Remember(statePath, oldRoot, ""); err != nil {
+		t.Fatalf("Remember: %v", err)
 	}
 }
