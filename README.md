@@ -32,6 +32,8 @@
 
 桌面壳和本地文件能力使用 Go / MyGo，节点画板使用 React / React Flow。构建、依赖与验证入口见 [构建说明](packaging/README.md)。
 
+Windows x64 当前用户安装器由 release 构建产出 `build/windows-amd64/kacha-setup-<版本>-amd64.exe`，不需要管理员权限；安装器未做 Authenticode 代码签名，首次运行可能出现 SmartScreen 提示。自动更新只在构建内置发布者公钥后开放。首日整体验收的通过项与外部阻塞见 [首日验收记录](docs/release/ACCEPTANCE-165.md)。
+
 产品版本只在 `mygo.config.ts` 声明。[更新说明](docs/release/changelog.md) 描述当前版本的可用能力；[领域词表](GLOSSARY.md) 和 [领域决策](docs/agents/domain.md) 说明画板、任务目录与画板包的语义。
 
 ## 反馈

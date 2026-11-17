@@ -76,3 +76,7 @@ icacls client\target /setintegritylevel '(OI)(CI)M'
 工具是单一 uml-viewer 二进制的 crap / dry / mutate 子命令。先查 `UML_VIEWER_BIN` 指向的文件，再查 DSH 插件 `%USERPROFILE%\.dsh\dsh-uml-viewer\current.json` 记录的版本目录；找不到即失败。前端覆盖率、变异副本与指标落在 `client/target`、`client/.metrics`。变异副本补复制 `../contracts`、`../docs/release` 与 `../mygo.config.ts`；工具必须支持 `--copy`。
 
 PR CI 从 npm 官方 registry 取得固定 `@dsh-uml-viewer/win32-x64@1.0.0`，核对 SHA-512 后只解出可执行文件，通过 `UML_VIEWER_BIN` 传入。该固定版本不支持 mutator 的 `--copy`，仅用于默认 CRAP 与 DRY。
+
+## 首日验收记录
+
+首日整体验收（#165）的通过项、隔离测试发行证据与仍然阻塞的外部条件见 [ACCEPTANCE-165.md](../docs/release/ACCEPTANCE-165.md)。那里分别记录自动测试、构建产物、隔离测试发行、受控网关替身与人工交互证据，不用构建成功或回放替代真实网关与真机安装。

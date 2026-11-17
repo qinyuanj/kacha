@@ -2,6 +2,8 @@
 
 本票交付的是**可重复生成、可审查、可重试**的 Windows x64 发布链；是否已在 Gitea 正式发布、是否完成双版本真机升级，须另有凭据和交互证据，不能由本地构建或脚本测试推定。
 
+首日整体验收（#165）记录见 [ACCEPTANCE-165.md](../docs/release/ACCEPTANCE-165.md)：本地构建与两版本隔离测试发行已验证，正式签名发布与双版本真机升级仍阻塞。
+
 ## 原生安装与更新资产
 
 MyGo 固定在 `go.mod` 的 v0.9.0（ADR 0023）。已用该版本 CLI 核实：`go tool mygo build` 生成 Windows x64 当前用户 NSIS 安装器 `kacha-setup-<版本>-amd64.exe`，无需管理员权限，提供开始菜单入口、可选的桌面快捷方式与设置中的卸载入口；`-skip-installer` 只用于 debug 验证。
