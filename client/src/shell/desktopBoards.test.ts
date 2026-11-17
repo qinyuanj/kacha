@@ -28,6 +28,7 @@ interface BridgeStub {
 function stubBridge(outcomes: { rename?: DesktopOutcome; remove?: DesktopOutcome; write?: DesktopOutcome; archive?: DesktopOutcome; unarchive?: DesktopOutcome } = {}): BridgeStub {
   const calls: BridgeStub["calls"] = { rename: [], remove: [], write: [], archive: [], unarchive: [] };
   const local: DesktopLocalBridge = {
+    pickImages: async () => [],
     readBoard: async () => ({ main: "{}", bak: null, version: "v1" }),
     writeBoard: async (path, text, options) => {
       calls.write.push({ path, text, options });

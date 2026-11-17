@@ -84,6 +84,19 @@ const NOT_READY: ReadonlySet<ReasonKind> = new Set(["positiveMissing", "positive
 
 const reason = (kind: ReasonKind, text: string): UnrunnableReason => ({ kind, category: NOT_READY.has(kind) ? "notReady" : "error", text });
 
+/**
+ * 提交前必须拦下的输入问题（#154）：与任务视图共用同一份判断与文案。
+ * 界面标红说「参考图 4 张超出模型上限 3 张」，提交时也得说同一句话并真的不发请求；
+ * 依赖界面采集事实（缺图、网关发现）的原因不在这里，缺图在读取参考图那一步失败。
+ */
+export function submissionBlockers(board: Board, table: CapabilityTable, taskId: string): UnrunnableReason[] {
+  const task = findTask(board, taskId);
+  const model = task ? findModel(table, task.model) : undefined;
+  if (!task || !model) return [];
+  const refs = imageRefProblems(board, table, taskId);
+  return dedupe([...modelReasons(board, model, task), ...refs.issues.map((text) => reason("referenceOutOfRange", text))]);
+}
+
 export function taskView(board: Board, table: CapabilityTable, taskId: string, facts: TaskFacts): TaskView | null {
   const task = findTask(board, taskId);
   if (!task) return null;
@@ -138,12 +151,15 @@ function enabledToggleReasons(task: TaskNode, layer: string | null, transparent:
   ];
 }
 
+/** 缺图文案：任务视图标红与提交前读取共用一份。 */
+export const missingImageText = (index: number, label: string): string => `图${index + 1} 图片缺失：${label}`;
+
 function imageSourceReasons(board: Board, taskId: string, facts: TaskFacts): UnrunnableReason[] {
   return imageSources(board, taskId, "").flatMap((src, i) => {
     if (src.absPath === null) return [reason("sourceLayerInvalid", `图${i + 1} 来源图层无效：${src.label}`)];
     // 缺图按来源分键：图层线只看自己那层，底图线只看底图，互不株连。
     const key = imageKey(src.nodeId, src.sourceLayer);
-    return facts.missingNodes.has(key) ? [reason("imageMissing", `图${i + 1} 图片缺失：${src.label}`)] : [];
+    return facts.missingNodes.has(key) ? [reason("imageMissing", missingImageText(i, src.label))] : [];
   });
 }
 
