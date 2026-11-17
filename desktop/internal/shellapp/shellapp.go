@@ -12,7 +12,7 @@ import (
 
 // Features 告诉界面哪些可选能力在这个实现里有；没有的入口按「尚不可用」隐藏。
 type Features struct {
-	// Generation 是生成（网关调用）：网关配置、密钥与模型发现已接通，但生成调用还没接上。
+	// Generation 是生成（网关调用）：#152 的配置/密钥/发现与 #153 的单份生成已接通。
 	Generation bool `json:"generation"`
 	// Usage 是用量统计与未引用清理：本地没有配额。
 	Usage bool `json:"usage"`
@@ -20,9 +20,9 @@ type Features struct {
 	PackExport bool `json:"pack_export"`
 }
 
-// DesktopFeatures 返回桌面壳本切片的能力开关：三项都没有。
+// DesktopFeatures 返回桌面壳本切片的能力开关：生成已接通，用量与导出仍未实现。
 func DesktopFeatures() Features {
-	return Features{Generation: false, Usage: false, PackExport: false}
+	return Features{Generation: true, Usage: false, PackExport: false}
 }
 
 // Info 是界面启动时读一次的壳信息。

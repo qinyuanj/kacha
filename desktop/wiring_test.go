@@ -48,6 +48,10 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 			t.Fatalf("复制结局的类型里没有 %q 字段：\n%s", key, src)
 		}
 	}
+	// 结果图的二进制响应字段（#153）：页面按 body_base64 还原字节，少了这个键就会静默损坏图片。
+	if !strings.Contains(src, "body_base64") {
+		t.Fatalf("生成的客户端里没有 body_base64（网关二进制响应没绑上）：\n%s", src)
+	}
 }
 
 // 剪贴板服务的快照字段是页面的约定（client/src/shell/desktop.ts 的 DesktopClipboardSnapshot）：

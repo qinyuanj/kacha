@@ -48,7 +48,7 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
 function ToolbarBody(props: CanvasToolbarProps) {
   const port = useShell();
   if (props.readOnly) return <BoardToolbar disabled />;
-  // 本切片还没做的能力（桌面壳的生成与整理）：入口留着但标成「尚不可用」，不假装能点。
+  // 入口留着但标成「尚不可用」，不假装能点：生成在 #153 已接通，按端口的能力开关说话。
   const generationOff = !port.features.generation;
   // tidy 显式 false 时，整理入口标为尚不可用。
   const tidyOff = port.features.tidy === false;

@@ -1,6 +1,6 @@
 // 画板包菜单的动作（#127）：下载整板结果。
 //
-// 端口可能说这项能力还没有（桌面壳本切片没有生成，也就没有结果可下载）：这时说清「尚不可用」，
+// 端口可能说这项能力还没有（桌面壳还没有整板结果下载）：这时说清「尚不可用」，
 // 不能报成功，也不能让拒绝冒成未捕获异常。成功才说「已开始下载」。
 import { errorText } from "../core/errors";
 import { unavailableMessage, type ShellPort } from "../shell/port";

@@ -3,7 +3,7 @@
 import { FEATURE_LABELS, PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore } from "./port";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
 import type { BoardListing, BoardTexts, BoardWriteOptions, ImageInfo, UsagePort } from "./types";
-import { base64ToBytes } from "../core/base64";
+import { base64Of, base64ToBytes } from "../core/base64";
 import { joinPath } from "../core/paths";
 import type { DirEntry } from "../core/relocate";
 import type { DesktopLocalBridge, DesktopOutcome } from "./desktop";
@@ -78,7 +78,8 @@ export function desktopBoardStore(local: DesktopLocalBridge, userRoot: string): 
 export function desktopFileStore(local: DesktopLocalBridge): FileStore {
   return {
     readFile: (absPath: string): Promise<Uint8Array> => localRun(async () => base64ToBytes(await local.readFile(absPath))),
-    writeNewFile: (absPath: string, bytes: Uint8Array): Promise<void> => localRun(async () => checked(await local.writeNewFile(absPath, bytes))),
+    // 跨 MyGo/JSON 绑定的字节一律走 base64：Uint8Array 直传会变成对象，Go 的 []byte 解不出来。
+    writeNewFile: (absPath: string, bytes: Uint8Array): Promise<void> => localRun(async () => checked(await local.writeNewFileBase64(absPath, base64Of(bytes)))),
     isFile: (absPath: string): Promise<boolean> => localRun(() => local.isFile(absPath)),
     listDir: (absDir: string): Promise<DirEntry[]> =>
       localRun(async () => (await local.listDir(absDir)).map((e) => ({ name: e.name, is_dir: e.is_dir }))),

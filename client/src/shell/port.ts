@@ -39,6 +39,11 @@ export interface ShellFeatures {
    * 未声明时按可用处理。
    */
   readonly tidy?: boolean;
+  /**
+   * 下载整板结果（打包并下载）：与生成是两项能力（#160 交付导出与整板结果保存）。
+   * 未声明时按可用处理；桌面壳还没实现时明确写 false，菜单入口标「尚不可用」。
+   */
+  readonly downloadResults?: boolean;
 }
 
 /** 端口失败的类别：界面只按它分支。 */
@@ -99,7 +104,7 @@ export function portFailureOf(error: unknown): PortFailure {
 /**
  * 端口说这项能力还没有时给用户的说法（#127）；不是 unavailable 就返回 null。
  *
- * 桌面壳本切片没有生成、结果下载、画板包导出等能力：调用点拿到 unavailable 时要说清「还没做」，
+ * 桌面壳本切片没有结果下载、画板包导出等能力：调用点拿到 unavailable 时要说清「还没做」，
  * 不能报成功，也不能把内部错误原文丢给用户。其它失败按各自的错误类别显示。
  */
 export function unavailableMessage(error: unknown): string | null {

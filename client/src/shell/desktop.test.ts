@@ -34,7 +34,7 @@ describe("桌面壳端口", () => {
   it("本切片没有的能力在 features 里都是关的", async () => {
     const { port } = await createDesktopPort(fakeBridge());
     // packImport（#131）也关着：这个假桥上没有 Pack 服务，导入无从谈起。
-    expect(port.features).toEqual({ generation: false, usage: false, packExport: false, packImport: false, tidy: false });
+    expect(port.features).toEqual({ generation: false, usage: false, packExport: false, packImport: false, tidy: false, downloadResults: false });
   });
 
   it("生成报 unavailable，并带上能力名", async () => {
@@ -49,6 +49,31 @@ describe("桌面壳端口", () => {
       expect(failure.message).toContain("生成");
       expect(failure.message).toContain(UNAVAILABLE_TEXT);
     }
+  });
+
+  it("生成能力打开时，生成请求走 Gateway 绑定", async () => {
+    const calls: string[] = [];
+    const bridge = fakeBridge({ features: { generation: true, usage: false, pack_export: false } });
+    const withGateway: DesktopBridge = {
+      ...bridge,
+      gateway: {
+        request: async (url) => { calls.push(url); return { status: 200, headers: {}, body: "{}" }; },
+        readApiKey: async () => "",
+        writeApiKey: async () => undefined,
+        deleteApiKey: async () => undefined,
+      },
+    };
+    const { port } = await createDesktopPort(withGateway);
+    expect(port.features.generation).toBe(true);
+    const response = await port.core.runDeps.fetch("http://gw/v1/models", { method: "GET", headers: {} });
+    expect(response.status).toBe(200);
+    expect(calls).toEqual(["http://gw/v1/models"]);
+  });
+
+  it("生成能力打开但桥上没有 Gateway 时明确报不可用，不空成功", async () => {
+    const bridge = fakeBridge({ features: { generation: true, usage: false, pack_export: false } });
+    const { port } = await createDesktopPort(bridge);
+    await expect(port.core.runDeps.fetch("http://gw/v1/models", { method: "GET", headers: {} })).rejects.toMatchObject({ kind: "unavailable", feature: "gateway" });
   });
 
   it("用量与画板包导出同样报 unavailable，不假装成功", async () => {
