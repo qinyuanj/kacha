@@ -39,6 +39,8 @@ export interface ShellFeatures {
    * 未声明时按可用处理。
    */
   readonly tidy?: boolean;
+  /** 归档与取消归档：由本机存储执行只读与画板位约束；未声明时按不可用处理。 */
+  readonly archive?: boolean;
 }
 
 /** 端口失败的类别：界面只按它分支。 */

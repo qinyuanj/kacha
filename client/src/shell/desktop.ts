@@ -2,7 +2,7 @@
 //
 // 界面只认 ShellPort（见 shell/port.ts），本文件负责 MyGo 桌面实现。
 // 画板、文件与元数据经 MyGo 绑定（Go 侧 internal/localstore 与 internal/localservice）落到本机数据根；
-// 本切片还没有的能力（生成、用量、画板包导出、归档、整理、结果中转）按 features 关掉，
+// 本切片还没有的能力（生成、用量、画板包导出、整理、结果中转）按 features 关掉，
 // 调用时以 kind: "unavailable" 拒绝：界面据此标「尚不可用」，不失败得更晚，也不伪装成功。
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
@@ -41,7 +41,7 @@ export interface DesktopInfo {
   version: string;
   user_data_root: string;
   board_root: string;
-  features: { generation: boolean; usage: boolean; pack_export: boolean };
+  features: { generation: boolean; usage: boolean; pack_export: boolean; archive?: boolean };
 }
 
 /** Go 侧本地能力（Local 服务）：方法名与 Go 侧绑定名一致。 */
@@ -52,6 +52,8 @@ export interface DesktopLocalBridge {
   listBoards(): Promise<DesktopBoardListing>;
   renameBoard(from: string, to: string, version?: string): Promise<DesktopOutcome>;
   deleteBoard(path: string, version?: string): Promise<DesktopOutcome>;
+  archiveBoard(from: string, to: string, version?: string): Promise<DesktopOutcome>;
+  unarchiveBoard(from: string, to: string): Promise<DesktopOutcome>;
   readFile(path: string): Promise<string>;
   writeNewFile(path: string, bytes: Uint8Array): Promise<DesktopOutcome>;
   /** 与 writeNewFile 相同，字节以 base64 传（Uint8Array 在 JSON 里解不进 Go 的 []byte）。 */
@@ -266,6 +268,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     packExport: info.features.pack_export,
     // 画板包导入（#131）在本机做：桥上有 Pack 服务就能导入（导入与导出是两项能力）。
     packImport: bridge.pack !== undefined,
+    // 归档由 Go 本机存储执行（20 画板位与只读都落在服务端），已接通。
+    archive: info.features.archive ?? false,
     // 整理模式本切片还没实现（度量画板体量留给后续切片）。
     tidy: false,
   };

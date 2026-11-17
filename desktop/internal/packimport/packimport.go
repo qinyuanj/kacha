@@ -64,6 +64,8 @@ const (
 	KindInvalid = "invalid"
 	// KindConflict 是画板提交撞上同名或本地画板已在别处改动。
 	KindConflict = "conflict"
+	// KindSlotsFull 是可编辑画板位已满：本机存储拒绝新建，导入不能绕过。
+	KindSlotsFull = "slotsFull"
 	// KindFailed 是本地写入失败。
 	KindFailed = "failed"
 	// KindCancelled 是用户取消了导入：已移入的任务目录保留，画板不再写入。
@@ -603,6 +605,8 @@ func (im *Importer) commitBoards(boards []packBoard) ([]string, error) {
 				kind = KindConflict
 			case localstore.KindInvalid:
 				kind = KindInvalid
+			case localstore.KindSlotsFull:
+				kind = KindSlotsFull
 			}
 			return nil, &Error{Kind: kind, Step: StepBoards, Message: "画板没有写入：" + result.Message}
 		}

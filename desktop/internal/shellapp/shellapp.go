@@ -18,11 +18,13 @@ type Features struct {
 	Usage bool `json:"usage"`
 	// PackExport 是画板包导出：导入是本地能力，导出还没实现。
 	PackExport bool `json:"pack_export"`
+	// Archive 是归档与取消归档：本机存储执行画板位与只读约束，端口已接通。
+	Archive bool `json:"archive"`
 }
 
-// DesktopFeatures 返回桌面壳本切片的能力开关：三项都没有。
+// DesktopFeatures 返回桌面壳本切片的能力开关：归档已接通，生成 / 用量 / 导出仍未实现。
 func DesktopFeatures() Features {
-	return Features{Generation: false, Usage: false, PackExport: false}
+	return Features{Generation: false, Usage: false, PackExport: false, Archive: true}
 }
 
 // Info 是界面启动时读一次的壳信息。

@@ -9,10 +9,12 @@ import type { DirEntry } from "../core/relocate";
 import type { DesktopLocalBridge, DesktopOutcome } from "./desktop";
 
 /** Go 侧的失败类别 → 端口失败类别；未列出的按 failed 处理（消息保持原文）。 */
-const KIND_BY_GO: Record<string, "conflict" | "missing" | "alreadyExists" | "invalid" | "failed"> = {
+const KIND_BY_GO: Record<string, "conflict" | "missing" | "alreadyExists" | "slotsFull" | "archived" | "invalid" | "failed"> = {
   conflict: "conflict",
   missing: "missing",
   alreadyExists: "alreadyExists",
+  slotsFull: "slotsFull",
+  archived: "archived",
   invalid: "invalid",
 };
 
@@ -56,8 +58,10 @@ export function desktopBoardStore(local: DesktopLocalBridge, userRoot: string): 
       localRun(async () => checked(await local.writeBoard(path, text, { version: options?.version, create_only: options?.createOnly }))),
     rename: (from: string, to: string, version?: string): Promise<void> => localRun(async () => checked(await local.renameBoard(from, to, version))),
     remove: (path: string, version?: string): Promise<void> => localRun(async () => checked(await local.deleteBoard(path, version))),
-    archive: async (): Promise<void> => unavailable("archive"),
-    unarchive: async (): Promise<void> => unavailable("archive"),
+    archive: (from: string, to: string, version?: string): Promise<void> =>
+      localRun(async () => checked(await local.archiveBoard(from, to, version))),
+    unarchive: (from: string, to: string): Promise<void> =>
+      localRun(async () => checked(await local.unarchiveBoard(from, to))),
     listNames: (dir: string): Promise<string[]> => localRun(() => local.listBoardNames(dir)),
     list: (): Promise<BoardListing> =>
       localRun(async () => {
