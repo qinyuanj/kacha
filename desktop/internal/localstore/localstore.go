@@ -16,6 +16,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/qinyuanj/kacha/desktop/internal/boardmeasure"
 )
 
 const (
@@ -398,7 +400,7 @@ func (s *Store) List() (BoardListing, error) {
 				Name:     name,
 				Path:     s.rel(full),
 				Archived: spec.archived,
-				Bytes:    nil,
+				Bytes:    s.bodySize(full),
 			})
 			if !spec.archived {
 				listing.Slots.Used++
@@ -406,6 +408,20 @@ func (s *Store) List() (BoardListing, error) {
 		}
 	}
 	return listing, nil
+}
+
+// bodySize 量一块画板的体量（#158）：引用的任务目录与独立图片各计一次，主文件读不懂时按 .bak 算。
+// 主文件与备份都读不懂时为 nil —— 体量未知，不当成 0，也不等同于按内容去重后的画板包大小。
+func (s *Store) bodySize(abs string) *int64 {
+	text := func(path string) *string {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		value := string(data)
+		return &value
+	}
+	return boardmeasure.BoardBytes(s.root, text(abs), text(abs+".bak"))
 }
 
 // RenameBoard 改画板名：主文件与 .bak 一起搬；目标已存在（含只剩 .bak 的孤儿）则拒绝。

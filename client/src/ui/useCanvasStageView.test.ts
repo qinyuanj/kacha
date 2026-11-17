@@ -224,6 +224,8 @@ describe("整理模式的度量", () => {
 
     await show(propsOf(board, { tidying: true }));
     expect(shell.measureBoard).toHaveBeenCalledWith(serializeBoard(board));
+    // 进入整理只是量：不写画板，不产生撤销步。
+    expect(applied).toEqual([]);
     expect(view.tidyMeasure.measure).toEqual(MEASURE);
     expect(view.tidyMeasure.before).toBe(boardBytes(MEASURE));
 

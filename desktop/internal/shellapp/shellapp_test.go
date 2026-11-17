@@ -11,8 +11,8 @@ import (
 // 桌面壳的能力开关：画板包导出、本机用量与单份生成都已接通。
 func TestDesktopFeatures(t *testing.T) {
 	f := DesktopFeatures(true)
-	if !f.Generation || !f.Usage || !f.PackExport {
-		t.Fatalf("features = %+v, want generation/usage/pack_export on", f)
+	if !f.Generation || !f.Usage || !f.PackExport || !f.Archive || !f.Tidy {
+		t.Fatalf("features = %+v, want generation/usage/pack_export/archive/tidy on", f)
 	}
 }
 

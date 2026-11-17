@@ -84,6 +84,16 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 	if !strings.Contains(src, "body_base64") {
 		t.Fatalf("生成的客户端里没有 body_base64（网关二进制响应没绑上）：\n%s", src)
 	}
+	// 整理模式的度量（#158）：页面按 Local.MeasureBoard(画板原文) 调用，读 nodes / dirs 两个键。
+	// 少绑这个方法，整理模式在桌面壳里只能显示「正在计算体量…」，体量永远是未知。
+	if !strings.Contains(src, "measureBoard") {
+		t.Fatalf("生成的客户端里没有 measureBoard（整理模式的度量没绑上）：\n%s", src)
+	}
+	for _, key := range []string{"nodes", "dirs"} {
+		if !strings.Contains(src, key) {
+			t.Fatalf("度量的类型里没有 %q 字段：\n%s", key, src)
+		}
+	}
 }
 
 // 剪贴板服务的快照字段是页面的约定（client/src/shell/desktop.ts 的 DesktopClipboardSnapshot）：
@@ -113,10 +123,10 @@ func TestRegisterAssetProtocol(t *testing.T) {
 	}
 }
 
-// 桌面壳的能力开关：画板包导出（#160）、本机用量（#159）与单份生成（#153）都已接通。
+// 桌面壳的能力开关：画板包导出（#160）、本机用量（#159）、单份生成（#153）与整理（#158）都已接通。
 func TestDesktopFeaturesEnableUsagePackExportAndGeneration(t *testing.T) {
 	features := shellapp.DesktopFeatures(true)
-	if !features.Usage || !features.PackExport || !features.Generation {
-		t.Fatalf("本机用量、画板包导出与单份生成都已实现，能力开关必须打开：%+v", features)
+	if !features.Usage || !features.PackExport || !features.Generation || !features.Tidy {
+		t.Fatalf("本机用量、画板包导出、单份生成与整理都已实现，能力开关必须打开：%+v", features)
 	}
 }

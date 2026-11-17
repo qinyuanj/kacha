@@ -120,6 +120,10 @@ export const TIDY_TEXT = {
   enter: "整理",
   done: "完成",
   measuring: "正在计算体量…",
+  /** 量不出来时照实说：读不出画板或读盘失败，不显示成 0。 */
+  measureFailed: "体量暂时算不出",
+  /** 整理模式下阶段体量的未知占位。 */
+  sizeUnknown: "未知",
   /** 顶部整理前后的体量对比。 */
   compare: (before: number, now: number) => `整理前${approxSizeText(before)} → 现在${approxSizeText(now)}`,
   /** 阶段框上的动作。 */

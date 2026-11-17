@@ -76,10 +76,11 @@ describe("仓库里的更新说明与桌面版本", () => {
     const section = parseChangelog(notes).find((v) => v.version === desktop);
     expect(section, `docs/release/changelog.md 缺少当前版本 ${desktop} 的一节`).toBeDefined();
     expect(section!.groups.flatMap((g) => g.items).length, `docs/release/changelog.md 中 ${desktop} 一节没有条目`).toBeGreaterThan(0);
-    // 当前版本一节要说清已接通与仍不可用的能力（#153 起单份文生图已接通，整理仍未实现）。
+    // 当前版本一节要说清已接通与仍不可用的能力（#153 起单份文生图已接通，#158 起整理已接通，参考图编辑仍未实现）。
     const currentText = JSON.stringify(section!.groups);
     expect(currentText).toContain("单份文生图");
-    expect(currentText).toContain("整理尚不可用");
+    expect(currentText).toContain("整理");
+    expect(currentText).toContain("参考图编辑尚不可用");
   });
 
   it("恢复全部可查版本，按新在前排列且不重复、不缺漏", () => {

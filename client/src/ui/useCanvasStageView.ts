@@ -37,6 +37,7 @@ export function useStageTidy({ board, boardRef, tidying, tidyMeasure, apply, toa
     const stageNodes = (id: string) => stagesOf(board).find((s) => s.id === id)?.nodes ?? [];
     return {
       bytes: (id) => (measure ? nodesBytes(measure, stageNodes(id)) : null),
+      sizeFailed: tidyMeasure.failed === true,
       prunable: (id) => prunableResults(board, [id]).length,
       keepable: (id) => stageNodes(id).filter((nodeId) => suggested.has(nodeId)).length,
       onKeep: (id) => {

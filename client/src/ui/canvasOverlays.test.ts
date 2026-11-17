@@ -191,6 +191,12 @@ describe("CanvasOverlays", () => {
     expect(props.onTidyDone).toHaveBeenCalledTimes(1);
   });
 
+  it("整理条：量不出来时说暂时算不出，不写成一个数", async () => {
+    await show(createElement(CanvasOverlays, overlays({ tidying: true, tidyMeasure: { measure: null, before: null, failed: true } })));
+    expect(container.querySelector(".tidy-bar")?.textContent).toContain(TIDY_TEXT.measureFailed);
+    expect(container.querySelector(".tidy-bar")?.textContent).not.toContain(TIDY_TEXT.measuring);
+  });
+
   it("上下文菜单落在右键处的窗口坐标上，点条目交给画布执行并关掉菜单", async () => {
     const props = overlays({ menu: MENU, menuEntries: MENU_ITEMS });
     await show(createElement(CanvasOverlays, props));
