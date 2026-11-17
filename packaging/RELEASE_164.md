@@ -36,6 +36,62 @@
 在这些条件具备之前，`desktop/internal/updateservice/publisher_key.txt` 保持只有注释，
 构建出的客户端会把更新入口显示为「尚不可用」，端口以 `kind: "unavailable"` 拒绝调用。
 
+## 外部阻塞：现有签名密钥不能直接复用（2026-11-17 核实）
+
+本机 `~/.kacha/updater/` 下确实有一对签名密钥，但它们**不是** MyGo 的 Ed25519 密钥，
+不能直接拿来给更新资产签名：
+
+| 文件 | 实测 | MyGo 期望 | 结论 |
+| --- | --- | --- | --- |
+| `signing.key` | 348 字节 base64 → 解码 **259** 字节 | 64 字节 Ed25519 私钥（base64 共 88 字符）| 格式不符 |
+| `signing.key.pub` | 152 字节 base64 → 解码 **114** 字节 | 32 字节公钥（base64 共 44 字符）| 格式不符 |
+
+这对应早期 Tauri 版本（ADR 0016/0017）用的 rsign 加密密钥容器，不是本切片需要的
+`go tool mygo keygen` 产物。用仓库里的签名工具直接跑，会得到明确的拒绝而不是静默出错：
+
+```
+签名失败：私钥长度是 259，期望 64（mygo keygen 的 mygo-update.key）
+```
+
+### 因此当前构建的状态
+
+- `desktop/internal/updateservice/publisher_key.txt` 只有注释、**没有任何 key**，
+  所以 `PublisherKey()` 返回空串 → `shellapp.DesktopFeatures(hasPublisherKey)` 得到
+  `Features.Update = false` → 页面更新入口整段不显示，端口调用以 `kind: "unavailable"` 拒绝。
+- 这是**刻意保留的诚实状态**：没有可信公钥就不放开一条无法验签的更新路径，
+  也不退化成「只比对哈希」。
+
+### 恢复步骤（在发布环境）
+
+1. `go tool mygo keygen` 生成**新**的 Ed25519 密钥对（`mygo-update.key` / `mygo-update.pub`）。
+   旧 rsign 密钥不能迁移，也不需要保留。
+2. 把 `mygo-update.pub` 的内容（单行 base64）覆盖写进
+   `desktop/internal/updateservice/publisher_key.txt`，替换掉注释行。
+3. 重新构建客户端；此时 `PublisherKey()` 非空，`Features.Update` 才会为 `true`。
+4. 私钥**只**放在发布环境：用 `MYGO_UPDATER_PRIVATE_KEY` 注入，或写进 `updates.privateKey`
+   指向的路径。**不要**放进仓库、构建产物或发行资产。
+5. 按上文「发布步骤」签名并上传。
+
+### 仓库里没有私钥
+
+- `publisher_key.txt` 只有注释：`grep -v "^#" | grep -c "[^[:space:]]"` 为 `0`。
+- 受版本控制的文件里没有任何 `*.key` / `*.pem`；提交历史里也从未加入过密钥文件。
+- 已核对：仓库中**没有**任何文件的 SHA-256 与本机 `signing.key` / `signing.key.pub` 相同；
+  本次提交的 45 个文件里也没有出现私钥形状的 base64 串。
+- 测试里的密钥全部在运行时用 `ed25519.GenerateKey` 生成，没有任何硬编码密钥常量。
+
+### 没有公钥时的行为（已用测试固定）
+
+- `New()` 在公钥为空时直接返回 `PhaseDisabled` 并带上原因，**不 panic**；
+  `ParsePublicKey` 失败同样落到 `PhaseDisabled`。整个包没有任何 `panic(` 调用点。
+- `Check()` 在 `!Enabled()` 时立即返回，不发网络请求、不改快照。
+- `Install()` 在非 `ready` / 未验签时返回错误「更新尚未验签通过，不能安装」，不起安装器。
+- `Installable` 只在 `Verify()` 通过之后置真（`service.go:284`）；
+  唯一另一处置真（`service.go:451`）是「启动安装器失败后回滚到已验签状态」，
+  前提是这次包刚刚验签通过——不存在「没验签却说能装」的路径。
+- 对应测试：`TestWithoutPublisherKeyUpdatesAreUnavailable`、
+  `TestInstallRefusesBeforeAnyVerifiedPackage`、`TestTamperedSignatureIsNotInstallable`。
+
 ## 发布步骤（发布环境）
 
 ```powershell
