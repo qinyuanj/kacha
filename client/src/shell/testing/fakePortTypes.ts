@@ -2,7 +2,7 @@
 import type { ImportOptions } from "../../core/boardPack";
 import type { BoardWriteOptions } from "../types";
 import type { ClipboardContent, ImageCopyResult } from "../port";
-import type { FeatureId, PortFailureKind } from "../port";
+import type { DiagnosticsOutcome, FeatureId, PortFailureKind } from "../port";
 
 export interface FakeBoard {
   path: string;
@@ -44,6 +44,8 @@ export interface FakePortOptions {
   files?: Record<string, Uint8Array>;
   /** 文件组已有的目录：listDir 用它判断目录在不在（缺省由一个文件路径推出来）。 */
   dirs?: string[];
+  /** 诊断包导出的脚本化结局（缺省成功）。 */
+  diagnosticsOutcome?: DiagnosticsOutcome;
 }
 
 /** 替身记下的调用：断言界面把结局传出去时用。 */
@@ -71,4 +73,5 @@ export interface FakeCalls {
   downloadImage?: string[];
   downloadBoardResults?: string[];
   writeNewFile?: { absPath: string; bytes: Uint8Array }[];
+  exportDiagnostics: number;
 }

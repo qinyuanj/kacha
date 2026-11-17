@@ -47,6 +47,7 @@ export function emptyFakeCalls(): FakeCalls {
     pickPackFile: [],
     saveCopyAs: [],
     log: [],
+    exportDiagnostics: 0,
     uploadReference: [],
     inspectImage: [],
     list: 0,
@@ -100,7 +101,7 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
   const meta = fakeMetaStore(calls);
   const media = fakeMediaStore(options, calls, pickImages, pickPacks);
   const pack = fakePackStore(imports, calls);
-  const ui = fakeUiStore(calls);
+  const ui = fakeUiStore(calls, options);
   const usage = fakeUsageStore(new Set<string>(missing));
   const core = fakeCorePorts(files, meta);
 
@@ -112,6 +113,7 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
       packExport: !missing.has("packExport"),
       // 导入与导出是两项能力（#131）：替身默认都有。
       packImport: !missing.has("packImport"),
+      diagnostics: !missing.has("diagnostics"),
       archive: !missing.has("archive"),
     },
     board,

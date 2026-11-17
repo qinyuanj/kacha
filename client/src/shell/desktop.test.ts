@@ -34,7 +34,7 @@ describe("桌面壳端口", () => {
   it("未实现的能力在 features 里关着；归档已接通", async () => {
     const { port } = await createDesktopPort(fakeBridge());
     // packImport（#131）也关着：这个假桥上没有 Pack 服务，导入无从谈起。
-    expect(port.features).toEqual({ generation: false, usage: false, packExport: false, packImport: false, tidy: false, archive: true });
+    expect(port.features).toEqual({ generation: false, usage: false, packExport: false, packImport: false, tidy: false, diagnostics: false, archive: true });
   });
 
   it("生成报 unavailable，并带上能力名", async () => {

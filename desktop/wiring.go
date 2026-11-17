@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo"
 
 	"github.com/qinyuanj/kacha/desktop/internal/clipboard"
+	"github.com/qinyuanj/kacha/desktop/internal/diagnostics"
 	"github.com/qinyuanj/kacha/desktop/internal/gateway"
 	"github.com/qinyuanj/kacha/desktop/internal/localservice"
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
@@ -32,7 +33,17 @@ func bindServices(shell *shellapp.Shell, root string) {
 	mygo.BindAs("Pack", packservice.New(root))
 	// Gateway 在本机发网关请求并把密钥交给 Windows 系统保护（#152）：
 	// 密钥文件落在同一份数据根，不按凭据分身份。
-	mygo.BindAs("Gateway", gateway.New(filepath.Join(root, "api-key.protected")))
+	gw := gateway.New(filepath.Join(root, "api-key.protected"))
+	mygo.BindAs("Gateway", gw)
+	// Diagnostics 只从 Gateway 读「当前有没有密钥」用于脱敏（#162）：
+	// 它拿到的只是临时字符串，用于把同值从日志与包里替换掉，不缓存、不写出。
+	mygo.BindAs("Diagnostics", diagnostics.New(shell.Version(), root, func() []string {
+		key, err := gw.ReadApiKey()
+		if err != nil || key == "" {
+			return nil
+		}
+		return []string{key}
+	}))
 }
 
 // assetScheme 是页面读数据根里本机文件（图片）用的自定义协议。

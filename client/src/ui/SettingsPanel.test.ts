@@ -166,3 +166,36 @@ describe("高级设置面板", () => {
     expect(container.textContent).toContain("settings.json 已损坏");
   });
 });
+
+describe("诊断包导出（#162）", () => {
+  it("有诊断能力时显示导出入口，点一次只导出一次", async () => {
+    const port = createFakePort();
+    await show(port);
+    await act(async () => buttonWithText("导出诊断包").click());
+    expect(port.calls.exportDiagnostics).toBe(1);
+  });
+
+  it("没有诊断能力时不显示入口，不用空按钮冒充交付", async () => {
+    const port = createFakePort({ missing: ["diagnostics"] });
+    await show(port);
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent?.trim() === "导出诊断包")).toBe(false);
+  });
+
+  it("用户取消没有成功提示，只给中性说明", async () => {
+    const port = createFakePort({ diagnosticsOutcome: { kind: "cancelled" } });
+    await show(port);
+    await act(async () => buttonWithText("导出诊断包").click());
+    await act(async () => undefined);
+    expect(container.textContent).not.toContain("已导出");
+    expect(container.textContent).not.toContain("已保存");
+    expect(container.textContent).toContain("已取消");
+  });
+
+  it("目标不可写或采集失败：显示明确原因", async () => {
+    const port = createFakePort({ diagnosticsOutcome: { kind: "failed", message: "写入诊断包失败：拒绝访问" } });
+    await show(port);
+    await act(async () => buttonWithText("导出诊断包").click());
+    await act(async () => undefined);
+    expect(container.textContent).toContain("写入诊断包失败：拒绝访问");
+  });
+});

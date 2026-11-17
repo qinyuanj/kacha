@@ -20,7 +20,7 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults";
+export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
@@ -39,6 +39,8 @@ export interface ShellFeatures {
    * 未声明时按可用处理。
    */
   readonly tidy?: boolean;
+  /** 脱敏诊断采集与诊断包导出：只有真实 Diagnostics 绑定在桥上时才开。 */
+  readonly diagnostics?: boolean;
   /** 归档与取消归档：由本机存储执行只读与画板位约束；未声明时按不可用处理。 */
   readonly archive?: boolean;
 }
@@ -128,6 +130,7 @@ export const FEATURE_LABELS: Record<FeatureId, string> = {
   saveImage: "另存为",
   downloadImage: "下载图片",
   downloadResults: "下载整板结果",
+  diagnostics: "诊断包导出",
 };
 
 // ---- 端口分组 ----
@@ -237,6 +240,12 @@ export interface PackStore {
   exportPack(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number; target?: string }>;
 }
 
+/** 诊断包导出的类型化结局：取消没有成功提示，失败带可显示的原因。 */
+export type DiagnosticsOutcome =
+  | { kind: "saved"; bytes: number }
+  | { kind: "cancelled" }
+  | { kind: "failed"; message: string };
+
 /** 宿主交互：确认框、提示、下载进度、外链、版本、日志、页面输入判定。 */
 export interface UiStore {
   ask(message: string, options?: BrowserOptions): Promise<boolean>;
@@ -244,8 +253,10 @@ export interface UiStore {
   onPackProgress(handler: (progress: { done: number; total: number }) => void): Promise<() => void>;
   openExternal(url: string): void;
   version(): Promise<string>;
-  /** 脱敏日志；实现可以静默丢弃。 */
+  /** 脱敏日志；桌面实现把它交给 Go 的有界缓冲，不在前端存明文。 */
   log(kind: LogKind, fields: Record<string, unknown>): void;
+  /** 导出脱敏诊断包，目标由本机「另存为」对话框选。 */
+  exportDiagnostics(): Promise<DiagnosticsOutcome>;
   /** 焦点 / 点击是否落在可编辑控件里（方向键与编辑类快捷键留给控件）。 */
   isEditableTarget(target: EventTarget | null): boolean;
   /** 装上页面级输入接管（#97），返回卸载函数。 */

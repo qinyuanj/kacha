@@ -7,7 +7,7 @@
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
 // 各组实现（画板、文件、元数据、媒体、画板包、用量）在 shell/desktopStores.ts（#137），这里只做接线。
-import { PortError, portFailureOf, type ClipboardContent, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort } from "./port";
+import { PortError, portFailureOf, type ClipboardContent, type DiagnosticsOutcome, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort } from "./port";
 import type { PackEntryFact, PackExportSpec } from "../core/boardPack";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
 import type { BrowserOptions, ImageInfo, RecycleEntry, UsageCandidate, UsagePort } from "./types";
@@ -242,6 +242,20 @@ export interface DesktopGatewayBridge {
   deleteApiKey(): Promise<void>;
 }
 
+/** Go 侧诊断结局（Diagnostics.Export）：页面按 ok / kind / message / bytes 折成类型化结局。 */
+export interface DesktopDiagnosticsOutcome {
+  ok: boolean;
+  kind: string;
+  message: string;
+  bytes: number;
+}
+
+/** Go 侧诊断服务（Diagnostics 服务，#162）：脱敏日志入有界缓冲，导出交给本机对话框。 */
+export interface DesktopDiagnosticsBridge {
+  log(kind: string, fields: Record<string, string>): void;
+  export(): Promise<DesktopDiagnosticsOutcome>;
+}
+
 /** MyGo 桥：Go 侧绑定与测试替身都满足它。 */
 export interface DesktopBridge {
   info(): Promise<DesktopInfo>;
@@ -252,6 +266,8 @@ export interface DesktopBridge {
   pack?: DesktopPackBridge;
   /** 网关与密钥（#152）；没有这一项的替身按「尚不可用」处理。 */
   gateway?: DesktopGatewayBridge;
+  /** 脱敏诊断采集与导出（#162）；没有这一项时能力关闭、导出明确不可用。 */
+  diagnostics?: DesktopDiagnosticsBridge;
   /** 本机用量与回收（#159）；没有这一项的替身按「尚不可用」处理。 */
   usage?: DesktopUsageBridge;
 }
@@ -355,6 +371,26 @@ function copyFailureOf(kind: string): ImageCopyFailure {
   return COPY_FAILURE_BY_GO[kind] ?? "failed";
 }
 
+
+/** 把结构化日志字段折成 Go 能收的字符串；脱敏由 Go 侧统一做，页面不碰秘密。 */
+function logFields(fields: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (typeof value === "string") out[key] = value;
+    else if (typeof value === "number" || typeof value === "boolean") out[key] = String(value);
+    else if (value === null || value === undefined) out[key] = "";
+    else out[key] = JSON.stringify(value);
+  }
+  return out;
+}
+
+/** Go 的诊断结局 → 端口结局：只有 ok 才是成功，取消与失败都不冒充成功。 */
+function diagnosticsOutcomeOf(outcome: DesktopDiagnosticsOutcome): DiagnosticsOutcome {
+  if (outcome.ok) return { kind: "saved", bytes: outcome.bytes };
+  if (outcome.kind === "cancelled") return { kind: "cancelled" };
+  return { kind: "failed", message: outcome.message || "导出诊断包失败" };
+}
+
 /** 造桌面壳端口：读一次壳信息，之后都从这份快照回答。 */
 export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopShell> {
   const info = await bridge.info();
@@ -369,6 +405,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     archive: info.features.archive ?? false,
     // 整理模式本切片还没实现（度量画板体量留给后续切片）。
     tidy: false,
+    // 诊断包导出（#162）：桥上有真实 Diagnostics 服务才开放。
+    diagnostics: bridge.diagnostics !== undefined,
   };
 
   const board = desktopBoardStore(local, info.user_data_root);
@@ -409,7 +447,13 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
       window.open(url, "_blank", "noopener");
     },
     version: (): Promise<string> => Promise.resolve(info.version),
-    log: (_kind: LogKind, _fields: Record<string, unknown>): void => {},
+    log: (kind: LogKind, fields: Record<string, unknown>): void => {
+      bridge.diagnostics?.log(kind, logFields(fields));
+    },
+    exportDiagnostics: (): Promise<DiagnosticsOutcome> => {
+      if (!bridge.diagnostics) return Promise.reject(unavailable("diagnostics"));
+      return bridge.diagnostics.export().then(diagnosticsOutcomeOf);
+    },
     isEditableTarget,
     installInputTakeover: installPageInputTakeover,
   };
@@ -455,7 +499,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
         readModelsCache: meta.readModelsCache,
         writeModelsCache: meta.writeModelsCache,
         now: () => new Date(),
-        log: (): void => {},
+        // 网关连接日志（#162）：走同一条脱敏采集通道，连接测试失败这类信息才能进诊断包。
+        log: (kind, fields) => bridge.diagnostics?.log(kind, logFields(fields)),
       },
     },
   };
