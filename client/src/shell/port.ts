@@ -20,7 +20,7 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics" | "update";
+export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics" | "update" | "dataRoot";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
@@ -48,6 +48,11 @@ export interface ShellFeatures {
    * 只有内置发布者公钥的发布构建才为 true；未声明时按不可用处理。
    */
   readonly update?: boolean;
+  /**
+   * 本机数据位置迁移（#161）：只有真实的 Storage 绑定在桥上时才开。
+   * 未声明时按不可用处理——没有实现就不能出现「迁移」入口。
+   */
+  readonly dataRoot?: boolean;
 }
 
 /** 端口失败的类别：界面只按它分支。 */
@@ -137,6 +142,7 @@ export const FEATURE_LABELS: Record<FeatureId, string> = {
   downloadResults: "下载整板结果",
   diagnostics: "诊断包导出",
   update: "自动更新",
+  dataRoot: "本机数据位置",
 };
 
 // ---- 端口分组 ----
@@ -269,6 +275,32 @@ export interface UiStore {
   installInputTakeover(): () => void;
 }
 
+/** 数据位置的状态：页面显示当前数据根与迁移进度。 */
+export interface DataRootStatus {
+  root: string;
+  /** 正在迁移：期间拒绝新的迁移，页面也拦下会与迁移冲突的操作。 */
+  moving: boolean;
+  done: number;
+  total: number;
+}
+
+/** 迁移的结局：成功带新数据根，取消是中性结局，失败带类别化 PortError。 */
+export type DataRootMoveResult = { root: string; files: number; bytes: number };
+
+/**
+ * 本机数据位置（#161）：选目标、迁移、报告状态。
+ *
+ * 迁移由 Go 完成：复制并校验全部内容成功之后才原子切换数据根记录，旧位置一直可用。
+ * 页面只负责「拦下会打架的操作、选目标、看一眼进度」。
+ */
+export interface DataRootStore {
+  status(): Promise<DataRootStatus>;
+  /** 让用户选一个新的数据位置；取消时返回空串。 */
+  pick(): Promise<string>;
+  /** 迁到 target；失败抛类型化 PortError。 */
+  move(target: string): Promise<DataRootMoveResult>;
+}
+
 /** core/ 的端口由壳层组合好交出去：core 的接口不变，界面只从端口取。 */
 export interface CorePorts {
   taskFs: TaskFs;
@@ -315,4 +347,6 @@ export interface ShellPort {
   /** 可信自动更新；实现不可用时以 kind: "unavailable" 拒绝。 */
   readonly update: UpdatePort;
   readonly core: CorePorts;
+  /** 本机数据位置迁移（#161）；没有这一项的实现在 features.dataRoot 上明确关掉。 */
+  readonly dataRoot: DataRootStore;
 }

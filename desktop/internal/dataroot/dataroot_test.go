@@ -124,3 +124,57 @@ func TestResolveKeepsSingleRoot(t *testing.T) {
 		t.Fatalf("dirs = %v, want exactly [data]", dirs)
 	}
 }
+
+// 迁移记下旧位置：新位置在下次启动时读不出来，就退回旧位置，而不是凭空建一个空数据根。
+func TestResolveFallsBackToPreviousRoot(t *testing.T) {
+	base := t.TempDir()
+	statePath := filepath.Join(base, "state.json")
+	old := filepath.Join(base, "旧位置")
+	next := filepath.Join(base, "新位置")
+	if err := os.MkdirAll(old, 0o755); err != nil {
+		t.Fatalf("建旧位置: %v", err)
+	}
+	if _, err := Resolve(statePath, old); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if err := Remember(statePath, next, old); err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+
+	// 新位置被删掉（拔了盘、目录被清理）：退回旧位置，旧位置的数据仍可访问。
+	got, err := Resolve(statePath, filepath.Join(base, "默认位置"))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != old {
+		t.Fatalf("数据根 = %q, want 旧位置 %q", got, old)
+	}
+	// 退回之后状态文件也改回旧位置：下次启动不再尝试新位置。
+	saved, ok := readState(statePath)
+	if !ok || saved.Root != filepath.ToSlash(old) {
+		t.Fatalf("状态文件 = %+v, want root %q", saved, filepath.ToSlash(old))
+	}
+}
+
+// 新位置还在时照常使用新位置，旧位置只作为退路。
+func TestResolvePrefersRememberedRootOverPrevious(t *testing.T) {
+	base := t.TempDir()
+	statePath := filepath.Join(base, "state.json")
+	old := filepath.Join(base, "旧位置")
+	next := filepath.Join(base, "新位置")
+	for _, dir := range []string{old, next} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("建目录 %s: %v", dir, err)
+		}
+	}
+	if err := Remember(statePath, next, old); err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+	got, err := Resolve(statePath, filepath.Join(base, "默认位置"))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != next {
+		t.Fatalf("数据根 = %q, want %q", got, next)
+	}
+}

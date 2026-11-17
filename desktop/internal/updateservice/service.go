@@ -55,6 +55,8 @@ type Options struct {
 	Current string
 	// Root 是下载目录的父目录（数据根）。
 	Root string
+	// RootFunc 给了就每次现取数据根（数据位置迁移后 #161 跟着换），优先于 Root。
+	RootFunc func() string
 	// BaseURL 是 Gitea 地址；空则用 KACHA_GITEA_URL，再空用 DefaultBaseURL。
 	BaseURL string
 	// PublicKey 是发布者公钥（base64）；空则用内置的 publisherKey。
@@ -69,16 +71,25 @@ type Options struct {
 	Now func() time.Time
 }
 
+// dataRoot 是下载目录的父目录：装了 RootFunc 就跟当前数据根走（迁移后不往旧位置写）。
+func (s *Service) dataRoot() string {
+	if s.rootFunc != nil {
+		return s.rootFunc()
+	}
+	return s.root
+}
+
 // Service 是更新协调服务：查发行、选版、下载、验签、装。
 type Service struct {
-	current string
-	root    string
-	base    string
-	key     ed25519.PublicKey
-	client  *http.Client
-	launch  func(string, []string) error
-	quit    func()
-	now     func() time.Time
+	current  string
+	root     string
+	rootFunc func() string
+	base     string
+	key      ed25519.PublicKey
+	client   *http.Client
+	launch   func(string, []string) error
+	quit     func()
+	now      func() time.Time
 
 	mu         sync.Mutex
 	snap       Snapshot
@@ -117,7 +128,7 @@ func New(opts Options) *Service {
 	if quit == nil {
 		quit = func() {}
 	}
-	s := &Service{current: opts.Current, root: opts.Root, base: base, client: client, launch: launch, quit: quit, now: now}
+	s := &Service{current: opts.Current, root: opts.Root, rootFunc: opts.RootFunc, base: base, client: client, launch: launch, quit: quit, now: now}
 	s.snap = Snapshot{Phase: PhaseIdle, Current: opts.Current}
 	if keyText == "" {
 		// 没有内置公钥：这次构建不能验证发布者，更新保持明确不可用。
@@ -247,7 +258,7 @@ func (s *Service) download(gen int64, cand *Candidate) {
 		return
 	}
 	s.snap.Phase = PhaseDownloading
-	dir := filepath.Join(s.root, "更新")
+	dir := filepath.Join(s.dataRoot(), "更新")
 	s.mu.Unlock()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		s.fail(gen, "下载更新失败：建下载目录失败："+err.Error())

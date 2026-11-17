@@ -1,0 +1,134 @@
+// Package storageservice 是页面的「本机数据位置」能力（#161）：选目标、迁移、报告当前数据根。
+//
+// 迁移本身在 internal/moveroot 里（复制、校验、切状态记录）；这里只做页面能调到的接线，
+// 并把切换结果同步到进程内共享的数据根，让已绑定的服务跟着换位置。
+package storage
+
+import (
+	"sync"
+
+	"github.com/egoist/mygo"
+
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
+	"github.com/qinyuanj/kacha/desktop/internal/moveroot"
+)
+
+// openDialog 选目标目录；测试替换掉，不弹窗。
+var openDialog = func(opts mygo.OpenDialogOptions) ([]string, error) { return mygo.Dialog.Open(opts) }
+
+// Outcome 是一次迁移的结局：成功带新数据根，失败带类别与可显示的原因。
+type Outcome struct {
+	OK      bool   `json:"ok"`
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
+	Root    string `json:"root"`
+	Files   int    `json:"files"`
+	Bytes   int64  `json:"bytes"`
+}
+
+// Status 是数据位置的当前状态：页面在迁移前读一次。
+type Status struct {
+	Root string `json:"root"`
+	// Moving 表示正在迁移：期间拒绝新的迁移，页面也拦下会与迁移冲突的操作。
+	Moving bool `json:"moving"`
+	// Done 与 Total 是已复制完的文件数与总数；没在迁移时都为 0。
+	Done  int `json:"done"`
+	Total int `json:"total"`
+}
+
+// Service 持有共享数据根与状态文件位置；并发调用安全。
+type Service struct {
+	roots     *dataroot.Roots
+	statePath string
+	pick      func() (string, error)
+
+	mu     sync.Mutex
+	moving bool
+	done   int
+	total  int
+	// busy 报出别的在途操作（打包、导入、保存）；返回空串表示没有冲突。
+	busy func() string
+}
+
+// New 用共享数据根与状态文件位置造服务；不建目录、不读磁盘。
+func New(roots *dataroot.Roots, statePath string) *Service {
+	return NewWithBusy(roots, statePath, nil)
+}
+
+// NewWithBusy 额外装一个「有没有别的操作在跑」的检查：返回非空原因就拒绝迁移。
+//
+// 检查是构造参数而不是导出的方法：绑定给页面的服务会暴露全部导出方法，
+// 一个 func() string 的参数没法编码成 JSON，绑定时会直接 panic。
+func NewWithBusy(roots *dataroot.Roots, statePath string, busy func() string) *Service {
+	s := &Service{roots: roots, statePath: statePath, busy: busy}
+	s.pick = s.pickDirectory
+	return s
+}
+
+// Pick 让用户选一个新的数据位置；取消时返回空串。
+func (s *Service) Pick() (string, error) {
+	return s.pick()
+}
+
+// pickDirectory 弹系统目录选择框。
+func (s *Service) pickDirectory() (string, error) {
+	paths, err := openDialog(mygo.OpenDialogOptions{
+		Title:             "选择本机数据位置",
+		Directory:         true,
+		CreateDirectories: true,
+	})
+	if err != nil || len(paths) == 0 {
+		return "", err
+	}
+	return paths[0], nil
+}
+
+// Status 报告当前数据根与迁移进度。
+func (s *Service) Status() Status {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return Status{Root: s.roots.Current(), Moving: s.moving, Done: s.done, Total: s.total}
+}
+
+// Move 把数据根迁到 target：复制并校验全部内容，成功后切状态记录与共享数据根。
+//
+// 失败时数据根不动，旧位置仍是唯一数据来源；目标里已写入的半份内容由 moveroot 清掉。
+func (s *Service) Move(target string) Outcome {
+	s.mu.Lock()
+	if s.moving {
+		s.mu.Unlock()
+		return Outcome{Kind: "busy", Message: "已有迁移在进行，请等它结束"}
+	}
+	busy := s.busy
+	s.moving = true
+	s.done, s.total = 0, 0
+	s.mu.Unlock()
+	if busy != nil {
+		if reason := busy(); reason != "" {
+			s.mu.Lock()
+			s.moving = false
+			s.mu.Unlock()
+			return Outcome{Kind: "busy", Message: reason}
+		}
+	}
+	defer func() {
+		s.mu.Lock()
+		s.moving = false
+		s.mu.Unlock()
+	}()
+
+	source := s.roots.Current()
+	report, err := moveroot.Migrate(source, target, s.statePath, &moveroot.Options{
+		Progress: func(p moveroot.Progress) {
+			s.mu.Lock()
+			s.done, s.total = p.Done, p.Total
+			s.mu.Unlock()
+		},
+	})
+	if err != nil {
+		return Outcome{Kind: moveroot.KindOf(err), Message: err.Error()}
+	}
+	// 状态记录已经改好，现在才让进程内所有服务换到新位置。
+	s.roots.Switch(report.Target)
+	return Outcome{OK: true, Root: report.Target, Files: report.Files, Bytes: report.Bytes}
+}

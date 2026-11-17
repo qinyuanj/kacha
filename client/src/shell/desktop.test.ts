@@ -35,7 +35,8 @@ describe("桌面壳端口", () => {
     const { port } = await createDesktopPort(fakeBridge());
     // packImport（#131）也关着：这个假桥上没有 Pack 服务，导入无从谈起。
     // update（#164）同理：这个假桥上没有 Update 服务，自动更新无从谈起。
-    expect(port.features).toEqual({ generation: false, usage: false, packExport: false, packImport: false, tidy: false, diagnostics: false, archive: true, update: false });
+    // dataRoot（#161）也一样：没有 Storage 服务就没有迁移入口。
+    expect(port.features).toEqual({ generation: false, usage: false, packExport: false, packImport: false, tidy: false, diagnostics: false, archive: true, update: false, dataRoot: false });
   });
 
   it("自动更新：没有 Update 服务时明确不可用，不返回空成功", async () => {

@@ -52,7 +52,7 @@ func (s *Service) PickExport(name string) (string, error) {
 
 // Facts 算包内每个文件的长度与 sha256，供页面按既有规则去重与预估大小。
 func (s *Service) Facts(spec packexport.Spec) ([]packexport.Fact, error) {
-	facts, failure := packexport.Facts(s.root, spec)
+	facts, failure := packexport.Facts(s.Root(), spec)
 	if failure != nil {
 		return nil, failure
 	}
@@ -99,7 +99,7 @@ func (s *Service) CancelExport() {
 func (s *Service) runExport(target string, spec packexport.Spec, generation int64) {
 	st := &s.export
 	stale := func() bool { return st.generation.Load() != generation }
-	result, err := packexport.Export(s.root, target, spec, func(p packexport.Progress) {
+	result, err := packexport.Export(s.Root(), target, spec, func(p packexport.Progress) {
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		if stale() {

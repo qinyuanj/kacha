@@ -50,6 +50,12 @@ export interface FakePortOptions {
   update?: import("../../core/update").UpdateSnapshot;
   /** install 的失败：命中时以该类别拒绝（验界面在安装失败后解除保护）。 */
   updateInstallFailure?: PortFailureKind;
+  /** 数据位置迁移（#161）：依次返回的目标目录（空了表示用户取消）。 */
+  pickTargets?: string[];
+  /** 迁移失败的类别；缺省成功。 */
+  moveFailure?: PortFailureKind;
+  /** 迁移成功时的文件数（结局文案用）。 */
+  moveFiles?: number;
 }
 
 /** 替身记下的调用：断言界面把结局传出去时用。 */
@@ -81,4 +87,8 @@ export interface FakeCalls {
   downloadBoardResults?: string[];
   writeNewFile?: { absPath: string; bytes: Uint8Array }[];
   exportDiagnostics: number;
+  /** 迁移请求过的目标目录（按顺序）。 */
+  moveTargets?: string[];
+  /** 替身认为的当前数据根；迁移成功后换成新位置。 */
+  dataRootRoot?: string;
 }

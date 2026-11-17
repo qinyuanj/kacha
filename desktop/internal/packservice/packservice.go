@@ -12,6 +12,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/packimport"
 )
 
@@ -56,6 +57,8 @@ type Snapshot struct {
 // Service 是绑定给页面的画板包服务。
 type Service struct {
 	root string
+	// roots 是可切换的数据根（迁移 #161）：装了它，导入与导出都跟着走。
+	roots *dataroot.Roots
 
 	// export 是画板包导出的独立状态：与导入互不阻塞，也各自有取消标记。
 	export exportState
@@ -71,6 +74,19 @@ type Service struct {
 // New 造一个以 root 为数据根的服务。
 func New(root string) *Service {
 	return &Service{root: root}
+}
+
+// NewFollowing 造一个跟着共享数据根走的服务：迁移切换后导入与导出都落到新位置。
+func NewFollowing(roots *dataroot.Roots) *Service {
+	return &Service{roots: roots}
+}
+
+// Root 返回当前数据根。
+func (s *Service) Root() string {
+	if s.roots != nil {
+		return s.roots.Current()
+	}
+	return s.root
 }
 
 // Pick 让用户选一个画板包，返回它的绝对路径；取消时返回空串。
@@ -137,7 +153,7 @@ func (s *Service) run(packPath string, generation int64) {
 	// stale 报告这次导入是否已经被取消（或已被新的一次顶掉）。
 	stale := func() bool { return s.generation.Load() != generation }
 
-	importer := packimport.New(s.root)
+	importer := packimport.New(s.Root())
 	importer.OnCancel(stale)
 	importer.OnProgress(func(p packimport.Progress) {
 		s.mu.Lock()
