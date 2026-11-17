@@ -66,7 +66,7 @@
 | 6 | 联验任务未完成、参考图读取、退避、在途导入 / 导出 / 迁移、画板或界面状态保存失败及更新安装失败，证明保护有效、工作不丢失、旧版本仍可启动 | A | `src/core/updatePreparation.test.ts`、`src/core/runner.test.ts`、`go test ./desktop/internal/updateservice ./desktop/internal/storage ./desktop/internal/packservice` | **通过（单元 / 替身）** |
 | 7 | 真实剪贴板复制 / 粘贴、外部软件互操作和窗口激活单独留交互证据，不以合成事件或 debug 构建替代 | F | 未执行；`desktop/internal/clipboard` 仅契约层 | **阻塞（B3）** |
 | 8 | 运行项目完整验证，合入前完成含质量检查的验证；如实区分前端质量门禁与 Go 现有测试，不宣称未接入的 Go 指标 | A | §4.1；`--quality` / mutate 未运行（项目约定由用户手动触发） | **通过（默认门禁）**；变异未执行 |
-| 9 | 按实际验收更新 1.5.0 说明与使用 / 构建文档；完成标准含可取得安装包、可验证签名、有效更新描述及双版本升级证据；缺凭据或交互环境明确标记阻塞 | B + C + 文档 | §4.2、§4.3、§9；新增 [release-notes-1.5.0.md](release-notes-1.5.0.md) 并更新 README 与 packaging 文档 | **部分通过**：构建与隔离签名证据在；正式签名发布与双版本升级阻塞 |
+| 9 | 按实际验收更新 1.5.0 说明与使用 / 构建文档；完成标准含可取得安装包、可验证签名、有效更新描述及双版本升级证据；缺凭据或交互环境明确标记阻塞 | B + C + 文档 | §4.2、§4.3、§9；发布说明改为从 changelog.md 切出当前版本一节（ADR 0024 单一来源），并更新 README 与 packaging 文档 | **部分通过**：构建与隔离签名证据在；正式签名发布与双版本升级阻塞 |
 
 ## 4. 本次实跑证据
 
@@ -319,7 +319,7 @@ go test ./desktop/internal/gateway -v -count=1
 | 文件 | 变更 | 说明 |
 | --- | --- | --- |
 | `docs/release/ACCEPTANCE-165.md` | 新增 | 本验收记录 |
-| `docs/release/release-notes-1.5.0.md` | 新增 | `publish_release.py` / `tools/signrelease` 要求的 1.5.0 发布说明；此前缺失，会让发布链在「缺少发布说明」处直接退出 |
+| `docs/release/release-notes-1.5.0.md` | 撤销 | 曾为满足旧 `publish_release.py` 的独立发布说明文件而新增；该要求已按 ADR 0024 改为从 `docs/release/changelog.md` 切出当前版本一节，第二份说明不再存在 |
 | `desktop/internal/updateservice/acceptance_test.go` | 新增 | 隔离测试发行验收；默认 `t.Skip`，只在设置 `KACHA_ACCEPTANCE_*` 时运行 |
 | `README.md` | 修改 | 增加安装器 / 更新与验收记录的指针，不改能力描述 |
 | `packaging/README.md`、`packaging/RELEASE_163.md`、`packaging/RELEASE_164.md` | 修改 | 链接到本验收记录 |
