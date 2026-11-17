@@ -4,7 +4,7 @@
 // 源码与单测在没有它时也要能编译。调用名与 Go 侧绑定名一致（Shell.Info / Local.WriteBoard）。
 import { call } from "mygo-runtime";
 
-import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy } from "./desktop";
+import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopDiagnosticsBridge, DesktopDiagnosticsOutcome, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy } from "./desktop";
 
 /** camelCase 的页面侧方法名 → Go 侧的 PascalCase 绑定名。 */
 function goName(method: string): string {
@@ -40,11 +40,20 @@ export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promi
     writeApiKey: (key) => callFn("Gateway.WriteApiKey", key) as Promise<void>,
     deleteApiKey: () => callFn("Gateway.DeleteApiKey") as Promise<void>,
   };
+  // 诊断采集与导出（#162）：与 Go 侧 BindAs("Diagnostics", ...) 对齐。
+  const diagnostics: DesktopDiagnosticsBridge = {
+    // 日志是尽力而为的旁路：采集失败不能影响界面，错误在这里就地吞掉。
+    log: (kind, fields) => {
+      void Promise.resolve(callFn("Diagnostics.Log", kind, fields)).catch(() => undefined);
+    },
+    export: () => callFn("Diagnostics.Export") as Promise<DesktopDiagnosticsOutcome>,
+  };
   return {
     info: () => callFn("Shell.Info") as Promise<DesktopInfo>,
     local,
     clipboard,
     pack,
     gateway,
+    diagnostics,
   };
 }

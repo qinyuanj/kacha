@@ -2,6 +2,7 @@
 // 可见判定在 ui/settingsPanelView.ts（#137），这里只留接线与 DOM 摆放。
 import { useEffect, useState } from "react";
 import { useShell } from "./shell";
+import { DiagnosticsSection } from "./DiagnosticsSection";
 import { DEFAULT_SETTINGS, MAX_CONCURRENCY, MIN_CONCURRENCY, normalizeBaseUrl } from "../core/settings";
 import { UsageSection } from "./UsageSection";
 import type { ConnectionResult, useSettings } from "./useSettings";
@@ -162,6 +163,8 @@ export function SettingsPanel({ settings, onClose }: Props) {
           onChange={setConcurrencyDraft}
           onBlur={() => setConcurrencyDraft(concurrencyOnBlur(concurrencyDraft, settings.settings.concurrency))}
         />
+
+        <DiagnosticsSection />
 
         <UsageSection />
         {error && <div className="form-error">{error}</div>}

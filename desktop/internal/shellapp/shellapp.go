@@ -51,6 +51,9 @@ func New(version, userDataRoot string) *Shell {
 // UserDataRoot 返回数据根。
 func (s *Shell) UserDataRoot() string { return s.root }
 
+// Version 返回应用版本，供诊断服务等绑定使用；不建目录、不读磁盘。
+func (s *Shell) Version() string { return s.version }
+
 // Info 返回壳信息，并确保数据根与画板目录存在（首次启动就是在这里建出来的）。
 func (s *Shell) Info() (Info, error) {
 	boardRoot := filepath.Join(s.root, localstore.BoardsDir)

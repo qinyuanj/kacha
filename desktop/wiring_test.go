@@ -22,7 +22,7 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 		t.Fatalf("GenerateTypeScript: %v", err)
 	}
 	src := string(client)
-	for _, want := range []string{"Shell", "Local", "Clipboard", "Pack", "Gateway"} {
+	for _, want := range []string{"Shell", "Local", "Clipboard", "Pack", "Gateway", "Diagnostics"} {
 		if !strings.Contains(src, want) {
 			t.Fatalf("生成的客户端里没有 %s 服务：\n%s", want, src)
 		}
@@ -46,6 +46,28 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 	for _, key := range []string{"ok", "kind", "message", "container", "bytes"} {
 		if !strings.Contains(src, key) {
 			t.Fatalf("复制结局的类型里没有 %q 字段：\n%s", key, src)
+		}
+	}
+	// 诊断服务（#162）：页面按 Diagnostics.Log / Diagnostics.Export 调用；
+	// 少绑一个，脱敏采集与诊断包导出在桌面壳里就无从谈起，前端入口只能是空的。
+	for _, want := range []string{"log", "export"} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("生成的客户端里没有诊断方法 %q：\n%s", want, src)
+		}
+	}
+	// Diagnostics 的方法名与形状是页面的约定（client/src/shell/desktopBridge.ts）：
+	// 页面按 Diagnostics.Log(kind, fields) 与 Diagnostics.Export() 调用，少一个方法就静默失灵。
+	start := strings.Index(src, "export const Diagnostics")
+	if start < 0 {
+		t.Fatalf("生成的客户端里没有 Diagnostics 服务：\n%s", src)
+	}
+	section := src[start:]
+	if end := strings.Index(section, "} as const;"); end > 0 {
+		section = section[:end]
+	}
+	for _, want := range []string{"Diagnostics.Log", "Diagnostics.Export", "Promise<DiagnosticsOutcome>"} {
+		if !strings.Contains(section, want) {
+			t.Fatalf("Diagnostics 服务里没有 %q：\n%s", want, section)
 		}
 	}
 }
