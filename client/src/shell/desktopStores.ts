@@ -157,12 +157,8 @@ export function desktopMediaStore(root: string): MediaStore {
     copyImage: async (): Promise<never> => unavailable("copyImage"),
     readClipboard: async (): Promise<null> => null,
     saveCopyAs: async (): Promise<never> => unavailable("saveImage"),
-    downloadImage: (): void => {
-      void unavailable("downloadImage");
-    },
-    downloadBoardResults: (): void => {
-      void unavailable("downloadResults");
-    },
+    downloadImage: async (): Promise<never> => unavailable("downloadImage"),
+    downloadBoardResults: async (): Promise<never> => unavailable("downloadResults"),
   };
 }
 

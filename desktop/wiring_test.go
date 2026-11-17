@@ -42,6 +42,12 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 			t.Fatalf("生成的客户端里没有 %q（网关服务没绑上）：\n%s", want, src)
 		}
 	}
+	// 画板包导出与结果保存的方法名是页面调用约定，缺一个都会在 WebView 里静默失败。
+	for _, want := range []string{"facts", "export", "exportSnapshot", "cancelExport", "pickExport", "saveResult", "saveBoardResults"} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("生成的客户端里没有导出/保存方法 %q：\n%s", want, src)
+		}
+	}
 	// 结局的键名来自 Go 的 json tag：页面按 ok / kind / message / bytes 读。
 	for _, key := range []string{"ok", "kind", "message", "container", "bytes"} {
 		if !strings.Contains(src, key) {

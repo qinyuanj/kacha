@@ -4,7 +4,8 @@
 // 源码与单测在没有它时也要能编译。调用名与 Go 侧绑定名一致（Shell.Info / Local.WriteBoard）。
 import { call } from "mygo-runtime";
 
-import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy } from "./desktop";
+import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopExportOutcome, DesktopExportSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy } from "./desktop";
+import type { PackEntryFact } from "../core/boardPack";
 
 /** camelCase 的页面侧方法名 → Go 侧的 PascalCase 绑定名。 */
 function goName(method: string): string {
@@ -32,6 +33,12 @@ export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promi
     start: (path) => callFn("Pack.Start", path) as Promise<DesktopPackOutcome>,
     snapshot: () => callFn("Pack.Snapshot") as Promise<DesktopPackSnapshot>,
     cancel: () => callFn("Pack.Cancel") as Promise<void>,
+    // 画板包导出（票 160）：与 Go 侧 Pack.PickExport / Facts / Export / ExportSnapshot / CancelExport 对齐。
+    pickExport: (name) => callFn("Pack.PickExport", name) as Promise<string>,
+    facts: (spec) => callFn("Pack.Facts", spec) as Promise<PackEntryFact[]>,
+    exportPack: (target, spec) => callFn("Pack.Export", target, spec) as Promise<DesktopExportOutcome>,
+    exportSnapshot: () => callFn("Pack.ExportSnapshot") as Promise<DesktopExportSnapshot>,
+    cancelExport: () => callFn("Pack.CancelExport") as Promise<void>,
   };
   // 网关与密钥（#152）：与 Go 侧 BindAs("Gateway", ...) 对齐。
   const gateway: DesktopGatewayBridge = {

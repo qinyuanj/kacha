@@ -3,10 +3,10 @@
 // Go 侧 Pack 服务（desktop/internal/packservice）把导入跑在后台 goroutine 里：这里只负责
 // 选包、开始导入、轮询快照，并把 Go 的结局折成 core 的 ImportResult（界面按 kind 分支的那一套）。
 // 从 shell/desktop.ts 拆出来（#137）：一组能力一个模块，判定放在纯函数里，函数复杂度单独看得到。
-import { type PackStore } from "./port";
-import type { ImportOptions, ImportPhase, ImportResult, PackIo } from "../core/boardPack";
+import { PortError, type PackStore } from "./port";
+import type { ImportOptions, ImportPhase, ImportResult, PackEntryFact, PackExportSpec, PackIo } from "../core/boardPack";
 import { localRun, unavailable } from "./desktopStores";
-import type { DesktopBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot } from "./desktop";
+import type { DesktopBridge, DesktopExportOutcome, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot } from "./desktop";
 
 /** 导入进度（字节）：进度对话框经 ui.onPackProgress 订阅。 */
 export interface PackProgress {
@@ -119,16 +119,53 @@ async function importPackFile(pack: DesktopPackBridge, path: string, options: Im
   return resultOf(await awaitImport(pack, options, publish), options);
 }
 
-/** 取消本机导入；false 复位由 Go 在开始新导入时处理。 */
+/** 取消本机导入与导出；false 复位由 Go 在开启新任务时处理。 */
 function packIo(pack: DesktopPackBridge | undefined): PackIo {
   return {
     cancel: async (cancelled) => {
-      if (cancelled && pack) await localRun(() => pack.cancel());
+      if (!cancelled || !pack) return;
+      // 导入与导出各自取消：其中一项没在跑也不该挡住另一项。
+      await localRun(() => pack.cancel()).catch(() => undefined);
+      if (pack.cancelExport) await localRun(() => pack.cancelExport!()).catch(() => undefined);
     },
   };
 }
 
-/** 画板包那一组：导入走本机 Pack 服务，导出还没有。 */
+/** Go 的导出失败 → 端口失败：界面按 kind 分支，不读英文文案。 */
+function exportFailure(outcome: DesktopExportOutcome): PortError {
+  const kind = outcome.kind === "cancelled" ? "cancelled" : outcome.kind === "invalid" ? "invalid" : "failed";
+  return new PortError({ kind, code: outcome.kind || "failed", message: outcome.message || "导出失败", status: 0 });
+}
+
+/** 等导出跑完：轮询 Go 快照并上报真实字节进度。 */
+async function awaitExport(pack: DesktopPackBridge, publish: (progress: { bytes_done: number; bytes_total: number }) => void): Promise<{ task_dirs: number; bytes: number }> {
+  for (;;) {
+    const snapshot = await localRun(() => pack.exportSnapshot!());
+    publish(snapshot.progress);
+    if (snapshot.running) {
+      await sleep(POLL_MS);
+      continue;
+    }
+    const outcome = snapshot.outcome;
+    if (!outcome) throw new PortError({ kind: "failed", code: "noOutcome", message: "导出没有给出结局", status: 0 });
+    if (!outcome.ok) throw exportFailure(outcome);
+    if (!outcome.result) throw new PortError({ kind: "failed", code: "noResult", message: "导出没有给出报告", status: 0 });
+    return outcome.result;
+  }
+}
+
+/** 导出画板包：系统选目标 → 本机打包 → 轮询真实进度；取消与失败都不报成功。 */
+async function exportPackThroughGo(pack: DesktopPackBridge | undefined, name: string, spec: PackExportSpec, publish: (progress: { bytes_done: number; bytes_total: number }) => void): Promise<{ task_dirs: number; bytes: number; target: string }> {
+  if (!pack?.pickExport || !pack.exportPack || !pack.exportSnapshot) unavailable("packExport");
+  const target = await localRun(() => pack.pickExport!(name));
+  if (!target) throw new PortError({ kind: "cancelled", code: "cancelled", message: "已取消导出", status: 0 });
+  const started = await localRun(() => pack.exportPack!(target, spec));
+  if (!started.ok) throw exportFailure(started);
+  const result = await awaitExport(pack, publish);
+  return { ...result, target };
+}
+
+/** 画板包那一组：导入与导出都走本机 Pack 服务。 */
 function packStore(pack: DesktopPackBridge | undefined, pickedPacks: WeakMap<File, string>, publish: (progress: { bytes_done: number; bytes_total: number }) => void): PackStore {
   return {
     io: packIo(pack),
@@ -139,8 +176,11 @@ function packStore(pack: DesktopPackBridge | undefined, pickedPacks: WeakMap<Fil
       if (!path) return { kind: "failed", error: "没有选中画板包" };
       return importPackFile(pack, path, options, publish);
     },
-    facts: async (): Promise<never> => unavailable("packExport"),
-    exportPack: async (): Promise<never> => unavailable("packExport"),
+    facts: async (spec: Pick<PackExportSpec, "task_dirs" | "files">): Promise<PackEntryFact[]> => {
+      if (!pack?.facts) unavailable("packExport");
+      return localRun(() => pack.facts!(spec));
+    },
+    exportPack: (name, spec) => exportPackThroughGo(pack, name, spec, publish),
   };
 }
 

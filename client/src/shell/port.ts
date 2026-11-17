@@ -218,8 +218,10 @@ export interface MediaStore {
   readClipboard(): Promise<ClipboardContent | null>;
   /** 结果另存为（带图层的结果是 zip）；用户取消时返回 cancelled。 */
   saveCopyAs(absPath: string): Promise<SaveCopyOutcome>;
-  downloadImage(path: string, name?: string): void;
-  downloadBoardResults(boardPath: string): void;
+  /** 单结果保存（带图层时打 zip）；目标由本机对话框选，取消时返回 cancelled。 */
+  downloadImage(path: string, name?: string): Promise<SaveCopyOutcome>;
+  /** 整板结果保存；取消时返回 cancelled。 */
+  downloadBoardResults(boardPath: string): Promise<SaveCopyOutcome>;
 }
 
 /**
@@ -231,7 +233,8 @@ export interface PackStore {
   import(file: File, options: ImportOptions): Promise<ImportResult>;
   /** 导出前的 hash 阶段：每个要写的文件的长度与 sha256。 */
   facts(spec: Pick<PackExportSpec, "task_dirs" | "files">): Promise<PackEntryFact[]>;
-  exportPack(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number }>;
+  /** 由本机选目标并打包；target 是实际写出的绝对路径，取消 / 失败都拒绝。 */
+  exportPack(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number; target?: string }>;
 }
 
 /** 宿主交互：确认框、提示、下载进度、外链、版本、日志、页面输入判定。 */

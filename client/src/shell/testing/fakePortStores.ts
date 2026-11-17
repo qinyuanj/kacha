@@ -216,11 +216,13 @@ export function fakeMediaStore(options: FakePortOptions, calls: FakeCalls, pickI
       calls.saveCopyAs.push(absPath);
       return { kind: "saved" as const };
     },
-    downloadImage: (path) => {
+    downloadImage: async (path) => {
       calls.downloadImage = [...(calls.downloadImage ?? []), path];
+      return { kind: "saved" as const };
     },
-    downloadBoardResults: (boardPath) => {
+    downloadBoardResults: async (boardPath) => {
       calls.downloadBoardResults = [...(calls.downloadBoardResults ?? []), boardPath];
+      return { kind: "saved" as const };
     },
   };
 }

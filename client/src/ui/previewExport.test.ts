@@ -2,9 +2,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { exportAllImages, exportAllText, exportFailedText, exportOneImage, exportOneText, runExport } from "./previewExport";
 
-const port = (patch: Partial<{ saveCopyAs(absPath: string): Promise<{ kind: "saved" | "cancelled" }>; downloadImage(path: string): void }> = {}) => ({
+const port = (patch: Partial<{ saveCopyAs(absPath: string): Promise<{ kind: "saved" | "cancelled" }>; downloadImage(path: string): Promise<{ kind: "saved" | "cancelled" }> }> = {}) => ({
   saveCopyAs: vi.fn(async () => ({ kind: "saved" as const })),
-  downloadImage: vi.fn(),
+  downloadImage: vi.fn(async () => ({ kind: "saved" as const })),
   ...patch,
 });
 
@@ -59,5 +59,29 @@ describe("导出接线", () => {
 
   it("文案", () => {
     expect(exportFailedText("offline")).toContain("offline");
+  });
+
+  it("保存全部：系统对话框取消时不报成功", async () => {
+    const p = {
+      saveCopyAs: vi.fn(async () => ({ kind: "saved" as const })),
+      downloadImage: vi.fn(async () => ({ kind: "cancelled" as const })),
+    };
+    const toast = vi.fn();
+    await exportAllImages(p, toast, vi.fn(), "/~/a.png");
+    expect(p.downloadImage).toHaveBeenCalledWith("/~/a.png");
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("保存全部：写失败给出明确失败", async () => {
+    const p = {
+      saveCopyAs: vi.fn(async () => ({ kind: "saved" as const })),
+      downloadImage: vi.fn(async () => {
+        throw new Error("磁盘满了");
+      }),
+    };
+    const toast = vi.fn();
+    await exportAllImages(p, toast, vi.fn(), "/~/a.png");
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("磁盘满了"));
+    expect(toast).not.toHaveBeenCalledWith(exportAllText);
   });
 });
