@@ -12,8 +12,10 @@ type Apply = (change: BoardChange) => void;
 
 /** 整理模式下阶段框多出的内容：体量与「收掉未定稿」。 */
 export interface StageTidy {
-  /** 阶段体量；还没量到为 null。 */
+  /** 阶段体量；还没量到或量不了为 null（显示未知，不当作 0）。 */
   bytes: (stageId: string) => number | null;
+  /** 这一次量不出来（读不出画板或读盘失败）。 */
+  sizeFailed: boolean;
   /** 「收掉未定稿」会收掉几张。 */
   prunable: (stageId: string) => number;
   onPrune: (stageId: string) => void;
@@ -184,7 +186,7 @@ function StageTidyActions({ stageId, tidy }: { stageId: string; tidy: StageTidy 
   return (
     <>
       <span className="stage-size" aria-label="阶段体量">
-        {bytes === null ? "…" : approxSizeText(bytes)}
+        {bytes !== null ? approxSizeText(bytes) : tidy.sizeFailed ? TIDY_TEXT.sizeUnknown : "…"}
       </span>
       {/* 建议保留只是建议：点了才成为定稿（一步撤销）。没有建议时置灰。 */}
       <button type="button" className="stage-keep" disabled={keep === 0} title={keep === 0 ? SUGGEST_KEEP_TEXT.nothingToKeep : undefined} onClick={() => tidy.onKeep(stageId)}>

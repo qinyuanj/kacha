@@ -35,8 +35,8 @@ export interface ShellFeatures {
    */
   readonly packImport?: boolean;
   /**
-   * 整理模式（按任务目录量画板体量）：桌面壳本切片还没实现，没做时入口标「尚不可用」。
-   * 未声明时按可用处理。
+   * 整理模式（按任务目录与独立图片量画板体量）：桌面壳由本机存储度量（#158）。
+   * 没实现时入口标「尚不可用」；未声明时按可用处理。
    */
   readonly tidy?: boolean;
   /** 脱敏诊断采集与诊断包导出：只有真实 Diagnostics 绑定在桥上时才开。 */

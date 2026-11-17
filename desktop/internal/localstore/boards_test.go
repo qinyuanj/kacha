@@ -408,3 +408,88 @@ func TestPolicyNamesMatchSharedContract(t *testing.T) {
 		t.Fatalf("archive dir = %q, want %q", ArchiveDir, policy.ArchiveDir)
 	}
 }
+
+// 画板列表带上画板体量（#158）：引用的任务目录与独立图片各计一次，读不懂的画板为 null（未知，不当成 0）。
+func TestListReportsBoardBodySize(t *testing.T) {
+	s := New(t.TempDir())
+	write := func(rel string, size int) {
+		t.Helper()
+		abs := filepath.Join(s.Root(), filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := os.WriteFile(abs, make([]byte, size), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+	write("2026-01-01/20260101T000000Z-aaaaaaaa/result.png", 700)
+	write("2026-01-01/20260101T000000Z-aaaaaaaa/task.json", 300)
+	write("导入参考图/bbbb.png", 60)
+
+	// 两个节点指向同一个任务目录：板内只算一次（1000），加独立图片 60。
+	text := `{"format_version": 2, "title": "体量", "viewport": {"zoom": 1, "x": 0, "y": 0}, "nodes": [
+	  {"id": "r", "type": "result", "pos": [0,0], "size": [1,1], "task_id": "20260101T000000Z-aaaaaaaa", "file": "result.png",
+	   "path": "2026-01-01/20260101T000000Z-aaaaaaaa/result.png", "layer_count": 0,
+	   "record": {"model": "m", "prompt": "", "negative_prompt": "", "submitted_at": ""}},
+	  {"id": "t", "type": "task", "pos": [0,0], "size": [1,1], "model": "m",
+	   "size_spec": {"tier": null, "ratio": null, "width": null, "height": null},
+	   "image_ports": 0, "layer_decomposition": false, "transparent_background": false,
+	   "last_submitted": {"task_id": "20260101T000000Z-aaaaaaaa", "copy_task_ids": []}},
+	  {"id": "i", "type": "reference", "pos": [0,0], "size": [1,1], "path": "导入参考图/bbbb.png", "sha256": "bbbb", "display_name": "参考.png"}
+	], "edges": []}`
+	if r := s.WriteBoard(filepath.Join(s.BoardDir(), "有体量"+BoardExt), text, WriteOptions{CreateOnly: true}); !r.OK {
+		t.Fatalf("WriteBoard: %+v", r)
+	}
+	if r := s.WriteBoard(filepath.Join(s.BoardDir(), "读不懂"+BoardExt), "{ 坏了", WriteOptions{CreateOnly: true}); !r.OK {
+		t.Fatalf("WriteBoard: %+v", r)
+	}
+
+	listing, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	byName := map[string]*int64{}
+	for _, b := range listing.Boards {
+		byName[b.Name] = b.Bytes
+	}
+	if got := byName["有体量"+BoardExt]; got == nil || *got != 1060 {
+		t.Fatalf("有体量的画板 = %v, want 1060", got)
+	}
+	if got := byName["读不懂"+BoardExt]; got != nil {
+		t.Fatalf("读不懂的画板体量 = %d, want 未知（null）", *got)
+	}
+}
+
+// 主文件读不懂但备份还在：按备份算，与打开画板时的回退一致。
+func TestListFallsBackToBackupForBodySize(t *testing.T) {
+	s := New(t.TempDir())
+	abs := filepath.Join(s.BoardDir(), "回退"+BoardExt)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	ref := filepath.Join(s.Root(), "导入参考图", "cccc.png")
+	if err := os.MkdirAll(filepath.Dir(ref), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(ref, make([]byte, 25), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	bak := `{"format_version": 2, "nodes": [{"id": "i", "type": "reference", "pos": [0,0], "size": [1,1], "path": "导入参考图/cccc.png", "sha256": "cccc", "display_name": "c.png"}], "edges": []}`
+	if err := os.WriteFile(abs, []byte("{ 坏了"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(abs+".bak", []byte(bak), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	listing, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(listing.Boards) != 1 {
+		t.Fatalf("boards = %+v, want 1", listing.Boards)
+	}
+	if got := listing.Boards[0].Bytes; got == nil || *got != 25 {
+		t.Fatalf("按备份算的体量 = %v, want 25", got)
+	}
+}

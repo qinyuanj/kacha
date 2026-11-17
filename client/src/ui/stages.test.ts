@@ -42,6 +42,7 @@ function tidyOf(overrides: Partial<StageTidy> = {}): StageTidy & { kept: string[
   const moved: string[] = [];
   return {
     bytes: () => 1536,
+    sizeFailed: false,
     prunable: () => 2,
     onPrune: (id) => void pruned.push(id),
     keepable: () => 2,
@@ -242,6 +243,10 @@ describe("整理模式下标题栏上的体量与「收掉未定稿」「移出�
 
     await showStage(stage("s1"), tidyOf({ bytes: () => null }));
     expect(container.querySelector(".stage-size")?.textContent).toBe("…");
+
+    // 量不出来时说未知，不留一个会被读成 0 的占位。
+    await showStage(stage("s1"), tidyOf({ bytes: () => null, sizeFailed: true }));
+    expect(container.querySelector(".stage-size")?.textContent).toBe(TIDY_TEXT.sizeUnknown);
   });
 
   it("「收掉未定稿」带上张数，点了交回该阶段", async () => {

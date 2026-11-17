@@ -20,11 +20,13 @@ type Features struct {
 	PackExport bool `json:"pack_export"`
 	// Archive 是归档与取消归档：本机存储执行画板位与只读约束，端口已接通。
 	Archive bool `json:"archive"`
+	// Tidy 是整理模式（#158）：画板体量由本机存储按任务目录与独立图片量出，端口已接通。
+	Tidy bool `json:"tidy"`
 }
 
-// DesktopFeatures 返回桌面壳的能力开关：归档、画板包导出、本机用量与单份生成都已接通。
+// DesktopFeatures 返回桌面壳的能力开关：归档、画板包导出、本机用量、单份生成与整理都已接通。
 func DesktopFeatures() Features {
-	return Features{Generation: true, Usage: true, PackExport: true, Archive: true}
+	return Features{Generation: true, Usage: true, PackExport: true, Archive: true, Tidy: true}
 }
 
 // Info 是界面启动时读一次的壳信息。

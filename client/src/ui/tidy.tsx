@@ -21,6 +21,8 @@ export interface TidyMeasure {
   measure: BoardMeasure | null;
   /** 进入整理模式时的画板体量。 */
   before: number | null;
+  /** 最近一次量失败：界面显示未知，不当作 0。 */
+  failed?: boolean;
 }
 
 /** 整理模式期间量当前画板（含未保存的改动）；只看节点，平移缩放不重量。退出即清空。 */
@@ -53,6 +55,7 @@ export function useTidyMeasure(board: Board, tidying: boolean): TidyMeasure {
 export function TidyBar({
   measure,
   before,
+  failed,
   board,
   readOnly,
   apply,
@@ -81,7 +84,7 @@ export function TidyBar({
   };
   return (
     <div className="tidy-bar" role="status" aria-label="整理模式">
-      <span>{measure && before !== null ? TIDY_TEXT.compare(before, boardBytes(measure)) : TIDY_TEXT.measuring}</span>
+      <span>{measure && before !== null ? TIDY_TEXT.compare(before, boardBytes(measure)) : failed ? TIDY_TEXT.measureFailed : TIDY_TEXT.measuring}</span>
       <button
         type="button"
         className="auto-stages"
