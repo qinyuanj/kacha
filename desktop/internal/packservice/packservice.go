@@ -57,6 +57,9 @@ type Snapshot struct {
 type Service struct {
 	root string
 
+	// export 是画板包导出的独立状态：与导入互不阻塞，也各自有取消标记。
+	export exportState
+
 	mu       sync.Mutex
 	running  bool
 	progress Progress
