@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, type KeyboardEvent } from "react";
-import { NOTICE_PREFIX, parseChangelog, type ChangelogVersion } from "../core/changelog";
+import { NOTICE_PREFIX, parseChangelog, visibleReleases, type ChangelogVersion } from "../core/changelog";
 import changelogText from "../../../docs/release/changelog.md?raw";
 
 // 格式错误只让弹窗显示提示，不让整个页面在加载时崩溃；日常验证由守护测试抓。
@@ -56,8 +56,8 @@ export function ChangelogDialog({ currentVersion, onClose }: { currentVersion: s
         <div ref={contentRef} className="changelog-releases" tabIndex={0} aria-label="各版本更新说明">
           {error && <div className="notice notice-warn">更新说明暂时显示不了：{error}</div>}
           {!error && releases.length === 0 && <div className="muted">暂无更新说明</div>}
-          {/* 文档最上面可能有尚未发布的下一版，只列当前版本及更早的。 */}
-          {releases.slice(Math.max(0, releases.findIndex((r) => r.version === currentVersion))).map((release) => (
+          {/* 当前版本未收录时也要按版本号过滤，不能把尚未发布的说明显示出来。 */}
+          {visibleReleases(releases, currentVersion).map((release) => (
             <section key={release.version} ref={release.version === currentVersion ? currentRef : undefined} className="changelog-release">
               <h2>{release.version}{release.version === currentVersion && <span className="muted small">当前版本</span>}</h2>
               {release.groups.map((group) => (
