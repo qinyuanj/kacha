@@ -13,4 +13,8 @@ export default {
   frontendDist: "client/dist",
   bindings: "client/src/mygo.ts",
   out: "build",
+  // 刻意不配 updates 段（#164）：MyGo 的 updates 签的是 <slug>-<版本>-windows-amd64.tar.gz
+  // 应用归档，并写出同名的 update-windows-amd64.json；本项目的发布资产是 NSIS 安装器，
+  // 描述文件名与语义必须只有一份（见 packaging/release_gate.py 与 RELEASE_164.md）。
+  // 安装器的签名由 tools/signrelease 在发布环境用发布者私钥完成。
 };

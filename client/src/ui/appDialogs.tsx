@@ -6,10 +6,11 @@ import { RunConfirmDialog } from "./RunConfirmDialog";
 import { SendTextDialog } from "./SendTextDialog";
 import { SettingsPanel } from "./SettingsPanel";
 import type { useSettings } from "./useSettings";
+import type { UpdatePreparationPorts } from "../core/updatePreparation";
 
 /** 设置面板。 */
-export function AppSettingsPanel({ settings, onClose }: { settings: ReturnType<typeof useSettings>; onClose(): void }) {
-  return <SettingsPanel settings={settings} onClose={onClose} />;
+export function AppSettingsPanel({ settings, onClose, update }: { settings: ReturnType<typeof useSettings>; onClose(): void; update: UpdatePreparationPorts }) {
+  return <SettingsPanel settings={settings} onClose={onClose} update={update} />;
 }
 
 /** 更新说明。 */
@@ -63,6 +64,7 @@ export function AppOverlays({
   onSendTextClose,
   packDialog,
   toastText,
+  update,
 }: {
   settings: ReturnType<typeof useSettings>;
   settingsOpen: boolean;
@@ -78,10 +80,12 @@ export function AppOverlays({
   onSendTextClose(): void;
   packDialog: BoardPackDialogProps | null;
   toastText: string | null;
+  /** 更新安装前的准备依赖（#164）：任务队列与严格落盘。 */
+  update: UpdatePreparationPorts;
 }) {
   return (
     <>
-      {settingsOpen && <AppSettingsPanel settings={settings} onClose={onSettingsClose} />}
+      {settingsOpen && <AppSettingsPanel settings={settings} onClose={onSettingsClose} update={update} />}
       {changelogOpen && <AppChangelogDialog version={version} onClose={onChangelogClose} />}
       {confirm && (
         <AppRunConfirm

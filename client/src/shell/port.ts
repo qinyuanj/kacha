@@ -20,7 +20,7 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics";
+export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics" | "update";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
@@ -43,6 +43,11 @@ export interface ShellFeatures {
   readonly diagnostics?: boolean;
   /** 归档与取消归档：由本机存储执行只读与画板位约束；未声明时按不可用处理。 */
   readonly archive?: boolean;
+  /**
+   * 可信自动更新（#164）：Go 侧真实验签并交给真实安装器。
+   * 只有内置发布者公钥的发布构建才为 true；未声明时按不可用处理。
+   */
+  readonly update?: boolean;
 }
 
 /** 端口失败的类别：界面只按它分支。 */
@@ -131,6 +136,7 @@ export const FEATURE_LABELS: Record<FeatureId, string> = {
   downloadImage: "下载图片",
   downloadResults: "下载整板结果",
   diagnostics: "诊断包导出",
+  update: "自动更新",
 };
 
 // ---- 端口分组 ----
@@ -273,6 +279,27 @@ export interface CorePorts {
   settingsPorts: SettingsPorts;
 }
 
+/**
+ * 可信自动更新（#164）：检查、读状态、安装。
+ *
+ * 信任规则不在这里：选版、验签与真实安装器都在 Go 侧（desktop/internal/updateservice）。
+ * 界面只按快照的 phase 与 installable 分支，不自己判断「能不能装」。
+ */
+export interface UpdatePort {
+  /** 读当前状态快照；界面轮询它。 */
+  status(): Promise<UpdateStatus>;
+  /** 发起一次检查（并发调用合并）；不安装、不重启。 */
+  check(): Promise<void>;
+  /**
+   * 交给真实安装器：只有已验签（status().installable）才允许。
+   * 准备与保存保护由界面先走 updatePreparation，失败时不调用这里。
+   */
+  install(): Promise<void>;
+}
+
+/** 更新状态快照：与 Go 侧 updateservice.Snapshot 同形（core/update.ts 定义页面用的类型）。 */
+export type UpdateStatus = import("../core/update").UpdateSnapshot;
+
 /** 壳端口：界面唯一依赖的实现接缝；桌面实现见 desktop.ts，测试替身见 testing/fakePort.ts。 */
 export interface ShellPort {
   /** 本机数据根的绝对路径，core 据此拼接文件路径。 */
@@ -285,5 +312,7 @@ export interface ShellPort {
   readonly pack: PackStore;
   readonly ui: UiStore;
   readonly usage: UsagePort;
+  /** 可信自动更新；实现不可用时以 kind: "unavailable" 拒绝。 */
+  readonly update: UpdatePort;
   readonly core: CorePorts;
 }

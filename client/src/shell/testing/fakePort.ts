@@ -13,6 +13,7 @@ import {
   fakeMetaStore,
   fakePackStore,
   fakeUiStore,
+  fakeUpdateStore,
   fakeUsageStore,
 } from "./fakePortStores";
 
@@ -43,6 +44,8 @@ export function emptyFakeCalls(): FakeCalls {
     import: [],
     copyImage: [],
     copyText: [],
+    updateCheck: 0,
+    updateInstall: 0,
     pickImages: [],
     pickPackFile: [],
     saveCopyAs: [],
@@ -103,6 +106,7 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
   const pack = fakePackStore(imports, calls);
   const ui = fakeUiStore(calls, options);
   const usage = fakeUsageStore(new Set<string>(missing));
+  const update = fakeUpdateStore(missing, options, calls);
   const core = fakeCorePorts(files, meta);
 
   return {
@@ -117,6 +121,7 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
       archive: !missing.has("archive"),
       // 整理模式（#158）：替身默认可用（度量返回空集，界面按 0 显示）；用例可以显式关掉。
       tidy: !missing.has("tidy"),
+      update: !missing.has("update"),
     },
     board,
     files,
@@ -125,6 +130,7 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
     pack,
     ui,
     usage,
+    update,
     core,
     calls,
   };
