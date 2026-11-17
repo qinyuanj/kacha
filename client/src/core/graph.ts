@@ -1,6 +1,6 @@
 // 节点图规则：连线合法性、任务节点按能力露出的端口与开关、提示词与图片来源。
 // 全部是 Board → 结果的纯函数；换模型绝不自动删线或改设置。不可运行原因见 taskView。
-import type { Board, BoardEdge, BoardNode, LayerRecord, ResultRecord, TaskNode } from "./board";
+import { findTask, type Board, type BoardEdge, type BoardNode, type LayerRecord, type ResultRecord, type TaskNode } from "./board";
 import {
   findModel,
   isSupported,
@@ -29,11 +29,6 @@ export function imagePortIndex(handle: string): number | null {
   if (!handle.startsWith(IMAGE_PORT_PREFIX)) return null;
   const index = Number(handle.slice(IMAGE_PORT_PREFIX.length));
   return Number.isInteger(index) && index >= 0 ? index : null;
-}
-
-function findTask(board: Board, id: string): TaskNode | undefined {
-  const node = board.nodes.find((n) => n.id === id);
-  return node?.type === "task" ? node : undefined;
 }
 
 /** 某任务节点的图片连线，按端口序号升序（= 参考图序号）。 */
@@ -86,7 +81,7 @@ export function sourceLayerRecord(record: ResultRecord, sourceLayer: number): La
   return entry && typeof entry.file === "string" && entry.file !== "" ? entry : null;
 }
 
-/** 结果图层文件相对用户数据根的路径：图层记录的 file 相对任务目录，任务目录即结果文件所在目录。 */
+/** 结果图层文件相对数据根的路径：图层记录的 file 相对任务目录，任务目录即结果文件所在目录。 */
 export function layerRelPath(node: { path: string; file: string }, file: string): string {
   return `${node.path.slice(0, node.path.length - node.file.length)}${file}`;
 }
@@ -149,6 +144,20 @@ export function canConnect(board: Board, table: CapabilityTable, c: Connection):
   if (c.sourceHandle !== "out") return no("来源端口无效");
   if (!target) return no("只能连到生成任务节点");
 
+  const portVerdict = targetPortVerdict(board, table, c, source, target);
+  if (!portVerdict.ok) return portVerdict;
+  return connectionTopologyVerdict(board, c);
+}
+
+/** 端口兼容后检查占用与谱系，错误顺序保持占用优先。 */
+function connectionTopologyVerdict(board: Board, c: Connection): Verdict {
+  if (board.edges.some((e) => e.to[0] === c.target && e.to[1] === c.targetHandle)) return no("该端口已有连线");
+  if (reachable(board, c.target, c.source)) return no("不能形成环");
+  return { ok: true };
+}
+
+/** 节点身份和来源端口通过后，按目标端口种类检查输入。 */
+function targetPortVerdict(board: Board, table: CapabilityTable, c: Connection, source: BoardNode, target: TaskNode): Verdict {
   const ports = taskPorts(board, table, target.id);
   const imageIndex = imagePortIndex(c.targetHandle);
   if (c.targetHandle === "positive" || c.targetHandle === "negative") {
@@ -156,18 +165,20 @@ export function canConnect(board: Board, table: CapabilityTable, c: Connection):
     if (c.targetHandle === "negative" && !ports.negative) return no("模型不支持负向提示词");
   } else if (imageIndex !== null) {
     if (source.type === "prompt") return no("图片端口只接参考图或结果节点");
-    const count = imageEdges(board, target.id).length;
-    // 名额按展开后序号算：区域叠加图也占 1 个参考图名额。
-    if (imagePortSlots(board, table, target.id).length >= ports.maxReferences) {
-      return no(ports.maxReferences === 0 ? "模型不支持图片编辑" : `参考图已达模型上限 ${ports.maxReferences} 张`);
-    }
-    if (imageIndex !== count) return no("该端口已有连线");
+    return imageConnectionVerdict(board, table, target.id, imageIndex, ports.maxReferences);
   } else {
     return no("目标端口无效");
   }
-  if (board.edges.some((e) => e.to[0] === c.target && e.to[1] === c.targetHandle)) return no("该端口已有连线");
-  if (reachable(board, c.target, c.source)) return no("不能形成环");
   return { ok: true };
+}
+
+function imageConnectionVerdict(board: Board, table: CapabilityTable, taskId: string, imageIndex: number, maxReferences: number): Verdict {
+  const count = imageEdges(board, taskId).length;
+  // 名额按展开后序号算：区域叠加图也占 1 个参考图名额。
+  if (imagePortSlots(board, table, taskId).length >= maxReferences) {
+    return no(maxReferences === 0 ? "模型不支持图片编辑" : `参考图已达模型上限 ${maxReferences} 张`);
+  }
+  return imageIndex !== count ? no("该端口已有连线") : { ok: true };
 }
 
 /** 追加一条用户连线（调用前应先 canConnect）；图片线总是落在下一个空端口。 */
@@ -333,18 +344,27 @@ export function imageRuleViolations(image: ImageFacts, rule: InputImageRule): st
     out.push(`格式 ${image.format.toUpperCase() || "未知"} 不受支持（支持 ${rule.formats.map((f) => f.toUpperCase()).join(" / ")}）`);
   }
   if (rule.max_bytes !== null && image.bytes > rule.max_bytes) out.push(`文件 ${mb(image.bytes)} 超过上限 ${mb(rule.max_bytes)}`);
-  if (image.width > 0 && image.height > 0) {
-    const total = image.width * image.height;
-    if (rule.min_total_pixels !== null && total < rule.min_total_pixels) out.push(`总像素 ${total} 低于下限 ${rule.min_total_pixels}`);
-    if (rule.max_total_pixels !== null && total > rule.max_total_pixels) out.push(`总像素 ${total} 超过上限 ${rule.max_total_pixels}`);
-    const short = Math.min(image.width, image.height);
-    if (rule.min_short_edge !== null && short < rule.min_short_edge) out.push(`最短边 ${short} px 小于 ${rule.min_short_edge} px`);
-    const ratio = image.width / image.height;
-    const lo = rule.min_aspect_ratio;
-    const hi = rule.max_aspect_ratio;
-    if ((lo !== null && ratio < lo) || (hi !== null && ratio > hi)) {
-      out.push(`宽高比 ${ratio.toFixed(2)} 超出 ${lo === null ? "0" : lo.toFixed(2)}～${hi === null ? "∞" : hi.toFixed(2)}`);
-    }
+  if (image.width > 0 && image.height > 0) out.push(...imagePixelViolations(image, rule), ...imageAspectViolations(image, rule));
+  return out;
+}
+
+function imagePixelViolations(image: ImageFacts, rule: InputImageRule): string[] {
+  const out: string[] = [];
+  const total = image.width * image.height;
+  if (rule.min_total_pixels !== null && total < rule.min_total_pixels) out.push(`总像素 ${total} 低于下限 ${rule.min_total_pixels}`);
+  if (rule.max_total_pixels !== null && total > rule.max_total_pixels) out.push(`总像素 ${total} 超过上限 ${rule.max_total_pixels}`);
+  const short = Math.min(image.width, image.height);
+  if (rule.min_short_edge !== null && short < rule.min_short_edge) out.push(`最短边 ${short} px 小于 ${rule.min_short_edge} px`);
+  return out;
+}
+
+function imageAspectViolations(image: ImageFacts, rule: InputImageRule): string[] {
+  const out: string[] = [];
+  const ratio = image.width / image.height;
+  const lo = rule.min_aspect_ratio;
+  const hi = rule.max_aspect_ratio;
+  if ((lo !== null && ratio < lo) || (hi !== null && ratio > hi)) {
+    out.push(`宽高比 ${ratio.toFixed(2)} 超出 ${lo === null ? "0" : lo.toFixed(2)}～${hi === null ? "∞" : hi.toFixed(2)}`);
   }
   return out;
 }

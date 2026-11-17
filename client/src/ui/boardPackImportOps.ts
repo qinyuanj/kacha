@@ -44,7 +44,7 @@ export async function packImportOutcome(
     const result = await deps.import(file, {
       file,
       openBoard: (path) => deps.openBoard(path),
-      // 画板位预检（#89）：读不到列表时不拦，服务端合并前仍会检查。
+      // 画板位预检（#89）：读不到列表时不拦，本机存储合并前仍会检查。
       slotsRefusal: async (adding) => {
         const slots = await deps.listSlots();
         return slots ? slotsRefusal(slots, adding) : null;

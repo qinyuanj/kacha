@@ -10,7 +10,7 @@ import { BUILTIN_TABLE, type CapabilityTable, type ModelCapability, type SizeRul
 import type { TaskStatus } from "../core/run";
 import type { SizeSpec } from "../core/size";
 import { createFakePort } from "../shell/testing/fakePort";
-import { webPort } from "../shell/webPort";
+
 import { BoardContext, type BoardActions } from "./context";
 import { ImageNode, ModelInfo, RatioCombo, ResultNodeView, StatusBadge } from "./nodes";
 import type { ResultFlowNode } from "./nodes";
@@ -35,11 +35,13 @@ vi.mock("@xyflow/react", async () => {
 
 let container: HTMLDivElement;
 let root: Root;
+let port = createFakePort();
 
 beforeEach(() => {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
+  port = createFakePort();
 });
 
 afterEach(async () => {
@@ -49,7 +51,7 @@ afterEach(async () => {
 
 /** 渲染（或重渲染）一棵节点组件树，等副作用走完。 */
 async function show(ui: ReactElement): Promise<void> {
-  await act(async () => root.render(ui));
+  await act(async () => root.render(createElement(ShellProvider, { port, children: ui })));
 }
 
 function board(overrides: Partial<BoardActions> = {}): BoardActions {
@@ -170,8 +172,7 @@ describe("ModelInfo", () => {
   it("「关闭」与「查看官方文档」都接上了回调", async () => {
     const onClose = vi.fn();
     const open = vi.fn();
-    const original = window.open;
-    window.open = open as unknown as typeof window.open;
+    port.ui.openExternal = open;
     try {
       await show(inBoard(createElement(ModelInfo, { modelId: flash.model_id, onClose }), board({ table: tableOf(flash) })));
       const close = [...container.querySelectorAll("button")].find((b) => b.textContent === "关闭")!;
@@ -179,9 +180,9 @@ describe("ModelInfo", () => {
       expect(onClose).toHaveBeenCalledTimes(1);
       const docs = [...container.querySelectorAll("button")].find((b) => b.textContent === "查看官方文档")!;
       await act(async () => docs.click());
-      expect(open).toHaveBeenCalledWith(flash.help_url, "_blank", "noopener,noreferrer");
+      expect(open).toHaveBeenCalledWith(flash.help_url);
     } finally {
-      window.open = original;
+      vi.restoreAllMocks();
     }
   });
 });
@@ -221,7 +222,7 @@ describe("ImageNode", () => {
     const actions = board();
     await show(inBoard(image({ selected: true, badges: ["透明", "2 图层"] }), actions));
     const thumb = container.querySelector("img")!;
-    expect(thumb.getAttribute("src")).toBe(webPort.media.thumbUrl("/~/.data/a.png"));
+    expect(thumb.getAttribute("src")).toBe(createFakePort().media.thumbUrl("/~/.data/a.png"));
     expect(thumb.getAttribute("alt")).toBe("a.png");
     expect(container.querySelector('[data-testid="resizer"]')?.getAttribute("data-visible")).toBe("true");
     expect([...container.querySelectorAll(".badge")].map((b) => b.textContent)).toEqual(["透明", "2 图层"]);

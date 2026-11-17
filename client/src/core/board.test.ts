@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   BOARD_FORMAT_VERSION,
+  findTask,
   DEFAULT_BOARD_TITLE,
   openBoard,
   parseBoard,
@@ -322,5 +323,14 @@ describe("文件名由标题派生", () => {
     expect(uniqueBoardFileName("未命名画板", ["未命名画板.ugcboard.json"])).toBe("未命名画板 (2).ugcboard.json");
     expect(uniqueBoardFileName("Cat", ["cat.ugcboard.json", "Cat (2).ugcboard.json"])).toBe("Cat (3).ugcboard.json");
     expect(uniqueBoardFileName("Cat", ["Cat.ugcboard.json"], "Cat.ugcboard.json")).toBe("Cat.ugcboard.json");
+  });
+});
+
+describe("画板任务身份查找", () => {
+  it("只返回匹配的任务节点；其他类型或不存在的身份为空，保持节点引用", () => {
+    const board = sample();
+    expect(findTask(board, board.nodes[2].id)).toBe(board.nodes[2]);
+    expect(findTask(board, board.nodes[0].id)).toBeUndefined();
+    expect(findTask(board, "missing")).toBeUndefined();
   });
 });

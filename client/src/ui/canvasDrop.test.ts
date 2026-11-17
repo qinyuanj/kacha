@@ -99,7 +99,7 @@ describe("importImages", () => {
       { path: "导入参考图/b.png", sha256: "sha-a", display_name: "b.png", width: 64, height: 48 },
     ]);
     expect(upload.mock.calls.map(([file]) => file.name)).toEqual(["a.png", "b.png"]);
-    // 绝对路径 = 用户数据根 + 服务端给的相对路径。
+    // 绝对路径 = 数据根 + 存储端口给的相对路径。
     expect(inspect).toHaveBeenCalledWith("/~/导入参考图/a.png");
     expect(prime).toHaveBeenCalledWith("/~/导入参考图/a.png", imageInfo());
     expect(toast).not.toHaveBeenCalled();

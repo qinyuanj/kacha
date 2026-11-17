@@ -84,8 +84,8 @@ describe("提示文案", () => {
     expect(stopTasksText(3)).toContain("不会在后台继续");
   });
 
-  it("放弃已不存在的画板：提醒先导出画板包", () => {
-    expect(discardMissingText).toContain("导出画板包");
+  it("放弃已不存在的画板：提醒恢复原文件路径", () => {
+    expect(discardMissingText).toContain("恢复原文件路径");
   });
 
   it("画板找不到的提示", () => {

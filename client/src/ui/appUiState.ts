@@ -44,9 +44,8 @@ export function modalOpenOf(state: {
   confirmOpen: boolean;
   sendTextOpen: boolean;
   packDialogOpen: boolean;
-  sessionExpired: boolean;
 }): boolean {
-  return state.settingsOpen || state.changelogOpen || state.boardListOpen || state.confirmOpen || state.sendTextOpen || state.packDialogOpen || state.sessionExpired;
+  return state.settingsOpen || state.changelogOpen || state.boardListOpen || state.confirmOpen || state.sendTextOpen || state.packDialogOpen;
 }
 
 /** 画板包菜单里各条目的禁用原因：导出与下载各说各的。 */
@@ -58,7 +57,7 @@ export function packMenuDisabled(active: { status: string } | undefined, action:
 
 /** 保存失败的画板顶部的说明与按钮：冲突、丢失、其它失败各有各的说法。 */
 export function saveFailureNotice(s: { saveError: string; missing: boolean; conflicted: boolean }): { note: string; actions: ("reload" | "retry" | "export" | "close")[] } {
-  if (s.missing) return { note: "", actions: ["export", "close"] };
+  if (s.missing) return { note: "", actions: ["retry", "export", "close"] };
   if (s.conflicted) return { note: "（改动保留在本页，不会自动合并）", actions: ["reload", "export"] };
   return { note: "（之后每次修改都会重试）", actions: ["retry", "export"] };
 }

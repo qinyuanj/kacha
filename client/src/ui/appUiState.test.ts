@@ -43,9 +43,9 @@ describe("保存失败", () => {
     expect(notice.note).toContain("不会自动合并");
   });
 
-  it("服务端已没有：只能导出画板包或关闭", () => {
+  it("存储端口已没有：应保留当前画板并恢复原文件路径", () => {
     const notice = saveFailureNotice({ saveError: "读不到", missing: true, conflicted: false });
-    expect(notice.actions).toEqual(["export", "close"]);
+    expect(notice.actions).toEqual(["retry", "export", "close"]);
     expect(notice.note).toBe("");
   });
 });
@@ -74,7 +74,6 @@ describe("其余判定", () => {
         confirmOpen: false,
         sendTextOpen: false,
         packDialogOpen: false,
-        sessionExpired: false,
       }),
     ).toBe(false);
   });

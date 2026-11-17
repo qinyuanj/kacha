@@ -5,18 +5,19 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
-// 桌面壳本次切片的能力开关：生成、用量、画板包导出都还没有。
-func TestDesktopFeaturesAreOff(t *testing.T) {
-	f := DesktopFeatures()
-	if f.Generation || f.Usage || f.PackExport {
-		t.Fatalf("features = %+v, want generation/usage/pack_export all false", f)
+// 桌面壳的能力开关：画板包导出、本机用量与单份生成都已接通。
+func TestDesktopFeatures(t *testing.T) {
+	f := DesktopFeatures(true)
+	if !f.Generation || !f.Usage || !f.PackExport || !f.Archive || !f.Tidy {
+		t.Fatalf("features = %+v, want generation/usage/pack_export/archive/tidy on", f)
 	}
 }
 
-// Info 报出版本、用户数据根与画板根；画板根在用户数据根里，首次调用就建好。
+// Info 报出版本、数据根与画板根；画板根在数据根里，首次调用就建好。
 func TestInfoReportsRootsAndCreatesBoardRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "data")
 	shell := New("0.1.0", root)
@@ -37,8 +38,8 @@ func TestInfoReportsRootsAndCreatesBoardRoot(t *testing.T) {
 	if stat, err := os.Stat(info.BoardRoot); err != nil || !stat.IsDir() {
 		t.Fatalf("board root not created: %v", err)
 	}
-	if info.Features.Generation || info.Features.Usage || info.Features.PackExport {
-		t.Fatalf("features = %+v, want all off", info.Features)
+	if !info.Features.Generation || !info.Features.Usage || !info.Features.PackExport {
+		t.Fatalf("features = %+v, want generation/usage/pack_export on", info.Features)
 	}
 }
 
@@ -54,7 +55,7 @@ func TestBoardRootSharesLocalstoreBoardsDir(t *testing.T) {
 	}
 }
 
-// 用户数据根不存在时 Info 也把它建出来，界面拿到的路径总是可用的。
+// 数据根不存在时 Info 也把它建出来，界面拿到的路径总是可用的。
 func TestInfoCreatesMissingUserDataRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "nested", "data")
 	shell := New("0.1.0", root)
@@ -63,5 +64,37 @@ func TestInfoCreatesMissingUserDataRoot(t *testing.T) {
 	}
 	if stat, err := os.Stat(root); err != nil || !stat.IsDir() {
 		t.Fatalf("user data root not created: %v", err)
+	}
+}
+
+// 迁移切换数据根之后，壳信息报的是新位置，画板目录也建在新位置：重启后页面读到同一份。
+func TestShellFollowsSwitchedRoot(t *testing.T) {
+	base := t.TempDir()
+	first := filepath.Join(base, "旧")
+	second := filepath.Join(base, "新")
+	roots := dataroot.NewRoots(first)
+	shell := NewFollowing("0.1.0", roots)
+
+	info, err := shell.Info()
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if info.UserDataRoot != first {
+		t.Fatalf("数据根 = %q, want %q", info.UserDataRoot, first)
+	}
+
+	roots.Switch(second)
+	info, err = shell.Info()
+	if err != nil {
+		t.Fatalf("切换后 Info: %v", err)
+	}
+	if info.UserDataRoot != second {
+		t.Fatalf("切换后数据根 = %q, want %q", info.UserDataRoot, second)
+	}
+	if want := filepath.Join(second, localstore.BoardsDir); info.BoardRoot != want {
+		t.Fatalf("切换后画板根 = %q, want %q", info.BoardRoot, want)
+	}
+	if stat, err := os.Stat(info.BoardRoot); err != nil || !stat.IsDir() {
+		t.Fatalf("切换后画板根没建出来: %v", err)
 	}
 }

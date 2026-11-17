@@ -127,6 +127,15 @@ describe("桌面壳：画板包导入（#131）", () => {
     expect(opened).toEqual([]);
   });
 
+  it("画板位满：导入结局是 slotsFull，界面按统一文案提示", async () => {
+    const { bridge } = fakeBridge({ picked: "C:/包.ugcpack" });
+    const { port } = await createDesktopPort(bridge);
+    const file = (await port.media.pickPackFile())!;
+    (bridge.pack as DesktopPackBridge).start = async () => ({ ok: false, kind: "slotsFull", step: "boards", message: "画板位已满（20/20）" });
+
+    expect(await port.pack.import(file, options())).toEqual({ kind: "slotsFull", message: "画板位已满（20/20）" });
+  });
+
   it("写入画板失败：结局是 commitFailed，界面据此说「画板没有写入」", async () => {
     const { bridge } = fakeBridge({ picked: "C:/包.ugcpack" });
     (bridge.pack as DesktopPackBridge).start = async () => ({ ok: false, kind: "failed", step: "boards", message: "画板没有写入：磁盘写满" });
@@ -163,7 +172,7 @@ describe("桌面壳：画板包导入（#131）", () => {
     off();
   });
 
-  it("取消导入经 io.cancel 落到 Pack.Cancel；其余去重上传方法仍报「尚不可用」", async () => {
+  it("取消端口只暴露 cancel，true 调用 Pack.Cancel，false 不打扰 Go", async () => {
     const { bridge, calls } = fakeBridge({ picked: "C:/包.ugcpack" });
     const { port } = await createDesktopPort(bridge);
     await port.pack.io.cancel(true);
@@ -171,7 +180,7 @@ describe("桌面壳：画板包导入（#131）", () => {
     // false 只是复位取消标记，不该再打扰 Go 侧。
     await port.pack.io.cancel(false);
     expect(calls.cancel).toBe(1);
-    await expect(port.pack.io.stage()).rejects.toMatchObject({ kind: "unavailable", feature: "packExport" });
+    expect(Object.keys(port.pack.io)).toEqual(["cancel"]);
   });
 
   it("桥上没有 Pack 服务：导入与选包都报 unavailable", async () => {

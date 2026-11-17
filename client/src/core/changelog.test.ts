@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parseChangelog, shouldShowUpdateNotice } from "./changelog";
+import { parseChangelog, shouldShowUpdateNotice, visibleReleases } from "./changelog";
 
 describe("更新说明解析 parseChangelog", () => {
   it("多版本按文档顺序（新在前）输出版本、组与条目", () => {
@@ -60,22 +60,65 @@ describe("更新说明解析 parseChangelog", () => {
   });
 });
 
-describe("仓库里的更新说明与两张清单", () => {
+describe("仓库里的更新说明与桌面版本", () => {
   /** 仓库根下的文件原文；路径相对本测试文件。 */
   const read = (relative: string): string => readFileSync(new URL(`../../../${relative}`, import.meta.url), "utf8");
+  /** 可查发行版的完整索引：新在前，同号只出现一次。 */
+  const RELEASES = [
+    "1.5.0", "1.4.0", "1.3.1", "1.3.0", "1.2.0", "1.1.1", "1.1.0", "1.0.0",
+    "0.3.2", "0.3.1", "0.3.0", "0.2.2", "0.2.1", "0.2.0", "0.1.0",
+  ];
 
-  it("更新说明、服务端清单与桌面配置写的是同一个版本号，该版本一节至少有一条", () => {
-    // 两张清单的版本号在这里手写正则读：Cargo.toml 与 mygo.config.ts 不是 TypeScript 能导入的东西，
-    // 跨语言只能各读一遍（CODING_STANDARDS「一个含义只定义一处」的例外）。
-    const notes = read("docs/release/web-changelog.md");
-    const server = /^version\s*=\s*"([^"]+)"/m.exec(read("server/Cargo.toml"))?.[1];
+  it("更新说明包含桌面配置的当前版本，该版本一节至少有一条", () => {
+    const notes = read("docs/release/changelog.md");
     const desktop = /^\s*version:\s*["']([^"']+)["']/m.exec(read("mygo.config.ts"))?.[1];
-    expect(server, "server/Cargo.toml 里读不到 version").toBeDefined();
     expect(desktop, "mygo.config.ts 里读不到 version").toBeDefined();
-    expect(desktop, `桌面配置 mygo.config.ts 的版本 ${desktop} 与服务端清单 server/Cargo.toml 的 ${server} 不同号`).toBe(server);
-    const section = parseChangelog(notes).find((v) => v.version === server);
-    expect(section, `docs/release/web-changelog.md 缺少当前版本 ${server} 的一节`).toBeDefined();
-    expect(section!.groups.flatMap((g) => g.items).length, `docs/release/web-changelog.md 中 ${server} 一节没有条目`).toBeGreaterThan(0);
+    const section = parseChangelog(notes).find((v) => v.version === desktop);
+    expect(section, `docs/release/changelog.md 缺少当前版本 ${desktop} 的一节`).toBeDefined();
+    expect(section!.groups.flatMap((g) => g.items).length, `docs/release/changelog.md 中 ${desktop} 一节没有条目`).toBeGreaterThan(0);
+    // 当前版本一节要说清已接通与仍不可用的能力（#153 起单份文生图、#154 参考图编辑、#156 透明背景与图层拆分已接通）。
+    const currentText = JSON.stringify(section!.groups);
+    expect(currentText).toContain("单份文生图");
+    expect(currentText).toContain("整理");
+    expect(currentText).toContain("参考图编辑");
+    expect(currentText).toContain("透明背景");
+    expect(currentText).toContain("图层拆分");
+    expect(currentText).toContain("尚不可用");
+  });
+
+  it("恢复全部可查版本，按新在前排列且不重复、不缺漏", () => {
+    const notes = read("docs/release/changelog.md");
+    expect(parseChangelog(notes).map((v) => v.version)).toEqual(RELEASES);
+  });
+
+  it("每个恢复的版本都有可追溯来源，来源索引同序且同号只列一次", () => {
+    const sources = read("docs/release/changelog-sources.md");
+    const indexed = [...sources.matchAll(/^\|\s*(\d+\.\d+\.\d+)\s*\|/gm)].map((match) => match[1]);
+    expect(indexed).toEqual(RELEASES);
+  });
+});
+
+describe("弹窗可见版本 visibleReleases", () => {
+  const releases = [
+    { version: "1.6.0", groups: [] },
+    { version: "1.5.0", groups: [] },
+    { version: "1.4.0", groups: [] },
+  ];
+
+  it("当前版本有效时只显示当前及更早版本，过滤尚未发布版本", () => {
+    expect(visibleReleases(releases, "1.5.0").map((v) => v.version)).toEqual(["1.5.0", "1.4.0"]);
+  });
+
+  it("当前版本比索引还旧时不显示比它新的说明", () => {
+    expect(visibleReleases(releases, "1.3.0")).toEqual([]);
+  });
+
+  it("当前版本未收录时仍显示所有更早版本，不显示未来版本", () => {
+    expect(visibleReleases(releases, "1.5.5").map((v) => v.version)).toEqual(["1.5.0", "1.4.0"]);
+  });
+
+  it("当前版本是 dev 等不可比较值时显示已收录说明，不误标当前版本", () => {
+    expect(visibleReleases(releases, "dev")).toBe(releases);
   });
 });
 

@@ -1,19 +1,20 @@
 // 测试用的内存壳端口（#126）：驱动打开画板、复制图片、粘贴图片、导入画板包，
 // 并能返回成功、部分成功与失败结局，让界面把这些结局原样传出去（不必起 MyGo runtime、不发请求）。
 // 形状与真实适配器一致：失败一律是 PortError，类别（conflict / missing / slotsFull / alreadyExists, ...）与
-// Web 实现折出来的同一套，界面按类别分支的分支点因此在替身下也走得到。
+// 壳端口使用同一套类别，界面按类别分支的分支点因此在替身下也走得到。
 // 各分组的替身在 shell/testing/fakePortStores.ts（#137），这里只把它们拼起来。
 import { buildZip, type FixtureEntry } from "../../core/testing/zipFixture";
 import { PortError, type CorePorts, type FeatureId, type PortFailureKind, type ShellPort } from "../port";
 import type { FakeBoard, FakeCalls, FakePortOptions } from "./fakePortTypes";
 import {
   fakeBoardStore,
+  fakeDataRootStore,
   fakeFileStore,
   fakeMediaStore,
   fakeMetaStore,
   fakePackStore,
-  fakeSessionStore,
   fakeUiStore,
+  fakeUpdateStore,
   fakeUsageStore,
 } from "./fakePortStores";
 
@@ -44,10 +45,13 @@ export function emptyFakeCalls(): FakeCalls {
     import: [],
     copyImage: [],
     copyText: [],
+    updateCheck: 0,
+    updateInstall: 0,
     pickImages: [],
     pickPackFile: [],
     saveCopyAs: [],
     log: [],
+    exportDiagnostics: 0,
     uploadReference: [],
     inspectImage: [],
     list: 0,
@@ -101,9 +105,10 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
   const meta = fakeMetaStore(calls);
   const media = fakeMediaStore(options, calls, pickImages, pickPacks);
   const pack = fakePackStore(imports, calls);
-  const ui = fakeUiStore(calls);
+  const ui = fakeUiStore(calls, options);
   const usage = fakeUsageStore(new Set<string>(missing));
-  const session = fakeSessionStore(options);
+  const update = fakeUpdateStore(missing, options, calls);
+  const dataRoot = fakeDataRootStore(calls, options);
   const core = fakeCorePorts(files, meta);
 
   return {
@@ -114,6 +119,13 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
       packExport: !missing.has("packExport"),
       // 导入与导出是两项能力（#131）：替身默认都有。
       packImport: !missing.has("packImport"),
+      diagnostics: !missing.has("diagnostics"),
+      archive: !missing.has("archive"),
+      // 整理模式（#158）：替身默认可用（度量返回空集，界面按 0 显示）；用例可以显式关掉。
+      tidy: !missing.has("tidy"),
+      update: !missing.has("update"),
+      // 数据位置迁移（#161）：替身默认有；缺这个能力时入口消失。
+      dataRoot: !missing.has("dataRoot"),
     },
     board,
     files,
@@ -122,7 +134,8 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
     pack,
     ui,
     usage,
-    session,
+    update,
+    dataRoot,
     core,
     calls,
   };

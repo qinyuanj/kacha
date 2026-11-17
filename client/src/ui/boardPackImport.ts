@@ -9,7 +9,7 @@ export type ImportOutcome =
   | { kind: "toast"; text: string }
   /** 关掉对话框，用系统提示框（window.alert）说明——导入包版本过新时用。 */
   | { kind: "message"; text: string }
-  /** 弹窗说明结局（服务端导入失败、打开画板失败、有冲突）。 */
+  /** 弹窗说明结局（本机存储导入失败、打开画板失败、有冲突）。 */
   | { kind: "dialog"; state: PackDialogState };
 
 /** 一句话提示。 */
@@ -48,7 +48,7 @@ export function importOutcome(result: ImportResult): ImportOutcome {
     case "slotsFull":
       return toast(result.message);
     case "failed":
-      // 服务端合并前按画板位拒绝（两页抢最后的位）：它的报错就是统一文案，不加前缀，此时什么都没合并。
+      // 本机存储合并前按画板位拒绝（两页抢最后的位）：它的报错就是统一文案，不加前缀，此时什么都没合并。
       return toast(isSlotsFullText(result.error) ? result.error : PACK_IMPORT_TEXT.failed(result.error));
     case "commitFailed":
       // 导入请求失败时任务目录可能已移入一部分：用弹窗说明画板没有写入，而不是一闪而过的提示。
@@ -58,16 +58,9 @@ export function importOutcome(result: ImportResult): ImportOutcome {
   }
 }
 
-/**
- * 导入进度对话框里各步的说明（#62）。
- *
- * 前五步是 Web 版（服务端合并）；后三步是桌面壳（#131）在本机解压合并时走的。
- */
+/** Go 本机导入过程的进度说明。 */
 export const IMPORT_PHASES: Record<ImportPhase, string> = {
   check: "正在检查画板包…",
-  existing: "正在比对服务端已有的任务目录…",
-  hash: "正在计算内容校验值…",
-  upload: "正在上传缺少的内容…",
   merge: "正在合并任务目录…",
   extract: "正在解压画板包…",
   restore: "正在还原重复内容…",

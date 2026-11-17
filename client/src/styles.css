@@ -1508,7 +1508,7 @@ button.primary[aria-disabled="true"] {
   font-size: 11px;
 }
 
-/* 画板列表（Web 版打开服务端已有画板） */
+/* 画板列表（Web 版打开本机存储已有画板） */
 .tab-list {
   align-self: center;
   margin-left: 6px;

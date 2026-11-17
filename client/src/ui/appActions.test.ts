@@ -133,7 +133,7 @@ describe("提交一次运行", () => {
     expect(toast).toHaveBeenCalled();
   });
 
-  it("没有用户数据根：不提交", async () => {
+  it("没有数据根：不提交", async () => {
     const submit = vi.fn(async () => []);
     await startRun({ userRoot: null, target: { boardKey: "k1", boardFile: "a", table: BUILTIN_TABLE, userRoot: "/~", baseUrl: "http://gw", apiKey: "sk" }, concurrency: 2, submit, toast: vi.fn() }, board(), ["t1"]);
     expect(submit).not.toHaveBeenCalled();

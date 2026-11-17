@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestResolveRejectsSymlinkOutOfRoot 用户数据根里的符号链接指向根外时，读与写都必须拒绝（spec 故事 32）。
+// TestResolveRejectsSymlinkOutOfRoot 数据根里的符号链接指向根外时，读与写都必须拒绝（spec 故事 32）。
 func TestResolveRejectsSymlinkOutOfRoot(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

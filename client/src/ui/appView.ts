@@ -34,7 +34,7 @@ export function appView(input: {
   activeSize: { path: string; bytes: number; tier: SizeTier | null } | null;
   /** 各画板已提醒到的体量档位。 */
   sizeNotices: Record<string, SizeTier>;
-  /** 端口没有画板包导入能力（桌面壳的旧版本 / Web 的降级实现）。 */
+  /** 端口没有画板包导入能力。 */
   packImportOff?: boolean;
 }): AppView {
   const active = activeSession(input.sessions, input.activeKey);
@@ -132,10 +132,10 @@ export const versionOrUndefined = (version: string | null | undefined): string |
 /** 记录的版本号：没有版本时给空串（界面上显示用）。 */
 export const versionOrEmpty = (version: string | null | undefined): string => orEmpty(version);
 
-/** 设置面板能不能用（设置已载入且有用户数据根）。 */
+/** 设置面板能不能用（设置已载入且有数据根）。 */
 export const settingsEnabled = (loaded: boolean, userRoot: string | null): boolean => loaded && !!userRoot;
 
-/** 用量统计要不要开（界面状态就绪且有用户数据根）。 */
+/** 用量统计要不要开（界面状态就绪且有数据根）。 */
 export const usageEnabled = (metadataReady: boolean, userRoot: string | null): boolean => metadataReady && !!userRoot;
 
 /** 画板自己的提示按钮：关掉它。 */

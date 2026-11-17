@@ -246,7 +246,7 @@ export async function exportableKey(
   return deps.keyOf(path);
 }
 
-/** 放弃一块服务端已不存在的画板：本页内容随之丢弃，先确认。 */
+/** 放弃一块本机存储已不存在的画板：本页内容随之丢弃，先确认。 */
 export async function discardMissing(
   deps: {
     ask(text: string, options: Record<string, unknown>): Promise<boolean>;

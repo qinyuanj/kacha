@@ -341,3 +341,21 @@ describe("菜单位置", () => {
     expect(clampMenuPosition({ x: 50, y: 50 }, { width: 900, height: 700 }, win)).toEqual({ x: 0, y: 0 });
   });
 });
+
+describe("菜单目标身份边界", () => {
+  it("不存在或未知类型的单节点没有菜单，多选仍作用于选区", () => {
+    const b = board([{ id: "u", type: "unknown", raw: { future: true } }, task("t")]);
+    expect(menuItems({ kind: "node", nodeId: "missing" }, facts({ board: b }))).toEqual([]);
+    expect(menuItems({ kind: "node", nodeId: "u" }, facts({ board: b, selected: new Set(["u"]) }))).toEqual([]);
+    expect(summary(menuItems({ kind: "node", nodeId: "u" }, facts({ board: b, selected: new Set(["u", "t"]) })))).toEqual([
+      ["newStage", "建为阶段", null], "---", ["delete", "删除 2 个节点", null],
+    ]);
+  });
+
+  it("图片线的目标不存在或不是任务时只给断开", () => {
+    const b = board([reference("r")]);
+    for (const target of ["missing", "r"]) {
+      expect(summary(menuItems({ kind: "edge", edge: edge("r", "out", target, "image:0") }, facts({ board: b })))).toEqual([["disconnect", "断开", null]]);
+    }
+  });
+});

@@ -1,6 +1,6 @@
-// Package localservice 是绑定给页面的本地能力：画板、用户数据根里的文件、元数据。
+// Package localservice 是绑定给页面的本地能力：画板、数据根里的文件、元数据。
 //
-// 方法只做转发与形状转换：文件语义在 internal/localstore，界面语义在 client/src/shell/desktopPort.ts。
+// 方法只做转发与形状转换：文件语义在 internal/localstore，界面语义在 client/src/shell/desktop.ts。
 // 失败一律返回类型化的结局（kind = conflict / missing / alreadyExists / invalid / failed），
 // 界面按类别分支，不看文案。
 package localservice
@@ -8,6 +8,7 @@ package localservice
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/qinyuanj/kacha/desktop/internal/boardmeasure"
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
@@ -152,6 +154,17 @@ func (s *Service) ListBoards() (BoardListing, error) {
 	}, nil
 }
 
+// MeasureBoard 量一块画板的体量（#158）：请求体是画板原文，所以未保存的节点改动也能量到。
+// 返回每个节点引用的条目与每个条目的字节数；同一任务目录在板内只算一次，口径与画板体量一致。
+// 画板读不懂时返回错误，让界面显示「未知」而不是 0 字节。
+func (s *Service) MeasureBoard(text string) (boardmeasure.Measure, error) {
+	m, ok := boardmeasure.MeasureBoard(s.store.Root(), text)
+	if !ok {
+		return boardmeasure.Measure{}, errors.New("读不懂这块画板")
+	}
+	return m, nil
+}
+
 // RenameBoard 改画板名：主文件与 .bak 一起搬。带版本时内容已变就拒绝。
 func (s *Service) RenameBoard(from, to string, version string) Outcome {
 	result := s.store.RenameBoard(from, to, version)
@@ -164,7 +177,19 @@ func (s *Service) DeleteBoard(path string, version string) Outcome {
 	return Outcome{OK: result.OK, Kind: result.Kind, Message: result.Message, Version: result.Version}
 }
 
-// ReadFile 读用户数据根里的文件字节（base64 传给页面）。
+// ArchiveBoard 把画板搬进归档目录：带版本时内容已变就拒绝，归档后只读且不占画板位。
+func (s *Service) ArchiveBoard(from, to, version string) Outcome {
+	result := s.store.ArchiveBoard(from, to, version)
+	return Outcome{OK: result.OK, Kind: result.Kind, Message: result.Message, Version: result.Version}
+}
+
+// UnarchiveBoard 把归档画板搬回画板目录：画板位满时结局是 slotsFull。
+func (s *Service) UnarchiveBoard(from, to string) Outcome {
+	result := s.store.UnarchiveBoard(from, to)
+	return Outcome{OK: result.OK, Kind: result.Kind, Message: result.Message, Version: result.Version}
+}
+
+// ReadFile 读数据根里的文件字节（base64 传给页面）。
 func (s *Service) ReadFile(path string) (string, error) {
 	data, err := s.store.ReadFile(path)
 	if err != nil {
@@ -196,7 +221,7 @@ var saveDialog = func(opts mygo.SaveDialogOptions) (string, error) { return mygo
 
 // SaveCopyAs 把 path 指向的图片另存为用户选的位置（#130）：复制图片失败时界面指向的「另存为…」就是它。
 //
-// 字节由 Go 按用户数据根读（越界由 localstore 拒绝）；目标位置由系统「另存为」对话框选，
+// 字节由 Go 按数据根读（越界由 localstore 拒绝）；目标位置由系统「另存为」对话框选，
 // 用户取消返回 kind = cancelled，不写文件。这样承诺的兜底是真能用的，而不是一句「尚不可用」。
 func (s *Service) SaveCopyAs(path string) (Outcome, error) {
 	data, err := s.store.ReadFile(path)
@@ -315,7 +340,7 @@ func (s *Service) BoardsDir() string {
 	return s.store.BoardDir()
 }
 
-// UserDataRoot 返回用户数据根的绝对路径。
+// UserDataRoot 返回数据根的绝对路径。
 func (s *Service) UserDataRoot() string {
 	return s.store.Root()
 }

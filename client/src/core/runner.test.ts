@@ -1119,3 +1119,48 @@ describe("任务运行器：提交守护（更新准备）", () => {
     expect(h.files.size).toBeGreaterThan(0);
   });
 });
+
+describe("任务运行器：忙闲判断与退避取消", () => {
+  const activity = (h: ReturnType<typeof harness>) => h.runner.getSnapshot().activity;
+
+  it("未完成份按阶段计数：读图、执行、排队、退避都算忙；全部结束即空闲", async () => {
+    const h = harness({ concurrency: 1 });
+    h.gateway.closed = true;
+    h.read.closed = true;
+    const submitting = h.runner.submit(h.target("A"), board(["t1"], true), ["t1"]);
+    await settle();
+    // 读参考图也算未完成：还没有任务编号，节点已锁定。
+    expect(activity(h)).toEqual({ busy: true, pending: 1, reading: 1, waiting: 0, running: 0, backoff: 0, boards: ["A"] });
+    h.read.open();
+    await submitting;
+    await settle();
+    expect(activity(h)).toEqual({ busy: true, pending: 1, reading: 0, waiting: 0, running: 1, backoff: 0, boards: ["A"] });
+    h.runner.cancel({ kind: "all" });
+    await settle();
+    expect(activity(h)).toEqual({ busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] });
+  });
+
+  it("退避也算未完成；取消最后一份退避后队列立刻恢复，别的画板不必等到恢复时刻", async () => {
+    const h = harness({ concurrency: 1 });
+    h.replies.push({ status: 429, body: "{}" });
+    await h.runner.submit(h.target("A"), board(["t1"]), ["t1"]);
+    await settle();
+    expect(h.statuses("A").t1).toMatchObject({ kind: "backoff" });
+    expect(activity(h)).toMatchObject({ busy: true, pending: 1, backoff: 1, running: 0 });
+    h.gateway.closed = true;
+    await h.runner.submit(h.target("B"), board(["t9"]), ["t9"]);
+    await settle();
+    // 退避期间整条队列暂停派发：B 的份还没发出去。
+    expect(h.requests).toHaveLength(1);
+    expect(activity(h)).toMatchObject({ pending: 2, backoff: 1, waiting: 1, boards: ["A", "B"] });
+    h.runner.cancel({ kind: "task", boardKey: "A", taskNodeId: "t1" });
+    await settle();
+    // 退避的份没了，队列没有理由继续暂停。
+    expect(h.requests).toHaveLength(2);
+    expect(activity(h)).toEqual({ busy: true, pending: 1, reading: 0, waiting: 0, running: 1, backoff: 0, boards: ["B"] });
+    h.gateway.open();
+    await settle();
+    expect(h.changes.filter((c) => c.change.kind === "runResult").map((c) => c.boardKey)).toEqual(["B"]);
+  });
+});
+

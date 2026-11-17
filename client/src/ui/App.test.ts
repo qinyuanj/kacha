@@ -32,7 +32,7 @@ function listing(boards: BoardListing["boards"] = []): BoardListing {
   return { boards, slots: { used: 0, total: 10 }, size_lines: { warn: 100, alert: 200 } };
 }
 
-async function show(port: FakePort, props: { onLogout?: () => void; version?: string | null; sessionExpired?: boolean } = {}): Promise<void> {
+async function show(port: FakePort, props: { version?: string | null } = {}): Promise<void> {
   await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(App, { ...props }) })));
 }
 

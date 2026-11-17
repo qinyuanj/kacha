@@ -9,7 +9,7 @@ export type PackDialogState =
   | { stage: "confirmExport"; boardFile: string; plan: ExportPlan; contents: PackContents }
   /** detail：进度阶段内正在做的一步（导入时按 ImportPhase 换）。 */
   | { stage: "progress"; title: string; detail?: string }
-  /** 有冲突、服务端导入请求失败或打开画板失败时才弹：message 是结局，notice 是完整的补充说明（文案见 boardText）。 */
+  /** 有冲突、本机存储导入请求失败或打开画板失败时才弹：message 是结局，notice 是完整的补充说明（文案见 boardText）。 */
   | { stage: "importDone"; message: string; conflicts: string[]; notice: string | null };
 
 export interface BoardPackDialogProps {
@@ -19,7 +19,7 @@ export interface BoardPackDialogProps {
   onClose: () => void;
 }
 
-/** 进度阶段：听服务端的进度回报，可取消。 */
+/** 进度阶段：听本机存储的进度回报，可取消。 */
 function Progress({ title, detail, onCancel }: { title: string; detail?: string; onCancel: () => void }) {
   const port = useShell();
   const [progress, setProgress] = useState({ done: 0, total: 0 });

@@ -2,11 +2,11 @@
 // 失败不改变画板：该节点已有的「另存为…」就是兜底，所以失败提示一律指向它（ADR 0021 / 0023）。
 import type { ImageCopyFailure } from "../shell/port";
 
-/** 复制图片失败的原因（Web 路线两种，桌面壳另有格式、占用与内容坏掉三种）。 */
+/** 系统剪贴板复制图片失败的原因。 */
 export const COPY_TEXT = {
   imageReason: {
-    decode: "浏览器无法解码这张图片（可能是不支持的格式，如 HEIC）",
-    unavailable: "当前浏览器不支持或拒绝把图片写入系统剪贴板",
+    decode: "无法解码这张图片（可能是不支持的格式，如 HEIC）",
+    unavailable: "系统剪贴板能力尚不可用",
     unsupported: "这张图的格式不受支持（如 HEIC、TIFF）",
     invalid: "这张图的内容无法识别",
     busy: "剪贴板正被其他程序占用，请稍后重试",

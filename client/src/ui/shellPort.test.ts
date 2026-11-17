@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newBoard, serializeBoard, type Board } from "../core/board";
 import { BUILTIN_TABLE } from "../core/capabilities";
 import type { BoardChange } from "../core/edit";
-import { nodeMarker } from "../core/pageInput";
+import type { ClipboardContent } from "../core/clipboardDispatch";
+import { isNodeMarker, nodeMarker } from "../core/pageInput";
 import { createFakePort, fakePackFile, type FakePort } from "../shell/testing/fakePort";
 import { BOARD_MISSING_TEXT, PACK_IMPORT_TEXT, PASTE_TEXT } from "./boardText";
 import { readClipboard, writeClipboard } from "./canvasKeyboard";
@@ -23,6 +24,7 @@ const BOARD_PATH = "/~/画板/测试.ugcboard.json";
 const isEditableTarget = (target: EventTarget | null): boolean =>
   target instanceof Element && target.closest("input, textarea, select, [contenteditable='true']") !== null;
 
+let nativeSnapshot: ClipboardContent | null = null;
 let container: HTMLDivElement;
 let root: Root;
 let port: FakePort;
@@ -50,12 +52,16 @@ async function show(ui: ReactElement): Promise<void> {
 }
 
 /** 剪贴板事件替身：jsdom 的 Event 上补一个 clipboardData。 */
-function pasteEvent(clipboard: { files?: File[]; text?: string | null }): Event {
+async function pasteEvent(clipboard: { files?: File[]; text?: string | null }): Promise<Event> {
+  const files = clipboard.files ?? [];
+  const images = files.filter(file => file.type.startsWith("image/") && file.size > 0);
+  const text = clipboard.text ?? null;
+  nativeSnapshot = { kind: isNodeMarker(text) ? "mark" : images.length ? "images" : files.length ? "unsupported" : text ? "text" : "empty", text, images, reason: files.length && !images.length ? "files" : null, readFailureCount: files.length - images.length };
   const event = new Event("paste", { bubbles: true, cancelable: true });
   Object.defineProperty(event, "clipboardData", {
     value: { files: clipboard.files ?? [], getData: (type: string) => (type === "text/plain" ? (clipboard.text ?? "") : "") },
   });
-  window.dispatchEvent(event);
+  await act(async () => { window.dispatchEvent(event); await Promise.resolve(); });
   return event;
 }
 
@@ -79,8 +85,7 @@ describe("粘贴分派（端口驱动）", () => {
       toast: (message) => toasts.push(message),
       importPastedImages: onImages,
       isEditableTarget,
-      readClipboard: async () => null,
-      nativeClipboard: false,
+      readClipboard: async () => nativeSnapshot,
     });
     return null;
   }
@@ -95,7 +100,7 @@ describe("粘贴分派（端口驱动）", () => {
     const images = vi.fn();
     writeClipboard({ nodes: [{ id: "p1", type: "prompt", pos: [0, 0], size: [240, 120], text: "p1", extra: {} }], edges: [] });
     await show(createElement(PasteProbe, { onImages: images }));
-    expect(pasteEvent({ text: nodeMarker(1) }).defaultPrevented).toBe(true);
+    expect((await pasteEvent({ text: nodeMarker(1) })).defaultPrevented).toBe(true);
     expect(applied).toEqual([expect.objectContaining({ kind: "paste" })]);
     expect(images).not.toHaveBeenCalled();
   });
@@ -103,7 +108,7 @@ describe("粘贴分派（端口驱动）", () => {
   it("剪贴板里是图片：交给图片导入（落成参考图节点）", async () => {
     const images = vi.fn();
     await show(createElement(PasteProbe, { onImages: images }));
-    expect(pasteEvent({ files: [fileOf("shot.png", "image/png")] }).defaultPrevented).toBe(true);
+    expect((await pasteEvent({ files: [fileOf("shot.png", "image/png")] })).defaultPrevented).toBe(true);
     expect(images).toHaveBeenCalledWith([expect.objectContaining({ name: "shot.png" })], { x: 0, y: 0 });
     expect(applied).toEqual([]);
   });
@@ -111,7 +116,7 @@ describe("粘贴分派（端口驱动）", () => {
   it("两样都不是（普通文本）：放行给浏览器，不提示也不落盘", async () => {
     const images = vi.fn();
     await show(createElement(PasteProbe, { onImages: images }));
-    expect(pasteEvent({ text: "一段普通文字" }).defaultPrevented).toBe(false);
+    expect((await pasteEvent({ text: "一段普通文字" })).defaultPrevented).toBe(true);
     expect(images).not.toHaveBeenCalled();
     expect(toasts).toEqual([]);
   });
@@ -119,7 +124,7 @@ describe("粘贴分派（端口驱动）", () => {
   it("标记还在但应用内剪贴板空了：按失效剪贴板提示重新复制", async () => {
     const images = vi.fn();
     await show(createElement(PasteProbe, { onImages: images }));
-    expect(pasteEvent({ text: nodeMarker(2) }).defaultPrevented).toBe(true);
+    expect((await pasteEvent({ text: nodeMarker(2) })).defaultPrevented).toBe(true);
     expect(toasts).toEqual([PASTE_TEXT.staleNodeClip]);
     expect(applied).toEqual([]);
   });

@@ -31,72 +31,24 @@ async function show(port: FakePort): Promise<void> {
   await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(Root) })));
 }
 
-/** 像用户键入一样改受控文本框的值。 */
-async function typeInto(textarea: HTMLTextAreaElement, text: string): Promise<void> {
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, text);
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-}
-
-describe("进入界面", () => {
-  it("读壳信息期间：显示正在加载", async () => {
+describe("桌面工作台启动", () => {
+  it("读取版本期间显示加载状态", async () => {
     const port = createFakePort();
-    port.session.config = () => new Promise(() => undefined);
+    port.ui.version = () => new Promise(() => undefined);
     await show(port);
     expect(container.textContent).toContain("正在加载…");
   });
-
-  it("连不上服务端：显示致命错误", async () => {
+  it("版本读取失败时显示本地启动错误", async () => {
     const port = createFakePort();
-    port.session.config = async () => {
-      throw new Error("offline");
-    };
+    port.ui.version = async () => { throw new Error("本机壳信息不可用"); };
     await show(port);
-    expect(container.textContent).toContain("无法连接 Kacha 服务端");
-  });
-
-  it("没有本地密钥：要粘贴密钥", async () => {
-    const port = createFakePort();
-    port.session.readStoredKey = () => null;
-    await show(port);
-    expect(container.querySelector("textarea[aria-label='API 密钥']")).not.toBeNull();
-    expect(container.textContent).toContain("进入工作台");
-  });
-
-  it("桌面壳（不需要登录）：直接进工作台", async () => {
-    const port = createFakePort();
-    Object.defineProperty(port.session, "requiresLogin", { value: false });
-    await show(port);
-    expect(container.querySelector(".app")).not.toBeNull();
-    expect(container.querySelector("textarea")).toBeNull();
-  });
-
-  it("密钥无效：显示错误，进不了工作台", async () => {
-    const port = createFakePort();
-    port.session.readStoredKey = () => null;
-    port.session.login = async () => {
-      throw new Error("密钥无效");
-    };
-    await show(port);
-    const input = container.querySelector("textarea") as HTMLTextAreaElement;
-    await typeInto(input, "sk-bad");
-    await act(async () => {
-      (container.querySelector("button.primary") as HTMLButtonElement).click();
-    });
-    expect(container.textContent).toContain("密钥无效");
+    expect(container.textContent).toContain("无法启动 Kacha 桌面客户端");
+    expect(container.textContent).toContain("本机壳信息不可用");
     expect(container.querySelector(".app")).toBeNull();
   });
-
-  it("密钥有效：进工作台", async () => {
-    const port = createFakePort();
-    port.session.readStoredKey = () => null;
-    await show(port);
-    const input = container.querySelector("textarea") as HTMLTextAreaElement;
-    await typeInto(input, "sk-good");
-    await act(async () => {
-      (container.querySelector("button.primary") as HTMLButtonElement).click();
-    });
+  it("不要求密钥，直接进入工作台", async () => {
+    await show(createFakePort());
     expect(container.querySelector(".app")).not.toBeNull();
+    expect(container.querySelector("textarea")).toBeNull();
   });
 });

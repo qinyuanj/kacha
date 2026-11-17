@@ -1,6 +1,6 @@
-// Package localstore 是桌面壳的本地文件层：画板、用户数据根里的文件与元数据。
+// Package localstore 是桌面壳的本地文件层：画板、数据根里的文件与元数据。
 //
-// 一切都在用户数据根里：画板在 画板/，元数据在 .kacha/，删除的画板进 回收区/。
+// 一切都在数据根里：画板在 画板/，元数据在 .kacha/，删除的画板进 回收区/。
 // 写入是原子的（临时文件 + 改名），覆盖前把旧主文件留一份 .bak；内容版本是主文件字节的 sha256。
 // 这里不碰界面，go test 就能跑。
 package localstore
@@ -15,10 +15,15 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+
+	"github.com/qinyuanj/kacha/desktop/internal/boardmeasure"
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
+	"github.com/qinyuanj/kacha/desktop/internal/pathguard"
 )
 
 const (
-	// BoardsDir 是画板目录名（与 Web 服务端一致，见 core/paths.ts 的 BOARDS_DIR_NAME）。
+	// BoardsDir 是画板目录名（见 core/paths.ts 的 BOARDS_DIR_NAME）。
 	BoardsDir = "画板"
 	// ArchiveDir 是归档画板目录名（画板目录下的子目录）。
 	ArchiveDir = "归档"
@@ -28,7 +33,7 @@ const (
 	RecycleDir = "回收区"
 	// BoardExt 是画板文件扩展名。
 	BoardExt = ".ugcboard.json"
-	// BoardSlots 是画板位上限：本切片本地没有服务端配额，给一个宽松的默认值。
+	// BoardSlots 是本机可编辑画板的数量上限。
 	BoardSlots = 20
 	// DefaultBoardTitle 是新建画板的默认标题（与共享契约 contracts/board-policy.json 一致）。
 	DefaultBoardTitle = "未命名画板"
@@ -91,7 +96,10 @@ const (
 	KindMissing      = "missing"
 	KindConflict     = "conflict"
 	KindAlreadyExist = "alreadyExists"
+	KindSlotsFull    = "slotsFull"
+	KindArchived     = "archived"
 	KindInvalid      = "invalid"
+	KindMoving       = "moving"
 	KindFailed       = "failed"
 )
 
@@ -151,39 +159,64 @@ type DirEntry struct {
 	IsDir bool   `json:"is_dir"`
 }
 
-// Store 是用户数据根上的文件层。
+// Store 是数据根上的文件层。
 type Store struct {
-	root string
+	// mu 串行化画板的创建 / 归档 / 取消归档：画板位与文件搬移都是一个原子决定，
+	// 并发抢位时不能各看到 19 位然后都写进去。
+	mu sync.Mutex
+	// roots 是可切换的数据根（迁移 #161）：每次读写都现取，切一次就落到新位置。
+	// 用 New 造的 Store 没有它，位置固定。
+	roots *dataroot.Roots
+	root  string
 }
 
-// New 造一个以 root 为用户数据根的 Store。
+// New 造一个以 root 为数据根的 Store。
 func New(root string) *Store {
 	return &Store{root: root}
 }
 
-// Root 返回用户数据根。
-func (s *Store) Root() string { return s.root }
+// NewFollowing 造一个跟着共享数据根走的 Store：迁移切换后读写自动落到新位置。
+func NewFollowing(roots *dataroot.Roots) *Store {
+	return &Store{roots: roots}
+}
+
+// Root 返回当前数据根。
+func (s *Store) Root() string {
+	if s.roots != nil {
+		return s.roots.Current()
+	}
+	return s.root
+}
+
+// movingFailure 在迁移复制期间返回拦截原因：这一段里状态记录还没切，
+// 写进旧位置的内容在切换重载后就丢了，所以宁可直接失败，也不静默丢写（#161）。
+func (s *Store) movingFailure() (Result, bool) {
+	if s.roots != nil && s.roots.Moving() {
+		return fail(KindMoving, "正在迁移数据位置，完成前不能写入"), true
+	}
+	return Result{}, false
+}
 
 // BoardDir 返回画板目录的绝对路径。
-func (s *Store) BoardDir() string { return filepath.Join(s.root, BoardsDir) }
+func (s *Store) BoardDir() string { return filepath.Join(s.Root(), BoardsDir) }
 
 // MetaPath 返回元数据文件（settings.json、ui-state.json 等）的绝对路径。
-func (s *Store) MetaPath(name string) string { return filepath.Join(s.root, MetaDir, name) }
+func (s *Store) MetaPath(name string) string { return filepath.Join(s.Root(), MetaDir, name) }
 
-// Resolve 把界面给的路径解析成绝对路径：绝对路径照用，相对路径按用户数据根拼。
-// 越出用户数据根的路径一律拒绝（导入与外部引用都不能跑出去）。
+// Resolve 把界面给的路径解析成绝对路径：绝对路径照用，相对路径按数据根拼。
+// 越出数据根的路径一律拒绝（导入与外部引用都不能跑出去）。
 func (s *Store) Resolve(path string) (string, error) {
 	if path == "" {
 		return "", errors.New("路径为空")
 	}
 	abs := path
 	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(s.root, filepath.FromSlash(path))
+		abs = filepath.Join(s.Root(), filepath.FromSlash(path))
 	}
 	abs = filepath.Clean(abs)
-	root := filepath.Clean(s.root)
-	if !withinRoot(root, abs) {
-		return "", fmt.Errorf("路径越出用户数据根：%s", path)
+	root := filepath.Clean(s.Root())
+	if !pathguard.InsideOrSame(root, abs) {
+		return "", fmt.Errorf("路径越出数据根：%s", path)
 	}
 	// 词法前缀不够：根内一个指向根外的符号链接会被顺着读 / 写，必须按真实路径再判一次。
 	if err := checkRealContainment(root, abs); err != nil {
@@ -192,10 +225,7 @@ func (s *Store) Resolve(path string) (string, error) {
 	return abs, nil
 }
 
-// withinRoot 是词法前缀判定：abs 等于 root 或在 root 之下（大小写不敏感，Windows）。
-func withinRoot(root, abs string) bool {
-	return strings.EqualFold(abs, root) || strings.HasPrefix(strings.ToLower(abs), strings.ToLower(root)+string(os.PathSeparator))
-}
+
 
 // checkRealContainment 要求解析符号链接后的真实目标仍在根内（spec 故事 32）。
 //
@@ -211,8 +241,8 @@ func checkRealContainment(root, abs string) error {
 	if err != nil {
 		return err
 	}
-	if !withinRoot(filepath.Clean(realRoot), filepath.Clean(realAbs)) {
-		return fmt.Errorf("路径经符号链接越出用户数据根：%s", abs)
+	if !pathguard.InsideOrSame(filepath.Clean(realRoot), filepath.Clean(realAbs)) {
+		return fmt.Errorf("路径经符号链接越出数据根：%s", abs)
 	}
 	return nil
 }
@@ -274,9 +304,18 @@ type WriteOptions struct {
 // 只新建（createOnly）：主文件或只剩 .bak 的孤儿占住名字都拒绝。
 // 带版本：主文件不在就说画板没了（不凭空建出同名画板），内容变了就是冲突。
 func (s *Store) WriteBoard(path, text string, opts WriteOptions) Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if out, moving := s.movingFailure(); moving {
+		return out
+	}
 	abs, err := s.Resolve(path)
 	if err != nil {
 		return fail(KindInvalid, err.Error())
+	}
+	// 归档画板只读：本机存储层也拒绝写入，界面判定不是唯一防线。
+	if s.withinArchiveDir(abs) {
+		return fail(KindArchived, "归档画板只读，不能写入")
 	}
 	old, readErr := os.ReadFile(abs)
 	exists := readErr == nil
@@ -289,6 +328,14 @@ func (s *Store) WriteBoard(path, text string, opts WriteOptions) Result {
 		}
 		if _, err := os.Stat(abs + ".bak"); err == nil {
 			return fail(KindAlreadyExist, "目标已存在，只新建不覆盖")
+		}
+		// 画板位由本机存储执行：新建、复制、导入都走只新建这条，抢位时也拦得住。
+		used, err := s.editableBoardCount()
+		if err != nil {
+			return fail(KindFailed, err.Error())
+		}
+		if used >= BoardSlots {
+			return fail(KindSlotsFull, fmt.Sprintf("画板位已满（%d/%d），归档或删掉一块再新建。", used, BoardSlots))
 		}
 	}
 	if opts.Version != "" {
@@ -326,7 +373,7 @@ func (s *Store) CreateBoard(title, text string) (string, Result) {
 	return path, result
 }
 
-// ListBoardNames 列出目录里的画板文件名：带扩展名，与 Web 服务端口径一致
+// ListBoardNames 列出目录里的画板文件名，保留扩展名
 // （只剩 .bak 的孤儿也算一块画板，主文件与它的 .bak 是同一块，列一次）。
 func (s *Store) ListBoardNames(dir string) ([]string, error) {
 	abs, err := s.Resolve(dir)
@@ -378,7 +425,7 @@ func (s *Store) List() (BoardListing, error) {
 				Name:     name,
 				Path:     s.rel(full),
 				Archived: spec.archived,
-				Bytes:    nil,
+				Bytes:    s.bodySize(full),
 			})
 			if !spec.archived {
 				listing.Slots.Used++
@@ -388,9 +435,29 @@ func (s *Store) List() (BoardListing, error) {
 	return listing, nil
 }
 
+// bodySize 量一块画板的体量（#158）：引用的任务目录与独立图片各计一次，主文件读不懂时按 .bak 算。
+// 主文件与备份都读不懂时为 nil —— 体量未知，不当成 0，也不等同于按内容去重后的画板包大小。
+//
+// 数据根一律现取 s.Root()：装配走 NewFollowing 时 s.root 是空的，用它会量出恒为 0 的体量，
+// 而整理模式走 localservice.MeasureBoard(s.store.Root(), …)，两处口径就对不上了。
+func (s *Store) bodySize(abs string) *int64 {
+	text := func(path string) *string {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		value := string(data)
+		return &value
+	}
+	return boardmeasure.BoardBytes(s.Root(), text(abs), text(abs+".bak"))
+}
+
 // RenameBoard 改画板名：主文件与 .bak 一起搬；目标已存在（含只剩 .bak 的孤儿）则拒绝。
 // 带版本：内容已变就说画板已在别处改过，原地不动。
 func (s *Store) RenameBoard(from, to string, version string) Result {
+	if out, moving := s.movingFailure(); moving {
+		return out
+	}
 	src, err := s.Resolve(from)
 	if err != nil {
 		return fail(KindInvalid, err.Error())
@@ -413,13 +480,94 @@ func (s *Store) RenameBoard(from, to string, version string) Result {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fail(KindFailed, err.Error())
 	}
-	if _, err := os.Stat(src); err == nil {
-		if err := os.Rename(src, dst); err != nil {
-			return fail(KindFailed, err.Error())
+	if err := moveBoard(src, dst); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	return ok("")
+}
+
+// ArchiveBoard 把可编辑画板搬进归档目录：带版本时内容已变就拒绝；归档后只读、不占画板位。
+// 主文件与 .bak 一起搬；任一步失败都尽力回滚，绝不把半完成的搬移报成成功。
+func (s *Store) ArchiveBoard(from, to, version string) Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if out, moving := s.movingFailure(); moving {
+		return out
+	}
+	src, err := s.Resolve(from)
+	if err != nil {
+		return fail(KindInvalid, err.Error())
+	}
+	dst, err := s.Resolve(to)
+	if err != nil {
+		return fail(KindInvalid, err.Error())
+	}
+	if s.withinArchiveDir(src) {
+		return fail(KindArchived, "画板已归档")
+	}
+	if !s.withinArchiveDir(dst) {
+		return fail(KindInvalid, "归档目标必须在归档目录里")
+	}
+	if !s.exists(src) {
+		return fail(KindMissing, "画板不存在")
+	}
+	if version != "" {
+		if got := s.checkVersion(src, version); !got.OK {
+			return got
 		}
 	}
-	if bak, err := os.Stat(src + ".bak"); err == nil && !bak.IsDir() {
-		_ = os.Rename(src+".bak", dst+".bak")
+	if s.exists(dst) {
+		return fail(KindAlreadyExist, "归档目标已存在")
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	if err := moveBoard(src, dst); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	return ok("")
+}
+
+// UnarchiveBoard 把归档画板搬回画板目录：可编辑画板位满时拒绝，归档原件不动。
+// 归档画板不会在归档期间被改写，因此不需要再核对内容版本。
+func (s *Store) UnarchiveBoard(from, to string) Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if out, moving := s.movingFailure(); moving {
+		return out
+	}
+	src, err := s.Resolve(from)
+	if err != nil {
+		return fail(KindInvalid, err.Error())
+	}
+	dst, err := s.Resolve(to)
+	if err != nil {
+		return fail(KindInvalid, err.Error())
+	}
+	if !s.withinArchiveDir(src) {
+		return fail(KindInvalid, "源画板不在归档目录里")
+	}
+	if !s.withinBoardDir(dst) {
+		return fail(KindInvalid, "取消归档目标必须在画板目录里")
+	}
+	if !s.exists(src) {
+		return fail(KindMissing, "归档画板不存在")
+	}
+	used, err := s.editableBoardCount()
+	if err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	if used >= BoardSlots {
+		return fail(KindSlotsFull, fmt.Sprintf("画板位已满（%d/%d），先归档或删掉一块再取消归档。", used, BoardSlots))
+	}
+	if s.exists(dst) {
+		return fail(KindAlreadyExist, "目标已存在")
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	if err := moveBoard(src, dst); err != nil {
+		return fail(KindFailed, err.Error())
 	}
 	return ok("")
 }
@@ -427,6 +575,9 @@ func (s *Store) RenameBoard(from, to string, version string) Result {
 // RemoveBoard 删画板：主文件与 .bak 移进回收区（可恢复），不是抹掉。
 // 带版本：内容已变就拒绝，画板留在原地。
 func (s *Store) RemoveBoard(path string, version string) Result {
+	if out, moving := s.movingFailure(); moving {
+		return out
+	}
 	abs, err := s.Resolve(path)
 	if err != nil {
 		return fail(KindInvalid, err.Error())
@@ -439,7 +590,7 @@ func (s *Store) RemoveBoard(path string, version string) Result {
 			return got
 		}
 	}
-	recycle := filepath.Join(s.root, RecycleDir)
+	recycle := filepath.Join(s.Root(), RecycleDir)
 	if err := os.MkdirAll(recycle, 0o755); err != nil {
 		return fail(KindFailed, err.Error())
 	}
@@ -460,7 +611,7 @@ func (s *Store) RemoveBoard(path string, version string) Result {
 	return ok("")
 }
 
-// ReadFile 读用户数据根里的文件字节。
+// ReadFile 读数据根里的文件字节。
 func (s *Store) ReadFile(path string) ([]byte, error) {
 	abs, err := s.Resolve(path)
 	if err != nil {
@@ -471,6 +622,9 @@ func (s *Store) ReadFile(path string) ([]byte, error) {
 
 // WriteNewFile 写新文件：目标已存在就拒绝（不覆盖）。
 func (s *Store) WriteNewFile(path string, data []byte) Result {
+	if out, moving := s.movingFailure(); moving {
+		return out
+	}
 	abs, err := s.Resolve(path)
 	if err != nil {
 		return fail(KindInvalid, err.Error())
@@ -540,6 +694,9 @@ func (s *Store) ReadMeta(name string) (string, error) {
 
 // WriteMeta 写元数据文本（原子）。
 func (s *Store) WriteMeta(name, text string) Result {
+	if out, moving := s.movingFailure(); moving {
+		return out
+	}
 	path := s.MetaPath(name)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fail(KindFailed, err.Error())
@@ -548,6 +705,52 @@ func (s *Store) WriteMeta(name, text string) Result {
 		return fail(KindFailed, err.Error())
 	}
 	return ok("")
+}
+
+// editableBoardCount 是可编辑画板数：画板目录顶层的主文件与 .bak 孤儿各算一块，同一块只算一次。
+// 归档子目录由 ListBoardNames 跳过，因此归档画板不占画板位。
+func (s *Store) editableBoardCount() (int, error) {
+	names, err := s.ListBoardNames(s.BoardDir())
+	if err != nil {
+		return 0, err
+	}
+	return len(names), nil
+}
+
+// withinArchiveDir 报告路径是不是画板目录下的归档子目录（含更深层）。
+func (s *Store) withinArchiveDir(abs string) bool {
+	return pathguard.InsideOrSame(filepath.Join(s.BoardDir(), ArchiveDir), filepath.Clean(abs))
+}
+
+// withinBoardDir 报告路径是不是可编辑画板目录里的顶层画板（归档子目录除外）。
+func (s *Store) withinBoardDir(abs string) bool {
+	return pathguard.InsideOrSame(s.BoardDir(), filepath.Clean(abs)) && !s.withinArchiveDir(abs)
+}
+
+// moveBoard 把主文件与 .bak 一起搬：备份搬失败时尽力把主文件搬回原处。
+// 只在调用方确认目标不存在、版本匹配后调用。
+func moveBoard(src, dst string) error {
+	hadMain := isRegularFile(src)
+	if hadMain {
+		if err := os.Rename(src, dst); err != nil {
+			return err
+		}
+	}
+	if isRegularFile(src + ".bak") {
+		if err := os.Rename(src+".bak", dst+".bak"); err != nil {
+			if hadMain {
+				_ = os.Rename(dst, src)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// isRegularFile 报告路径是不是一个真实文件（目录与不存在的都不算）。
+func isRegularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // exists 报告画板在不在：主文件或只剩 .bak 的孤儿都算在。
@@ -585,9 +788,9 @@ func dedupe(names []string) []string {
 	return out
 }
 
-// rel 把绝对路径写成相对用户数据根的正斜杠路径；根目录外的保留绝对路径。
+// rel 把绝对路径写成相对数据根的正斜杠路径；根目录外的保留绝对路径。
 func (s *Store) rel(abs string) string {
-	root := filepath.Clean(s.root)
+	root := filepath.Clean(s.Root())
 	if strings.HasPrefix(strings.ToLower(abs), strings.ToLower(root)+string(os.PathSeparator)) {
 		return filepath.ToSlash(strings.TrimPrefix(abs, root+string(os.PathSeparator)))
 	}

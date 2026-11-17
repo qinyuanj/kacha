@@ -174,7 +174,7 @@ describe("工具栏", () => {
         createElement(AppToolbar, {
           setToolbarSlot: vi.fn(),
           canvasReady: false,
-          runIndicator: { active: [], titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
+          runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
           packMenuOpen: false,
           packMenuDisabled: false,
           onTogglePackMenu: vi.fn(),

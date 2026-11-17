@@ -1,51 +1,12 @@
-# Domain Docs
+# 领域文档
 
-How the engineering skills should consume this repo's domain documentation when exploring the codebase.
+本仓库采用 single-context 布局。探索领域或修改行为前，先读根目录的 [GLOSSARY.md](../../GLOSSARY.md)，再读 [docs/adr/](../adr/) 中相关决定。
 
-## Before exploring, read these
+输出中的概念沿用词表用语。词表定义含义，ADR 记录约束与取舍，当前交付能力以 README 和桌面适配器为准。改动与 ADR 冲突时明确指出冲突并更新决定，避免让两套规则并存。
 
-- **`GLOSSARY.md`** at the repo root, or
-- **`GLOSSARY-MAP.md`** at the repo root if it exists — it points at one `GLOSSARY.md` per context. Read each one relevant to the topic.
-- **`docs/adr/`** — read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
-
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
-
-## File structure
-
-Single-context repo (most repos):
-
-```
-/
-├── GLOSSARY.md
-├── docs/adr/
-│   ├── 0001-event-sourced-orders.md
-│   └── 0002-postgres-for-write-model.md
-└── src/
-```
-
-Multi-context repo (presence of `GLOSSARY-MAP.md` at the root):
-
-```
-/
-├── GLOSSARY-MAP.md
-├── docs/adr/                          ← system-wide decisions
-└── src/
-    ├── ordering/
-    │   ├── GLOSSARY.md
-    │   └── docs/adr/                  ← context-specific decisions
-    └── billing/
-        ├── GLOSSARY.md
-        └── docs/adr/
-```
-
-## Use the glossary's vocabulary
-
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `GLOSSARY.md`. Don't drift to synonyms the glossary explicitly avoids.
-
-If the concept you need isn't in the glossary yet, that's a signal — either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
-
-## Flag ADR conflicts
-
-If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
-
-> _Contradicts ADR-0007 (event-sourced orders) — but worth reopening because…_
+- 任务目录与画板包：ADR 0010、0013。
+- 节点编辑、撤销与运行器：ADR 0009、0011、0012、0014、0015。
+- 网关、模型能力与上架：ADR 0001、0004、0005、0006；协议证据见 [网关契约](../contracts/team-gateway-contract.md)。
+- 归档与整理规则：ADR 0019、0025；领域规则不表示桌面已开放这些能力，当前能力以 README 与桌面端口测试为准。
+- 桌面运行、剪贴板、数据位置与版本：ADR 0021、0023、0024、0026。
+- 质量门禁：ADR 0020、0022。

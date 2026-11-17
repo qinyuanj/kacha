@@ -40,7 +40,7 @@ describe("恢复标签页", () => {
 describe("文案", () => {
   it("各有各的说法", () => {
     expect(stopTasksText(2)).toContain("2");
-    expect(discardMissingText).toContain("导出画板包");
+    expect(discardMissingText).toContain("恢复原文件路径");
     expect(boardMissingText).toContain("刷新列表");
   });
 });

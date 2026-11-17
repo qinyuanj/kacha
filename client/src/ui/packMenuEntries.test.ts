@@ -1,5 +1,5 @@
-// 画板包菜单（#127）：桌面壳本切片没有画板包导出与生成，入口标「尚不可用」并置灰；Web 版照旧。
-// 导入画板包不需要打开的画板：Web 版里它始终可用。
+// 画板包菜单（#127）：桌面壳本切片没有画板包导出与生成，入口标「尚不可用」并置灰。
+// 导入画板包不需要打开的画板：具备导入能力时始终可用。
 import { describe, expect, it } from "vitest";
 
 import { createDesktopPort, type DesktopBridge, type DesktopInfo, type DesktopLocalBridge } from "../shell/desktop";
@@ -44,7 +44,7 @@ describe("画板包菜单", () => {
     expect(entry?.disabledReason).not.toBeNull();
   });
 
-  it("Web 版：入口照旧可用", () => {
+  it("端口声明能力可用时：入口照旧可用", () => {
     const port = createFakePort();
     const entries = packMenuEntries(port, { open: true, broken: false });
     for (const entry of entries) {
@@ -53,7 +53,7 @@ describe("画板包菜单", () => {
     }
   });
 
-  it("Web 版：导入画板包不需要打开的画板，没有画板时仍可用", () => {
+  it("端口声明能力可用时：导入画板包不需要打开的画板，没有画板时仍可用", () => {
     const port = createFakePort();
     for (const board of [{ open: false, broken: false }, { open: false, broken: true }]) {
       const entry = packImportEntry(port);
@@ -63,7 +63,7 @@ describe("画板包菜单", () => {
     }
   });
 
-  it("Web 版：导出与下载仍按画板状态置灰", () => {
+  it("端口声明能力可用时：导出与下载仍按画板状态置灰", () => {
     const port = createFakePort();
     expect(packExportEntry(port, { open: false, broken: false }).disabledReason).toBe("没有打开的画板");
     expect(packExportEntry(port, { open: false, broken: true }).disabledReason).toBe("画板无法打开，不能导出");

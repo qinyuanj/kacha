@@ -9,6 +9,8 @@ import { BOARD_FORMAT_VERSION, type Board } from "../core/board";
 import { BUILTIN_TABLE } from "../core/capabilities";
 import { PREFERRED_TASK_MODEL } from "../core/settings";
 import { FLASH_UNAVAILABLE_TEXT, TIDY_TEXT } from "./boardText";
+import { createFakePort } from "../shell/testing/fakePort";
+import { ShellProvider } from "./shell";
 import { CanvasToolbar, type CanvasToolbarProps } from "./canvasToolbar";
 
 // React 19 的 act() 要在测试环境里显式打开。
@@ -78,7 +80,7 @@ function blank(): CanvasToolbarProps {
 }
 
 async function show(props: CanvasToolbarProps): Promise<void> {
-  await act(async () => root.render(createElement(CanvasToolbar, props)));
+  await act(async () => root.render(createElement(ShellProvider, { port: createFakePort(), children: createElement(CanvasToolbar, props) })));
 }
 
 const toolbar = (): HTMLElement => slot.querySelector<HTMLElement>(".board-toolbar-left")!;

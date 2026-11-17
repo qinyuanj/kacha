@@ -1,4 +1,4 @@
-// 任务目录：用户数据根/<UTC 日期>/<task_id>/（ADR 0010，任务目录是真源）。
+// 任务目录：数据根/<UTC 日期>/<task_id>/（ADR 0010，任务目录是真源）。
 // 派发时一次写入参考图快照与 task.json，之后不可变；成功后再写结果图，失败 / 取消时写结局记录。文件系统由调用方注入。
 import type { CapabilityTable } from "./capabilities";
 import type { FittedRecord } from "./fitImage";
@@ -35,7 +35,7 @@ export function newTaskId(now: Date, random32: () => number = () => crypto.getRa
   return `${stamp}-${(random32() >>> 0).toString(16).padStart(8, "0")}`;
 }
 
-/** 相对用户数据根的任务目录，正斜杠；日期取提交时刻的 UTC 日期。 */
+/** 相对数据根的任务目录，正斜杠；日期取提交时刻的 UTC 日期。 */
 function taskDirOf(submittedAt: Date, taskId: string): string {
   return `${submittedAt.toISOString().slice(0, 10)}/${taskId}`;
 }
@@ -49,7 +49,7 @@ export function taskDirOfTaskId(taskId: string): string | null {
 /** 任务目录的第一层：UTC 日期目录。 */
 const DATE_DIR = /^\d{4}-\d{2}-\d{2}$/;
 
-/** 相对用户数据根的路径（正斜杠）落在 `<日期>/<task_id>/…` 里时返回任务目录，否则 null。 */
+/** 相对数据根的路径（正斜杠）落在 `<日期>/<task_id>/…` 里时返回任务目录，否则 null。 */
 export function taskDirOfRelPath(rel: string): string | null {
   const parts = rel.split("/");
   return parts.length >= 3 && DATE_DIR.test(parts[0]) && parts[1] ? `${parts[0]}/${parts[1]}` : null;
@@ -61,6 +61,20 @@ export function taskFilePath(userRoot: string, taskId: string, file: string): st
   return dir ? taskPath(userRoot, dir, file) : null;
 }
 
+function sniffHeif(bytes: Uint8Array, ascii: (text: string, offset?: number) => boolean): { ext: string; mediaType: string } | null {
+  if (!ascii("ftyp", 4)) return null;
+  const brands = [8, ...Array.from({ length: Math.max(0, Math.floor((Math.min(bytes.length, 64) - 16) / 4)) }, (_, i) => 16 + i * 4)];
+  if (brands.some((offset) => ["heic", "heix", "hevc", "hevx"].some((brand) => ascii(brand, offset)))) return { ext: "heic", mediaType: "image/heic" };
+  if (brands.some((offset) => ["mif1", "msf1"].some((brand) => ascii(brand, offset)))) return { ext: "heif", mediaType: "image/heif" };
+  return null;
+}
+
+function sniffBitmap(starts: (sig: number[]) => boolean): { ext: string; mediaType: string } | null {
+  if (starts([0x42, 0x4d])) return { ext: "bmp", mediaType: "image/bmp" };
+  if (starts([0x49, 0x49, 0x2a, 0x00]) || starts([0x4d, 0x4d, 0x00, 0x2a])) return { ext: "tiff", mediaType: "image/tiff" };
+  return null;
+}
+
 export function sniffImage(bytes: Uint8Array): { ext: string; mediaType: string } | null {
   const starts = (sig: number[], offset = 0) => sig.every((b, i) => bytes[offset + i] === b);
   const ascii = (text: string, offset = 0) => starts([...text].map((c) => c.charCodeAt(0)), offset);
@@ -68,14 +82,9 @@ export function sniffImage(bytes: Uint8Array): { ext: string; mediaType: string 
   if (starts([0xff, 0xd8, 0xff])) return { ext: "jpg", mediaType: "image/jpeg" };
   if (ascii("RIFF") && ascii("WEBP", 8)) return { ext: "webp", mediaType: "image/webp" };
   if (ascii("GIF87a") || ascii("GIF89a")) return { ext: "gif", mediaType: "image/gif" };
-  if (ascii("ftyp", 4)) {
-    const brands = [8, ...Array.from({ length: Math.max(0, Math.floor((Math.min(bytes.length, 64) - 16) / 4)) }, (_, i) => 16 + i * 4)];
-    if (brands.some((offset) => ["heic", "heix", "hevc", "hevx"].some((brand) => ascii(brand, offset)))) return { ext: "heic", mediaType: "image/heic" };
-    if (brands.some((offset) => ["mif1", "msf1"].some((brand) => ascii(brand, offset)))) return { ext: "heif", mediaType: "image/heif" };
-  }
-  if (ascii("BM")) return { ext: "bmp", mediaType: "image/bmp" };
-  if (starts([0x49, 0x49, 0x2a, 0x00]) || starts([0x4d, 0x4d, 0x00, 0x2a])) return { ext: "tiff", mediaType: "image/tiff" };
-  return null;
+  const heif = sniffHeif(bytes, ascii);
+  if (heif) return heif;
+  return sniffBitmap(starts);
 }
 
 import { sha256Hex } from "./sha256";
@@ -158,7 +167,7 @@ export interface TaskRecord {
   references: TaskRecordReference[];
 }
 
-/** 写参考图快照 reference-N.ext 与 task.json；返回任务目录（相对用户数据根，正斜杠）与发给网关的参考图。 */
+/** 写参考图快照 reference-N.ext 与 task.json；返回任务目录（相对数据根，正斜杠）与发给网关的参考图。 */
 export async function writeSubmission(fs: Pick<TaskFs, "writeNewFile">, userRoot: string, plan: SubmissionPlan): Promise<{ relDir: string; references: ReferenceImage[] }> {
   const kinds = plan.references.map((ref, i) => {
     const kind = sniffImage(ref.bytes);
@@ -198,6 +207,14 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 /** 快照文件名只能是任务目录里的普通文件名，不许带目录。 */
 const isPlainFileName = (v: unknown): v is string => typeof v === "string" && v !== "" && !/[\\/]/.test(v) && v !== "." && v !== "..";
 
+function validReferenceRegion(region: unknown): boolean {
+  return region === undefined || (isObject(region) && Array.isArray(region.rects) && typeof region.source_port === "number");
+}
+
+function validTaskReference(ref: unknown): boolean {
+  return isObject(ref) && isPlainFileName(ref.file) && isObject(ref.source) && typeof ref.source.kind === "string" && validReferenceRegion(ref.region);
+}
+
 /** 解析 task.json；只校验重新生成必需的字段（model、prompt、size、references[].file / source），不合格即损坏。 */
 function parseTaskRecord(bytes: Uint8Array): TaskRecord {
   const corrupt = () => new LocalError("上次任务的任务记录已损坏");
@@ -215,14 +232,7 @@ function parseTaskRecord(bytes: Uint8Array): TaskRecord {
     typeof raw.size.width === "number" &&
     typeof raw.size.height === "number" &&
     Array.isArray(raw.references) &&
-    raw.references.every(
-      (ref) =>
-        isObject(ref) &&
-        isPlainFileName(ref.file) &&
-        isObject(ref.source) &&
-        typeof ref.source.kind === "string" &&
-        (ref.region === undefined || (isObject(ref.region) && Array.isArray(ref.region.rects) && typeof ref.region.source_port === "number")),
-    );
+    raw.references.every(validTaskReference);
   if (!valid) throw corrupt();
   // 只校验重新生成读到的字段（model / prompt / size / references 的 file、source、region）；其余字段按写入口径信任，仅供追溯。
   return raw as unknown as TaskRecord;
@@ -253,7 +263,7 @@ export async function readSubmission(fs: Pick<TaskFs, "readFile">, userRoot: str
   return { record, references };
 }
 
-/** 写结果图 result.<ext>；返回文件名与相对用户数据根的路径（画板结果节点的主引用）。 */
+/** 写结果图 result.<ext>；返回文件名与相对数据根的路径（画板结果节点的主引用）。 */
 export async function saveResult(fs: Pick<TaskFs, "writeNewFile">, userRoot: string, relDir: string, bytes: Uint8Array): Promise<{ file: string; path: string }> {
   const kind = sniffImage(bytes);
   if (!kind) throw new Error("结果不是可识别的图片");
@@ -303,6 +313,18 @@ export function layersExportJson(layers: LayerRecord[], base?: LayersBase): stri
   return `${JSON.stringify({ ...(base ? { base } : {}), layers }, null, 2)}\n`;
 }
 
+function validLayerLabels(layer: Record<string, unknown>): boolean {
+  return (layer.name === undefined || typeof layer.name === "string") && (layer.description === undefined || typeof layer.description === "string");
+}
+
+function validLayersBase(base: unknown): boolean {
+  return base === undefined || (isObject(base) && (base.z_index === undefined || base.z_index === 0) && (base.file === undefined || typeof base.file === "string") && validLayerLabels(base));
+}
+
+function validLayerRecord(layer: unknown, index: number): boolean {
+  return isObject(layer) && layer.z_index === index + 1 && typeof layer.file === "string" && /^layers\/\d{2}\.png$/.test(layer.file) && validLayerBox(layer.bounding_box) && validLayerLabels(layer);
+}
+
 /** 解析并校验 layers.json：底图身份（可选，z_index 缺省补 0）与图层记录；损坏或关键身份 / 定位无效明确失败。 */
 export function parseLayersFile(bytes: Uint8Array): { base?: LayersBase; layers: LayerRecord[] } {
   let raw: unknown;
@@ -312,18 +334,12 @@ export function parseLayersFile(bytes: Uint8Array): { base?: LayersBase; layers:
     throw new LocalError("图层元数据损坏");
   }
   const base = isObject(raw) ? raw.base : undefined;
-  const validBase =
-    base === undefined ||
-    (isObject(base) &&
-      (base.z_index === undefined || base.z_index === 0) &&
-      (base.file === undefined || typeof base.file === "string") &&
-      (base.name === undefined || typeof base.name === "string") &&
-      (base.description === undefined || typeof base.description === "string"));
+  const validBase = validLayersBase(base);
   const layers = isObject(raw) ? raw.layers : undefined;
   const validLayers =
     Array.isArray(layers) &&
     layers.length <= 16 &&
-    layers.every((l, i) => isObject(l) && l.z_index === i + 1 && typeof l.file === "string" && /^layers\/\d{2}\.png$/.test(l.file) && validLayerBox(l.bounding_box) && (l.name === undefined || typeof l.name === "string") && (l.description === undefined || typeof l.description === "string"));
+    layers.every(validLayerRecord);
   if (!validBase || !validLayers) throw new LocalError("图层元数据损坏");
   return { ...(base === undefined ? {} : { base: { ...(base as object), z_index: 0 } as LayersBase }), layers: layers as LayerRecord[] };
 }

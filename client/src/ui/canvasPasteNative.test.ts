@@ -9,7 +9,7 @@ import { nodeMarker } from "../core/pageInput";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { PASTE_TEXT } from "./boardText";
 import { useCanvasPaste } from "./canvasPaste";
-import { ShellProvider, useShell } from "./shell";
+import { ShellProvider } from "./shell";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -26,7 +26,6 @@ let snapshotValue: ClipboardContent | null;
 
 /** 挂在真端口上的探针：粘贴走 useCanvasPaste，壳端口来自 ShellProvider。 */
 function Probe(): null {
-  const shellPort = useShell();
   useCanvasPaste({
     wrapper: { current: null },
     dialogOpen: { current: false },
@@ -39,7 +38,6 @@ function Probe(): null {
     importPastedImages: importPastedImages as never,
     isEditableTarget: (target) => target instanceof Element && target.closest("input, textarea, select, [contenteditable='true']") !== null,
     readClipboard: () => Promise.resolve(snapshotValue),
-    nativeClipboard: shellPort.features.nativeClipboard ?? false,
   });
   return null;
 }
@@ -51,13 +49,7 @@ async function show(): Promise<void> {
   });
 }
 
-/** 端口替身：features 只读，按需要造一份声明（或不声明）原生剪贴板能力的。 */
-function nativePort(native: boolean): FakePort {
-  const created = createFakePort();
-  return { ...created, features: { ...created.features, ...(native ? { nativeClipboard: true } : {}) } };
-}
-
-/** 一次 Ctrl+V：桌面壳的路由（nativeClipboard）不看事件内容，只看端口读到的快照。 */
+/** 一次 Ctrl+V：桌面壳的路由不看事件内容，只看端口读到的快照。 */
 async function paste(text = ""): Promise<Event> {
   const event = new Event("paste", { bubbles: true, cancelable: true });
   Object.defineProperty(event, "clipboardData", { value: { files: [], getData: (type: string) => (type === "text/plain" ? text : "") } });
@@ -76,8 +68,8 @@ beforeEach(async () => {
   toast = vi.fn<(message: string) => void>();
   importPastedImages = vi.fn();
   snapshotValue = snapshot();
-  // 桌面壳的端口：features.nativeClipboard 为 true 时粘贴先读原生快照。
-  port = nativePort(true);
+  // 桌面壳粘贴只读取原生快照。
+  port = createFakePort();
   await show();
 });
 
@@ -169,11 +161,11 @@ describe("原生剪贴板：失败与空", () => {
     snapshotValue = null;
     port.media.readClipboard = () => Promise.reject(new Error("剪贴板不可用"));
     await paste();
-    // 退回 paste 事件（这里事件是空的）：什么都不做，与 Web 一致。
+    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.unavailable);
     expect(importPastedImages).not.toHaveBeenCalled();
   });
 
-  it("读不到快照、事件里带图片：退回事件内容，与 Web 同一套语义", async () => {
+  it("读不到原生快照时明确提示，不使用事件里的图片", async () => {
     snapshotValue = null;
     const image = png();
     const event = new Event("paste", { bubbles: true, cancelable: true });
@@ -182,20 +174,12 @@ describe("原生剪贴板：失败与空", () => {
       window.dispatchEvent(event);
       await Promise.resolve();
     });
-    expect(event.defaultPrevented).toBe(true);
-    expect(importPastedImages).toHaveBeenCalledWith([image], { x: 0, y: 0 });
-  });
-});
-
-describe("Web 的路不变", () => {
-  it("nativeClipboard 为 false 时仍按 paste 事件分派，不吞普通文本", async () => {
-    port = nativePort(false);
-    await show();
-    snapshotValue = snapshot({ kind: "images", images: [png()] });
-    const event = new Event("paste", { bubbles: true, cancelable: true });
-    Object.defineProperty(event, "clipboardData", { value: { files: [], getData: (type: string) => (type === "text/plain" ? "一段普通文字" : "") } });
-    window.dispatchEvent(event);
-    expect(event.defaultPrevented).toBe(false);
+    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.unavailable);
     expect(importPastedImages).not.toHaveBeenCalled();
   });
+});
+it("原生读取未完成时就阻止画板的默认粘贴", () => {
+  const event = new Event("paste", { bubbles: true, cancelable: true });
+  window.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
 });

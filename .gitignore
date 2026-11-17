@@ -32,20 +32,16 @@ dist/
 .idea/
 .vscode/
 
-# Web 服务端构建产物
+# 旧检出残留缓存保持忽略；清理源码不删除这些本地产物
 /server/target/
+/client/src-tauri/
+test-results/
 
-# 质量门禁（docs/adr/0020）：覆盖率与变异 worker、指标快照、生成的 UML 图都不提交
+# 前端质量门禁：覆盖率与变异 worker、指标快照、生成的 UML 图都不提交
 /client/target/
 .metrics/
 /examples/kacha.edn
-# 已退役桌面客户端在旧检出里残留的构建缓存
-/client/src-tauri/
-
 # MyGo 生成物（#127）：绑定客户端与嵌入前端的临时包，每次构建重新生成
 /client/src/mygo.ts
 desktop/mygo_frontend_gen.go
 desktop/mygo_frontend/
-
-# e2e 截图与 Playwright 输出（以仓库根为 cwd 运行时产生）
-test-results/

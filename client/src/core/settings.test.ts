@@ -3,6 +3,7 @@ import { BUILTIN_TABLE } from "./capabilities";
 import {
   availableModels,
   DEFAULT_SETTINGS,
+  defaultEditModel,
   defaultTaskModel,
   discoveryFromCache,
   isPlainHttp,
@@ -62,6 +63,11 @@ describe("高级设置 settings.json", () => {
 
   it("更新版本拒开：报告版本，给出默认值供本次运行", () => {
     expect(parseSettings(JSON.stringify({ format_version: 2, base_url: "x" }))).toEqual({ kind: "newer", version: 2, settings: DEFAULT_SETTINGS });
+  });
+
+  it("更新版本优先于字段类型校验，当前版本的 null 设置值按缺省处理", () => {
+    expect(parseSettings('{"format_version":2,"base_url":3,"concurrency":99}')).toEqual({ kind: "newer", version: 2, settings: DEFAULT_SETTINGS });
+    expect(parseSettings('{"format_version":1,"base_url":null,"concurrency":null}')).toEqual({ kind: "ok", settings: DEFAULT_SETTINGS });
   });
 
   it("损坏报错并用默认值", () => {
@@ -142,15 +148,25 @@ describe("模型发现", () => {
     expect(availableModels(BUILTIN_TABLE, live).map((m) => m.model_id)).toEqual(["qwen-image-3.0-pro", "doubao-seedream-5-0-pro-260628"]);
   });
 
-  it("从未发现过时列出上架清单", () => {
-    expect(availableModels(BUILTIN_TABLE, { source: "none" }).map((m) => m.model_id)).toEqual(["qwen-image-3.0-pro", "doubao-seedream-5-0-pro-260628", "qwen-image-3.0", "doubao-seedream-5-0-flash-260915"]);
+  it("没有有效发现或缓存时不拿静态上架清单冒充发现成功", () => {
+    expect(availableModels(BUILTIN_TABLE, { source: "none" })).toEqual([]);
+    expect(availableModels(BUILTIN_TABLE, { source: "none", failed: true })).toEqual([]);
   });
 
   it("已发现但网关没有该模型时，任务标红原因", () => {
     const live = { source: "live" as const, ids: ["qwen-image-3.0-pro"], fetchedAt: "t" };
     expect(modelAvailabilityIssue(BUILTIN_TABLE, live, "qwen-image-3.0-pro")).toBeNull();
     expect(modelAvailabilityIssue(BUILTIN_TABLE, live, "qwen-image-3.0")).toBe("网关未提供模型 qwen-image-3.0");
+    // 还没发现过时不把静态清单当成功，但也不把每个任务都标成错误：编辑仍可用。
     expect(modelAvailabilityIssue(BUILTIN_TABLE, { source: "none" }, "qwen-image-3.0")).toBeNull();
+    expect(modelAvailabilityIssue(BUILTIN_TABLE, { source: "none", failed: true }, "qwen-image-3.0")).toContain("模型发现失败");
+  });
+});
+
+describe("迭代默认编辑模型", () => {
+  it("没有发现结果时仍保留本机编辑能力，不把静态清单当发现成功", () => {
+    expect(defaultEditModel(BUILTIN_TABLE, { source: "none" }, "qwen-image-3.0")?.model_id).toBe("qwen-image-3.0");
+    expect(defaultEditModel(BUILTIN_TABLE, { source: "none", failed: true }, "qwen-image-3.0")?.model_id).toBe("qwen-image-3.0");
   });
 });
 
@@ -164,6 +180,7 @@ describe("新建任务默认模型", () => {
     expect(defaultTaskModel(BUILTIN_TABLE, { source: "none" }, "doubao-seedream-5-0-pro-260628")).toBe("doubao-seedream-5-0-pro-260628");
     expect(defaultTaskModel(BUILTIN_TABLE, { source: "none" }, "nope")).toBe("doubao-seedream-5-0-flash-260915");
     expect(defaultTaskModel(BUILTIN_TABLE, live(["qwen-image-3.0-pro", "doubao-seedream-5-0-pro-260628"]), null)).toBe("doubao-seedream-5-0-flash-260915");
+    expect(defaultTaskModel(BUILTIN_TABLE, live(["qwen-image-3.0"]), "qwen-image-3.0")).toBe("qwen-image-3.0");
   });
 });
 

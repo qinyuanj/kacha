@@ -27,7 +27,7 @@ interface Options {
   /** 画板写入的唯一入口（见 core/edit）：只读画板由它拒绝，这里先给只读提示。 */
   apply: (change: BoardChange) => void;
   toast: (message: string) => void;
-  /** 用户数据根：本机图片上传后按它拼绝对路径。 */
+  /** 数据根：本机图片上传后按它拼绝对路径。 */
   userRoot: string;
   /** 归档画板：拖进来的图片不导入，只提示只读。 */
   readOnly: boolean;

@@ -11,7 +11,7 @@ export interface ExportDeps {
   packFs: Parameters<typeof planExport>[2];
   io: Parameters<typeof runCancellable>[0];
   facts(spec: ReturnType<typeof exportSources>): Promise<PackEntryFact[]>;
-  exportPack(target: string, spec: ReturnType<typeof buildExportSpec>): Promise<{ task_dirs: number; bytes: number }>;
+  exportPack(target: string, spec: ReturnType<typeof buildExportSpec>): Promise<{ task_dirs: number; bytes: number; target?: string }>;
   version(): Promise<string>;
   log(kind: LogKind, fields: Record<string, unknown>): void;
 }
@@ -37,7 +37,7 @@ export async function exportPlanStep(
     return { kind: "failed", text: unavailableMessage(e) ?? planFailedText(e instanceof Error ? e.message : String(e)) };
   }
   const { stem } = exportTargetOf(boardFile);
-  // hash 阶段：服务端给逐文件长度与 sha256，core 据此去重并算预估大小，再请用户确认（包格式 v2）。
+  // hash 阶段：本机存储给逐文件长度与 sha256，core 据此去重并算预估大小，再请用户确认（包格式 v2）。
   // runCancellable 把异常压成文本，类别就丢了：端口说「尚不可用」时在这里先记下来。
   let unavailable: string | null = null;
   const outcome = await runCancellable(deps.io, progress(`正在计算画板包大小：${stem}`), async () => {
@@ -73,7 +73,8 @@ export async function exportPackStep(
     return { ok: false, text: outcome.result === "cancelled" ? exportCancelledText : exportFailedText(outcome.error) };
   }
   deps.log("board_pack", { ...fields, task_dirs: outcome.value.task_dirs, bytes: outcome.value.bytes, result: "ok" });
-  return { ok: true, text: exportDoneText(target) };
+  // 桌面壳选的是本机目标：告知用户实际写出的路径，而不是一开始给的默认文件名。
+  return { ok: true, text: exportDoneText(outcome.value.target ?? target) };
 }
 
 /** 进度对话框的状态。 */

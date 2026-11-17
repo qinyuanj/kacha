@@ -1,7 +1,6 @@
 // MyGo 桌面壳配置（#127）：Go 应用在 desktop/，前端仍是现有 client/，构建产物在 build/。
 // 这里导出普通对象而不是 defineConfig({...})：CLI 用 Node 求值本文件，不引入额外依赖就能读。
-// 版本、名称与标识符只在本文件定义。version 是产品版本号，必须与 server/Cargo.toml 同号：
-// packaging/release_gate.py 读这两张清单比对，桌面打包入口经它取版本（ADR 0024）。
+// 版本、名称与标识符只在本文件定义；packaging/release_gate.py 从这里读取产品版本号。
 export default {
   name: "Kacha",
   slug: "kacha",
@@ -14,4 +13,8 @@ export default {
   frontendDist: "client/dist",
   bindings: "client/src/mygo.ts",
   out: "build",
+  // 刻意不配 updates 段（#164）：MyGo 的 updates 签的是 <slug>-<版本>-windows-amd64.tar.gz
+  // 应用归档，并写出同名的 update-windows-amd64.json；本项目的发布资产是 NSIS 安装器，
+  // 描述文件名与语义必须只有一份（见 packaging/release_gate.py 与 RELEASE_164.md）。
+  // 安装器的签名由 tools/signrelease 在发布环境用发布者私钥完成。
 };

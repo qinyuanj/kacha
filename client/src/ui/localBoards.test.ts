@@ -174,3 +174,35 @@ it("新建画板写不进去：标签页留着，内容不丢，失败原因看�
   expect(session.status).toBe("ok");
   expect(session.status === "ok" && session.saveError).toContain("写入失败");
 });
+
+it("缺失画板恢复原文件后显式重试：使用原版本保存并解除缺失状态", async () => {
+  const failures = new Map([[BOARD_PATH, "missing" as const]]);
+  const port = createFakePort({ boards: [{ path: BOARD_PATH, main: serializeBoard(newBoard("本地")), version: "v1" }], writeFailures: failures });
+  const { key, boards } = await openAndEdit(port, "保留的改动");
+  await boards.flushNow(key);
+  expect(boards.snapshot().sessions[0]).toMatchObject({ missing: true, conflicted: true });
+  const before = port.calls.write.length;
+  await boards.flushNow(key);
+  expect(port.calls.write).toHaveLength(before);
+  await boards.retrySave(key);
+  expect(boards.snapshot().sessions[0]).toMatchObject({ missing: true, conflicted: true, version: "v1" });
+  expect(port.calls.write.at(-1)?.options).toEqual({ version: "v1" });
+  failures.delete(BOARD_PATH);
+  await boards.retrySave(key);
+  expect(port.calls.write.at(-1)?.options).toEqual({ version: "v1" });
+  expect(boards.snapshot().sessions[0]).toMatchObject({ missing: false, conflicted: false, saveError: null, board: { title: "保留的改动" } });
+});
+
+it("缺失画板恢复成外部新版本：显式重试仍拒绝覆盖，保留内存改动", async () => {
+  const failures = new Map([[BOARD_PATH, "missing" as "missing" | "conflict"]]);
+  const port = createFakePort({ boards: [{ path: BOARD_PATH, main: serializeBoard(newBoard("本地")), version: "v1" }], writeFailures: failures });
+  const { key, boards } = await openAndEdit(port, "未保存的改动");
+  await boards.flushNow(key);
+  failures.set(BOARD_PATH, "conflict");
+  await boards.retrySave(key);
+  expect(port.calls.write.at(-1)?.options).toEqual({ version: "v1" });
+  expect(boards.snapshot().sessions[0]).toMatchObject({ conflicted: true, missing: false, version: "v1", board: { title: "未保存的改动" } });
+  const before = port.calls.write.length;
+  await boards.retrySave(key);
+  expect(port.calls.write).toHaveLength(before);
+});

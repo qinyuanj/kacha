@@ -12,8 +12,12 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/packimport"
 )
+
+// KindMoving 是迁移复制期间的拒绝类别：状态记录还没切，导入与导出都先停下（#161）。
+const KindMoving = "moving"
 
 // Progress 是一次导入的进度快照（与 packimport.Progress 同形，页面按它画进度条）。
 type Progress struct {
@@ -56,6 +60,11 @@ type Snapshot struct {
 // Service 是绑定给页面的画板包服务。
 type Service struct {
 	root string
+	// roots 是可切换的数据根（迁移 #161）：装了它，导入与导出都跟着走。
+	roots *dataroot.Roots
+
+	// export 是画板包导出的独立状态：与导入互不阻塞，也各自有取消标记。
+	export exportState
 
 	mu       sync.Mutex
 	running  bool
@@ -65,9 +74,30 @@ type Service struct {
 	generation atomic.Int64
 }
 
-// New 造一个以 root 为用户数据根的服务。
+// New 造一个以 root 为数据根的服务。
 func New(root string) *Service {
 	return &Service{root: root}
+}
+
+// NewFollowing 造一个跟着共享数据根走的服务：迁移切换后导入与导出都落到新位置。
+func NewFollowing(roots *dataroot.Roots) *Service {
+	return &Service{roots: roots}
+}
+
+// Root 返回当前数据根。
+func (s *Service) Root() string {
+	if s.roots != nil {
+		return s.roots.Current()
+	}
+	return s.root
+}
+
+// moving 报告迁移复制是否正在进行：这一段里不开始新的导入与导出。
+//
+// 导入会往数据根里写任务目录与画板，写成旧位置在切换后就没用了；导出也在搬同一批文件，
+// 与迁移抢着读同一份内容。两边都直接失败，给用户一句「等迁移结束」，而不是静默丢写。
+func (s *Service) moving() bool {
+	return s.roots != nil && s.roots.Moving()
 }
 
 // Pick 让用户选一个画板包，返回它的绝对路径；取消时返回空串。
@@ -97,6 +127,9 @@ func (s *Service) Start(packPath string) Outcome {
 	if info, err := os.Stat(packPath); err != nil || info.IsDir() {
 		return Outcome{Kind: "invalid", Step: packimport.StepCheck, Message: "选中的画板包读不出来：" + packPath}
 	}
+	if s.moving() {
+		return Outcome{Kind: KindMoving, Step: packimport.StepCheck, Message: "正在迁移数据位置，完成前不能导入画板包"}
+	}
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
@@ -119,7 +152,7 @@ func (s *Service) Snapshot() Snapshot {
 	return Snapshot{Running: s.running, Progress: s.progress, Outcome: s.outcome}
 }
 
-// Cancel 取消当前导入：已移入的任务目录保留，画板不再写入（与 Web 版一致）。
+// Cancel 取消当前导入：已移入的任务目录保留，画板不再写入。
 func (s *Service) Cancel() {
 	s.mu.Lock()
 	running := s.running
@@ -134,7 +167,7 @@ func (s *Service) run(packPath string, generation int64) {
 	// stale 报告这次导入是否已经被取消（或已被新的一次顶掉）。
 	stale := func() bool { return s.generation.Load() != generation }
 
-	importer := packimport.New(s.root)
+	importer := packimport.New(s.Root())
 	importer.OnCancel(stale)
 	importer.OnProgress(func(p packimport.Progress) {
 		s.mu.Lock()

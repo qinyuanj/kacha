@@ -362,3 +362,44 @@ describe("图片节点按哪些模型给输入规则提示", () => {
     expect(inputRuleModels(b, "res", FLASH)).toEqual([SEEDREAM_PRO]);
   });
 });
+
+describe("连线失败原因优先级", () => {
+  it("图片名额已满时先报上限；空端口可用后仍拒绝谱系成环", () => {
+    const g = board([node("r", "result"), task("t")], [edge("t", "result", "r", "in", true)]);
+    const noImages = withModel((m) => { m.workflows.image_edit.max_references = 0; });
+    g.nodes[1] = task("t", "test-model");
+    expect(canConnect(g, noImages, conn("r", "out", "t", "image:0"))).toEqual({ ok: false, reason: "模型不支持图片编辑" });
+    g.nodes[1] = task("t");
+    expect(canConnect(g, table, conn("r", "out", "t", "image:0"))).toEqual({ ok: false, reason: "不能形成环" });
+  });
+
+  it("提示词端口已有连线时优先报告占用，即使新增连线也会成环", () => {
+    const g = board([node("p", "prompt"), task("t")], [edge("p", "out", "t", "positive"), edge("t", "result", "p", "in", true)]);
+    expect(canConnect(g, table, conn("p", "out", "t", "positive"))).toEqual({ ok: false, reason: "该端口已有连线" });
+  });
+});
+
+describe("图片规则边界", () => {
+  const unrestricted = { formats: ["png"], max_bytes: null, min_total_pixels: null, max_total_pixels: null, min_short_edge: null, min_aspect_ratio: null, max_aspect_ratio: null };
+
+  it("尺寸未就绪只检查格式和字节，不根据零边长推断像素或宽高比", () => {
+    const rule = { ...unrestricted, max_bytes: 1024 * 1024, min_total_pixels: 100, min_short_edge: 10, max_aspect_ratio: 2 };
+    expect(imageRuleViolations({ format: "", bytes: 2 * 1024 * 1024, width: 0, height: 100 }, rule)).toEqual([
+      "格式 未知 不受支持（支持 PNG）", "文件 2.0 MB 超过上限 1.0 MB",
+    ]);
+  });
+
+  it("可单独限定宽高比上下界，提示中无界分别显示 0 和无穷", () => {
+    const image = { format: "png", bytes: 1, width: 200, height: 100 };
+    expect(imageRuleViolations(image, { ...unrestricted, max_aspect_ratio: 1 })).toEqual(["宽高比 2.00 超出 0～1.00"]);
+    expect(imageRuleViolations(image, { ...unrestricted, min_aspect_ratio: 3 })).toEqual(["宽高比 2.00 超出 3.00～∞"]);
+    expect(imageRuleViolations(image, unrestricted)).toEqual([]);
+  });
+
+  it("等于各上限和下限时合法，低于像素下限仍按顺序给原因", () => {
+    const image = { format: "png", bytes: 100, width: 20, height: 10 };
+    const rule = { ...unrestricted, max_bytes: 100, min_total_pixels: 200, max_total_pixels: 200, min_short_edge: 10, min_aspect_ratio: 2, max_aspect_ratio: 2 };
+    expect(imageRuleViolations(image, rule)).toEqual([]);
+    expect(imageRuleViolations(image, { ...rule, min_total_pixels: 201 })).toEqual(["总像素 200 低于下限 201"]);
+  });
+});

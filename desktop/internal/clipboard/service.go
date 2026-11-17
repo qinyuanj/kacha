@@ -201,12 +201,12 @@ type ImageCopyOutcome struct {
 // 让 busy 判定走结构化错误而不是匹配文案（MyGo 改措辞也不会把可重试的失败降级）。
 var ErrClipboardBusy = errors.New("系统剪贴板正被其他程序占用")
 
-// Reader 按用户数据根里的路径读字节：生产实现是 localstore 的 ReadFile（自带越界拒绝）。
+// Reader 按数据根里的路径读字节：生产实现是 localstore 的 ReadFile（自带越界拒绝）。
 type Reader func(path string) ([]byte, error)
 
 // Bound 是绑定给页面的剪贴板服务：读快照（#129）与把图片写进系统剪贴板（#130）。
 //
-// 页面只给路径与格式提示，字节由 Go 自己按用户数据根读：路径越界由 localstore 拒绝，
+// 页面只给路径与格式提示，字节由 Go 自己按数据根读：路径越界由 localstore 拒绝，
 // 界面不把整张图搬过 IPC。
 type Bound struct {
 	// Service 是读写实现（Read 来自它）。
@@ -214,7 +214,7 @@ type Bound struct {
 	read Reader
 }
 
-// NewBound 造一个绑定服务：read 是「按路径读用户数据根里的文件」。
+// NewBound 造一个绑定服务：read 是「按路径读数据根里的文件」。
 func NewBound(read Reader) Bound {
 	return Bound{Service: Service{}, read: read}
 }

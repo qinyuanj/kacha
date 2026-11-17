@@ -55,7 +55,7 @@ export function concurrencyOnBlur(draft: string, savedConcurrency: number): stri
   return String(parseConcurrency(draft, savedConcurrency));
 }
 
-/** 连接测试的结果文案：成功给模型数，失败给服务端的话。 */
+/** 连接测试的结果文案：成功给模型数，失败给本机存储的话。 */
 export function connectionText(result: { ok: true; count: number } | { ok: false; message: string }): string {
   return result.ok ? `连接成功，网关提供 ${result.count} 个模型` : result.message;
 }
@@ -65,7 +65,7 @@ export function discoveryText(discovery: { source: "live" | "cached" | "none"; f
   const at = discovery.fetchedAt ? new Date(discovery.fetchedAt).toLocaleString() : "";
   if (discovery.source === "live") return `模型列表：已从网关获取（${at}）`;
   if (discovery.source === "cached") return `模型列表：离线，使用缓存（${at}）`;
-  return "模型列表：尚未从网关获取，暂按上架清单显示";
+  return "模型列表：尚未从网关获取，模型不可选；请配置密钥并测试连接";
 }
 
 /** 保存时要写入的设置：在已存设置上套用表单。 */

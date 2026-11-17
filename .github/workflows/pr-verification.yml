@@ -21,7 +21,6 @@ jobs:
       PYTHONUTF8: '1'
       PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
       PR_BASE: origin/${{ github.event.pull_request.base.ref }}
-      RUN_E2E: ${{ github.event.pull_request.base.ref == 'main' || startsWith(github.event.pull_request.base.ref, 'integration/') }}
     steps:
       - name: Check out PR and full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,10 +38,11 @@ jobs:
           python-version: '3.12'
           architecture: x64
 
-      - name: Set up Rust 1.99.1 MSVC
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
+      - name: Set up Go from the module manifest
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          toolchain: 1.99.1-x86_64-pc-windows-msvc
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
 
       - name: Fetch the explicit PR base
         shell: pwsh
@@ -50,10 +50,6 @@ jobs:
 
       - name: Install locked client dependencies
         run: npm --prefix client ci
-
-      - name: Install Chromium for integration PRs
-        if: env.RUN_E2E == 'true'
-        run: npm --prefix client exec -- playwright install chromium
 
       - name: Install the integrity-checked quality tool
         shell: python
@@ -120,8 +116,4 @@ jobs:
       - name: Run PR verification against its actual base
         shell: pwsh
         run: |
-          $arguments = @("packaging/verify.py", "--base", $env:PR_BASE)
-          if ($env:RUN_E2E -eq "true") {
-            $arguments += "--e2e"
-          }
-          python @arguments
+          python packaging/verify.py --base $env:PR_BASE

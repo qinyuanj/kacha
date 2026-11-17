@@ -23,7 +23,7 @@ describe("用量上限提醒", () => {
     expect(usageNoticeOf(usage())).toBeNull();
   });
 
-  it("有上限但没到线：服务端没给档位就不提醒", () => {
+  it("有上限但没到线：存储端口没给档位就不提醒", () => {
     expect(usageNoticeOf(usage({ limit_bytes: 1000 }))).toBeNull();
   });
 

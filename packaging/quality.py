@@ -17,7 +17,7 @@ import re
 import subprocess
 import sys
 
-SOURCE_SUFFIXES = (".ts", ".tsx", ".rs")
+SOURCE_SUFFIXES = (".ts", ".tsx")
 CRAP_THRESHOLD = "10"
 DRY_THRESHOLD = "0.8"
 BASE_REF = "origin/main"
@@ -29,13 +29,10 @@ VIEWER_PLUGIN = "dsh-uml-viewer"
 VIEWER_PLUGIN_RECORD = "current.json"
 VIEWER_BINARY_NAME = "uml-viewer.exe" if os.name == "nt" else "uml-viewer"
 
-# 变异工作副本要额外复制进来的路径，相对包根；client、server 都是仓库根的直接子目录，
-# 所以两个包的取值相同。mutator 在 Windows 上只为每个变异体复制被运行的那个包，包外依赖
-# 不在副本里，改动文件的基线测试一读就失败（见 docs/adr/0022、#102、#141）：
-# contracts/ 放画板策略与网关实测夹具；docs/release 是「更新说明」；server/Cargo.toml 与
-# mygo.config.ts 是版本线的两张清单——changelog 守护测试要同时读这三样
-# （client/src/core/changelog.test.ts、ui/ChangelogDialog.tsx 的 ?raw import）。
-MUTATION_COPIES = ("../contracts", "../docs/release", "../server/Cargo.toml", "../mygo.config.ts")
+# 前端变异工作副本需要读取包外的契约夹具、更新说明与唯一版本清单。
+MUTATION_COPIES = ("../contracts", "../docs/release", "../mygo.config.ts")
+
+GO_COVERAGE_NOTICE = "质量范围：前端 TypeScript 的 CRAP / DRY / mutation；Go 当前只由 go test ./... 验证，未接入这三项质量指标。"
 
 
 class BaseRefError(RuntimeError):
@@ -59,7 +56,7 @@ class Scope:
 
 @dataclass(frozen=True)
 class Package:
-    """一个源码根所在的包（client、server）：工具以它为根运行，覆盖率报告与指标都落在包内。
+    """一个前端源码根所在的包：工具以它为根运行，覆盖率报告与指标都落在包内。
 
     vitest 写出的 lcov 路径相对包目录，以仓库根运行时 crapper 对不上，覆盖率会变成 N/A。
     """
@@ -90,7 +87,7 @@ def packages(scope: Scope) -> list[Package]:
 
 
 def in_scope(scope: Scope, files: list[str]) -> list[str]:
-    """留下源码根下的 TS / Rust 文件；排除规则交给工具按同一套规则执行。"""
+    """留下前端源码根下的 TypeScript 文件；排除规则交给工具按同一套规则执行。"""
     return [f for f in files if f.endswith(SOURCE_SUFFIXES) and any(f.startswith(r + "/") for r in scope.roots)]
 
 
@@ -115,7 +112,8 @@ def changed_files(root: Path, base: str) -> list[str]:
     committed = _git_lines(root, "diff", "--name-only", "--diff-filter=AMR", f"{base}..HEAD")
     uncommitted = _git_lines(root, "diff", "--name-only", "--diff-filter=AMR", "HEAD")
     untracked = _git_lines(root, "ls-files", "--others", "--exclude-standard")
-    return sorted(set(committed) | set(uncommitted) | set(untracked))
+    candidates = set(committed) | set(uncommitted) | set(untracked)
+    return sorted(path for path in candidates if (root / path).is_file())
 
 
 def viewer_binary(env: Mapping[str, str]) -> Path:
@@ -203,7 +201,7 @@ def _segments(text: str, opener: str, closer: str) -> list[str]:
 def mutation_uncovered(edn: str, changed: set[str]) -> int:
     """一份 mutate 快照里，本次改动文件的未覆盖变异点数之和（见 docs/adr/0022）。
 
-    Rust mutator 不再打印 Python 版的结果表，未覆盖的变异点只有快照里有：:forms 里每个 map 记着
+    mutator 的未覆盖变异点只有快照里有：:forms 里每个 map 记着
     :file（相对包根）与 :uncovered 数量。快照目录里还留着别的文件上次运行的记录，只统计改动文件。
     """
     forms = _segments(edn[edn.find(":forms"):], "{", "}") if ":forms" in edn else []
@@ -276,6 +274,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--mutate", action="store_true", help="同时运行 mutator")
     args = parser.parse_args(argv)
     scope = Scope.load(ROOT)
+    print(GO_COVERAGE_NOTICE, flush=True)
     try:
         base = merge_base(ROOT, args.base)
     except BaseRefError as error:

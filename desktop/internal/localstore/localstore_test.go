@@ -134,7 +134,7 @@ func TestRemoveBoardMovesToRecycle(t *testing.T) {
 	}
 }
 
-// 越出用户数据根的路径一律拒绝。
+// 越出数据根的路径一律拒绝。
 func TestResolveRejectsOutsideRoot(t *testing.T) {
 	s := New(t.TempDir())
 	if _, err := s.Resolve(filepath.Join("..", "outside.txt")); err == nil {
@@ -148,8 +148,18 @@ func TestResolveRejectsOutsideRoot(t *testing.T) {
 // 画板列表：主画板与归档画板分开，画板位只数主画板。
 func TestListSeparatesArchived(t *testing.T) {
 	s := New(t.TempDir())
-	s.WriteBoard(filepath.Join(s.BoardDir(), "一"+BoardExt), "{}", WriteOptions{CreateOnly: true})
-	s.WriteBoard(filepath.Join(s.BoardDir(), ArchiveDir, "二"+BoardExt), "{}", WriteOptions{CreateOnly: true})
+	first, r1 := s.CreateBoard("一", "{}")
+	if !r1.OK {
+		t.Fatalf("CreateBoard: %+v", r1)
+	}
+	second, r2 := s.CreateBoard("二", "{}")
+	if !r2.OK {
+		t.Fatalf("CreateBoard: %+v", r2)
+	}
+	if got := s.ArchiveBoard(second, filepath.Join(s.BoardDir(), ArchiveDir, filepath.Base(second)), ""); !got.OK {
+		t.Fatalf("ArchiveBoard: %+v", got)
+	}
+	_ = first
 
 	listing, err := s.List()
 	if err != nil {

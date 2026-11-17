@@ -80,6 +80,6 @@ describe("提示条", () => {
 
   it("备份提示：一直显示", async () => {
     await act(async () => dom.render(createElement(BackupHint, {})));
-    expect(container.textContent).toContain("导出");
+    expect(container.textContent).toContain("备份数据根");
   });
 });

@@ -7,7 +7,7 @@ import { prepareStageSplit } from "../core/moveOut";
 import { slotsRefusal, TIDY_TEXT } from "./boardText";
 import { moveOutBlockedText } from "./boardSessions";
 
-/** 移出前的画板位预检：读不到列表时不拦（服务端新建时仍会检查）。 */
+/** 移出前的画板位预检：读不到列表时不拦（本机存储新建时仍会检查）。 */
 export interface SlotsPort {
   board: { list(): Promise<{ slots: { used: number; total: number } }> };
 }
@@ -38,7 +38,7 @@ export async function moveOutWrite(
   stageId: string,
   key: string,
 ): Promise<string> {
-  // 读不到列表时不拦：服务端新建时仍会检查。
+  // 读不到列表时不拦：本机存储新建时仍会检查。
   const refusal = await moveOutRefusal(deps as unknown as SlotsPort);
   if (refusal) return refusal;
   const prepared = await prepareStageSplit(deps.boardOf, stageId, deps.sha256, newId);

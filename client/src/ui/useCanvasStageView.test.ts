@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // useCanvasStageView 的接线：阶段收起 / 框尺寸、新建阶段进入改名、整理模式的度量，
-// 以及整理模式下阶段框上的体量 / 收掉未定稿 / 移出为新画板。壳层（确认框、服务端度量）用替身。
+// 以及整理模式下阶段框上的体量 / 收掉未定稿 / 移出为新画板。壳层（确认框、存储端口度量）用替身。
 import { act, createElement, type MutableRefObject } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -52,7 +52,7 @@ const stage = (id: string, nodes: string[], collapsed = false): Stage => ({ id, 
 
 const boardOf = (nodes: BoardNode[], stages?: Stage[]): Board => ({ ...newBoard("测试"), nodes, ...(stages ? { stages } : {}) });
 
-/** 服务端量出的体量：d1 被两个节点共用（同一次只算一次）。 */
+/** 存储端口量出的体量：d1 被两个节点共用（同一次只算一次）。 */
 const MEASURE: BoardMeasure = { nodes: { a: ["d1"], b: ["d1", "d2"], r1: ["d3"] }, dirs: { d1: 1000, d2: 500, d3: 200 } };
 
 interface ProbeProps {
@@ -224,6 +224,8 @@ describe("整理模式的度量", () => {
 
     await show(propsOf(board, { tidying: true }));
     expect(shell.measureBoard).toHaveBeenCalledWith(serializeBoard(board));
+    // 进入整理只是量：不写画板，不产生撤销步。
+    expect(applied).toEqual([]);
     expect(view.tidyMeasure.measure).toEqual(MEASURE);
     expect(view.tidyMeasure.before).toBe(boardBytes(MEASURE));
 

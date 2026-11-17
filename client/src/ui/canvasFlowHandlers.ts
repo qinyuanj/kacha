@@ -79,7 +79,7 @@ export interface FlowHandlerDeps {
   /** 按当前画板试算一次变更，不写入：删除前的整体拒绝判定。 */
   check: (change: BoardChange) => EditResult | null;
   toast: (message: string) => void;
-  /** 确认框（端口：Web 是 window.confirm，桌面壳可换原生对话框）。 */
+  /** 确认框由桌面壳端口提供。 */
   ask: (message: string, options?: BrowserOptions) => Promise<boolean>;
   /** 已确认「先取消再删除」时逐个取消任务。 */
   onCancelTask: (taskId: string) => void;

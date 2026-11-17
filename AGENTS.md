@@ -2,26 +2,16 @@
 
 默认使用中文与用户沟通；代码、命令、路径和既有技术术语按项目惯例保留原文。
 
-## 开发环境
+## 开发与验证
 
-主开发平台是原生 Windows，在 PowerShell 下开发和验证；部署目标 lzxsvn 同样是 Windows。
+主开发平台是原生 Windows，使用 PowerShell。产品是单机优先的 MyGo / Go 桌面客户端，React 画板通过壳端口访问本机能力。版本只在 `mygo.config.ts` 声明。
 
-## 构建与打包
+构建、验证或排查 Windows 文件权限问题前，先读 `packaging/README.md`。日常使用 debug 构建，正式交付才使用 release 构建。需要本地验证时手动运行 `python packaging\verify.py`，合入集成分支前运行 `python packaging\verify.py --quality`。当前桌面未实现的能力保持明确不可用，文档和测试不得把领域规则当成已交付功能。
 
-日常验证使用 dev/debug 构建；正式部署才使用 release 构建。保留 Cargo 默认并行策略。执行部署构建前，先读 `packaging/README.md` 并使用 `packaging/build_web.py` 入口。
+## 工作票
 
-新 clone 或新建 worktree 后先跑 `python packaging\verify.py --preflight`；需要本地检查时手动运行 `python packaging\verify.py`，合入集成分支前手动运行 `python packaging\verify.py --quality`；构建或测试报 os error 5、cl D8050、建不了符号链接时，读 `packaging/README.md`「验证」。
+创建、读取、更新工作票或推进 wayfinder 地图时，使用 GitHub Issues，并先读 `docs/agents/issue-tracker.md`。
 
-非 Draft PR 自动获得常规 PR 验证，质量门禁以 PR 的实际目标分支为比较基线；直接 push 不触发 CI。PR 更新会重新验证最新代码，Draft 转为 Ready for review 后开始验证。目标为 `main` 或 `integration/*` 时，同一 PR Verify check 还运行全套 e2e；其他目标分支不安装 Chromium、不运行 e2e，修改目标分支后按新目标重新验证。
+## 领域文档
 
-本地手动验证时，e2e 只在集成分支（`main`、`integration/*`）上跑，`verify.py` 会自动跳过其他分支。集成分支上全套 e2e 只在合完各票后手动跑一次，修复时只重跑失败的 spec。在其他分支上跑任何 e2e（`verify.py --e2e`、`npm run test:e2e`、`playwright test`，含只跑单个 spec）都要用户明确授权，一次授权只管当次。
-
-## Agent skills
-
-### Issue tracker
-
-Issues：创建、读取、更新工作票或推进 wayfinder 地图时，使用 GitHub Issues，并先读 `docs/agents/issue-tracker.md`。
-
-### Domain docs
-
-项目采用 single-context 域文档布局。详见 `docs/agents/domain.md`。
+探索领域概念或修改画板、任务目录、画板包行为前，先读 `docs/agents/domain.md`，按其中入口读取词表和相关 ADR。

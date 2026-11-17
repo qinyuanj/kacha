@@ -31,7 +31,7 @@ describe("导入结局", () => {
     });
   });
 
-  it("服务端提交失败：弹窗说明画板没写入", () => {
+  it("存储端口提交失败：弹窗说明画板没写入", () => {
     const outcome = importOutcome({ kind: "commitFailed", error: "断网" });
     expect(outcome.kind).toBe("dialog");
     if (outcome.kind === "dialog") {

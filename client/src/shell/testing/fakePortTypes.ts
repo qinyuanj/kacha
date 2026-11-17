@@ -2,7 +2,7 @@
 import type { ImportOptions } from "../../core/boardPack";
 import type { BoardWriteOptions } from "../types";
 import type { ClipboardContent, ImageCopyResult } from "../port";
-import type { FeatureId, PortFailureKind } from "../port";
+import type { DiagnosticsOutcome, FeatureId, PortFailureKind } from "../port";
 
 export interface FakeBoard {
   path: string;
@@ -39,15 +39,23 @@ export interface FakePortOptions {
   writeFailures?: Map<string, PortFailureKind>;
   /** 没有的能力。 */
   missing?: FeatureId[];
-  /** 是否需要登录界面：默认要（Web 版）；桌面壳给 false。 */
-  requiresLogin?: boolean;
-  /** 本地存着的密钥：有它时界面直接进工作台（Web 版已登录的样子）。 */
-  storedKey?: string | null;
   slots?: { used: number; total: number };
   /** 文件组已有的文件（绝对路径 → 字节）：readFile/sha256/inspectImage 只认这些与画板。 */
   files?: Record<string, Uint8Array>;
   /** 文件组已有的目录：listDir 用它判断目录在不在（缺省由一个文件路径推出来）。 */
   dirs?: string[];
+  /** 诊断包导出的脚本化结局（缺省成功）。 */
+  diagnosticsOutcome?: DiagnosticsOutcome;
+  /** 更新快照：status() 返回它（缺省 idle 快照）；check / install 也按它演。 */
+  update?: import("../../core/update").UpdateSnapshot;
+  /** install 的失败：命中时以该类别拒绝（验界面在安装失败后解除保护）。 */
+  updateInstallFailure?: PortFailureKind;
+  /** 数据位置迁移（#161）：依次返回的目标目录（空了表示用户取消）。 */
+  pickTargets?: string[];
+  /** 迁移失败的类别；缺省成功。 */
+  moveFailure?: PortFailureKind;
+  /** 迁移成功时的文件数（结局文案用）。 */
+  moveFiles?: number;
 }
 
 /** 替身记下的调用：断言界面把结局传出去时用。 */
@@ -59,6 +67,9 @@ export interface FakeCalls {
   archive: { from: string; to: string; version?: string }[];
   unarchive: { from: string; to: string }[];
   import: { file: File; options: ImportOptions }[];
+  /** 更新：检查与安装各被调用几次。 */
+  updateCheck: number;
+  updateInstall: number;
   copyImage: { path: string; format?: string }[];
   copyText: string[];
   pickImages: { multiple: boolean; files: File[] }[];
@@ -75,4 +86,9 @@ export interface FakeCalls {
   downloadImage?: string[];
   downloadBoardResults?: string[];
   writeNewFile?: { absPath: string; bytes: Uint8Array }[];
+  exportDiagnostics: number;
+  /** 迁移请求过的目标目录（按顺序）。 */
+  moveTargets?: string[];
+  /** 替身认为的当前数据根；迁移成功后换成新位置。 */
+  dataRootRoot?: string;
 }

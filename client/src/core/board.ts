@@ -1,4 +1,4 @@
-// 画板文件：用户数据根/画板/<标题>.ugcboard.json。
+// 画板文件：数据根/画板/<标题>.ugcboard.json。
 // 任务目录是真源、画板只是视图；本模块只负责文件格式的读写、版本与未知字段保留、文件名派生。
 import policy from "../../../contracts/board-policy.json" with { type: "json" };
 import { isLayerSize, LAYER_SIZES_TEXT, type LayerSize, type OutputOptions } from "./gateway";
@@ -36,7 +36,7 @@ export interface PromptNode extends NodeBase {
 
 export interface ReferenceNode extends NodeBase {
   type: "reference";
-  /** 用户数据根内为相对路径，根目录外为绝对路径。 */
+  /** 数据根内为相对路径，根目录外为绝对路径。 */
   path: string;
   sha256: string;
   display_name: string;
@@ -86,7 +86,7 @@ export interface ResultNode extends NodeBase {
   type: "result";
   task_id: string;
   file: string;
-  /** 相对用户数据根，主引用。 */
+  /** 相对数据根，主引用。 */
   path: string;
   layer_count: number;
   record: ResultRecord;
@@ -137,6 +137,12 @@ export interface Board {
   /** 阶段；缺省（旧画板、没建过）= 没有阶段。读写一律经 stagesOf。 */
   stages?: Stage[];
   extra: Json;
+}
+
+/** 按节点身份查生成任务；同 id 的其他节点类型不作为任务。 */
+export function findTask(board: Board, id: string): TaskNode | undefined {
+  const node = board.nodes.find((n) => n.id === id);
+  return node?.type === "task" ? node : undefined;
 }
 
 export const stagesOf = (board: Board): Stage[] => board.stages ?? [];
@@ -264,41 +270,48 @@ function parseNode(raw: unknown): BoardNode {
         ...(o.source_board === undefined ? {} : { source_board: str(o, "source_board") }),
       };
     case "task":
-      return {
-        ...base,
-        type,
-        model: str(o, "model"),
-        size_spec: sizeSpec(o, "size_spec"),
-        image_ports: num(o, "image_ports"),
-        layer_decomposition: bool(o, "layer_decomposition"),
-        ...(o.layer_size === undefined ? {} : { layer_size: layerSizeOf(o.layer_size) }),
-        transparent_background: bool(o, "transparent_background"),
-        ...(o.output_options === undefined ? {} : { output_options: outputOptionsOf(o.output_options) }),
-        ...(o.count === undefined ? {} : { count: need<number>(Number.isInteger(o.count) && (o.count as number) >= 1, o.count, "count 必须是正整数") }),
-        last_submitted: nullableObj(o, "last_submitted"),
-      };
-    default: {
-      const record = obj(o, "record");
-      const final = o.final === undefined ? false : need<boolean>(typeof o.final === "boolean", o.final, "final 必须是布尔值");
-      return {
-        ...(final ? { final: true as const } : {}),
-        ...base,
-        type: "result",
-        task_id: str(o, "task_id"),
-        file: str(o, "file"),
-        path: str(o, "path"),
-        layer_count: num(o, "layer_count"),
-        record: {
-          ...record,
-          model: str(record, "model"),
-          prompt: str(record, "prompt"),
-          negative_prompt: str(record, "negative_prompt"),
-          size_spec: sizeSpec(record, "size_spec"),
-          submitted_at: str(record, "submitted_at"),
-        },
-      };
-    }
+      return parseTaskNode(o, base);
+    default:
+      return parseResultNode(o, base);
   }
+}
+
+function parseTaskNode(o: Json, base: NodeBase): TaskNode {
+  return {
+    ...base,
+    type: "task",
+    model: str(o, "model"),
+    size_spec: sizeSpec(o, "size_spec"),
+    image_ports: num(o, "image_ports"),
+    layer_decomposition: bool(o, "layer_decomposition"),
+    ...(o.layer_size === undefined ? {} : { layer_size: layerSizeOf(o.layer_size) }),
+    transparent_background: bool(o, "transparent_background"),
+    ...(o.output_options === undefined ? {} : { output_options: outputOptionsOf(o.output_options) }),
+    ...(o.count === undefined ? {} : { count: need<number>(Number.isInteger(o.count) && (o.count as number) >= 1, o.count, "count 必须是正整数") }),
+    last_submitted: nullableObj(o, "last_submitted"),
+  };
+}
+
+function parseResultNode(o: Json, base: NodeBase): ResultNode {
+  const record = obj(o, "record");
+  const final = o.final === undefined ? false : need<boolean>(typeof o.final === "boolean", o.final, "final 必须是布尔值");
+  return {
+    ...(final ? { final: true as const } : {}),
+    ...base,
+    type: "result",
+    task_id: str(o, "task_id"),
+    file: str(o, "file"),
+    path: str(o, "path"),
+    layer_count: num(o, "layer_count"),
+    record: {
+      ...record,
+      model: str(record, "model"),
+      prompt: str(record, "prompt"),
+      negative_prompt: str(record, "negative_prompt"),
+      size_spec: sizeSpec(record, "size_spec"),
+      submitted_at: str(record, "submitted_at"),
+    },
+  };
 }
 
 function portRef(o: Json, k: string): PortRef {
@@ -344,25 +357,30 @@ export function parseBoard(text: string): ParsedBoard {
     const version = o.format_version;
     if (!Number.isInteger(version) || (version as number) < 1) throw new Corrupt("format_version 必须是正整数");
     if ((version as number) > BOARD_FORMAT_VERSION) return { kind: "newer", version: version as number };
-    const viewport = obj(o, "viewport");
-    const board: Board = {
-      format_version: version as number,
-      title: str(o, "title"),
-      viewport: { ...viewport, zoom: num(viewport, "zoom"), x: num(viewport, "x"), y: num(viewport, "y") },
-      nodes: need<unknown[]>(Array.isArray(o.nodes), o.nodes, "nodes 必须是数组").map(parseNode),
-      edges: need<unknown[]>(Array.isArray(o.edges), o.edges, "edges 必须是数组").map(parseEdge),
-      extra: extraOf(o, BOARD_KEYS),
-    };
-    if (o.last_model !== undefined && o.last_model !== null) board.last_model = str(o, "last_model");
-    if (o.stages !== undefined) {
-      const stages = need<unknown[]>(Array.isArray(o.stages), o.stages, "stages 必须是数组").map(parseStage);
-      if (stages.length) board.stages = stages;
-    }
+    const board = parseBoardContents(o, version as number);
     return { kind: "ok", board };
   } catch (error) {
     if (error instanceof Corrupt) return { kind: "corrupt", reason: error.message };
     throw error;
   }
+}
+
+function parseBoardContents(o: Json, version: number): Board {
+  const viewport = obj(o, "viewport");
+  const board: Board = {
+    format_version: version,
+    title: str(o, "title"),
+    viewport: { ...viewport, zoom: num(viewport, "zoom"), x: num(viewport, "x"), y: num(viewport, "y") },
+    nodes: need<unknown[]>(Array.isArray(o.nodes), o.nodes, "nodes 必须是数组").map(parseNode),
+    edges: need<unknown[]>(Array.isArray(o.edges), o.edges, "edges 必须是数组").map(parseEdge),
+    extra: extraOf(o, BOARD_KEYS),
+  };
+  if (o.last_model !== undefined && o.last_model !== null) board.last_model = str(o, "last_model");
+  if (o.stages !== undefined) {
+    const stages = need<unknown[]>(Array.isArray(o.stages), o.stages, "stages 必须是数组").map(parseStage);
+    if (stages.length) board.stages = stages;
+  }
+  return board;
 }
 
 export type OpenedBoard =

@@ -2,7 +2,12 @@
 // 可见判定在 ui/settingsPanelView.ts（#137），这里只留接线与 DOM 摆放。
 import { useEffect, useState } from "react";
 import { useShell } from "./shell";
+import { DataRootSection } from "./DataRootSection";
+import type { DataRootActions } from "./dataRootMove";
+import { DiagnosticsSection } from "./DiagnosticsSection";
 import { DEFAULT_SETTINGS, MAX_CONCURRENCY, MIN_CONCURRENCY, normalizeBaseUrl } from "../core/settings";
+import { UpdateSection } from "./UpdateSection";
+import type { UpdatePreparationPorts } from "../core/updatePreparation";
 import { UsageSection } from "./UsageSection";
 import type { ConnectionResult, useSettings } from "./useSettings";
 import { concurrencyOnBlur, connectionText, discoveryText, settingsPanelView, settingsToSave } from "./settingsPanelView";
@@ -10,6 +15,10 @@ import { concurrencyOnBlur, connectionText, discoveryText, settingsPanelView, se
 interface Props {
   settings: ReturnType<typeof useSettings>;
   onClose: () => void;
+  /** 更新安装前的准备依赖：任务队列与严格落盘（#164）。 */
+  update: UpdatePreparationPorts;
+  /** 数据位置迁移的接线（#161）；工作台没给就不显示这一段。 */
+  dataRoot?: DataRootActions;
 }
 
 /** 网关地址那一行：输入、错误与明文 HTTP 提示。 */
@@ -78,11 +87,13 @@ function ConcurrencyRow({
   );
 }
 
-export function SettingsPanel({ settings, onClose }: Props) {
+export function SettingsPanel({ settings, onClose, update, dataRoot }: Props) {
   const port = useShell();
   const [baseUrl, setBaseUrl] = useState(settings.settings.base_url);
   // 草稿是原始文本，输入中可为空或越界；失焦与保存时才经 parseConcurrency 钳制。
   const [concurrencyDraft, setConcurrencyDraft] = useState(String(settings.settings.concurrency));
+  // 密钥草稿：只有点保存 / 清除才写进系统保护存储；测试连接用草稿，不用上一次读到的旧值。
+  const [apiKeyDraft, setApiKeyDraft] = useState(settings.apiKey);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionResult | null>(null);
   const [saving, setSaving] = useState(false);
@@ -97,7 +108,7 @@ export function SettingsPanel({ settings, onClose }: Props) {
     concurrencyDraft,
     savedConcurrency: settings.settings.concurrency,
     file: settings.file,
-    apiKey: settings.apiKey,
+    apiKey: apiKeyDraft,
     testing,
     saving,
   });
@@ -106,7 +117,7 @@ export function SettingsPanel({ settings, onClose }: Props) {
   const test = async () => {
     setTesting(true);
     setTestResult(null);
-    setTestResult(await settings.testConnection(normalizeBaseUrl(baseUrl), settings.apiKey));
+    setTestResult(await settings.testConnection(normalizeBaseUrl(baseUrl), apiKeyDraft));
     setTesting(false);
   };
 
@@ -114,10 +125,20 @@ export function SettingsPanel({ settings, onClose }: Props) {
     if (view.urlError) return;
     setSaving(true);
     setError(null);
-    const problem = await settings.save(settingsToSave(settings.settings, baseUrl, concurrencyDraft), settings.apiKey);
+    const problem = await settings.save(settingsToSave(settings.settings, baseUrl, concurrencyDraft), apiKeyDraft);
     setSaving(false);
     if (problem) return setError(problem);
     onClose();
+  };
+
+  // 清除是显式动作：立即用空密钥保存，同时清掉草稿；不留下「看起来清了、盘上还有」的状态。
+  const clearKey = async () => {
+    setSaving(true);
+    setError(null);
+    const problem = await settings.save(settings.settings, "");
+    setSaving(false);
+    if (problem) return setError(problem);
+    setApiKeyDraft("");
   };
 
   return (
@@ -132,10 +153,12 @@ export function SettingsPanel({ settings, onClose }: Props) {
 
         <GatewayRow baseUrl={baseUrl} urlError={view.urlError} plainHttp={view.plainHttp} onChange={setBaseUrl} />
 
-        <div className="form-row">
+        <label className="form-row">
           <span>API 密钥</span>
-          <span className="muted small">密钥由进入界面管理；换密钥即视为新用户，看不到原来的画板与结果。要换密钥请先退出。</span>
-        </div>
+          <input type="password" value={apiKeyDraft} onChange={(e) => setApiKeyDraft(e.target.value)} placeholder="粘贴团队网关 API 密钥" autoComplete="off" spellCheck={false} />
+          <button onClick={() => void clearKey()} disabled={saving || !apiKeyDraft.trim()}>清除密钥</button>
+        </label>
+        <div className="muted small form-hint">密钥保存在本机并受 Windows 系统保护，不写入设置文件或诊断；更换或清除密钥不会改变本机画板身份。</div>
 
         <ConnectionRow testResult={testResult} canTest={view.canTest} testLabel={view.testLabel} onTest={() => void test()} />
         <div className="muted small form-hint">{discoveryText(discovery)}</div>
@@ -148,6 +171,12 @@ export function SettingsPanel({ settings, onClose }: Props) {
           onChange={setConcurrencyDraft}
           onBlur={() => setConcurrencyDraft(concurrencyOnBlur(concurrencyDraft, settings.settings.concurrency))}
         />
+
+        <UpdateSection queue={update.queue} saveBoards={update.saveBoards} saveUi={update.saveUi} />
+
+        {dataRoot && <DataRootSection actions={dataRoot} />}
+
+        <DiagnosticsSection />
 
         <UsageSection />
         {error && <div className="form-error">{error}</div>}

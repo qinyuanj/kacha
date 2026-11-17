@@ -138,7 +138,7 @@ function Thumb({ absPath, alt, onOpen }: { absPath: string; alt: string; onOpen?
   );
 }
 
-/** 缺图占位：文件名 + 「重新定位」（选文件，或在用户数据根内按身份找）。 */
+/** 缺图占位：文件名 + 「重新定位」（选文件，或在数据根内按身份找）。 */
 function MissingImage({ nodeId, name }: { nodeId: string; name: string }) {
   const { relocate } = useBoardActions();
   return (
@@ -146,7 +146,7 @@ function MissingImage({ nodeId, name }: { nodeId: string; name: string }) {
       <div>图片缺失</div>
       <div className="mono small">{name}</div>
       <div className="relocate">
-        <HoverButton onClick={() => relocate(nodeId, "search")} info={textHoverInfo("在用户数据根内按任务编号 / 文件哈希查找，不扫描整个磁盘")}>
+        <HoverButton onClick={() => relocate(nodeId, "search")} info={textHoverInfo("在数据根内按任务编号 / 文件哈希查找，不扫描整个磁盘")}>
           重新定位
         </HoverButton>
         <button onClick={() => relocate(nodeId, "pick")}>选文件…</button>

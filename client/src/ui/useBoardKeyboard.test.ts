@@ -201,7 +201,7 @@ describe("复制图片（#130）", () => {
     const event = press({ key: "c", ctrlKey: true });
     await settle();
     expect(event.defaultPrevented).toBe(true);
-    // 路径按用户数据根拼成绝对路径，格式提示跟着扩展名走。
+    // 路径按数据根拼成绝对路径，格式提示跟着扩展名走。
     expect(port.calls.copyImage).toEqual([{ path: "/~/参考/cat.png", format: "png" }]);
     expect(port.calls.copyText).toEqual([]);
     expect(readClipboard()).toBeNull();

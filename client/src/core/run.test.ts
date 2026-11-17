@@ -2,13 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { Board, BoardEdge, BoardNode, ResultNode, TaskNode } from "./board";
 import { BUILTIN_TABLE } from "./capabilities";
 import type { FetchLike } from "./gateway";
-import { ERROR_CATEGORY_LABELS, GatewayError } from "./gateway";
-import { LocalError, sniffImage } from "./taskDir";
 import { addResultNode } from "./layout";
 import { createRunner } from "./runner";
 import { settle } from "./testing/runnerHarness";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
-import { CancelledError, executeJob, failureLabel, prepareJob, prepareRegenerate, writeJob, type Prepared, type PreparedJob, type RunDeps } from "./run";
+import { executeJob, failureLabel, prepareJob, prepareRegenerate, writeJob, type Prepared, type PreparedJob, type RunDeps } from "./run";
 
 import { PNG_1X1 as PNG, PNG_1X1_BASE64 as PNG_B64 } from "./testing/png";
 
@@ -371,22 +369,34 @@ describe("单任务端到端", () => {
 });
 
 describe("Seedream：执行", () => {
-  function seedreamBoard(): Board {
+  function seedreamBoard(withSecondReference = false): Board {
     const b = board(true);
     b.nodes = b.nodes.map((n) =>
-      n.type === "task" ? { ...n, model: "doubao-seedream-5-0-pro-260628", size_spec: { tier: "2K", ratio: "1:1", width: null, height: null }, transparent_background: true } : n,
+      n.type === "task" ? { ...n, model: "doubao-seedream-5-0-pro-260628", size_spec: { tier: "2K", ratio: "1:1", width: null, height: null }, image_ports: withSecondReference ? 2 : 1, transparent_background: true } : n,
     );
+    if (withSecondReference) {
+      b.nodes.push({ id: "r2", type: "reference", pos: [0, 400], size: [100, 100], extra: {}, path: "refs/second.png", sha256: "b".repeat(64), display_name: "second.png" });
+      b.edges.push({ from: ["r2", "out"], to: ["t", "image:1"], source_layer: null, region: null, system: false, extra: {} });
+    }
     return b;
   }
   const respond = (url: string) =>
     url.startsWith("https://oss/") ? { status: 200, body: "" } : { status: 200, body: JSON.stringify({ data: [{ url: "https://oss/r.png", size: "2048x2048" }] }) };
+  /** 壳层 canvas 替身：透明度按字节区分，便于同一份依赖里给参考图与结果不同的答案。 */
+  const alphaCodec = (alphaOf: (bytes: Uint8Array) => boolean): NonNullable<RunDeps["imageCodec"]> => ({
+    decode: async (bytes) => ({ width: 1024, height: 1024, hasAlpha: () => alphaOf(bytes), encode: async () => PNG, close: () => undefined }),
+  });
+  const downloadAs = (bytes: Uint8Array) => (d: RunDeps) => {
+    d.fetch = ((inner) => async (url, init) => {
+      const r = await inner(url, init);
+      return url.startsWith("https://oss/") ? { ...r, arrayBuffer: async () => bytes.slice().buffer } : r;
+    })(d.fetch);
+  };
 
   it("走 generations 顶层 image，透明背景开关带 background；下载 data[].url 落盘；重新生成沿用开关", async () => {
     const { d, files, requests } = deps(respond);
-    d.fetch = ((inner) => async (url, init) => {
-      const r = await inner(url, init);
-      return url.startsWith("https://oss/") ? { ...r, arrayBuffer: async () => PNG.slice().buffer } : r;
-    })(d.fetch);
+    d.imageCodec = alphaCodec(() => true);
+    downloadAs(PNG)(d);
     const { job: prepared, board: b1 } = await prepare(d, { board: seedreamBoard(), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
     const job = await writeJob(d, "/root", prepared);
     await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" });
@@ -397,6 +407,51 @@ describe("Seedream：执行", () => {
 
     const { job: again } = await regen(d, { board: b1, table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
     expect(again.input.transparentBackground).toBe(true);
+  });
+
+  it("透明背景提交前按实际快照确认 alpha：未知、不带 alpha 与多张参考图都不发请求", async () => {
+    const unknown = deps(respond);
+    await expect(prepareJob(unknown.d, { board: seedreamBoard(), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" })).rejects.toThrow(/参考图透明通道尚未确认/);
+    expect(unknown.requests).toEqual([]);
+
+    const opaque = deps(respond);
+    opaque.d.imageCodec = alphaCodec(() => false);
+    await expect(prepareJob(opaque.d, { board: seedreamBoard(), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" })).rejects.toThrow(/透明背景需要已确认带透明通道的参考图快照/);
+    expect(opaque.requests).toEqual([]);
+
+    const two = deps(respond);
+    const read = two.d.readFile;
+    two.d.imageCodec = alphaCodec(() => true);
+    two.d.readFile = async (path) => (path === "/root/refs/cat.png" || path === "/root/refs/second.png" ? PNG : read(path));
+    await expect(prepareJob(two.d, { board: seedreamBoard(true), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" })).rejects.toThrow(/透明背景需要恰好一张实际参考图/);
+    expect(two.requests).toEqual([]);
+
+    const broken = deps(respond);
+    broken.d.imageCodec = { decode: async () => { throw new Error("canvas decode failed"); } };
+    await expect(prepareJob(broken.d, { board: seedreamBoard(), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" })).rejects.toThrow(/参考图透明通道尚未确认/);
+    expect(broken.requests).toEqual([]);
+  });
+
+  it("透明背景结果不带 alpha 或不是 PNG：明确失败，不把不透明结果落成成功", async () => {
+    const opaque = Uint8Array.from([...PNG, 9]);
+    const notAlpha = deps(respond);
+    notAlpha.d.imageCodec = alphaCodec((bytes) => bytes.length === PNG.length);
+    downloadAs(opaque)(notAlpha.d);
+    const { job: prepared } = await prepare(notAlpha.d, { board: seedreamBoard(), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
+    const job = await writeJob(notAlpha.d, "/root", prepared);
+    const err = await executeJob(notAlpha.d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
+    expect(failureLabel(err)).toBe("响应无效");
+    expect(String(err.message)).toContain("透明背景结果未包含透明像素");
+    expect([...notAlpha.files.keys()].some((key) => key.endsWith("result.png"))).toBe(false);
+
+    const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46]);
+    const wrongFormat = deps(respond);
+    wrongFormat.d.imageCodec = alphaCodec(() => true);
+    downloadAs(jpeg)(wrongFormat.d);
+    const { job: prepared2 } = await prepare(wrongFormat.d, { board: seedreamBoard(), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
+    const err2 = await executeJob(wrongFormat.d, { job: await writeJob(wrongFormat.d, "/root", prepared2), userRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
+    expect(String(err2.message)).toContain("透明背景结果必须为带透明通道的 PNG");
+    expect([...wrongFormat.files.keys()].some((key) => key.endsWith("result.png"))).toBe(false);
   });
 });
 
@@ -659,131 +714,5 @@ describe("参考图快照按模型规则缩放 / 转码（#116）", () => {
     expect(files.get(`/root/${job.relDir}/reference-1.png`)).toEqual(FITTED);
     expect(readTaskJson(files, first.relDir).references[0]).toHaveProperty("fitted");
     expect(readTaskJson(files, job.relDir).references[0]).not.toHaveProperty("fitted");
-  });
-});
-
-/** 结果中转（Web 版）：url 结果由服务端下载到任务目录暂存区，浏览器读回校验后提交，result.* 最后落盘。 */
-describe("结果中转", () => {
-  const byUrl = (image: string) => (url: string) =>
-    url.startsWith("https://oss") ? { status: 200, body: image } : { status: 200, body: JSON.stringify({ metadata: { output: { choices: [{ message: { content: [{ image: "https://oss/x.png?sig=1" }] } }] } } }) };
-  // 对象存储返回的是原始图片字节（不是 base64 文本；base64 只在网关 JSON 里）。
-  const PNG_BINARY = String.fromCharCode(...PNG);
-
-  /** 伪服务端中转：沿用同一个 fetch 桩下载，写进内存任务目录的 .staging/，提交即移到成品名。 */
-  function withRelay(respond: (url: string) => { status: number; body: string }) {
-    const base = deps((url) => respond(url));
-    const relays: { url: string; relDir: string; stem: string }[] = [];
-    const commits: string[] = [];
-    const discards: string[] = [];
-    base.d.relayResult = async ({ url, relDir, stem }) => {
-      relays.push({ url, relDir, stem });
-      const res = await base.d.fetch(url, { method: "GET", headers: {} });
-      if (res.status >= 400) throw Object.assign(new Error(`下载结果图失败：上游 HTTP ${res.status}`), { status: 502, code: "download_failed", upstreamStatus: res.status });
-      const bytes = new Uint8Array(await res.arrayBuffer());
-      const kind = sniffImage(bytes);
-      if (!kind) throw Object.assign(new Error("下载的内容不是可识别的图片"), { status: 422, code: "invalid_image" });
-      const file = `${stem}.${kind.ext}`;
-      await base.d.writeNewFile(`/root/${relDir}/.staging/${file}`, bytes);
-      return { file, path: `${relDir}/.staging/${file}` };
-    };
-    base.d.commitRelayed = async (relDir, from, stem) => {
-      const bytes = await base.d.readFile(`/root/${relDir}/.staging/${from}`);
-      const file = `${stem}.${from.split(".").pop()}`;
-      commits.push(`${relDir}/${file}`);
-      await base.d.writeNewFile(`/root/${relDir}/${file}`, bytes);
-      return { file, path: `${relDir}/${file}` };
-    };
-    base.d.discardRelayed = async (relDir) => {
-      discards.push(relDir);
-    };
-    return { ...base, relays, commits, discards };
-  }
-
-  const preparedJob = async (d: RunDeps) => {
-    const { job } = await prepare(d, { board: board(false), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
-    return writeJob(d, "/root", job);
-  };
-
-  it("url 结果不经过浏览器直连对象存储；读回校验后提交为 result.<ext>", async () => {
-    const { d, files, requests, relays, commits } = withRelay(byUrl(PNG_BINARY));
-    const job = await preparedJob(d);
-    const result = await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" });
-    expect(requests.map((r) => r.url).filter((u) => u.startsWith("https://oss"))).toHaveLength(1);
-    expect(relays).toHaveLength(1);
-    expect(relays[0]).toMatchObject({ url: "https://oss/x.png?sig=1", relDir: job.relDir });
-    expect(commits).toEqual([`${job.relDir}/result.png`]);
-    expect(files.get(`/root/${job.relDir}/result.png`)).toEqual(PNG);
-    expect(result).toMatchObject({ file: "result.png", path: `${job.relDir}/result.png` });
-  });
-
-  it("中转下载失败：按上游状态归类为网关错误，不写成品并清掉暂存", async () => {
-    const { d, files, discards } = withRelay((url) => (url.startsWith("https://oss") ? { status: 403, body: "denied" } : byUrl(PNG_BINARY)(url)));
-    const job = await preparedJob(d);
-    const err = await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
-    expect(err).toBeInstanceOf(GatewayError);
-    expect(err.status).toBe(403);
-    expect(failureLabel(err)).toBe(ERROR_CATEGORY_LABELS.rejected);
-    expect([...files.keys()].some((k) => k.includes("result."))).toBe(false);
-    expect(discards).toEqual([job.relDir]);
-  });
-
-  it.each([
-    [401, "rejected"],
-    [429, "rate_limited"],
-    [503, "server"],
-  ] as const)("中转的上游 HTTP %i 归类为 %s：对象存储 401 不是密钥鉴权失败", async (status, category) => {
-    const { d } = withRelay((url) => (url.startsWith("https://oss") ? { status, body: "denied" } : byUrl(PNG_BINARY)(url)));
-    const job = await preparedJob(d);
-    const err = await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
-    expect(err).toBeInstanceOf(GatewayError);
-    expect(err.category).toBe(category);
-    expect(err.status).toBe(status);
-    expect(err.message).toContain(`上游 HTTP ${status}`);
-  });
-
-  it("中转到的字节不是图片：invalid_response，不出现 result.*，暂存清理", async () => {
-    const { d, files, commits, discards } = withRelay(byUrl("not an image"));
-    const job = await preparedJob(d);
-    const err = await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
-    expect(err).toBeInstanceOf(GatewayError);
-    expect(err.category).toBe("invalid_response");
-    expect(commits).toEqual([]);
-    expect([...files.keys()].some((k) => k.includes("/result."))).toBe(false);
-    expect(discards).toEqual([job.relDir]);
-  });
-
-  it("中转途中取消：不提交成品并清掉暂存", async () => {
-    const { d, files, discards } = withRelay(byUrl(PNG_BINARY));
-    const controller = new AbortController();
-    const job = await preparedJob(d);
-    const relayResult = d.relayResult!;
-    d.relayResult = async (args) => {
-      const saved = await relayResult(args);
-      controller.abort();
-      return saved;
-    };
-    const err = await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k", signal: controller.signal }).catch((e) => e);
-    expect(err).toBeInstanceOf(CancelledError);
-    expect([...files.keys()].some((k) => k.includes("/result."))).toBe(false);
-    expect(discards).toEqual([job.relDir]);
-  });
-
-  it("b64_json 结果不走中转：仍由浏览器解码后只新建写入", async () => {
-    const { d, files, relays } = withRelay(ok);
-    const job = await preparedJob(d);
-    await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" });
-    expect(relays).toEqual([]);
-    expect(files.get(`/root/${job.relDir}/result.png`)).toEqual(PNG);
-  });
-
-  it("中转已存在（409）按冲突报错，不覆盖既有成品", async () => {
-    const { d } = withRelay(byUrl(PNG_BINARY));
-    const job = await preparedJob(d);
-    d.commitRelayed = async () => {
-      throw Object.assign(new Error("目标已存在，只新建不覆盖"), { status: 409, code: "already_exists" });
-    };
-    const err = await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
-    expect(err).toBeInstanceOf(LocalError);
-    expect(err.message).toContain("目标已存在");
   });
 });

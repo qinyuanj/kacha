@@ -8,7 +8,7 @@ export interface UsageLimitNotice {
   limit: number;
 }
 
-/** 服务端算好的提醒档位：上限留空或没到线时不提醒。 */
+/** 本机存储算好的提醒档位：上限留空或没到线时不提醒。 */
 export function usageNoticeOf(usage: Usage): UsageLimitNotice | null {
   if (!usage.limit_level || usage.limit_bytes === null) return null;
   return { level: usage.limit_level, total: usage.total_bytes, limit: usage.limit_bytes };

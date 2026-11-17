@@ -1,7 +1,7 @@
 {
   "archive_dir": "归档",
   "default_board_title": "未命名画板",
-  "archived_read_only": "归档画板只读：取消归档或复制为新画板后再编辑。",
+  "archived_read_only": "归档画板只读，不能编辑。",
   "slots_full_head": "画板位满了",
-  "slots_full": "{head}（{used}/{total}），归档或删掉一块再新建。"
+  "slots_full": "{head}（{used}/{total}），备份并删掉不再需要的画板后再新建。"
 }

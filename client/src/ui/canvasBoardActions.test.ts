@@ -134,14 +134,14 @@ beforeEach(() => {
 });
 
 describe("动作对象的字段", () => {
-  it("画板事实直接透传：能力表、用户数据根、可用模型、并发上限", () => {
+  it("画板事实直接透传：能力表、数据根、可用模型、并发上限", () => {
     const h = harness();
     const actions = canvasBoardActions(h.deps);
     expect(actions.table).toBe(BUILTIN_TABLE);
     expect(actions.userRoot).toBe(ROOT);
     expect(actions.concurrency).toBe(2);
-    // discovery = none 且没失败：上架清单就是可用模型。
-    expect(actions.availableModels.length).toBe(BUILTIN_TABLE.models.length);
+    // 还没从网关发现过：没有模型可选，静态上架清单不能冒充成功。
+    expect(actions.availableModels).toEqual([]);
   });
 
   it("perform 经 ref 转发最新一版（画布每次渲染重建新建类函数）", () => {
@@ -350,7 +350,7 @@ describe("生成变体", () => {
 describe("重新定位：选文件", () => {
   const pick = (h: Harness) => canvasBoardActions(h.deps).relocate("ref1", "pick");
 
-  it("上传到用户数据根后按端口给的路径改写节点，并记一条成功日志", async () => {
+  it("上传到数据根后按端口给的路径改写节点，并记一条成功日志", async () => {
     const h = harness();
     h.port.media.pickImages = async () => [{ name: "新文件.png" } as File];
     h.port.media.uploadReference = async () => ({ path: "refs/新文件.png", sha256: "c".repeat(64) });
@@ -398,7 +398,7 @@ describe("重新定位：选文件", () => {
   });
 });
 
-describe("重新定位：在用户数据根内找", () => {
+describe("重新定位：在数据根内找", () => {
   it("结果按 task_id 与文件名找，找到后写相对路径与文件名", async () => {
     const h = harness();
     vi.mocked(findResultFile).mockResolvedValue("/~/任务/task-res1/res1.png");

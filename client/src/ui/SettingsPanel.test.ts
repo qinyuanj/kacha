@@ -46,8 +46,22 @@ function settings(overrides: Partial<SettingsState> = {}): PanelSettings {
   } as unknown as PanelSettings;
 }
 
-async function show(port: FakePort, state = settings()): Promise<void> {
-  await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: state, onClose: vi.fn() }) })));
+// 更新段的准备依赖（#164）：面板只摆放，替身给空队列与即时保存。
+const UPDATE_DEPS = {
+  queue: { pending: () => 0, setSubmissionGuard: () => undefined },
+  saveBoards: async () => undefined,
+  saveUi: async () => undefined,
+};
+
+async function show(port: FakePort, state = settings(), dataRoot?: Parameters<typeof SettingsPanel>[0]["dataRoot"]): Promise<void> {
+  await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: state, onClose: vi.fn(), update: UPDATE_DEPS, ...(dataRoot ? { dataRoot } : {}) }) })));
+}
+
+/** 密钥输入框（密码框，不把密钥显示成普通文本）。 */
+function keyInput(): HTMLInputElement {
+  const el = container.querySelector("input[type='password']");
+  if (!el) throw new Error("没有找到 API 密钥输入框");
+  return el as HTMLInputElement;
 }
 
 /** 按文字找按钮。 */
@@ -65,6 +79,46 @@ async function typeInto(input: HTMLInputElement, text: string): Promise<void> {
   });
 }
 
+
+describe("API 密钥管理（#152）", () => {
+  it("密钥框是密码输入，状态只说受系统保护，不把密钥显示成正文", async () => {
+    await show(createFakePort(), settings({ apiKey: "sk-visible-only-in-input" }));
+    expect(keyInput().type).toBe("password");
+    expect(keyInput().value).toBe("sk-visible-only-in-input");
+    expect(container.textContent).toContain("Windows 系统保护");
+    expect(container.textContent).not.toContain("当前无法设置 API 密钥");
+  });
+
+  it("输入新密钥后测试连接：用草稿密钥，不用旧值", async () => {
+    const state = settings({ apiKey: "sk-old" });
+    await show(createFakePort(), state);
+    await typeInto(keyInput(), "sk-new-draft");
+    await act(async () => buttonWithText("测试连接并刷新模型").click());
+    expect(state.testConnection).toHaveBeenCalledWith(DEFAULT_SETTINGS.base_url, "sk-new-draft");
+  });
+
+  it("保存：把草稿里的新密钥交给 save，替换即可生效", async () => {
+    const state = settings({ apiKey: "sk-old" });
+    await show(createFakePort(), state);
+    await typeInto(keyInput(), "sk-replacement");
+    await act(async () => buttonWithText("保存").click());
+    expect(state.save).toHaveBeenCalledWith(DEFAULT_SETTINGS, "sk-replacement");
+  });
+
+  it("清除密钥：显式调用 save 写入空密钥", async () => {
+    const state = settings({ apiKey: "sk-old" });
+    await show(createFakePort(), state);
+    await act(async () => buttonWithText("清除密钥").click());
+    expect(state.save).toHaveBeenCalledWith(DEFAULT_SETTINGS, "");
+    await act(async () => undefined);
+    expect(keyInput().value).toBe("");
+  });
+
+  it("没有有效发现时明确说明模型不可选，不拿上架清单冒充成功", async () => {
+    await show(createFakePort(), settings({ discovery: { source: "none" } }));
+    expect(container.textContent).toContain("模型不可选");
+  });
+});
 describe("高级设置面板", () => {
   it("地址非法：显示错误，保存与连接测试都不可用", async () => {
     const port = createFakePort();
@@ -118,4 +172,56 @@ describe("高级设置面板", () => {
     await show(port, settings({ fileProblem: "settings.json 已损坏" }));
     expect(container.textContent).toContain("settings.json 已损坏");
   });
+});
+
+describe("诊断包导出（#162）", () => {
+  it("有诊断能力时显示导出入口，点一次只导出一次", async () => {
+    const port = createFakePort();
+    await show(port);
+    await act(async () => buttonWithText("导出诊断包").click());
+    expect(port.calls.exportDiagnostics).toBe(1);
+  });
+
+  it("没有诊断能力时不显示入口，不用空按钮冒充交付", async () => {
+    const port = createFakePort({ missing: ["diagnostics"] });
+    await show(port);
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent?.trim() === "导出诊断包")).toBe(false);
+  });
+
+  it("用户取消没有成功提示，只给中性说明", async () => {
+    const port = createFakePort({ diagnosticsOutcome: { kind: "cancelled" } });
+    await show(port);
+    await act(async () => buttonWithText("导出诊断包").click());
+    await act(async () => undefined);
+    expect(container.textContent).not.toContain("已导出");
+    expect(container.textContent).not.toContain("已保存");
+    expect(container.textContent).toContain("已取消");
+  });
+
+  it("目标不可写或采集失败：显示明确原因", async () => {
+    const port = createFakePort({ diagnosticsOutcome: { kind: "failed", message: "写入诊断包失败：拒绝访问" } });
+    await show(port);
+    await act(async () => buttonWithText("导出诊断包").click());
+    await act(async () => undefined);
+    expect(container.textContent).toContain("写入诊断包失败：拒绝访问");
+  });
+
+  // 数据位置迁移（#161）：工作台把接线交进来时这一段才出现，独立于用量与排障。
+  it("给了数据位置接线时出现迁移入口", async () => {
+    const port = createFakePort({ userRoot: "C:\\data" });
+    await show(port, settings(), { prepare: async () => undefined, finish: () => undefined, guard: () => ({ pending: 0, packBusy: false, moving: false }) });
+    expect([...container.querySelectorAll("button")].some((b) => (b.textContent ?? "").includes("迁移"))).toBe(true);
+  });
+
+
+  // 点遮罩关闭：不是点弹窗里的控件，避免误关。
+  it("点弹窗外面的遮罩会关闭设置", async () => {
+    const close = vi.fn();
+    const port = createFakePort();
+    await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: settings(), onClose: close, update: UPDATE_DEPS }) })));
+    const backdrop = container.querySelector(".modal-backdrop")!;
+    await act(async () => backdrop.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
 });

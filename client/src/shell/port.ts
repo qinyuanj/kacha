@@ -1,5 +1,5 @@
-// 壳端口（#126）：界面只认这一组接口，Web 实现在 webPort.ts（同源 HTTP + 浏览器能力）。
-// 换底层实现（桌面 Go 壳，见 ADR 0023）只换实现、不改调用点：缺的能力由 features 提前关掉，
+// 壳端口：界面通过这组接口使用 MyGo / Go 本机能力（ADR 0023）。
+// 缺的能力由 features 提前关掉，
 // 或在调用时返回 kind: "unavailable"，界面据此隐藏入口而不是失败得很晚。
 import { errorText } from "../core/errors";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
@@ -12,7 +12,7 @@ import type { TaskFs } from "../core/taskDir";
 import type { ClipboardContent } from "../core/clipboardDispatch";
 import type { BoardMeasure } from "../core/tidy";
 import type { LogKind } from "./log";
-import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, SessionPort, UsagePort } from "./types";
+import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, UsagePort } from "./types";
 
 export type { ImageInfo } from "./types";
 
@@ -20,7 +20,7 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "login" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults";
+export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics" | "update" | "dataRoot";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
@@ -30,20 +30,29 @@ export interface ShellFeatures {
   /** 画板包导出（打包并下载）。 */
   packExport: boolean;
   /**
-   * 画板包导入（#131）：桌面壳在本机解压合并，Web 走服务端合并。
-   * 不声明按有处理（两种实现都有）；只有实现明确做不到时才写 false。
+   * 画板包导入：桌面壳交给 Go 在本机解压合并。
+   * 未声明时按可用处理；实现不可用时明确写 false。
    */
   readonly packImport?: boolean;
   /**
-   * 整理模式（按任务目录量画板体量）：桌面壳本切片还没实现，没做时入口标「尚不可用」。
-   * 不声明按有处理（Web 版有）。
+   * 整理模式（按任务目录与独立图片量画板体量）：桌面壳由本机存储度量（#158）。
+   * 没实现时入口标「尚不可用」；未声明时按可用处理。
    */
   readonly tidy?: boolean;
+  /** 脱敏诊断采集与诊断包导出：只有真实 Diagnostics 绑定在桥上时才开。 */
+  readonly diagnostics?: boolean;
+  /** 归档与取消归档：由本机存储执行只读与画板位约束；未声明时按不可用处理。 */
+  readonly archive?: boolean;
   /**
-   * 能直接读系统剪贴板（#129）：桌面壳为 true，粘贴先读原生快照；Web 不声明，
-   * 继续用 paste 事件带的内容（内网 HTTP 下页面读不到剪贴板，见 ADR 0018）。
+   * 可信自动更新（#164）：Go 侧真实验签并交给真实安装器。
+   * 只有内置发布者公钥的发布构建才为 true；未声明时按不可用处理。
    */
-  readonly nativeClipboard?: boolean;
+  readonly update?: boolean;
+  /**
+   * 本机数据位置迁移（#161）：只有真实的 Storage 绑定在桥上时才开。
+   * 未声明时按不可用处理——没有实现就不能出现「迁移」入口。
+   */
+  readonly dataRoot?: boolean;
 }
 
 /** 端口失败的类别：界面只按它分支。 */
@@ -70,7 +79,7 @@ export interface PortFailure {
   /** 实现的原始错误码（日志与排查用），界面不据此分支。 */
   code: string;
   message: string;
-  /** 原始状态码（Web 是 HTTP 状态，桌面适配器可留 0）。 */
+  /** 底层状态码；无对应状态时为 0。 */
   status: number;
   /** kind = unavailable 时是哪个能力。 */
   feature?: FeatureId;
@@ -104,8 +113,8 @@ export function portFailureOf(error: unknown): PortFailure {
 /**
  * 端口说这项能力还没有时给用户的说法（#127）；不是 unavailable 就返回 null。
  *
- * 桌面壳本切片没有生成、结果下载、画板包导出等能力：调用点拿到 unavailable 时要说清「还没做」，
- * 不能报成功，也不能把内部错误原文丢给用户。其它失败仍按各自原有的文案处理（Web 版不变）。
+ * 桌面壳本切片没有结果下载、画板包导出等能力：调用点拿到 unavailable 时要说清「还没做」，
+ * 不能报成功，也不能把内部错误原文丢给用户。其它失败按各自的错误类别显示。
  */
 export function unavailableMessage(error: unknown): string | null {
   const failure = portFailureOf(error);
@@ -118,6 +127,7 @@ export function unavailableMessage(error: unknown): string | null {
 
 /** 能力名（界面用中文）：与 FeatureId 一一对应；桌面壳与本文件共用这一份（C1）。 */
 export const FEATURE_LABELS: Record<FeatureId, string> = {
+  gateway: "网关配置",
   generation: "生成",
   usage: "用量统计",
   packExport: "画板包导出",
@@ -125,12 +135,14 @@ export const FEATURE_LABELS: Record<FeatureId, string> = {
   archive: "归档",
   tidy: "整理",
   relay: "结果中转",
-  login: "登录",
   copyImage: "复制图片",
   copyText: "复制文本",
   saveImage: "另存为",
   downloadImage: "下载图片",
   downloadResults: "下载整板结果",
+  diagnostics: "诊断包导出",
+  update: "自动更新",
+  dataRoot: "本机数据位置",
 };
 
 // ---- 端口分组 ----
@@ -151,7 +163,7 @@ export interface BoardStore {
   measure(text: string): Promise<BoardMeasure>;
 }
 
-/** 用户数据根里的文件：任务目录、参考图、画板包规划都要它。 */
+/** 数据根里的文件：任务目录、参考图、画板包规划都要它。 */
 export interface FileStore {
   readFile(absPath: string): Promise<Uint8Array>;
   /** 原子写新文件；目标已存在 alreadyExists。 */
@@ -212,7 +224,7 @@ export interface MediaStore {
   thumbUrl(absPath: string): string;
   pickImages(multiple: boolean): Promise<File[]>;
   pickPackFile(): Promise<File | null>;
-  /** 本机图片进用户数据根的 导入参考图/，返回相对用户数据根的路径与 sha256。 */
+  /** 本机图片进数据根的 导入参考图/，返回相对数据根的路径与 sha256。 */
   uploadReference(file: File): Promise<{ path: string; sha256: string }>;
   copyText(text: string): Promise<void>;
   /** 复制一张图到系统剪贴板；format 是路径扩展名给的提示，实现按字节判断容器。 */
@@ -221,22 +233,30 @@ export interface MediaStore {
   readClipboard(): Promise<ClipboardContent | null>;
   /** 结果另存为（带图层的结果是 zip）；用户取消时返回 cancelled。 */
   saveCopyAs(absPath: string): Promise<SaveCopyOutcome>;
-  downloadImage(path: string, name?: string): void;
-  downloadBoardResults(boardPath: string): void;
+  /** 单结果保存（带图层时打 zip）；目标由本机对话框选，取消时返回 cancelled。 */
+  downloadImage(path: string, name?: string): Promise<SaveCopyOutcome>;
+  /** 整板结果保存；取消时返回 cancelled。 */
+  downloadBoardResults(boardPath: string): Promise<SaveCopyOutcome>;
 }
 
 /**
  * 画板包：导入与导出都经这里。
- * import 是整条导入（本地检查 → 去重上传 → 合并 → 提交画板），进度与结局由调用方给的选项接；
- * 桌面适配器可以整条自己实现，Web 实现把它转给 core 的 importPack（经 io）。
+ * import 由 Go 完成本机解压、合并与画板提交；io 只提供取消，选项接收进度与结局。
  */
 export interface PackStore {
   readonly io: PackIo;
   import(file: File, options: ImportOptions): Promise<ImportResult>;
   /** 导出前的 hash 阶段：每个要写的文件的长度与 sha256。 */
   facts(spec: Pick<PackExportSpec, "task_dirs" | "files">): Promise<PackEntryFact[]>;
-  exportPack(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number }>;
+  /** 由本机选目标并打包；target 是实际写出的绝对路径，取消 / 失败都拒绝。 */
+  exportPack(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number; target?: string }>;
 }
+
+/** 诊断包导出的类型化结局：取消没有成功提示，失败带可显示的原因。 */
+export type DiagnosticsOutcome =
+  | { kind: "saved"; bytes: number }
+  | { kind: "cancelled" }
+  | { kind: "failed"; message: string };
 
 /** 宿主交互：确认框、提示、下载进度、外链、版本、日志、页面输入判定。 */
 export interface UiStore {
@@ -245,12 +265,40 @@ export interface UiStore {
   onPackProgress(handler: (progress: { done: number; total: number }) => void): Promise<() => void>;
   openExternal(url: string): void;
   version(): Promise<string>;
-  /** 脱敏日志；实现可以静默丢弃。 */
+  /** 脱敏日志；桌面实现把它交给 Go 的有界缓冲，不在前端存明文。 */
   log(kind: LogKind, fields: Record<string, unknown>): void;
+  /** 导出脱敏诊断包，目标由本机「另存为」对话框选。 */
+  exportDiagnostics(): Promise<DiagnosticsOutcome>;
   /** 焦点 / 点击是否落在可编辑控件里（方向键与编辑类快捷键留给控件）。 */
   isEditableTarget(target: EventTarget | null): boolean;
   /** 装上页面级输入接管（#97），返回卸载函数。 */
   installInputTakeover(): () => void;
+}
+
+/** 数据位置的状态：页面显示当前数据根与迁移进度。 */
+export interface DataRootStatus {
+  root: string;
+  /** 正在迁移：期间拒绝新的迁移，页面也拦下会与迁移冲突的操作。 */
+  moving: boolean;
+  done: number;
+  total: number;
+}
+
+/** 迁移的结局：成功带新数据根，取消是中性结局，失败带类别化 PortError。 */
+export type DataRootMoveResult = { root: string; files: number; bytes: number };
+
+/**
+ * 本机数据位置（#161）：选目标、迁移、报告状态。
+ *
+ * 迁移由 Go 完成：复制并校验全部内容成功之后才原子切换数据根记录，旧位置一直可用。
+ * 页面只负责「拦下会打架的操作、选目标、看一眼进度」。
+ */
+export interface DataRootStore {
+  status(): Promise<DataRootStatus>;
+  /** 让用户选一个新的数据位置；取消时返回空串。 */
+  pick(): Promise<string>;
+  /** 迁到 target；失败抛类型化 PortError。 */
+  move(target: string): Promise<DataRootMoveResult>;
 }
 
 /** core/ 的端口由壳层组合好交出去：core 的接口不变，界面只从端口取。 */
@@ -263,9 +311,30 @@ export interface CorePorts {
   settingsPorts: SettingsPorts;
 }
 
-/** 壳端口：界面唯一依赖的实现接缝（Web 见 webPort.ts，测试见 testing/fakePort.ts）。 */
+/**
+ * 可信自动更新（#164）：检查、读状态、安装。
+ *
+ * 信任规则不在这里：选版、验签与真实安装器都在 Go 侧（desktop/internal/updateservice）。
+ * 界面只按快照的 phase 与 installable 分支，不自己判断「能不能装」。
+ */
+export interface UpdatePort {
+  /** 读当前状态快照；界面轮询它。 */
+  status(): Promise<UpdateStatus>;
+  /** 发起一次检查（并发调用合并）；不安装、不重启。 */
+  check(): Promise<void>;
+  /**
+   * 交给真实安装器：只有已验签（status().installable）才允许。
+   * 准备与保存保护由界面先走 updatePreparation，失败时不调用这里。
+   */
+  install(): Promise<void>;
+}
+
+/** 更新状态快照：与 Go 侧 updateservice.Snapshot 同形（core/update.ts 定义页面用的类型）。 */
+export type UpdateStatus = import("../core/update").UpdateSnapshot;
+
+/** 壳端口：界面唯一依赖的实现接缝；桌面实现见 desktop.ts，测试替身见 testing/fakePort.ts。 */
 export interface ShellPort {
-  /** 用户数据根：core 按它拼绝对路径；Web 是虚拟根 /~，桌面是本机真实目录。 */
+  /** 本机数据根的绝对路径，core 据此拼接文件路径。 */
   readonly userRoot: string;
   readonly features: ShellFeatures;
   readonly board: BoardStore;
@@ -275,6 +344,9 @@ export interface ShellPort {
   readonly pack: PackStore;
   readonly ui: UiStore;
   readonly usage: UsagePort;
-  readonly session: SessionPort;
+  /** 可信自动更新；实现不可用时以 kind: "unavailable" 拒绝。 */
+  readonly update: UpdatePort;
   readonly core: CorePorts;
+  /** 本机数据位置迁移（#161）；没有这一项的实现在 features.dataRoot 上明确关掉。 */
+  readonly dataRoot: DataRootStore;
 }

@@ -3,6 +3,7 @@ import { type Board } from "./core/board";
 import { BUILTIN_TABLE, type CapabilityTable } from "./core/capabilities";
 import type { BoardChange } from "./core/edit";
 import type { Runner, RunTarget } from "./core/runner";
+import type { UpdatePreparationPorts } from "./core/updatePreparation";
 import { useActiveBoardSize } from "./ui/useBoardSize";
 import { shouldShowUpdateNotice } from "./core/changelog";
 import { useUsageLimit } from "./ui/useUsageLimit";
@@ -15,6 +16,7 @@ import { errorText } from "./core/errors";
 import { useShell } from "./ui/shell";
 import { modalOpenOf, noticesAfterMove, uiStateOf, uiStateText } from "./ui/appUiState";
 import { AppOverlays } from "./ui/appDialogs";
+import type { DataRootActions } from "./ui/dataRootMove";
 import { downloadBoardResults } from "./ui/packMenu";
 import { AppShell } from "./ui/appShell";
 import { useAppState, useRestoreTabs, useStartupReads, useToastTimer, useUiStateWriter, useVersionNotice } from "./ui/useAppState";
@@ -72,12 +74,10 @@ const EMPTY_BOARD: Board = { format_version: 2, title: "", viewport: { zoom: 1, 
 
 /** 工作台的 props。 */
 export interface AppProps {
-  onLogout?: () => void;
   version?: string | null;
-  sessionExpired?: boolean;
 }
 
-export function App({ onLogout, version, sessionExpired = false }: AppProps) {
+export function App({ version }: AppProps) {
   const port = useShell();
   const userRoot = port.userRoot;
   const store = useAppState();
@@ -108,6 +108,35 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
 
   // 导入与导出是两项能力（#131）：桌面壳能导入、还不能导出。
   const pack = useBoardPack(userRoot, boards, toast);
+
+  // 数据位置迁移（#161）：准备期先落盘并拦下新的生成提交，结束后（成败都）解除；成功才重新载入。
+  const [movingRoot, setMovingRoot] = useState(false);
+  const movingRootRef = useRef(false);
+  useEffect(() => {
+    runner.setSubmissionGuard(movingRoot ? () => toast("正在迁移数据位置，请等它结束") : null);
+  }, [movingRoot, runner, toast]);
+  const dataRootActions = useMemo<DataRootActions>(
+    () => ({
+      prepare: async () => {
+        movingRootRef.current = true;
+        setMovingRoot(true);
+        await boards.flushAll();
+      },
+      finish: (moved: boolean) => {
+        movingRootRef.current = false;
+        setMovingRoot(false);
+        // 数据根换了：页面启动时读的地址是快照，必须重新读一次（服务与图片协议已跟着换）。
+        if (moved) window.location.reload();
+      },
+      guard: () => ({
+        pending: runnerRef.current?.getSnapshot().pending() ?? 0,
+        // 进度模态开着就是导入 / 导出在跑；Go 侧也会拒绝并发迁移。
+        packBusy: pack.dialog?.state.stage === "progress",
+        moving: movingRootRef.current,
+      }),
+    }),
+    [boards, pack.dialog],
+  );
 
   useToastTimer(state.toastText, store.setToastText);
   useStartupReads(
@@ -214,7 +243,7 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
     [boards, openPath, pack, toast],
   );
 
-  /** 放弃一块服务端已不存在的画板：本页内容随之丢弃，先确认。 */
+  /** 放弃一块本机存储已不存在的画板：本页内容随之丢弃，先确认。 */
   const discardMissingBoard = useCallback(
     async (key: string) => {
       await discardMissingAction(
@@ -254,6 +283,22 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
     return port.meta.writeUiState(text);
   }, [boards, state.lastSeenVersion, state.sizeNotices, port]);
   const persistUi = useUiStateWriter(writeUi);
+
+  // 更新安装前的准备依赖（#164）：任务队列用 runner 的真实份数与提交守护，
+  // 保存用画板会话的严格落盘与界面状态写入；准备失败时界面恢复创作，旧版本照常可用。
+  const updateDeps = useMemo<UpdatePreparationPorts>(
+    () => ({
+      queue: {
+        pending: () => runner.getSnapshot().pending(),
+        setSubmissionGuard: (guard) => runner.setSubmissionGuard(guard),
+      },
+      saveBoards: () => boards.flushAll(),
+      saveUi: async () => {
+        await persistUi();
+      },
+    }),
+    [runner, boards, persistUi],
+  );
   const uiSignature = JSON.stringify([sessions.map((s) => s.path), sessions.find((s) => s.key === activeKey)?.path, state.lastSeenVersion, state.sizeNotices]);
   const persistRef = useRef(persistUi);
   persistRef.current = persistUi;
@@ -278,7 +323,7 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
   if (state.fatal) return <div className="fatal">启动失败：{state.fatal}</div>;
 
   const updateNotice = updateNoticeOf(ready, versionOrEmpty(version), state.lastSeenVersion, shouldShowUpdateNotice);
-  /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框、会话失效遮罩）：粘贴放行给弹窗，不落到背后的画板（#96）。 */
+  /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框）：粘贴放行给弹窗，不落到背后的画板（#96）。 */
   const modalOpen = modalOpenOf({
     settingsOpen: state.settingsOpen,
     changelogOpen: state.changelogOpen,
@@ -286,7 +331,6 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
     confirmOpen: state.confirm !== null,
     sendTextOpen: state.sendText !== null,
     packDialogOpen: pack.dialog !== null,
-    sessionExpired,
   });
   return (
 
@@ -309,6 +353,7 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
         usageNotice={usageNotice}
         runIndicator={{
           active: runState.active,
+          activity: runState.activity,
           titleOf: view.titleOf,
           onJump: (t) => jumpToTask(boards.setActiveKey, store.setFocus, state.focus, t),
           onCancelCopy: (taskId) => runner.cancel({ kind: "copy", taskId }),
@@ -379,7 +424,6 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
         onCloseMissing={(key) => void discardMissingBoard(key)}
         onImportPack={() => void pack.importPack()}
         importDisabled={view.importDisabled}
-        onLogout={onLogout}
         onToolbarSlot={setToolbarSlot}
       />
       <AppOverlays
@@ -397,6 +441,8 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
         onSendTextClose={() => store.setSendText(null)}
         packDialog={pack.dialog}
         toastText={state.toastText}
+        update={updateDeps}
+        dataRoot={dataRootActions}
       />
     </>
 

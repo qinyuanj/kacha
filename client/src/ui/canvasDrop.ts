@@ -36,7 +36,7 @@ export function dropAttachOf(hit: DropTarget | null, board: Board): { taskId: st
 }
 
 /**
- * 本机图片先上传到用户数据根的 导入参考图/，再按服务端给出的路径读元信息并写进缓存。单张失败只提示，不打断其余。
+ * 本机图片先上传到数据根的 导入参考图/，再按本机存储给出的路径读元信息并写进缓存。单张失败只提示，不打断其余。
  * displayNames = 整批上传后统一合成显示名（粘贴的图按「粘贴-…」命名，扩展名取落盘路径而不是剪贴板里的类型声明）；缺省用本机文件名。
  */
 export async function importImages(

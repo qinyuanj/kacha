@@ -61,7 +61,6 @@ export function AppShell(props: {
   onImportPack(): void;
   /** 导入画板包的置灰原因（端口说这项能力还没有时非空）。 */
   importDisabled: string | null;
-  onLogout?: () => void;
   onToolbarSlot(slot: HTMLElement | null): void;
 }) {
   const { view, sessions, activeKey, userRoot, ready } = props;
@@ -106,7 +105,6 @@ export function AppShell(props: {
         onOpenChangelog={props.onOpenChangelog}
         settingsLoaded={props.settingsLoaded}
         onOpenSettings={props.onOpenSettings}
-        onLogout={props.onLogout}
       />
       {props.packMenu && (
         <AppPackMenu

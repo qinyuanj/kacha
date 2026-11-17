@@ -28,25 +28,29 @@ interface Upstream {
   sha256: string | null;
 }
 
+function upstreamImage(board: Board, edge: BoardEdge, key: string): Upstream | null {
+  const src = board.nodes.find((n) => n.id === edge.from[0]);
+  if (src?.type === "reference") return { key, node: src, path: src.path, sha256: src.sha256 };
+  if (src?.type !== "result") return null;
+  // 图层身份无效时不猜路径（与提交同口径），这条连线随之断开。
+  const layer = edge.source_layer === null ? null : sourceLayerRecord(src.record, edge.source_layer);
+  if (edge.source_layer !== null && !layer) return null;
+  return { key, node: src, path: layer ? layerRelPath(src, layer.file) : src.path, sha256: null };
+}
+
 function upstreams(board: Board, moved: ReadonlySet<string>): Map<string, Upstream> {
   const out = new Map<string, Upstream>();
   for (const e of board.edges) {
     if (e.system || moved.has(e.from[0]) || !moved.has(e.to[0]) || imagePortIndex(e.to[1]) === null) continue;
     const key = imageKey(e.from[0], e.source_layer);
     if (out.has(key)) continue;
-    const src = board.nodes.find((n) => n.id === e.from[0]);
-    if (src?.type === "reference") out.set(key, { key, node: src, path: src.path, sha256: src.sha256 });
-    else if (src?.type === "result") {
-      // 图层身份无效时不猜路径（与提交同口径），这条连线随之断开。
-      const layer = e.source_layer === null ? null : sourceLayerRecord(src.record, e.source_layer);
-      if (e.source_layer !== null && !layer) continue;
-      out.set(key, { key, node: src, path: layer ? layerRelPath(src, layer.file) : src.path, sha256: null });
-    }
+    const upstream = upstreamImage(board, e, key);
+    if (upstream) out.set(key, upstream);
   }
   return out;
 }
 
-/** 拆分前要先读 sha256 的文件（相对用户数据根）：阶段外接进来的结果图（底图或图层）。 */
+/** 拆分前要先读 sha256 的文件（相对数据根）：阶段外接进来的结果图（底图或图层）。 */
 export function moveOutSources(board: Board, stageId: string): string[] {
   const moved = movedIds(board, stageId);
   if (!moved) return [];
@@ -66,6 +70,34 @@ export async function prepareStageSplit(boardOf: () => Board | null, stageId: st
   if (boardOf() !== source) throw new Error("采集图片身份期间画板有了新的改动，请重试");
   const board = splitStage(source, stageId, { sha256: (p) => shas.get(p) ?? null, newId });
   return board ? { source, board } : null;
+}
+
+function upstreamReference(upstream: Upstream, title: string, opts: SplitOptions): ReferenceNode {
+  const src = upstream.node as Extract<BoardNode, { type: "reference" | "result" }>;
+  const sha256 = upstream.sha256 ?? opts.sha256(upstream.path);
+  if (!sha256) throw new Error(`无法采集图片身份：${upstream.path}`);
+  return {
+    id: opts.newId(),
+    type: "reference",
+    pos: src.pos,
+    size: src.size,
+    extra: {},
+    path: upstream.path,
+    sha256,
+    display_name: src.type === "reference" ? src.display_name : basename(upstream.path),
+    source_board: title,
+  };
+}
+
+function reconnectEdges(edges: BoardEdge[], ids: ReadonlyMap<string, string>, refIds: ReadonlyMap<string, string>): BoardEdge[] {
+  return edges.flatMap((e): BoardEdge[] => {
+    const to = ids.get(e.to[0]);
+    if (!to) return [];
+    const from = ids.get(e.from[0]);
+    if (from) return [{ ...e, from: [from, e.from[1]], to: [to, e.to[1]] }];
+    const ref = refIds.get(imageKey(e.from[0], e.source_layer));
+    return ref && !e.system ? [{ ...e, from: [ref, e.from[1]], to: [to, e.to[1]], source_layer: null }] : [];
+  });
 }
 
 export interface SplitOptions {
@@ -88,31 +120,11 @@ export function splitStage(board: Board, stageId: string, opts: SplitOptions): B
   const nodes: BoardNode[] = board.nodes.flatMap((n) => (moved.has(n.id) ? [{ ...n, id: ids.get(n.id)! } as BoardNode] : []));
   const refIds = new Map<string, string>();
   for (const u of upstreams(board, moved).values()) {
-    const src = u.node as Extract<BoardNode, { type: "reference" | "result" }>;
-    const sha256 = u.sha256 ?? opts.sha256(u.path);
-    if (!sha256) throw new Error(`无法采集图片身份：${u.path}`);
-    const ref: ReferenceNode = {
-      id: opts.newId(),
-      type: "reference",
-      pos: src.pos,
-      size: src.size,
-      extra: {},
-      path: u.path,
-      sha256,
-      display_name: src.type === "reference" ? src.display_name : basename(u.path),
-      source_board: board.title,
-    };
+    const ref = upstreamReference(u, board.title, opts);
     refIds.set(u.key, ref.id);
     nodes.push(ref);
   }
-  const edges = board.edges.flatMap((e): BoardEdge[] => {
-    const to = ids.get(e.to[0]);
-    if (!to) return [];
-    const from = ids.get(e.from[0]);
-    if (from) return [{ ...e, from: [from, e.from[1]], to: [to, e.to[1]] }];
-    const ref = refIds.get(imageKey(e.from[0], e.source_layer));
-    return ref && !e.system ? [{ ...e, from: [ref, e.from[1]], to: [to, e.to[1]], source_layer: null }] : [];
-  });
+  const edges = reconnectEdges(board.edges, ids, refIds);
   const members = stage.nodes.flatMap((id) => (ids.has(id) ? [ids.get(id)!] : []));
   return {
     format_version: BOARD_FORMAT_VERSION,

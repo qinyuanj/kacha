@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // 标签页的右键菜单（#127）：「导出画板包…」的标签与置灰原因跟顶部「画板包」菜单同一处定义。
-// 桌面壳本切片没有画板包导出时标「尚不可用」并置灰；Web 版照旧。
+// 桌面壳本切片没有画板包导出时标「尚不可用」并置灰。
 import { act, createElement } from "react";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -77,7 +77,7 @@ describe("标签页右键菜单", () => {
     expect(item.getAttribute("aria-disabled")).toBe("true");
   });
 
-  it("Web 版：导出画板包照旧可用", async () => {
+  it("端口声明导出可用时：导出画板包照旧可用", async () => {
     await openMenu(createFakePort());
     const item = container.querySelector('[role="menuitem"]') as HTMLElement;
     expect(item.textContent).toBe("导出画板包…");
@@ -86,7 +86,7 @@ describe("标签页右键菜单", () => {
 });
 
 describe("标签页栏的行为", () => {
-  /** 用 Web 版替身渲染标签栏。 */
+  /** 用内存端口渲染标签栏。 */
   async function renderBar(props: Record<string, unknown> = {}): Promise<FakePort> {
     const port = createFakePort();
     await act(async () => {

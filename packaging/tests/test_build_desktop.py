@@ -11,7 +11,6 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import build_desktop  # noqa: E402
-from release_gate import parse_config_version  # noqa: E402
 
 PACKAGING = Path(__file__).resolve().parents[1]
 
@@ -21,7 +20,7 @@ VALID_CHANGELOG = "# 0.1.0\n\n## 新增\n\n- 一条。\n"
 
 
 def write_stub(tools: Path, name: str, body: str) -> None:
-    """在 tools 下放一个名为 name 的命令桩，用当前 Python 执行 body（与 test_build_web 同一做法）。"""
+    """在 tools 下放一个名为 name 的命令桩，用当前 Python 执行 body。"""
     script = tools / f"{name}.py"
     script.write_text(body, encoding="utf-8")
     if os.name == "nt":
@@ -32,8 +31,8 @@ def write_stub(tools: Path, name: str, body: str) -> None:
         launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
 
 
-def make_repo(root: Path, changelog: str = VALID_CHANGELOG, server_version: str = "0.1.0") -> dict[str, str]:
-    """最小仓库：打包脚本与门禁模块、两张清单、更新说明，与会写产物、记下调用参数的 go 桩。
+def make_repo(root: Path, changelog: str = VALID_CHANGELOG) -> dict[str, str]:
+    """最小仓库：打包脚本与门禁模块、桌面清单、更新说明，与会写产物、记下调用参数的 go 桩。
 
     门禁规则本身在 test_release_gate 里测，这里只测入口：门禁不通过就不构建。
     """
@@ -41,12 +40,8 @@ def make_repo(root: Path, changelog: str = VALID_CHANGELOG, server_version: str 
     for name in ("build_desktop.py", "release_gate.py"):
         shutil.copy2(PACKAGING / name, root / "packaging" / name)
     (root / "mygo.config.ts").write_text(CONFIG, encoding="utf-8")
-    (root / "server").mkdir()
-    (root / "server" / "Cargo.toml").write_text(
-        f'[package]\nname = "kacha-server"\nversion = "{server_version}"\n', encoding="utf-8"
-    )
     (root / "docs" / "release").mkdir(parents=True)
-    (root / "docs" / "release" / "web-changelog.md").write_text(changelog, encoding="utf-8")
+    (root / "docs" / "release" / "changelog.md").write_text(changelog, encoding="utf-8")
     (root / "client").mkdir()
     tools = root / "tools"
     tools.mkdir()
@@ -70,9 +65,12 @@ def make_repo(root: Path, changelog: str = VALID_CHANGELOG, server_version: str 
         "elif args[:3] == ['tool', 'mygo', 'version']:\n"
         "    print('mygo 0.9.0')\n"
         "else:\n"
-        "    out = Path('build/windows-amd64')\n"
+        "    base = args[args.index('-o') + 1] if '-o' in args else 'build'\n"
+        "    out = Path(base) / 'windows-amd64'\n"
         "    out.mkdir(parents=True, exist_ok=True)\n"
         "    (out / 'Kacha.exe').write_bytes(b'exe')\n"
+        "    if '-debug' not in args and '-skip-installer' not in args:\n"
+        "        (out / 'kacha-setup-0.1.0-amd64.exe').write_bytes(b'installer')\n"
         "    print('  √ Built Kacha 0.1.0 in 6.8s')\n",
     )
     return dict(os.environ, PATH=f"{tools}{os.pathsep}{os.environ['PATH']}", PYTHONIOENCODING="utf-8")
@@ -134,10 +132,6 @@ class VersionParsingTest(unittest.TestCase):
     def test_webview2_missing(self):
         self.assertIsNone(build_desktop.parse_webview2_version("错误: 系统找不到指定的注册表项或值。"))
 
-    def test_config_version_is_forwarded_from_the_gate_module(self):
-        # 解析规则在 test_release_gate 里测；这里只证明入口仍能以同名拿到同一个函数，既有调用点不改。
-        self.assertIs(build_desktop.parse_config_version, parse_config_version)
-
 
 class BuildDesktopGateTest(unittest.TestCase):
     """打包入口在构建前过门禁：更新说明缺当前版本就拒绝，构建命令一次都不跑。"""
@@ -152,18 +146,6 @@ class BuildDesktopGateTest(unittest.TestCase):
             self.assertIn("0.1.0", result.stderr)
             self.assertFalse((root / "build" / "windows-amd64" / "Kacha.exe").exists())
             self.assertFalse((root / "calls.log").exists(), "门禁失败前不应运行任何构建命令")
-
-    def test_rejects_when_the_two_manifests_differ(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            env = make_repo(root, server_version="0.9.9")
-            result = run_build(root, env)
-            self.assertNotEqual(result.returncode, 0, result.stdout)
-            self.assertIn("0.1.0", result.stderr)
-            self.assertIn("0.9.9", result.stderr)
-            self.assertFalse((root / "build" / "windows-amd64" / "Kacha.exe").exists())
-            self.assertFalse((root / "calls.log").exists(), "门禁失败前不应运行任何构建命令")
-
 
 class BuildDesktopTest(unittest.TestCase):
     """打包入口：跑固定版本的 CLI，记录版本，写出产物路径与构建记录。"""
@@ -189,7 +171,7 @@ class BuildDesktopTest(unittest.TestCase):
             self.assertEqual(info["platform"], "windows/amd64")
             self.assertEqual(info["exe"], "build/windows-amd64/Kacha.exe")
 
-    def test_pins_cli_and_skips_installer(self):
+    def test_release_build_uses_native_installer_and_signs_updates(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env = make_repo(root)
@@ -199,7 +181,22 @@ class BuildDesktopTest(unittest.TestCase):
             build = [line for line in calls if line.startswith("tool mygo build")]
             self.assertEqual(len(build), 1, calls)
             self.assertIn("-platform windows/amd64", build[0])
-            self.assertIn("-skip-installer", build[0])
+            self.assertNotIn("-skip-installer", build[0])
+            self.assertIn("kacha-setup-0.1.0-amd64.exe", (root / "build" / "windows-amd64" / "build-info.json").read_text(encoding="utf-8"))
+
+    def test_debug_build_keeps_release_output_separate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = make_repo(root)
+            result = run_build(root, env, "--debug", "--skip-install")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            info = json.loads((root / "build/debug/windows-amd64/build-info.json").read_text(encoding="utf-8"))
+            self.assertEqual(info["profile"], "debug")
+            self.assertEqual(info["exe"], "build/debug/windows-amd64/Kacha.exe")
+            self.assertFalse((root / "build/windows-amd64").exists())
+            calls = (root / "calls.log").read_text(encoding="utf-8")
+            self.assertIn("-debug -o build/debug", calls)
+            self.assertNotIn("npm ci", calls)
 
     def test_fails_when_exe_missing(self):
         with tempfile.TemporaryDirectory() as tmp:

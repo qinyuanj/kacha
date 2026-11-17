@@ -48,7 +48,7 @@ export function useCanvasData({ board, boardFile, userRoot, table, locked, handl
   const images = useMemo(() => board.nodes.flatMap((n) => nodeImages(n, userRoot)), [board.nodes, userRoot]);
   const imageAbsPaths = useMemo(() => images.map((img) => img.absPath), [images]);
   const imageInfos = useImageInfos(imageAbsPaths);
-  // 图片宽高晚于画板变更读到（刚打开画板、刚重新定位）、任务结束解除锁定、能力表或用户数据根变化时补算自动宽高比：
+  // 图片宽高晚于画板变更读到（刚打开画板、刚重新定位）、任务结束解除锁定、能力表或数据根变化时补算自动宽高比：
   // 系统变更，不构成撤销步；环境经 apply 取最新，这里的依赖只决定何时补算。
   useEffect(() => {
     applyChange({ kind: "syncAutoRatios" });

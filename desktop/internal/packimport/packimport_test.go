@@ -86,7 +86,7 @@ func quotePairs(pairs map[string]string) string {
 
 const boardText = "{\"format_version\":2,\"title\":\"画板一\",\"viewport\":{\"zoom\":1,\"x\":0,\"y\":0},\"nodes\":[{\"id\":\"n1\",\"type\":\"reference\",\"path\":\"导入参考图/abc.png\",\"sha256\":\"abc\"}],\"edges\":[]}"
 
-// 导入一个真实的包之后：画板、任务目录、图片与图层文件都落在用户数据根里，内容逐字节一致。
+// 导入一个真实的包之后：画板、任务目录、图片与图层文件都落在数据根里，内容逐字节一致。
 func TestImportWritesBoardTaskDirsImagesAndLayers(t *testing.T) {
 	root := t.TempDir()
 	pack := buildPack(t,
@@ -132,7 +132,7 @@ func TestImportWritesBoardTaskDirsImagesAndLayers(t *testing.T) {
 	}
 }
 
-// tempDirs 列出用户数据根下残留的导入临时目录。
+// tempDirs 列出数据根下残留的导入临时目录。
 func tempDirs(t *testing.T, root string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(root)
@@ -148,7 +148,7 @@ func tempDirs(t *testing.T, root string) []string {
 	return out
 }
 
-// snapshot 记下用户数据根里的全部文件与内容：用来断言「拒绝后本地数据保持不变」。
+// snapshot 记下数据根里的全部文件与内容：用来断言「拒绝后本地数据保持不变」。
 func snapshot(t *testing.T, root string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
@@ -177,7 +177,7 @@ func snapshot(t *testing.T, root string) map[string]string {
 	return out
 }
 
-// seededRoot 是拒绝类用例共用的前置：用户数据根里已经有一块画板与一个任务目录。
+// seededRoot 是拒绝类用例共用的前置：数据根里已经有一块画板与一个任务目录。
 func seededRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -223,7 +223,7 @@ func TestRejectsTraversalPath(t *testing.T) {
 	}
 }
 
-// 包内符号链接：拒绝（链接可以指向用户数据根之外），本地数据不变。
+// 包内符号链接：拒绝（链接可以指向数据根之外），本地数据不变。
 func TestRejectsSymlinkEntry(t *testing.T) {
 	root := seededRoot(t)
 	before := snapshot(t, root)
@@ -419,6 +419,41 @@ func TestImportConflictsDoNotOverwriteLocalTaskDir(t *testing.T) {
 	}
 	if string(data) != "{\"task_id\":\"本机的\"}" {
 		t.Fatalf("本机内容被覆盖了：%q", string(data))
+	}
+}
+
+// 画板位满时导入必须被本机存储拒绝：不能绕过 20 位约束，也没有半成品画板。
+func TestImportRespectsBoardSlots(t *testing.T) {
+	root := t.TempDir()
+	store := localstore.New(root)
+	for i := 1; i <= localstore.BoardSlots; i++ {
+		if _, r := store.CreateBoard(fmt.Sprintf("本地%d", i), "{}"); !r.OK {
+			t.Fatalf("CreateBoard #%d: %+v", i, r)
+		}
+	}
+	pack := buildPack(t,
+		zipEntry{name: "manifest.json", data: manifestV2("1.0.0", []string{"画板/导入.ugcboard.json"}, nil)},
+		zipEntry{name: "画板/导入.ugcboard.json", data: []byte(boardText)},
+		zipEntry{name: "2026-01-02/t1/task.json", data: []byte("{}")},
+	)
+
+	_, err := NewWithStore(store).Import(pack)
+	if err == nil {
+		t.Fatal("画板位满却导入成功了")
+	}
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Kind != KindSlotsFull || failure.Step != StepBoards {
+		t.Fatalf("err = %v, want slotsFull at boards", err)
+	}
+	if !strings.Contains(failure.Message, "画板位已满") {
+		t.Fatalf("message = %q, want 带上原因", failure.Message)
+	}
+	names, err := os.ReadDir(filepath.Join(root, "画板"))
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(names) != localstore.BoardSlots {
+		t.Fatalf("画板数 = %d, want %d", len(names), localstore.BoardSlots)
 	}
 }
 

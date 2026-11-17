@@ -102,6 +102,15 @@ describe("移出流程", () => {
     expect(message).toContain("阶段");
   });
 
+  it("新画板写不进去：原画板不动（一步都不删）", async () => {
+    const staged = stagedBoard();
+    const d = deps({ boardOf: vi.fn(() => staged), write: vi.fn(async () => "磁盘满了") });
+    const message = await moveOutWrite(d, "s1", "k1");
+    expect(message).toBe("磁盘满了");
+    expect(d.write).toHaveBeenCalledTimes(1);
+    expect(d.apply).not.toHaveBeenCalled();
+  });
+
   it("阶段还在：拆出新画板、写好并从原画板删掉节点", async () => {
     const staged = stagedBoard();
     const d = deps({ boardOf: vi.fn(() => staged) });

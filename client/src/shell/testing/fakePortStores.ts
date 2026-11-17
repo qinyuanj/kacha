@@ -1,8 +1,10 @@
 // 内存壳端口的各个分组（#137）：从 shell/testing/fakePort.ts 拆出，一个分组一个函数。
 // 拆开之后每个函数的复杂度单独看得到，门禁也按函数计。
-import type { ImportOptions, ImportResult, MergeReport, PackEntryFact } from "../../core/boardPack";
-import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, SessionPort, UsagePort } from "../types";
-import { PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore, type PackStore, type PortFailureKind, type UiStore } from "../port";
+import type { ImportOptions, ImportResult } from "../../core/boardPack";
+import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, UpdatePort, UsagePort } from "../types";
+import { emptySnapshot, type UpdateSnapshot } from "../../core/update";
+import { PortError, type BoardStore, type DataRootMoveResult, type DataRootStatus, type DataRootStore, type FeatureId, type FileStore, type MediaStore, type MetaStore, type PackStore, type PortFailureKind, type UiStore } from "../port";
+import type { DiagnosticsOutcome } from "../port";
 import type { FakeBoard, FakeCalls, FakeImportOutcome, FakePortOptions } from "./fakePortTypes";
 
 /** 造一个端口失败（界面按 kind 分支）。 */
@@ -216,11 +218,13 @@ export function fakeMediaStore(options: FakePortOptions, calls: FakeCalls, pickI
       calls.saveCopyAs.push(absPath);
       return { kind: "saved" as const };
     },
-    downloadImage: (path) => {
+    downloadImage: async (path) => {
       calls.downloadImage = [...(calls.downloadImage ?? []), path];
+      return { kind: "saved" as const };
     },
-    downloadBoardResults: (boardPath) => {
+    downloadBoardResults: async (boardPath) => {
       calls.downloadBoardResults = [...(calls.downloadBoardResults ?? []), boardPath];
+      return { kind: "saved" as const };
     },
   };
 }
@@ -247,20 +251,7 @@ export async function runImport(
 
 /** 画板包那一组。 */
 export function fakePackStore(imports: FakeImportOutcome[], calls: FakeCalls): PackStore {
-  const io = {
-    cancel: async () => undefined,
-    existing: async () => [],
-    hash: async (): Promise<PackEntryFact[]> => [],
-    stage: async () => "staging-1",
-    uploadContent: async () => undefined,
-    importContent: async (): Promise<MergeReport & { boards: string[] }> => ({ outcomes: [], bytes: 0, boards: [] }),
-    discardStaging: async () => undefined,
-    upload: async () => "pack-1",
-    entries: async () => [],
-    readTexts: async () => ({}),
-    importUnits: async (): Promise<MergeReport & { boards: string[] }> => ({ outcomes: [], bytes: 0, boards: [] }),
-    discard: async () => undefined,
-  };
+  const io = { cancel: async () => undefined };
   return {
     io,
     import: async (file, importOptions: ImportOptions) => runImport(imports, calls, file, importOptions),
@@ -270,7 +261,7 @@ export function fakePackStore(imports: FakeImportOutcome[], calls: FakeCalls): P
 }
 
 /** 界面能力那一组。 */
-export function fakeUiStore(calls: FakeCalls): UiStore {
+export function fakeUiStore(calls: FakeCalls, options: FakePortOptions): UiStore {
   return {
     ask: async (_message: string, _options?: BrowserOptions) => calls.ask !== false,
     message: async (text) => {
@@ -284,34 +275,72 @@ export function fakeUiStore(calls: FakeCalls): UiStore {
     log: (kind, fields) => {
       calls.log.push({ kind, fields });
     },
+    exportDiagnostics: async (): Promise<DiagnosticsOutcome> => {
+      calls.exportDiagnostics += 1;
+      return options.diagnosticsOutcome ?? { kind: "saved", bytes: 0 };
+    },
     isEditableTarget: (target) => target instanceof Element && target.closest("input, textarea, select, [contenteditable='true']") !== null,
     installInputTakeover: () => () => undefined,
   };
 }
 
 /** 用量统计那一组。 */
+/**
+ * 更新分组（#164）：快照按选项脚本化，check / install 只记次数。
+ *
+ * 替身不模拟选版与验签：那些判定在 Go 侧，前端替身声称「能装」时也必须已经
+ * verified + installable，否则会把界面的信任假设测成假的。
+ */
+export function fakeUpdateStore(missing: Set<string>, options: FakePortOptions, calls: FakeCalls): UpdatePort {
+  const snapshot: UpdateSnapshot = options.update ?? emptySnapshot();
+  return {
+    status: async () => {
+      if (missing.has("update")) throw fakeFailureOf("unavailable", "桌面版没有自动更新", "update");
+      return snapshot;
+    },
+    check: async () => {
+      if (missing.has("update")) throw fakeFailureOf("unavailable", "桌面版没有自动更新", "update");
+      calls.updateCheck++;
+    },
+    install: async () => {
+      if (missing.has("update")) throw fakeFailureOf("unavailable", "桌面版没有自动更新", "update");
+      calls.updateInstall++;
+      if (options.updateInstallFailure) throw fakeFailureOf(options.updateInstallFailure, "安装失败");
+    },
+  };
+}
+
 export function fakeUsageStore(missing: Set<string>): UsagePort {
   return {
     usage: async () => {
       if (missing.has("usage")) throw fakeFailureOf("unavailable", "桌面版没有用量统计", "usage");
       return { total_bytes: 0, boards_bytes: 0, meta_bytes: 0, last_access: 0, by_date: [], unreferenced: null, unreadable_board: null, limit_bytes: null, limit_level: null };
     },
-    cleanupUnreferenced: async () => ({ moved: [], skipped: [] }),
+    setLimit: async () => undefined,
+    recycle: async () => [],
+    restore: async () => undefined,
+    purgeExpired: async () => undefined,
+    cleanupUnreferenced: async () => ({ ok: true, kind: "", message: "", moved: [], skipped: [], failed: [] }),
   };
 }
 
-/** 会话那一组。 */
-export function fakeSessionStore(options: { requiresLogin?: boolean; storedKey?: string | null } = {}): SessionPort {
-  return {
-    // requiresLogin 可改：桌面壳（不登录）与 Web 版（要登录）用同一个替身。
-    requiresLogin: options.requiresLogin ?? true,
-    login: async () => ({ fingerprint: "fake" }),
-    current: async () => ({ fingerprint: "fake" }),
-    logout: async () => undefined,
-    config: async () => ({ version: "9.9.9", gateway_url: "http://gateway.invalid" }),
-    onExpired: () => () => undefined,
-    readStoredKey: () => options.storedKey ?? null,
-    storeKey: () => undefined,
-    clearStoredKey: () => undefined,
-  };
+/** 数据位置那一组（#161）：状态与迁移结局都由 options / calls 脚本化。 */
+export function fakeDataRootStore(calls: FakeCalls, options: FakePortOptions): DataRootStore {
+	return {
+		status: async (): Promise<DataRootStatus> => ({
+			root: calls.dataRootRoot ?? options.userRoot ?? "/~",
+			moving: false,
+			done: 0,
+			total: 0,
+		}),
+		pick: async (): Promise<string> => options.pickTargets?.shift() ?? "",
+		move: async (target: string): Promise<DataRootMoveResult> => {
+			calls.moveTargets = [...(calls.moveTargets ?? []), target];
+			const failure = options.moveFailure;
+			if (failure) throw fakeFailureOf(failure, "迁移失败：" + failure, "dataRoot");
+			const root = target;
+			calls.dataRootRoot = root;
+			return { root, files: options.moveFiles ?? 0, bytes: 0 };
+		},
+	};
 }

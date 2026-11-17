@@ -1,15 +1,15 @@
 // 生成任务视图：一个生成任务按当前画板、能力表与界面采集的事实，能不能运行、为什么、节点上显示什么。
 // 生成任务节点与二次确认（buildConfirmItems）消费同一份，「节点标红 ≡ 运行被拦」由构造保证。
 // 换模型绝不自动删线或改设置，只报告原因。
-import { runCopies, type Board, type TaskNode } from "./board";
-import { findModel, isRetiredModel, isSupported, LITE_RETIRED_HINT, type CapabilityTable, type ModelCapability } from "./capabilities";
+import { findTask, runCopies, type Board, type BoardEdge, type TaskNode } from "./board";
+import { findModel, isRetiredModel, isSupported, LITE_RETIRED_HINT, type CapabilityTable, type ModelCapability, type SizeRule } from "./capabilities";
 import { isFlashShape, isLayerSize, isRequestShapeImplemented, LAYER_SIZES_TEXT } from "./gateway";
 import { imageEdges, imageKey, imagePortSlots, imageSources, promptText, workflowOf } from "./graph";
 import { MAX_REGIONS } from "./overlay";
 import { effectiveRegionRender, expandImageEdges } from "./region";
 import { planSend, promptLanguage, referenceProblemsOf, type ReferenceProblems, type SendPlan } from "./sendPlan";
 import { availableModels, modelAvailabilityIssue, type Discovery } from "./settings";
-import { isAutoRatio, ratioRangeText, ratioValue, resolveSize, sizeTiersOf, withinRatioRange } from "./size";
+import { isAutoRatio, ratioRangeText, ratioValue, resolveSize, sizeTiersOf, withinRatioRange, type SizeSpec } from "./size";
 
 /** 不可运行原因的种类（封闭）。 */
 export type ReasonKind =
@@ -84,9 +84,17 @@ const NOT_READY: ReadonlySet<ReasonKind> = new Set(["positiveMissing", "positive
 
 const reason = (kind: ReasonKind, text: string): UnrunnableReason => ({ kind, category: NOT_READY.has(kind) ? "notReady" : "error", text });
 
-function findTask(board: Board, id: string): TaskNode | undefined {
-  const node = board.nodes.find((n) => n.id === id);
-  return node?.type === "task" ? node : undefined;
+/**
+ * 提交前必须拦下的输入问题（#154）：与任务视图共用同一份判断与文案。
+ * 界面标红说「参考图 4 张超出模型上限 3 张」，提交时也得说同一句话并真的不发请求；
+ * 依赖界面采集事实（缺图、网关发现）的原因不在这里，缺图在读取参考图那一步失败。
+ */
+export function submissionBlockers(board: Board, table: CapabilityTable, taskId: string): UnrunnableReason[] {
+  const task = findTask(board, taskId);
+  const model = task ? findModel(table, task.model) : undefined;
+  if (!task || !model) return [];
+  const refs = imageRefProblems(board, table, taskId);
+  return dedupe([...modelReasons(board, model, task), ...refs.issues.map((text) => reason("referenceOutOfRange", text))]);
 }
 
 export function taskView(board: Board, table: CapabilityTable, taskId: string, facts: TaskFacts): TaskView | null {
@@ -95,36 +103,19 @@ export function taskView(board: Board, table: CapabilityTable, taskId: string, f
   const model = findModel(table, task.model);
   const refs = imageRefProblems(board, table, taskId);
   const transparent = transparentBlock(board, model, taskId, facts);
-  const layer = model && !isSupported(model.workflows[workflowOf(board, taskId)].layer_decomposition) ? "模型不支持拆分图层" : null;
-  const flashLayers = isFlashShape(model) && task.layer_decomposition;
-  const reasons = [
-    ...(flashLayers ? [] : promptReasons(board, taskId)),
-    ...(flashLayers && imagePortSlots(board, table, taskId).length !== 1 ? [reason("layerNeedsOneImage", "图层拆分需要恰好一张 PNG/JPEG 参考图，不支持区域派生图")] : []),
-    ...(flashLayers && !isLayerSize(task.layer_size ?? "auto") ? [reason("sizeUnsupported", `图层尺寸只支持 ${LAYER_SIZES_TEXT}`)] : []),
-    ...(isRetiredModel(task.model) ? [reason("modelRetired", LITE_RETIRED_HINT)] : model ? [...availabilityReasons(table, facts.discovery, model), ...modelReasons(board, model, task)] : [reason("modelUnknown", `模型 ${task.model} 不在能力表内`)]),
-    ...(task.layer_decomposition && layer ? [reason("layerUnsupported", layer)] : []),
-    ...(task.transparent_background && transparent ? [reason(transparent.kind, transparent.text)] : []),
-    ...refs.issues.map((text) => reason("referenceOutOfRange", text)),
-    ...imageSources(board, taskId, "").flatMap((src, i) => {
-      if (src.absPath === null) return [reason("sourceLayerInvalid", `图${i + 1} 来源图层无效：${src.label}`)];
-      // 缺图按来源分键：图层线只看自己那层，底图线只看底图，互不株连。
-      const key = imageKey(src.nodeId, src.sourceLayer);
-      return facts.missingNodes.has(key) ? [reason("imageMissing", `图${i + 1} 图片缺失：${src.label}`)] : [];
-    }),
-  ];
-  const edgeCount = imageEdges(board, taskId).length;
-  const englishUnverified = !!model && edgeCount > 0 && promptLanguage(promptText(board, taskId, "positive")) === "en" && model.reference_phrasing.en_verified === "untested";
-  const rule = model?.workflows[workflowOf(board, taskId)].size_rule;
-  const size = !flashLayers && rule ? resolveSize(rule, task.size_spec) : null;
-  const { tier, ratio } = task.size_spec;
-  const copies = runCopies(task, facts.concurrency);
+  const layer = layerBlock(board, model, taskId);
   return {
-    reasons: dedupe(reasons),
-    warnings: [...refs.warnings, ...(englishUnverified ? ["该模型英文序号未验证"] : []), ...(copies.actual < copies.set ? [`份数 ${copies.set}，本次按 ${copies.actual}`] : [])],
+    reasons: dedupe([
+      ...inputReasons(board, table, task, model),
+      ...taskModelReasons(board, table, task, model, facts.discovery),
+      ...enabledToggleReasons(task, layer, transparent),
+      ...refs.issues.map((text) => reason("referenceOutOfRange", text)),
+      ...imageSourceReasons(board, taskId, facts),
+    ]),
+    warnings: [...refs.warnings, ...taskWarnings(board, task, model, facts.concurrency)],
     unreferenced: refs.unreferenced,
     model: modelLabel(table, facts.discovery, task.model),
-    size,
-    ratioUnsupported: !!rule && !isAutoRatio(task.size_spec) && tier !== null && sizeTiersOf(rule).includes(tier) && ratio !== null && size === null,
+    ...taskSizeView(board, task, model),
     toggles: {
       transparentBackground: { canEnable: transparent === null, hint: transparent?.hint ?? "" },
       layerDecomposition: { canEnable: model !== undefined && layer === null, hint: layer ?? "" },
@@ -132,10 +123,73 @@ export function taskView(board: Board, table: CapabilityTable, taskId: string, f
   };
 }
 
+/** Flash 拆层不要求提示词，改按实际参考图数与图层尺寸校验。 */
+function inputReasons(board: Board, table: CapabilityTable, task: TaskNode, model: ModelCapability | undefined): UnrunnableReason[] {
+  const taskId = task.id;
+  const flashLayers = isFlashShape(model) && task.layer_decomposition;
+  return [
+    ...(flashLayers ? [] : promptReasons(board, taskId)),
+    ...(flashLayers && imagePortSlots(board, table, taskId).length !== 1 ? [reason("layerNeedsOneImage", "图层拆分需要恰好一张 PNG/JPEG 参考图，不支持区域派生图")] : []),
+    ...(flashLayers && !isLayerSize(task.layer_size ?? "auto") ? [reason("sizeUnsupported", `图层尺寸只支持 ${LAYER_SIZES_TEXT}`)] : []),
+  ];
+}
+
+function taskModelReasons(board: Board, table: CapabilityTable, task: TaskNode, model: ModelCapability | undefined, discovery: Discovery): UnrunnableReason[] {
+  if (isRetiredModel(task.model)) return [reason("modelRetired", LITE_RETIRED_HINT)];
+  if (!model) return [reason("modelUnknown", `模型 ${task.model} 不在能力表内`)];
+  return [...availabilityReasons(table, discovery, model), ...modelReasons(board, model, task)];
+}
+
+function layerBlock(board: Board, model: ModelCapability | undefined, taskId: string): string | null {
+  return model && !isSupported(model.workflows[workflowOf(board, taskId)].layer_decomposition) ? "模型不支持拆分图层" : null;
+}
+
+function enabledToggleReasons(task: TaskNode, layer: string | null, transparent: ReturnType<typeof transparentBlock>): UnrunnableReason[] {
+  return [
+    ...(task.layer_decomposition && layer ? [reason("layerUnsupported", layer)] : []),
+    ...(task.transparent_background && transparent ? [reason(transparent.kind, transparent.text)] : []),
+  ];
+}
+
+/** 缺图文案：任务视图标红与提交前读取共用一份。 */
+export const missingImageText = (index: number, label: string): string => `图${index + 1} 图片缺失：${label}`;
+
+function imageSourceReasons(board: Board, taskId: string, facts: TaskFacts): UnrunnableReason[] {
+  return imageSources(board, taskId, "").flatMap((src, i) => {
+    if (src.absPath === null) return [reason("sourceLayerInvalid", `图${i + 1} 来源图层无效：${src.label}`)];
+    // 缺图按来源分键：图层线只看自己那层，底图线只看底图，互不株连。
+    const key = imageKey(src.nodeId, src.sourceLayer);
+    return facts.missingNodes.has(key) ? [reason("imageMissing", missingImageText(i, src.label))] : [];
+  });
+}
+
+function taskWarnings(board: Board, task: TaskNode, model: ModelCapability | undefined, concurrency: number): string[] {
+  const taskId = task.id;
+  const edgeCount = imageEdges(board, taskId).length;
+  const englishUnverified = !!model && edgeCount > 0 && promptLanguage(promptText(board, taskId, "positive")) === "en" && model.reference_phrasing.en_verified === "untested";
+  const copies = runCopies(task, concurrency);
+  return [...(englishUnverified ? ["该模型英文序号未验证"] : []), ...(copies.actual < copies.set ? [`份数 ${copies.set}，本次按 ${copies.actual}`] : [])];
+}
+
+function taskSizeView(board: Board, task: TaskNode, model: ModelCapability | undefined): Pick<TaskView, "size" | "ratioUnsupported"> {
+  const taskId = task.id;
+  const flashLayers = isFlashShape(model) && task.layer_decomposition;
+  const rule = model?.workflows[workflowOf(board, taskId)].size_rule;
+  const size = !flashLayers && rule ? resolveSize(rule, task.size_spec) : null;
+  return { size, ratioUnsupported: manualRatioUnsupported(rule, task.size_spec, size) };
+}
+
+function manualRatioUnsupported(rule: SizeRule | undefined, spec: SizeSpec, size: TaskView["size"]): boolean {
+  const { tier, ratio } = spec;
+  return !!rule && !isAutoRatio(spec) && tier !== null && sizeTiersOf(rule).includes(tier) && ratio !== null && size === null;
+}
+
 function modelLabel(table: CapabilityTable, discovery: Discovery, modelId: string): TaskView["model"] {
   if (isRetiredModel(modelId)) return { state: "unknown", label: "Lite（已停用，请切换到 Flash）" };
   const model = findModel(table, modelId);
   if (!model) return { state: "unknown", label: `${modelId}（未知模型）` };
+  // 还没发现过时保留画板里已有的模型身份；静态清单只是本地能力事实，不冒充网关发现成功。
+  if (discovery.source === "none" && !discovery.failed && model.tier !== null) return { state: "ok", label: model.display_name };
   if (availableModels(table, discovery).some((m) => m.model_id === modelId)) return { state: "ok", label: model.display_name };
   return model.tier !== null ? { state: "notFromGateway", label: `${model.display_name}（网关未提供）` } : { state: "unshelved", label: `${model.display_name}（未上架）` };
 }
@@ -206,26 +260,46 @@ function availabilityReasons(table: CapabilityTable, discovery: Discovery, model
 
 /** 按能力表判断的原因：参考图名额、区域、负向、尺寸。 */
 function modelReasons(board: Board, model: ModelCapability, task: TaskNode): UnrunnableReason[] {
-  const out: UnrunnableReason[] = [];
   const edges = imageEdges(board, task.id);
   const wf = model.workflows[workflowOf(board, task.id)];
+  return [
+    ...referenceCountReasons(edges, model),
+    ...regionReasons(edges, model),
+    ...(hasEdge(board, task.id, "negative") && !isSupported(wf.supports_negative_prompt) ? [reason("negativeUnsupported", "模型不支持负向提示词")] : []),
+    ...generationSizeReasons(model, task, wf.size_rule),
+  ];
+}
+
+function referenceCountReasons(edges: BoardEdge[], model: ModelCapability): UnrunnableReason[] {
   const max = model.workflows.image_edit.max_references;
-  const render = effectiveRegionRender(model);
   const expanded = expandImageEdges(edges, model).length;
-  if (edges.length > 0 && max === 0) out.push(reason("imageEditUnsupported", "模型不支持图片编辑"));
-  else if (expanded > max) out.push(reason("tooManyReferences", `参考图 ${expanded} 张超出模型上限 ${max} 张`));
+  if (edges.length > 0 && max === 0) return [reason("imageEditUnsupported", "模型不支持图片编辑")];
+  return expanded > max ? [reason("tooManyReferences", `参考图 ${expanded} 张超出模型上限 ${max} 张`)] : [];
+}
+
+function regionReasons(edges: BoardEdge[], model: ModelCapability): UnrunnableReason[] {
+  const out: UnrunnableReason[] = [];
+  const render = effectiveRegionRender(model);
   const regions = edges.reduce((n, e) => n + (e.region?.rects.length ?? 0), 0);
   if (render === null && regions > 0) out.push(reason("regionUnsupported", "模型不支持框选修改区域"));
   if (render !== null && regions > MAX_REGIONS) out.push(reason("tooManyRegions", `框选了 ${regions} 个区域，最多 ${MAX_REGIONS} 个`));
-  if (hasEdge(board, task.id, "negative") && !isSupported(wf.supports_negative_prompt)) out.push(reason("negativeUnsupported", "模型不支持负向提示词"));
-  if (!(isFlashShape(model) && task.layer_decomposition) && resolveSize(wf.size_rule, task.size_spec) === null) {
-    const s = task.size_spec;
-    const value = ratioValue(s.ratio);
-    // 只有宽高比本身越界才报范围；分辨率档不认识、或没有 custom 范围的模型仍按「不在尺寸表内」。
-    const range = s.tier !== null && s.tier in wf.size_rule.tiers && value !== null && !withinRatioRange(wf.size_rule, value) ? ratioRangeText(wf.size_rule) : null;
-    const text =
-      s.tier === null ? `自定义尺寸 ${s.width}×${s.height} 超出模型范围` : range !== null ? `宽高比 ${s.ratio} 超出模型范围 ${range}` : `生成尺寸 ${s.tier} · ${s.ratio} 不在模型尺寸表内`;
-    out.push(reason("sizeUnsupported", text));
-  }
   return out;
+}
+
+function generationSizeReasons(model: ModelCapability, task: TaskNode, rule: SizeRule): UnrunnableReason[] {
+  if (!(isFlashShape(model) && task.layer_decomposition) && resolveSize(rule, task.size_spec) === null) {
+    return [reason("sizeUnsupported", unsupportedSizeText(rule, task.size_spec))];
+  }
+  return [];
+}
+
+function unsupportedSizeText(rule: SizeRule, s: SizeSpec): string {
+  const range = unsupportedRatioRange(rule, s);
+  return s.tier === null ? `自定义尺寸 ${s.width}×${s.height} 超出模型范围` : range !== null ? `宽高比 ${s.ratio} 超出模型范围 ${range}` : `生成尺寸 ${s.tier} · ${s.ratio} 不在模型尺寸表内`;
+}
+
+function unsupportedRatioRange(rule: SizeRule, s: SizeSpec): string | null {
+  const value = ratioValue(s.ratio);
+  // 只有宽高比本身越界才报范围；分辨率档不认识、或没有 custom 范围的模型仍按「不在尺寸表内」。
+  return s.tier !== null && s.tier in rule.tiers && value !== null && !withinRatioRange(rule, value) ? ratioRangeText(rule) : null;
 }

@@ -1,6 +1,6 @@
-// Package packimport 把一个手工导出的画板包（.ugcpack）导入本地用户数据根。
+// Package packimport 把一个手工导出的画板包（.ugcpack）导入本地数据根。
 //
-// 包格式与 Web 服务端的实现一致（见 client/src/core/boardPack.ts 与 ADR 0013）：zip 里是
+// 画板包格式见 client/src/core/boardPack.ts：zip 里是
 // manifest.json、画板/<文件>.ugcboard.json、<日期>/<task_id>/… 与 导入参考图/<文件>。
 // 导入分九步（检查 → 解压到临时目录 → 还原被省略的重复内容 → 核对 → 合并 → 提交画板 → 清理），
 // 检查通过之前不写任何东西：路径越界、符号链接、缺失条目与读不懂的清单都在这一步被拒，
@@ -26,16 +26,18 @@ import (
 	"time"
 
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
+	"github.com/qinyuanj/kacha/desktop/internal/pathguard"
+	"github.com/qinyuanj/kacha/desktop/internal/taskref"
 )
 
 const (
-	// TempPrefix 是导入临时目录的前缀（在用户数据根下，导入结束无论成败都删掉）。
+	// TempPrefix 是导入临时目录的前缀（在数据根下，导入结束无论成败都删掉）。
 	TempPrefix = ".ugcpack-import."
 	// ManifestName 是包内清单的文件名。
 	ManifestName = "manifest.json"
-	// BoardsDirName 是包内画板目录名（与用户数据根里的画板目录同名）。
+	// BoardsDirName 是包内画板目录名（与数据根里的画板目录同名）。
 	BoardsDirName = localstore.BoardsDir
-	// ReferencesDirName 是包内、也是用户数据根里的导入参考图目录名。
+	// ReferencesDirName 是包内、也是数据根里的导入参考图目录名。
 	ReferencesDirName = "导入参考图"
 	// TaskRecordName 是任务目录里判定「同一份」的身份文件。
 	TaskRecordName = "task.json"
@@ -64,6 +66,8 @@ const (
 	KindInvalid = "invalid"
 	// KindConflict 是画板提交撞上同名或本地画板已在别处改动。
 	KindConflict = "conflict"
+	// KindSlotsFull 是可编辑画板位已满：本机存储拒绝新建，导入不能绕过。
+	KindSlotsFull = "slotsFull"
 	// KindFailed 是本地写入失败。
 	KindFailed = "failed"
 	// KindCancelled 是用户取消了导入：已移入的任务目录保留，画板不再写入。
@@ -106,7 +110,7 @@ type Report struct {
 	Outcomes []Outcome `json:"outcomes"`
 	// Bytes 是解压出来的字节数。
 	Bytes int64 `json:"bytes"`
-	// Boards 是新画板相对用户数据根的路径。
+	// Boards 是新画板相对数据根的路径。
 	Boards []string `json:"boards"`
 	// Imported 是移入的任务目录数。
 	Imported int `json:"imported"`
@@ -122,20 +126,20 @@ type Report struct {
 
 // Store 是导入需要的本地文件层（生产实现是 localstore.Store）。
 type Store interface {
-	// Root 是用户数据根的绝对路径：导入的一切都写在这里面。
+	// Root 是数据根的绝对路径：导入的一切都写在这里面。
 	Root() string
 	// CreateBoard 在画板目录里新建一块画板（只新建，名字由标题派生）。
 	CreateBoard(title, text string) (string, localstore.Result)
 }
 
-// Importer 把画板包导入一个用户数据根。进度回调与取消判定都可以为 nil。
+// Importer 把画板包导入一个数据根。进度回调与取消判定都可以为 nil。
 type Importer struct {
 	store      Store
 	onProgress func(Progress)
 	cancelled  func() bool
 }
 
-// New 造一个以 root 为用户数据根的导入器。
+// New 造一个以 root 为数据根的导入器。
 func New(root string) *Importer {
 	return NewWithStore(localstore.New(root))
 }
@@ -232,7 +236,7 @@ func (im *Importer) Import(packPath string) (Report, error) {
 	return report, nil
 }
 
-// root 返回用户数据根。
+// root 返回数据根。
 func (im *Importer) root() string { return im.store.Root() }
 
 // readPlan 只读清单、画板文本与条目名，判版本与布局：不合格的包在这里就被拒，一个字节都不写。
@@ -284,7 +288,7 @@ func readPlan(files []*zip.File) (plan, error) {
 		if name == ManifestName || isBoardEntry(name) {
 			continue
 		}
-		if dir, ok := taskDirOf(name); ok {
+		if dir, ok := taskref.TaskDirOfRelPath(name); ok {
 			taskDirs[dir] = true
 			continue
 		}
@@ -429,7 +433,7 @@ func checkDuplicates(duplicates map[string]string, entries map[string]bool, boar
 		if !entries[source] {
 			return nil, corruptf(StepCheck, "duplicates 指向包内不存在的条目：%s → %s", omitted, source)
 		}
-		if _, ok := taskDirOf(omitted); !ok {
+		if _, ok := taskref.TaskDirOfRelPath(omitted); !ok {
 			if parts := strings.Split(omitted, "/"); len(parts) != 2 || parts[0] != ReferencesDirName {
 				return nil, corruptf(StepCheck, "duplicates 只能省略任务目录或导入参考图里的文件：%s", omitted)
 			}
@@ -454,7 +458,7 @@ func (im *Importer) extract(tempDir string, planned plan) (int64, error) {
 		}
 		file := planned.entries[name]
 		dst := filepath.Join(tempDir, filepath.FromSlash(name))
-		if !within(tempDir, dst) {
+		if !pathguard.Inside(tempDir, dst) {
 			return 0, corruptf(StepExtract, "包内路径越出导入目录：%s", name)
 		}
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -503,7 +507,7 @@ func (im *Importer) restoreDuplicates(tempDir string, planned plan) error {
 		source := planned.duplicates[omitted]
 		src := filepath.Join(tempDir, filepath.FromSlash(source))
 		dst := filepath.Join(tempDir, filepath.FromSlash(omitted))
-		if !within(tempDir, dst) {
+		if !pathguard.Inside(tempDir, dst) {
 			return corruptf(StepRestore, "包内路径越出导入目录：%s", omitted)
 		}
 		if _, err := os.Stat(dst); err == nil {
@@ -522,7 +526,7 @@ func (im *Importer) restoreDuplicates(tempDir string, planned plan) error {
 	return nil
 }
 
-// verifyUnits 核对每个合并单元都在、且身份文件在：包内容不完整时在这里拒绝，还没动用户数据根。
+// verifyUnits 核对每个合并单元都在、且身份文件在：包内容不完整时在这里拒绝，还没动数据根。
 func verifyUnits(tempDir string, units []unit) error {
 	for _, u := range units {
 		info, err := os.Stat(filepath.Join(tempDir, filepath.FromSlash(u.path)))
@@ -603,6 +607,8 @@ func (im *Importer) commitBoards(boards []packBoard) ([]string, error) {
 				kind = KindConflict
 			case localstore.KindInvalid:
 				kind = KindInvalid
+			case localstore.KindSlotsFull:
+				kind = KindSlotsFull
 			}
 			return nil, &Error{Kind: kind, Step: StepBoards, Message: "画板没有写入：" + result.Message}
 		}
@@ -661,7 +667,7 @@ func summarize(outcomes []Outcome, units []unit, boards []string, bytes int64, m
 
 // missingImages 列出画板引用了、但本机没有的图片：节点保留，界面显示缺图占位。
 //
-// 只看 reference 与 result 节点的 path：它们指向用户数据根里的图片；根目录外的绝对路径同样按文件判断。
+// 只看 reference 与 result 节点的 path：它们指向数据根里的图片；根目录外的绝对路径同样按文件判断。
 func missingImages(boards []packBoard, root string) []string {
 	missing := []string{}
 	seen := map[string]bool{}
@@ -805,45 +811,9 @@ func safeSegment(s string) bool {
 	return true
 }
 
-// taskDirOf 判相对路径落在 <YYYY-MM-DD>/<task_id>/… 里时返回任务目录。
-func taskDirOf(rel string) (string, bool) {
-	parts := strings.Split(rel, "/")
-	if len(parts) < 3 || !isDateDir(parts[0]) || parts[1] == "" {
-		return "", false
-	}
-	return parts[0] + "/" + parts[1], true
-}
 
-// isDateDir 判第一段是不是 UTC 日期目录（YYYY-MM-DD）。
-func isDateDir(s string) bool {
-	if len(s) != 10 || s[4] != '-' || s[7] != '-' {
-		return false
-	}
-	for i, r := range s {
-		if i == 4 || i == 7 {
-			continue
-		}
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
 
-// within 判 p 是否在 root 里（root 自己不算）。
-func within(root, p string) bool {
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return false
-	}
-	absPath, err := filepath.Abs(p)
-	if err != nil {
-		return false
-	}
-	return strings.HasPrefix(strings.ToLower(absPath), strings.ToLower(absRoot)+string(os.PathSeparator))
-}
-
-// rel 把绝对路径写成相对用户数据根的正斜杠路径；根目录外的保留绝对路径。
+// rel 把绝对路径写成相对数据根的正斜杠路径；根目录外的保留绝对路径。
 func rel(root, abs string) string {
 	if strings.HasPrefix(strings.ToLower(abs), strings.ToLower(root)+string(os.PathSeparator)) {
 		return filepath.ToSlash(strings.TrimPrefix(abs, root+string(os.PathSeparator)))

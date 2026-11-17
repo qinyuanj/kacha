@@ -1,270 +1,82 @@
-# Kacha Web 部署与运维
+# Kacha 桌面构建与验证
 
-Kacha 由一个 `kacha-server` 进程同时托管前端静态文件和 API，默认地址为 `http://lzxsvn:3004/`。桌面安装器、自动更新与 Gitea 发布脚本已退役；旧版本只从 tag `v0.3.2` 查阅。
+Kacha 是单机优先的 Windows 桌面客户端：MyGo / Go 提供本机文件、系统剪贴板与窗口，React 画板嵌进可执行文件。普通查看、编辑与组织画板不依赖服务端。版本只在仓库根的 `mygo.config.ts` 声明。
 
-产品只有一条版本线（[ADR 0024](../docs/adr/0024-one-version-line-for-the-product.md)）：服务端清单 `server/Cargo.toml` 与桌面配置 `mygo.config.ts` 同号。**发布纪律**：1.5.0 的 Web 构建与桌面客户端同一批发布；在那之前，部署机继续跑 1.4.0。
+## 构建
 
-## 构建与复制
+开发机使用原生 Windows、PowerShell、Python 3.11+、Node 24 与 `go.mod` 声明的 Go 工具链。MyGo 和 CLI 固定在 `go.mod` 的 v0.9.0；升级应独立验证原生剪贴板、窗口、文件协议与画板包导入。
 
-在开发机（原生 Windows）安装 Rust、Node 与 Python 3.11+，在仓库根目录的 PowerShell 中执行：
+日常验证使用 debug 构建：
 
-```powershell
-python packaging\build_web.py
-# 已按锁文件安装依赖时可跳过 npm ci：
-python packaging\build_web.py --skip-npm-ci
-```
+~~~powershell
+python packaging\build_desktop.py --debug
+# 已按 lockfile 安装前端依赖时：
+python packaging\build_desktop.py --debug --skip-install
+~~~
 
-脚本先过打包共用的门禁 [packaging/release_gate.py](release_gate.py)，桌面入口用的是同一份：
+输出为 `build/debug/windows-amd64/Kacha.exe` 与 `build-info.json`。debug 保留开发检查能力，使用独立目录，不覆盖正式交付产物。
 
-- `check_version_line`：`server/Cargo.toml` 与 `mygo.config.ts` 必须同号，不同号时说清两边各是什么。
-- `check_release_notes`：更新说明 [docs/release/web-changelog.md](../docs/release/web-changelog.md) 去掉 HTML 注释后，必须有一个一级标题与当前版本完全相同（如 `# 1.5.0`），且该节的「新增 / 改进 / 修复」至少一组下有一条列表项。
+正式交付才构建 release：
 
-不满足时以中文原因退出，不运行任何构建，也不动已有的 `release/kacha-web`。发版时同时改两张清单的版本号，并在更新说明最上面加这一节。
-
-检查通过后，脚本运行前端 release 构建和 `cargo build --release`，输出：
-
-```text
-release/kacha-web/
-  kacha-server[.exe]
-  static/
-    index.html
-    assets/...
-  SHA256SUMS
-```
-
-把整个 `kacha-web` 目录复制到部署机，例如 `C:\kacha`。运行环境不需要 Rust、Node 或 Python；只需服务端程序和 `static/`。`index.html` 使用相对资源路径。SHA256SUMS 可用于复制后核对文件。
-
-Linux 上命令相同，只需把 `python` 换成 `python3`、路径分隔符换成 `/`；Linux 不再实测。
-
-2026-11-07 在 Windows 开发机实测：`python packaging\build_web.py` 完成 release 构建并产出 `kacha-server.exe` 与 `static/`；前台启动后 `GET /` 返回首页、`GET /api/config` 返回版本，登录后经符号链接越界读文件返回 403；`cleanup --dry-run` 正常执行并退出 0。尚未实测：在 lzxsvn 上以 Windows 服务运行（见下文「待人工实测」与 [#70](https://github.com/qinyuanj/kacha/issues/70)）。
-
-## 桌面客户端（#127）
-
-本地优先的 Windows 客户端用 MyGo 壳加载同一份 React 画板（ADR 0023）：不连服务端、不要求密钥、没有登录。在仓库根目录执行：
-
-```powershell
+~~~powershell
 python packaging\build_desktop.py
-# 已按 lockfile 安装过前端依赖时可跳过 npm ci：
-python packaging\build_desktop.py --skip-install
-```
+~~~
 
-脚本先过与 web 相同的门禁（`packaging/release_gate.py`）：两张清单不同号、或更新说明缺少当前版本一节，都以中文原因退出，**不跑任何构建命令**。通过后跑固定版本的 CLI（`go.mod` 的 tool 指令钉住 MyGo 0.9.0），由它先构建 `client/`、再把 `client/dist` 嵌进可执行文件，最后输出：
+输出为 `build/windows-amd64/Kacha.exe`、MyGo 当前用户 NSIS 安装器 `kacha-setup-<版本>-amd64.exe` 与 `build-info.json`。debug 仍用 `-skip-installer`，不生成安装器。发布构建不上传 Release；签名、Gitea 发布与更新描述门禁见 [安装器与发布链](RELEASE_163.md)。`build-info.json` 记录应用版本、profile、MyGo / Go / WebView2 版本、安装器与产物路径。WebView2 Runtime 版本读不到时记 null。
 
-```text
-build/windows-amd64/
-  Kacha.exe
-  build-info.json     # 本次构建的 MyGo / Go / WebView2 版本与产物路径
-```
+两个 profile 都先检查版本与更新说明：`mygo.config.ts` 是唯一产品版本源；`docs/release/changelog.md` 必须包含与它同号的一级标题，且该节「新增 / 改进 / 修复」至少一组下有条目。当前版本在最前，历史版本可查并保留当时语境，历史恢复来源见 `docs/release/changelog-sources.md`；完整索引与弹窗可见范围由前端守护测试检查。检查失败即退出，不运行构建命令。MyGo CLI 随后执行配置中的前端 `buildCommand`，再将 `client/dist` 嵌入程序；Go 模块位于仓库根，源码入口为 `./desktop`。
 
-`Kacha.exe` 可双击运行，不需要 Node、Go 或 Python。首次启动在 `%AppData%\Kacha\data` 建立本机唯一一份用户数据根并记住它（`%AppData%\Kacha\shell-state.json`），之后每次启动都回到同一份；同一台电脑只开一个实例，重复双击只是把已有窗口叫到前面。本切片还没有生成、用量与画板包导出，界面上标为「尚不可用」。
+## 本机数据与迁入
 
-MyGo 与 CLI 固定在 0.9.0，不跟随后续开发分支；升级要先单独验证。`build-info.json` 记录构建时用的版本，WebView2 Runtime 版本取自 `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` 的 `pv`。
+首次启动在 `%AppData%\Kacha\data` 创建本机数据根，位置记录在 `%AppData%\Kacha\shell-state.json`。以后回到同一份数据；重复启动只激活已有窗口。数据由客户端管理，不按 API 密钥分用户。
 
-### Go 模块放在仓库根（不是 desktop/）
+数据迁入只通过用户手工选择的 `.ugcpack` 画板包，不扫描旧服务端、不迁移整用户、不对账。导入由本机 Go 服务检查、解压与合并，限制在数据根内。已有画板、任务记录、结果与图层兼容夹具用于验证文件交换；它们的格式号不随产品版本变化。
 
-`go.mod` / `go.sum` 在**仓库根**，Go 源码在 `desktop/`：
+当前桌面已接通单份文生图：经桌面端口与本机服务调用团队网关，结果和任务记录落在任务目录。整理模式已由本机存储按任务目录与独立图片度量画板体量（#158），阶段、定稿、收掉未定稿与移出为新画板都落在真实画板文件上；尚未实现的能力保持明确不可用，不能因共享前端已有领域逻辑就认为这些能力已交付。归档与取消归档已由本机 Go 服务执行（20 个可编辑画板位、只读与版本冲突保护）。本机用量统计、未引用清理与回收恢复已通过桌面壳的 Usage 服务接通真实数据根；它按本机文件字节计量，不表示 token 或金额配额。画板包导出与完整结果保存已由本机 Pack 服务接通（#160）。其余原生剪贴板、保存、导入与文件访问的边界应以桌面端口能力和测试为准。
 
-```text
-go.mod            # module github.com/qinyuanj/kacha，钉住 mygo v0.9.0 与 go 1.27.3
-mygo.config.ts    # main: "./desktop"（Go 包），frontendDist: "client/dist"，out: "build"
-desktop/          # main.go + internal/{dataroot,shellapp,localstore,localservice}
-client/           # 现有 React 前端（构建后嵌进可执行文件）
-```
-
-原因是 MyGo 的 `main` 按 `go list` 解析，而 `go list` 从项目根找 `go.mod`：把 `go.mod` 放在 `desktop/` 里时，
-`mygo build` 会报 `go.mod file not found in current directory or any parent directory`。
-`main` 仍写 `"./desktop"`：写成 `"desktop"` 会被 `go list` 当成标准库包名（*package desktop is not in std*）。
-后续票（画板存储、剪贴板、画板包）继续往 `desktop/internal/` 加包，不要另起第二个 Go 模块。
-
-
-## 配置
-
-命令行参数优先于环境变量。Windows 服务建议使用下面的绝对路径参数，避免服务工作目录影响相对路径。
-
-| 参数 | 环境变量 | 默认值 | 用途 |
-| --- | --- | --- | --- |
-| `--listen` | `KACHA_LISTEN` | `0.0.0.0:3004` | 监听地址与端口；部署前确认端口空闲 |
-| `--data-root` | `KACHA_DATA_ROOT` | `./kacha-data` | 所有用户数据根、回收区与服务端日志的位置 |
-| `--gateway-url` | `KACHA_GATEWAY_URL` | `http://lzxsvn:3001` | 服务端验证密钥的网关地址，也是前端初始网关地址与 CSP 允许地址 |
-| `--static-dir` | `KACHA_STATIC_DIR` | 无 | 前端构建目录；部署时指到复制后的 `static` |
-| `--result-hosts` | `KACHA_RESULT_HOSTS` | 空 | 逗号分隔的额外结果对象存储主机或后缀；默认已含 `.volces.com`、`.volccdn.com`、`.bytepluses.com`、`.aliyuncs.com` |
-| `--min-free-gb` | `KACHA_MIN_FREE_GB` | `20` | 数据盘最低余量（GiB）；低于它时写入接口返回 507 |
-| `--board-slots` | `KACHA_BOARD_SLOTS` | `10` | 画板位：每人可同时持有的可编辑画板数（ADR 0019） |
-| `--board-warn-mb` | `KACHA_BOARD_WARN_MB` | `500` | 画板体量黄线（MiB）：画板列表标黄、画布顶部提示整理，不阻止生成 |
-| `--board-alert-mb` | `KACHA_BOARD_ALERT_MB` | `1024` | 画板体量红线（MiB）：画板列表标红、再提示一次，不阻止生成 |
-| `--usage-limit-gb` | `KACHA_USAGE_LIMIT_GB` | 空 | 用量上限（GiB）：每人用户数据根的总用量接近或达到时提醒并给「管理画板」入口，不阻止生成；留空即不提醒 |
-| `--usage-warn-percent` | `KACHA_USAGE_WARN_PERCENT` | `80` | 用量提醒比例（%）：达到上限的这个比例标黄，达到上限标红 |
-
-画板位、体量提醒线与用量上限是初值，按服务端每日用量日志调整：改服务参数后重启服务即可，不用重新发版。用量上限按 lzxsvn 数据盘可用空间 ÷ 12 × 0.7 计算，拿到数值前留空。
-
-结果下载只允许 HTTP/HTTPS 与允许列表中的主机，重定向也逐次校验。不要把不可信内网主机加入列表。若允许用户把前端网关改为非 `KACHA_GATEWAY_URL` 的地址，还需同步调整服务端 CSP；当前部署应保持一致。
-
-数据根建议放在空间充足的 NTFS 数据盘。服务端只存密钥指纹和会话（`<数据根>/sessions.json`，只含会话令牌哈希、指纹与过期时间，服务重启后会话仍有效），不存密钥；日志不应包含密钥、提示词全文或签名结果地址。服务端不做备份，也不自动清理用户数据（画板包上传临时文件除外，见「清理与恢复」）。
-
-## Windows 服务
-
-服务端自带原生 Windows 服务模式：`kacha-server.exe service <与前台相同的参数>`。该模式对接服务控制管理器（SCM），启动时报告运行状态；收到停止（或关机）请求后，立即停止接受新连接，等进行中的请求处理完再退出，排空最多 60 秒。超过 60 秒就放弃剩余请求退出。单个文件都经临时文件加原子改名落位，被放弃的请求不会留下半截文件，只会留下临时文件；画板改名或删除恰好在两步之间被结束时，可能多出一个孤立的 `.bak`，可手动处理。不带 `service` 时仍是前台运行，Ctrl+C 走同一条优雅关停路径。`service` 子命令只供 SCM 启动，在终端直接运行会报错退出。
-
-以下命令需管理员 PowerShell，服务名统一为 `kacha`。按实际路径与域名调整；`--result-hosts` 只填需要追加的主机。
-
-```powershell
-$dir  = 'C:\Users\Intel\dev\services\kacha'
-$data = "$dir\data"
-$bin  = "`"$dir\kacha-server.exe`" service --listen 0.0.0.0:3004 --data-root `"$data`" --gateway-url http://lzxsvn:3001 --static-dir `"$dir\static`" --result-hosts .aliyuncs.com --min-free-gb 20"
-sc.exe create kacha binPath= $bin start= auto depend= new-api obj= "NT AUTHORITY\NetworkService"
-sc.exe failure kacha reset= 86400 actions= restart/5000/restart/5000/restart/5000
-sc.exe failureflag kacha 1
-# NetworkService 需要数据根的修改权限（程序目录只需读取与执行）：
-icacls $data /grant "NT AUTHORITY\NetworkService:(OI)(CI)M"
-sc.exe start kacha
-sc.exe query kacha
-```
-
-- `sc.exe` 的 `参数= 值` 等号后必须有空格。`obj= "NT AUTHORITY\NetworkService"` 内置账户无需密码；不写 `obj=` 则以 LocalSystem 运行。
-- `depend= new-api` 让服务在网关服务之后启动。
-- `start= auto` 配置开机自启。`failure` 配置三次失败均在 5 秒后重启。`failureflag 1` 让服务以非零退出码报告停止时也触发恢复，例如数据根不可写、端口被占用。
-- `$bin` 示例按 PowerShell 7 编写。Windows PowerShell 5.1 传给外部程序时会剥掉内嵌的双引号，路径含空格就会出错；这种情况请改用 PowerShell 7，或改用不含空格的路径。
-- 开放防火墙 3004 端口时只限可信内网。
-- 升级前执行 `sc.exe stop kacha`，等 `sc.exe query kacha` 显示 `STOPPED`；最长约 60 秒排空。替换程序和 `static/` 后再启动。
-
-**日志**：服务模式没有控制台。启动（版本、监听地址、数据根、运行模式）、启动失败原因、收到关停信号、排空结果和退出都写入 `<数据根>\server-log\server.log`；超过 1 MiB 时轮转为 `server.1.log`，总量不超过 2 MiB。前台运行也写这份日志，同时保留控制台输出。同目录下的 `diagnostics.log` 是另一份日志（每日用量等事件），不记进程生命周期。启动时会先写一行日志，探测数据根是否可写；写不进去就直接启动失败。服务起不来时，先看 `server.log` 和 `sc.exe query kacha` 的 `SERVICE_EXIT_CODE`：1 表示数据根不可用（不能创建或不可写）、监听失败或异常退出，2 表示监听地址无效。数据根不可写时 `server.log` 也写不进去，只能看退出码；先检查服务账户的权限。
-
-### 从 NSSM 服务迁移
-
-lzxsvn 目前由 NSSM 服务 `kacha` 托管控制台程序，停服时硬终止进程。迁移到原生服务模式的步骤如下，需要维护窗口：
-
-1. 记下现有参数：`nssm get kacha AppParameters`，同时核对账户（`NetworkService`）、依赖（`new-api`）与自启设置。
-2. 通知用户暂停上传、保存与导入，然后执行 `nssm stop kacha`。
-3. 执行 `nssm remove kacha confirm` 删除 NSSM 服务，再用 `sc.exe query kacha` 确认服务已不存在。
-4. 用上面的 `sc.exe create` 以原生方式重建服务，参数保持不变（`--listen`、`--data-root`、`--gateway-url`、`--static-dir`、`--result-hosts`、`--min-free-gb`），只在程序路径后加 `service`。
-5. 核对数据目录权限：NetworkService 对 `data\` 有修改权限。
-6. 执行 `sc.exe start kacha`，确认 `GET /api/config` 版本正确，`data\server-log\server.log` 有本次启动记录。
-7. 之后看 `data\server-log\server.log`；NSSM 的 `C:\Users\Intel\dev\logs\kacha\out.log` / `err.log` 不再更新，可归档。
-
-### 待人工实测（lzxsvn）
-
-以下各项**尚未实测**，需管理员在 lzxsvn 上逐项验证并回写结果：
-
-- [ ] `sc.exe create`（带 `service`、`depend= new-api`、`obj= "NT AUTHORITY\NetworkService"`）成功。
-- [ ] `sc.exe start kacha` 在数秒内进入 `RUNNING`，没有报错 1053；`server.log` 记录启动与「服务模式」。
-- [ ] `sc.exe query kacha` 显示 `RUNNING`，`STOPPABLE` 与 `ACCEPTS_SHUTDOWN`。
-- [ ] `sc.exe stop kacha` 进入 `STOP_PENDING` 后变成 `STOPPED`，退出码为 0；`server.log` 记录关停信号、排空完成与退出。
-- [ ] 停服时有进行中的上传或画板包导入：请求能完成，或在 60 秒上限后被放弃；目标文件没有损坏，`server.log` 记录排空结果。
-- [ ] 崩溃后自动重启：用 `taskkill /F /PID <pid>` 结束进程，5 秒后服务恢复为 `RUNNING`。
-- [ ] 启动失败触发恢复：例如端口被占用时，`server.log` 记录失败原因，SCM 按失败策略重试。
-- [ ] 开机自启：重启 lzxsvn 后服务在 `new-api` 之后自动进入 `RUNNING`。
-
-实际上线、qwen 结果域名实测和 Gitea Release 页更新不属于本节。
-
-## 清理与恢复
-
-先预览，再执行；不要在服务端处理同一用户写入时并发运行清理：
-
-```powershell
-C:\kacha\kacha-server.exe cleanup --data-root D:\kacha-data --dry-run
-C:\kacha\kacha-server.exe cleanup --data-root D:\kacha-data
-# 磁盘紧急时跳过回收区，直接删除：
-C:\kacha\kacha-server.exe cleanup --data-root D:\kacha-data --purge
-```
-
-候选只有连续 60 天无访问的闲置用户，以及所有画板均不引用且建立超过 30 天的任务目录。默认移入 `<数据根>\recycle\<批次>`，后续清理会彻底删除超过 14 天的批次。
-
-列出回收区并恢复误删条目：
-
-```powershell
-C:\kacha\kacha-server.exe cleanup restore --data-root D:\kacha-data
-C:\kacha\kacha-server.exe cleanup restore --data-root D:\kacha-data "<批次>/users/<指纹>/<原相对路径>"
-```
-
-恢复整个闲置用户时条目到 `users/<指纹>`；恢复任务目录时还包括日期与任务 id。命令搬回原位置，原位置已存在会拒绝覆盖。没有恢复界面。
-
-### 画板包上传临时文件
-
-导入画板包有两种上传暂存，导入结束（成功、失败或取消）即删除：
-
-- 整包上传（浏览器读不了包时的回退）：`<数据根>\users\<指纹>\.kacha\packs\*.ugcpack.tmp`，每个可达几百 MB。
-- 按内容去重上传：`<数据根>\users\<指纹>\.kacha\pack-content\*.staging.tmp\`，每次导入一个目录，里面每份内容一个文件（以 sha256 命名，写了一半的是 `*.part`）。
-
-关掉标签页、放弃请求没发出去等情况会留下暂存。服务端在该用户每次开始上传（整包上传或开一份去重暂存）时，自动删除他修改时间超过 1 小时的两种暂存；`cleanup` 命令不处理它们。
-
-升级前已存在的残留，会在对应用户下次上传时被清理；不想等的话，由管理员在服务停止时（或确认没有导入在进行时）手动删除 `<数据根>/users/*/.kacha/packs/*.ugcpack.tmp` 文件与 `<数据根>/users/*/.kacha/pack-content/*.staging.tmp` 目录（整个目录删除）。
-
-用量与清理显示的字节数按文件长度累加：导入画板包时同次导入里内容相同的文件以硬链接落盘，会被重复计入，删除一个任务目录也不一定释放它显示的全部字节。
-
-## 换密钥后的管理员迁移
-
-换密钥即新用户。若只需迁移部分画板，优先让旧用户导出画板包，再用新密钥导入。必须搬整份数据时：
-
-1. 通知用户暂停操作并停止 Kacha 服务。
-2. 用新密钥登录一次以建立新用户数据根，再停止服务。
-3. 把 `users/<旧指纹>/` 下的 `画板/`、日期任务目录和 `导入参考图/` 移到 `users/<新指纹>/`。不要覆盖新目录的 `.kacha/user.json` 等会话元数据。
-4. 确认目标路径仍在配置的数据根内，重新启动服务并让用户核对画板、结果和图层。
-
-服务端没有备份，搬移失败时只能靠用户导出的画板包与已下载结果恢复。
-
-## 设计规模内存实测
-
-设计规模是 12 人（见 `GLOSSARY.md`）：它是容量与内存预算依据的规模假设，不是强制上限。压测脚本用真实 release 服务端和本地网关桩，按 `--users` 开同样多的线程，分别执行写结果、读图、上传并导入 v0.3.2 画板包、导出画板包；结束后、服务端退出前读一次操作系统记录的进程峰值内存（Windows：峰值工作集 `PeakWorkingSetSize`；Linux：`/proc/<pid>/status` 的 `VmHWM`），不受采样间隔影响。读不到峰值或超过预算（`--budget-mib`，默认 512）时以非 0 退出。
-
-```powershell
-python packaging\load_users.py --users 12 --output release\memory-12-users.json
-```
-
-2026-11-07 Windows 开发机实测（release 构建）：12 人全部操作成功，0.67 秒完成，**服务端峰值工作集 13.95 MiB**，低于 **512 MiB** 预算。该结果使用仓库的小型画板包夹具，未计入 lzxsvn 上 Gitea、new-api、学习站等进程的内存。
+脱敏诊断包导出经本机 Go 服务完成：允许清单限定采集项（版本、平台、运行状态、脱敏日志），凭据只报存在与否，API 密钥、鉴权头与凭据文件不进入日志、诊断包或包内文件名，画板内容与任务目录不打包。取消、目标不可写与采集失败都有各自明确的结局，不留半成品，也不改动本机创作数据。
 
 ## 验证
 
-需要本地检查时，在仓库根目录手动执行：
+先安装锁定的前端依赖，然后运行：
 
-```powershell
+~~~powershell
+npm --prefix client ci
+python packaging\verify.py --preflight
 python packaging\verify.py
-```
+# 合入集成分支前加前端变异测试：
+python packaging\verify.py --quality
+# 显式指定质量比较基线：
+python packaging\verify.py --base origin/main
+~~~
 
-脚本先预检构建输出目录的完整性标签（见下文），再依次跑打包脚本单测、前端单测、类型检查、e2e（4 个 worker）、服务端测试（`--no-fail-fast`）与质量门禁（见下文「质量门禁」）。每一项都会跑完，最后汇总；任一失败即以非 0 退出。只需重跑其中一项时，命令见 [verify.py](verify.py) 的 `COMMANDS`。
+默认按顺序运行打包脚本单测、前端单测、类型检查、knip（普通与 production）、`go test ./...`、桌面 debug 构建和前端质量门禁。各项跑完再汇总，任一失败即返回非零。不会安装 Chromium，也不运行 e2e。旧的 --e2e 参数会被拒绝。
 
-非 Draft PR 会自动在 Windows CI 中运行常规 PR 验证，复用这里的默认验证入口，并把 PR 的实际目标分支显式传给质量门禁。目标分支引用缺失、历史不足或无法求 merge-base 都会使验证失败。目标为 `main` 或 `integration/*` 时，同一个 PR Verify check 会先用 lockfile 内的 Playwright CLI 安装 Chromium，再通过现有 `--e2e` 强制开关运行全套 e2e（4 个 worker、真实服务端）；其他目标分支不安装 Chromium，也不运行 e2e。修改 PR 目标分支会重新触发验证并按新目标调整范围。PR 更新会取消同一 PR 的过期运行；直接 push 不触发 CI。CI 不运行 mutator，合入集成分支前仍须按下文手动运行增强质量验证。
+Go 单测覆盖本地存储、路径边界、导入、剪贴板契约与服务绑定；前端单测使用壳端口替身。它们不能替代 Windows 已解锁交互会话里的真实剪贴板、外部软件粘贴、窗口激活与打包产物检查。debug 构建只证明程序可构建，不宣称这些交互验收通过。
 
-e2e 很慢，本地默认只在集成分支（`main`、`integration/*`）上跑：各票合完后手动跑一次全套。其他分支（`impl/*`、`spec/*` 等）和分离 HEAD 跳过 e2e，汇总里记为「跳过」；需要时加 `--e2e` 强制跑，并遵守仓库的授权规则。
+非 Draft PR 的 Windows CI 使用同一 `verify.py` 入口，质量基线为 PR 的实际目标分支；目标引用缺失、历史不足或没有共同祖先会失败。PR 更新取消过期运行，直接 push 不触发该 workflow。CI 不运行 mutator，合入前仍需手动 `--quality`。
 
-符号链接逃逸测试在无权创建符号链接时打印原因并跳过，其余断言照常运行。无权的原因可能有两种：当前账户既没开开发者模式，也不是管理员；或者测试程序以 Low 完整性级别运行。
+### Windows 完整性标签
 
-Windows 启动程序时，进程的完整性级别不会高于 exe 文件自身的标签；文件的标签从所在目录继承。仓库若放在带 Low 完整性标签的目录下（例如某些沙箱工具会这样标记 Desktop），编译出的测试程序和服务端都会以 Low 运行。这时它们不能写 `%TEMP%`（报错误 5，测试建临时目录失败、压测启动时报「数据根不可写」），也不能创建符号链接；`cargo build` 编译 ring 时 cl.exe 报 `D8050: 无法执行 c1.dll` 也是这个原因。新 clone 或新建 worktree 的目录同样继承标签，先跑 `python packaging\verify.py --preflight`，它只做这项预检。可以用 `icacls <目录>` 查看目录的标签。处理方法是把构建输出目录设为 Medium，其中已有的文件会随之继承（`client\target` 是质量门禁在前端包里的覆盖率与变异 worker 目录）：
+输出目录若继承 Low 完整性标签，程序可能无法写临时文件或创建符号链接。`--preflight` 只检查 build 与 `client/target`，发现问题只报告命令，不修改目录。在确认目标目录后用 PowerShell 修复：
 
-```powershell
-icacls server\target /setintegritylevel '(OI)(CI)M'
-icacls release /setintegritylevel '(OI)(CI)M'
+~~~powershell
+icacls build /setintegritylevel '(OI)(CI)M'
 icacls client\target /setintegritylevel '(OI)(CI)M'
-```
+~~~
 
-`cargo clean` 会删掉整个 `target` 目录，标签也随之消失，之后需要重新设置；`verify.py` 的预检会在跑测试前发现这种情况，并打印上面的命令。部署时复制到 lzxsvn 的程序按目标目录的标签运行，不受影响。
+输出目录尚不存在时，先创建目录再设置标签。Go 测试还使用系统临时目录与 Go 缓存；这些位置的权限问题不在仓库预检范围内。
 
+## 前端质量门禁
 
-## 质量门禁
+`packaging/quality.py` 只测 `uml-quality.json` 中声明的 `client/src` TypeScript / TSX。默认比较 `origin/main` 的 merge-base 以来的改动（含未提交与未跟踪源码），`--base` 可换基线。CRAP 超过 10、CRAP 覆盖率缺失、改动文件涉及相似度至少 0.8 的重复配对都会失败；`--mutate` 额外拒绝存活与未覆盖变异点。
 
-决定与理由见 [ADR 0020](../docs/adr/0020-quality-gate-with-crapper-dryer-and-mutator.md)。门禁默认只查自 `origin/main` 分叉以来改动过的 `client/src`、`server/src` 源码（含未提交与未跟踪文件），范围与排除只在 [uml-quality.json](../uml-quality.json) 声明。需要按其他目标分支比较时，给 `quality.py` 或 `verify.py` 传 `--base <Git 引用>`；同一个引用同时用于求 merge-base 与 changed-files。引用缺失、历史不足或没有共同祖先会明确失败，不会跳过门禁。质量判定保持：
+**Go 的 CRAP、DRY 与 mutation 尚未接入。** 当前 Go 验证为 `go test ./...`，不能声称整个桌面客户端通过这三项质量指标。架构图示例也只声明前端 TypeScript，不伪造 Go 图或覆盖率。
 
-- CRAP 超过 10，或没有 CRAP 分（覆盖率缺失）失败（crapper）；
-- 至少一边在改动文件里的重复配对，相似度不低于 0.8 即失败（dryer）；
-- 有存活变异体或未覆盖变异点失败（mutator，只在 `--quality` 时跑）。
+工具是单一 uml-viewer 二进制的 crap / dry / mutate 子命令。先查 `UML_VIEWER_BIN` 指向的文件，再查 DSH 插件 `%USERPROFILE%\.dsh\dsh-uml-viewer\current.json` 记录的版本目录；找不到即失败。前端覆盖率、变异副本与指标落在 `client/target`、`client/.metrics`。变异副本补复制 `../contracts`、`../docs/release` 与 `../mygo.config.ts`；工具必须支持 `--copy`。
 
-```powershell
-python packaging\quality.py                       # 只跑 CRAP 与重复，verify.py 默认流程里就有
-python packaging\quality.py --base origin/target  # 显式选择比较基线
-python packaging\quality.py --mutate              # 连变异测试一起跑
-python packaging\verify.py --quality              # 全套验证加变异测试，合入集成分支前必须跑
-```
+PR CI 从 npm 官方 registry 取得固定 `@dsh-uml-viewer/win32-x64@1.0.0`，核对 SHA-512 后只解出可执行文件，通过 `UML_VIEWER_BIN` 传入。该固定版本不支持 mutator 的 `--copy`，仅用于默认 CRAP 与 DRY。
 
-工具按包运行（`--root client`、`--root server`），覆盖率与指标快照落在包内的 `target/`、`.metrics/`，都不提交。
+## 首日验收记录
 
-三个工具都是 dsh-uml-viewer 那个单一 `uml-viewer` 二进制的子命令（`uml-viewer crap`、`dry`、`mutate`，见 [ADR 0022](../docs/adr/0022-quality-tools-from-dsh-uml-viewer-binary.md)）。二进制按顺序找两处，两处都没有时门禁直接报错，说明怎么装或怎么指，不猜路径：
-
-- `UML_VIEWER_BIN`：二进制的绝对路径，优先；
-- 否则用 DSH 插件：`%USERPROFILE%\.dsh\dsh-uml-viewer\current.json` 记下的版本目录里的 `uml-viewer.exe`（`dsh plugin add dsh-uml-viewer` 装）。
-
-PR CI 是本地工具发现规则的固定来源例外：从 npm 官方 registry 获取 `@dsh-uml-viewer/win32-x64@1.0.0`，核对 registry 的 SHA-512 完整性与仓库内固定值后，只解出 `uml-viewer.exe`，再通过 `UML_VIEWER_BIN` 的绝对路径交给默认 CRAP 与 dryer。完整性校验失败即失败，不安装完整 DSH；这个固定版本不支持 mutator 所需的 `--copy`，不得用于 `--quality`。本地工具发现与手动 mutator 约定不变（见 [ADR 0022](../docs/adr/0022-quality-tools-from-dsh-uml-viewer-binary.md)）。
-
-门禁其余前置：Rust 1.99.1 MSVC 工具链、git。crapper 缺 `cargo-llvm-cov` 时会自动装；如果 `%USERPROFILE%\.cargo\bin\cargo-llvm-cov.exe` 带 Low 完整性标签（被 Low 进程装上时会这样），它在 `server\target` 下建不了目录，Rust 覆盖率失败，门禁报「没有 CRAP 分」；用 `icacls <该 exe> /setintegritylevel M` 改回 Medium。
-
-变异测试要求二进制认 `--copy`：在 Windows 上 mutator 只为每个变异体复制被运行的那个包，包外依赖要靠 `--copy` 补进副本（[#102](https://github.com/qinyuanj/kacha/issues/102)）——现在是 `../contracts`、`../docs/release`、`../server/Cargo.toml`、`../mygo.config.ts` 四条（见 `packaging/quality.py` 的 `MUTATION_COPIES`）。带 `--mutate` 时门禁先读 `uml-viewer mutate --help`，没有这个开关就明确失败并说明需要带它的构建。
-
-看架构图用 `uml-viewer ir examples/kacha.policy.edn` 生成 `examples/kacha.edn`；在 DSH 里也可以用 `uml_ir` 生成、`uml_display` 打开。policy 在 [examples/kacha.policy.edn](../examples/kacha.policy.edn)。
+首日整体验收（#165）的通过项、隔离测试发行证据与仍然阻塞的外部条件见 [ACCEPTANCE-165.md](../docs/release/ACCEPTANCE-165.md)。那里分别记录自动测试、构建产物、隔离测试发行、受控网关替身与人工交互证据，不用构建成功或回放替代真实网关与真机安装。

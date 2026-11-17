@@ -1,4 +1,4 @@
-// 更新说明：把 docs/release/web-changelog.md 解析为按版本倒序的结构。
+// 更新说明：把 docs/release/changelog.md 解析为按版本倒序的结构。
 // 格式从严：一级标题只能是版本号（新在前、不重复），二级标题只能是 新增 / 改进 / 修复（同版本内不重复），
 // 其余只允许「- 」列表与 HTML 注释；任何不符都抛错并指出行号，由守护测试在日常验证时发现，页面上只降级为提示、不显示乱码。
 
@@ -30,11 +30,30 @@ export function shouldShowUpdateNotice(currentVersion: string, lastSeenVersion?:
   return lastSeenVersion !== undefined && lastSeenVersion !== currentVersion;
 }
 
-function compareVersions(a: string, b: string): number {
-  const pa = VERSION.exec(a)!.slice(1).map(Number);
-  const pb = VERSION.exec(b)!.slice(1).map(Number);
-  for (let k = 0; k < 3; k++) if (pa[k] !== pb[k]) return pa[k] - pb[k];
+type VersionParts = [number, number, number];
+
+function versionParts(value: string): VersionParts | null {
+  const match = VERSION.exec(value);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+function compareParts(a: VersionParts, b: VersionParts): number {
+  for (let k = 0; k < 3; k++) if (a[k] !== b[k]) return a[k] - b[k];
   return 0;
+}
+
+function compareVersions(a: string, b: string): number {
+  return compareParts(versionParts(a)!, versionParts(b)!);
+}
+
+/** 弹窗只看当前及更早版本；dev 等不可比较的产品版本显示已收录说明，不标当前版本。 */
+export function visibleReleases(releases: ChangelogVersion[], currentVersion: string): ChangelogVersion[] {
+  const current = versionParts(currentVersion);
+  if (!current) return releases;
+  return releases.filter((release) => {
+    const parts = versionParts(release.version);
+    return parts !== null && compareParts(parts, current) <= 0;
+  });
 }
 
 /** 解析到一半的进展：原文行、已认下的版本、当前版本与当前组（都带行号，留给收尾时报错），以及未闭合注释的起始行。 */

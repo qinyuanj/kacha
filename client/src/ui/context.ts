@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useEffect, useState } from "react";
 import type { Board, PortRef } from "../core/board";
 import type { CapabilityTable, ModelCapability } from "../core/capabilities";
 import type { BoardAction, MenuTarget } from "../core/contextMenu";
@@ -9,6 +9,7 @@ import { createInterruptedLog, interruptedCandidates, storedStatuses } from "../
 import type { TaskFs } from "../core/taskDir";
 import type { ImageInfo } from "../shell/port";
 import { useShell } from "./shell";
+import { useRequiredContext } from "./requiredContext";
 import { createImageInfoCache } from "./imageInfoCache";
 
 export interface BoardActions {
@@ -24,7 +25,7 @@ export interface BoardActions {
   continueEditing: (nodeId: string, sourceLayer?: number | null, at?: { x: number; y: number }) => void;
   addAsReference: (resultId: string, sourceLayer?: number | null) => void;
   generateVariant: (resultId: string) => void;
-  /** 缺图节点：pick = 选文件，search = 在用户数据根内按身份找。 */
+  /** 缺图节点：pick = 选文件，search = 在数据根内按身份找。 */
   relocate: (nodeId: string, mode: "pick" | "search") => void;
   /** 参考图 / 结果节点的「放大预览」：弹窗里可再选扇出任务编辑区域。 */
   previewNode: (nodeId: string) => void;
@@ -52,9 +53,7 @@ export interface BoardActions {
 export const BoardContext = createContext<BoardActions | null>(null);
 
 export function useBoardActions(): BoardActions {
-  const ctx = useContext(BoardContext);
-  if (!ctx) throw new Error("BoardContext 未提供");
-  return ctx;
+  return useRequiredContext(BoardContext, "BoardContext 未提供");
 }
 
 // 图片信息的缓存与同步视图（见 ui/imageInfoCache.ts）。

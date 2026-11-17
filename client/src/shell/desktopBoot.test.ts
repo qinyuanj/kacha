@@ -24,10 +24,10 @@ afterEach(() => {
 });
 
 describe("桌面壳启动", () => {
-  it("普通浏览器里不解析壳，返回 null", async () => {
+  it("缺少 MyGo runtime 时明确拒绝启动", async () => {
     isMyGo.mockReturnValue(false);
     const boot = await freshBoot();
-    await expect(boot()).resolves.toBeNull();
+    await expect(boot()).rejects.toThrow("MyGo 桌面客户端");
     expect(call).not.toHaveBeenCalled();
   });
 

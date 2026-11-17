@@ -4,12 +4,14 @@ import { BoardPackDialog, type BoardPackDialogProps } from "./BoardPackDialog";
 import { ChangelogDialog } from "./ChangelogDialog";
 import { RunConfirmDialog } from "./RunConfirmDialog";
 import { SendTextDialog } from "./SendTextDialog";
+import type { DataRootActions } from "./dataRootMove";
 import { SettingsPanel } from "./SettingsPanel";
 import type { useSettings } from "./useSettings";
+import type { UpdatePreparationPorts } from "../core/updatePreparation";
 
 /** 设置面板。 */
-export function AppSettingsPanel({ settings, onClose }: { settings: ReturnType<typeof useSettings>; onClose(): void }) {
-  return <SettingsPanel settings={settings} onClose={onClose} />;
+export function AppSettingsPanel({ settings, onClose, update, dataRoot }: { settings: ReturnType<typeof useSettings>; onClose(): void; update: UpdatePreparationPorts; dataRoot?: DataRootActions }) {
+  return <SettingsPanel settings={settings} onClose={onClose} update={update} dataRoot={dataRoot} />;
 }
 
 /** 更新说明。 */
@@ -63,6 +65,8 @@ export function AppOverlays({
   onSendTextClose,
   packDialog,
   toastText,
+  update,
+  dataRoot,
 }: {
   settings: ReturnType<typeof useSettings>;
   settingsOpen: boolean;
@@ -78,10 +82,14 @@ export function AppOverlays({
   onSendTextClose(): void;
   packDialog: BoardPackDialogProps | null;
   toastText: string | null;
+  /** 更新安装前的准备依赖（#164）：任务队列与严格落盘。 */
+  update: UpdatePreparationPorts;
+  /** 数据位置迁移的接线（#161）。 */
+  dataRoot?: DataRootActions;
 }) {
   return (
     <>
-      {settingsOpen && <AppSettingsPanel settings={settings} onClose={onSettingsClose} />}
+      {settingsOpen && <AppSettingsPanel settings={settings} onClose={onSettingsClose} update={update} dataRoot={dataRoot} />}
       {changelogOpen && <AppChangelogDialog version={version} onClose={onChangelogClose} />}
       {confirm && (
         <AppRunConfirm

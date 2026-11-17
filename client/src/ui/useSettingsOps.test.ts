@@ -72,7 +72,7 @@ describe("结果", () => {
     expect(connectionResultOf({ ok: true, cache: { base_url: "http://a", fetched_at: "", model_ids: ["a", "b"] } })).toEqual({ ok: true, count: 2 });
   });
 
-  it("连接失败：给服务端的话", () => {
+  it("连接失败：给存储端口的话", () => {
     expect(connectionResultOf({ ok: false, message: "网关不可达" })).toEqual({ ok: false, message: "网关不可达" });
   });
 
@@ -111,6 +111,32 @@ describe("保存设置", () => {
     }
   });
 
+
+  it("换密钥或清密钥：旧网关缓存作废，不拿旧凭据的发现继续显示", async () => {
+    const writes: string[] = [];
+    const ports = {
+      writeSettings: async () => undefined,
+      readApiKey: async () => null,
+      writeApiKey: async () => undefined,
+      deleteApiKey: async () => undefined,
+      readSettings: async () => null,
+      readModelsCache: async () => null,
+      writeModelsCache: async (text: string) => void writes.push(text),
+      defaultBaseUrl: async () => "http://gw",
+      fetch: async () => new Response(null, { status: 500 }),
+      now: () => new Date(0),
+      log: () => undefined,
+    } as unknown as SettingsPorts;
+    const current = {
+      ...initialSettingsState(),
+      loaded: true,
+      apiKey: "sk-old",
+      discovery: { source: "live" as const, ids: ["m1"], fetchedAt: "t" },
+    };
+    const result = await saveSettingsState(ports, current, DEFAULT_SETTINGS, "sk-new");
+    expect(writes).toEqual([""]);
+    expect(result.ok && result.state.discovery).toEqual({ source: "none" });
+  });
   it("写失败：给一句说明", async () => {
     const ports = {
       writeSettings: async () => {

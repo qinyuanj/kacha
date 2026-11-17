@@ -51,7 +51,7 @@ describe("当前画板", () => {
     expect(activeSession(sessions, "k9")).toBeUndefined();
   });
 
-  it("能打开：ok 状态且有用户数据根", () => {
+  it("能打开：ok 状态且有数据根", () => {
     expect(boardOpenState(okSession(), "/~")).toBe("ok");
     expect(boardOpenState(okSession(), null)).toBe("none");
   });

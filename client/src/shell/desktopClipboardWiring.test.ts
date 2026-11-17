@@ -34,12 +34,6 @@ describe("原生剪贴板端到端（#129）", () => {
     expect(calls).toContain("Clipboard.Read");
   });
 
-  it("端口声明了能直接读系统剪贴板：界面据此走原生那条路", async () => {
-    const { bridge } = bridgeWithClipboard({ kind: "empty", text: "", images: [], reason: "" });
-    const { port } = await createDesktopPort(bridge);
-    expect(port.features.nativeClipboard).toBe(true);
-  });
-
   it("图片经端口还原成 image/png 的 File：既有导入链路认得它", async () => {
     const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString("base64");
     const { bridge } = bridgeWithClipboard({ kind: "images", text: "", images: [png], reason: "" });
@@ -48,7 +42,7 @@ describe("原生剪贴板端到端（#129）", () => {
     expect(content?.images[0].type).toBe("image/png");
   });
 
-  it("桥读剪贴板失败：抛 PortError，界面按读不到处理（退回 paste 事件），不崩", async () => {
+  it("桥读剪贴板失败：抛 PortError，界面明确提示读取失败，不崩", async () => {
     const callFn = (method: string): Promise<unknown> => {
       if (method === "Shell.Info") return Promise.resolve(INFO);
       if (method === "Clipboard.Read") return Promise.reject(new Error("剪贴板被占用"));

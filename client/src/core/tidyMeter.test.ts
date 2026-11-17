@@ -27,3 +27,56 @@ it("退出整理后旧响应不会覆盖新一轮状态", async () => {
   await Promise.resolve();
   expect(changed).toBe(false);
 });
+
+it("量失败：明说量不出来，不沿用上一份数当 0", async () => {
+  const measures = new Map<string, { resolve: (m: BoardMeasure) => void; reject: (e: unknown) => void }>();
+  let state: TidyMeasurement = { measure: null, before: null };
+  const meter = new TidyMeter("first", (text) => {
+    const pending = {} as { resolve: (m: BoardMeasure) => void; reject: (e: unknown) => void };
+    const promise = new Promise<BoardMeasure>((resolve, reject) => {
+      pending.resolve = resolve;
+      pending.reject = reject;
+    });
+    measures.set(text, pending);
+    return promise;
+  }, (value) => { state = value; });
+
+  meter.update("first");
+  measures.get("first")!.resolve({ nodes: {}, dirs: { kept: 100 } });
+  await Promise.resolve();
+  expect(state.measure).toEqual({ nodes: {}, dirs: { kept: 100 } });
+
+  meter.update("broken");
+  measures.get("broken")!.reject(new Error("读不懂这块画板"));
+  await Promise.resolve();
+  expect(state.measure).toBeNull();
+  expect(state.failed).toBe(true);
+  meter.dispose();
+});
+
+it("量成功之后 cleared failed：恢复后不再显示未知", async () => {
+  let fail!: (e: unknown) => void;
+  let state: TidyMeasurement = { measure: null, before: null };
+  let call = 0;
+  const meter = new TidyMeter("text", () => {
+    call += 1;
+    return call === 1
+      ? Promise.resolve({ nodes: {}, dirs: { kept: 10 } })
+      : new Promise<BoardMeasure>((_resolve, reject) => { fail = reject; });
+  }, (value) => { state = value; });
+
+  meter.update("text");
+  await Promise.resolve();
+  meter.update("next");
+  fail(new Error("读盘失败"));
+  await Promise.resolve();
+  expect(state.failed).toBe(true);
+
+  const ok = new TidyMeter("text", () => Promise.resolve({ nodes: {}, dirs: { kept: 20 } }), (value) => { state = value; });
+  ok.update("text");
+  await Promise.resolve();
+  expect(state.failed).toBe(false);
+  expect(state.measure).toEqual({ nodes: {}, dirs: { kept: 20 } });
+  meter.dispose();
+  ok.dispose();
+});

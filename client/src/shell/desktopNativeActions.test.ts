@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
-// 桌面壳的原生剪贴板与另存为（#124 A1 / A2）：桌面适配器走 Go 绑定，Web 路线保持不变。
+// 桌面壳的原生剪贴板与另存为（#124 A1 / A2）：桌面适配器走 Go 绑定。
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDesktopPort, type DesktopBridge, type DesktopInfo, type DesktopLocalBridge } from "./desktop";
 import { mygoBridge } from "./desktopBridge";
-import { webPort } from "./webPort";
 
 const INFO: DesktopInfo = {
   version: "0.1.0",
@@ -68,15 +67,6 @@ describe("桌面复制文本走 Go 原生剪贴板（#124 A1）", () => {
     const { port } = await createDesktopPort({ info: () => Promise.resolve(INFO), local });
     await expect(port.media.copyText("kacha:clip:v1:1")).rejects.toMatchObject({ kind: "unavailable", feature: "copyText" });
     expect(writeText).not.toHaveBeenCalled();
-  });
-});
-
-describe("Web 复制文本仍走浏览器路径（Web 行为不变）", () => {
-  it("webPort.media.copyText 写 navigator.clipboard", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    await webPort.media.copyText("一段文本");
-    expect(writeText).toHaveBeenCalledWith("一段文本");
   });
 });
 

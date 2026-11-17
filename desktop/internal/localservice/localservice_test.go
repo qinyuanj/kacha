@@ -85,7 +85,7 @@ func TestWriteBoardOutcomeKind(t *testing.T) {
 	}
 }
 
-// 越出用户数据根的路径被拒绝，不会读到别的文件。
+// 越出数据根的路径被拒绝，不会读到别的文件。
 func TestReadFileRejectsOutsideRoot(t *testing.T) {
 	base := t.TempDir()
 	outside := filepath.Join(base, "outside.txt")

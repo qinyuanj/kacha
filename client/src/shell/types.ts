@@ -1,8 +1,5 @@
-// Web 壳层端口：UI 只认这些接口，同源 HTTP 与浏览器能力都在 ipc.ts 中实现。
-import type { MergeReport, MergeUnit, PackDuplicates, PackEntryFact, PackExportSpec, PackIo } from "../core/boardPack";
+// 桌面壳与界面共用的数据类型。
 import type { SizeLines, SizeTier } from "../core/boardSize";
-import type { BoardMeasure } from "../core/tidy";
-import type { DirEntry } from "../core/relocate";
 
 export interface BoardTexts {
   main: string | null;
@@ -25,7 +22,7 @@ export interface ImageInfo {
   has_alpha: boolean;
 }
 
-/** 画板列表的一行（#87）：path 含用户数据根；bytes 为画板体量，画板读不懂时为 null。 */
+/** 画板列表的一行（#87）：path 含数据根；bytes 为画板体量，画板读不懂时为 null。 */
 export interface BoardListEntry {
   name: string;
   path: string;
@@ -33,50 +30,11 @@ export interface BoardListEntry {
   bytes: number | null;
 }
 
-/** 服务端画板列表：画板、画板位已用 / 总数与体量提醒线（都来自服务端配置）。 */
+/** 本机存储画板列表：画板、画板位已用 / 总数与体量提醒线（都来自本机存储配置）。 */
 export interface BoardListing {
   boards: BoardListEntry[];
   slots: { used: number; total: number };
   size_lines: SizeLines;
-}
-
-export interface Ipc {
-  readBoard(path: string): Promise<BoardTexts>;
-  writeBoard(path: string, text: string, options?: BoardWriteOptions): Promise<void>;
-  renameBoard(from: string, to: string, version?: string): Promise<void>;
-  /** 删除画板：主文件与 .bak 移入回收区（只有管理员能恢复）；带版本时内容已变 409。 */
-  deleteBoard(path: string, version?: string): Promise<void>;
-  listBoardNames(dir: string): Promise<string[]>;
-  /** 归档（#90）：画板连同 .bak 搬进归档子目录，to 由调用方按同名加 (2) 挑好；带版本时内容已变 409。 */
-  archiveBoard(from: string, to: string, version?: string): Promise<void>;
-  /** 取消归档：搬回画板目录；画板位满 409 board_slots_full。 */
-  unarchiveBoard(from: string, to: string): Promise<void>;
-  /** 画板列表（含体量与画板位），由服务端拼好。 */
-  listBoards(): Promise<BoardListing>;
-  /** 按任务目录量一块画板（画板原文，可未保存），口径与画板体量一致（#92）；读不懂 400。 */
-  measureBoard(text: string): Promise<BoardMeasure>;
-  readUiState(): Promise<string | null>;
-  writeUiState(text: string): Promise<void>;
-  readCapabilityOverride(): Promise<string | null>;
-  inspectImage(path: string): Promise<ImageInfo>;
-  readSettings(): Promise<string | null>;
-  writeSettings(text: string): Promise<void>;
-  readModelsCache(): Promise<string | null>;
-  writeModelsCache(text: string): Promise<void>;
-  logEvent(kind: string, fields: Record<string, unknown>): Promise<void>;
-  /** 导出前的 hash 阶段：每个要写的文件的长度与 sha256；取消时以 PACK_CANCELLED reject。 */
-  boardPackFacts(spec: Pick<PackExportSpec, "task_dirs" | "files">): Promise<PackEntryFact[]>;
-  boardPackExport(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number }>;
-  boardPackEntries(pack: string): Promise<string[]>;
-  boardPackReadTexts(pack: string, names: string[]): Promise<Record<string, string>>;
-  /** boards = 导入后将新增的画板数，服务端据此在写文件前检查画板位（#89，409 board_slots_full）。 */
-  boardPackImport(pack: string, units: MergeUnit[], duplicates: PackDuplicates, boards: { title: string; text: string }[]): Promise<MergeReport & { boards: string[] }>;
-  boardPackCancel(cancelled: boolean): Promise<void>;
-  listDir(path: string): Promise<DirEntry[]>;
-  fileSha256(path: string): Promise<string>;
-  isFile(path: string): Promise<boolean>;
-  readFileBytes(path: string): Promise<Uint8Array>;
-  writeNewFile(path: string, bytes: Uint8Array): Promise<void>;
 }
 
 export interface BrowserOptions {
@@ -84,14 +42,6 @@ export interface BrowserOptions {
   kind?: "error" | "info" | "warning";
   okLabel?: string;
   cancelLabel?: string;
-}
-
-export interface BrowserPort {
-  ask(message: string, options?: BrowserOptions): Promise<boolean>;
-  message(text: string, options?: BrowserOptions): Promise<void>;
-  onPackProgress(handler: (progress: { done: number; total: number }) => void): Promise<() => void>;
-  openExternal(url: string): void;
-  version(): Promise<string>;
 }
 
 export interface UsageCandidate {
@@ -108,51 +58,38 @@ export interface Usage {
   by_date: { date: string; bytes: number }[];
   unreferenced: UsageCandidate[] | null;
   unreadable_board: string | null;
-  /** 用量上限（服务端配置，#88）；留空为 null，此时不提醒。 */
+  /** 用量上限（本机存储配置，#88）；留空为 null，此时不提醒。 */
   limit_bytes: number | null;
   /** 提醒档位：达到提醒比例 warn（黄）、达到上限 alert（红）；只提醒、不阻止生成。 */
   limit_level: SizeTier | null;
 }
 
+export interface RecycleEntry {
+  id: string;
+  dir: string;
+  bytes: number;
+  cleaned_at: number;
+  location: string;
+  expired: boolean;
+}
+
+export interface CleanupResult {
+  ok: boolean;
+  kind: string;
+  message: string;
+  moved: UsageCandidate[];
+  skipped: string[];
+  failed: string[];
+}
+
+export type { UpdatePort } from "./port";
+
 export interface UsagePort {
   usage(): Promise<Usage>;
-  cleanupUnreferenced(dirs: string[]): Promise<{ moved: UsageCandidate[]; skipped: string[] }>;
-}
-
-/** 结果中转：相对路径都相对用户数据根（虚拟根由实现剥掉）。 */
-export interface RelayPort {
-  relayResult(args: { url: string; relDir: string; stem: string; signal?: AbortSignal }): Promise<{ file: string; path: string }>;
-  commitRelayed(relDir: string, from: string, stem: string): Promise<{ file: string; path: string }>;
-  discardRelayed(relDir: string): Promise<void>;
-}
-
-export interface TransferPort {
-  pickLocalImages(multiple: boolean): Promise<File[]>;
-  uploadReference(file: File): Promise<{ path: string; sha256: string }>;
-  downloadImage(path: string, name?: string): void;
-  downloadBoardResults(boardPath: string): void;
-}
-
-export interface PackUploadPort {
-  upload(file: File): Promise<string>;
-  discard(id: string): Promise<void>;
-}
-
-/** 去重上传（#62）：问已有、Worker 里 hash、开暂存、逐份上传、按落盘清单合并；语义见 core/boardPack 的 PackIo。 */
-export type PackContentPort = Required<Pick<PackIo, "existing" | "hash" | "stage" | "uploadContent" | "importContent" | "discardStaging">>;
-
-export interface SessionPort {
-  /**
-   * 是否需要登录界面：桌面壳没有服务端会话，恒为 false，界面直接进工作台（#127）。
-   * 缺省按需要登录处理（Web 版）。
-   */
-  readonly requiresLogin?: boolean;
-  login(key: string): Promise<{ fingerprint: string }>;
-  current(): Promise<{ fingerprint: string }>;
-  logout(): Promise<void>;
-  config(): Promise<{ version: string; gateway_url: string }>;
-  onExpired(listener: () => void): () => void;
-  readStoredKey(): string | null;
-  storeKey(key: string): void;
-  clearStoredKey(): void;
+  cleanupUnreferenced(dirs: string[]): Promise<CleanupResult>;
+  /** 保存容量提醒阈值（字节）；0 表示清除。只提醒，不阻止生成。 */
+  setLimit(bytes: number): Promise<void>;
+  recycle(): Promise<RecycleEntry[]>;
+  restore(id: string): Promise<void>;
+  purgeExpired(): Promise<void>;
 }
