@@ -50,14 +50,14 @@ describe("没有的能力", () => {
     const media = desktopMediaStore("C:/data");
     await expect(media.copyImage("C:/data/a.png")).rejects.toMatchObject({ kind: "unavailable", feature: "copyImage" });
     await expect(media.saveCopyAs("C:/data/a.png")).rejects.toMatchObject({ kind: "unavailable", feature: "saveImage" });
-    expect(() => media.downloadImage("C:/data/a.png")).toThrow(PortError);
+    await expect(media.downloadImage("C:/data/a.png")).rejects.toBeInstanceOf(PortError);
     try {
-      media.downloadImage("C:/data/a.png");
+      await media.downloadImage("C:/data/a.png");
     } catch (e) {
       expect(e).toMatchObject({ kind: "unavailable", feature: "downloadImage" });
     }
     try {
-      media.downloadBoardResults("C:/data/画板/a.ugcboard.json");
+      await media.downloadBoardResults("C:/data/画板/a.ugcboard.json");
     } catch (e) {
       expect(e).toMatchObject({ kind: "unavailable", feature: "downloadResults" });
     }

@@ -22,7 +22,7 @@ python packaging\build_desktop.py --debug --skip-install
 python packaging\build_desktop.py
 ~~~
 
-输出为 `build/windows-amd64/Kacha.exe` 与 `build-info.json`。构建只产出可执行文件，不生成安装器、不上传 Release、不配置自动更新。`build-info.json` 记录应用版本、profile、MyGo / Go / WebView2 版本与产物路径。WebView2 Runtime 版本读不到时记 null。
+输出为 `build/windows-amd64/Kacha.exe`、MyGo 当前用户 NSIS 安装器 `kacha-setup-<版本>-amd64.exe` 与 `build-info.json`。debug 仍用 `-skip-installer`，不生成安装器。发布构建不上传 Release；签名、Gitea 发布与更新描述门禁见 [安装器与发布链](RELEASE_163.md)。`build-info.json` 记录应用版本、profile、MyGo / Go / WebView2 版本、安装器与产物路径。WebView2 Runtime 版本读不到时记 null。
 
 两个 profile 都先检查版本与更新说明：`mygo.config.ts` 是唯一产品版本源；`docs/release/changelog.md` 必须包含与它同号的一级标题，且该节「新增 / 改进 / 修复」至少一组下有条目。当前版本在最前，历史版本可查并保留当时语境，历史恢复来源见 `docs/release/changelog-sources.md`；完整索引与弹窗可见范围由前端守护测试检查。检查失败即退出，不运行构建命令。MyGo CLI 随后执行配置中的前端 `buildCommand`，再将 `client/dist` 嵌入程序；Go 模块位于仓库根，源码入口为 `./desktop`。
 
@@ -32,7 +32,7 @@ python packaging\build_desktop.py
 
 数据迁入只通过用户手工选择的 `.ugcpack` 画板包，不扫描旧服务端、不迁移整用户、不对账。导入由本机 Go 服务检查、解压与合并，限制在数据根内。已有画板、任务记录、结果与图层兼容夹具用于验证文件交换；它们的格式号不随产品版本变化。
 
-当前桌面已接通单份文生图：经桌面端口与本机服务调用团队网关，结果和任务记录落在任务目录；用量统计、画板包导出、归档与整理等尚未实现的能力保持明确不可用，不能因共享前端已有领域逻辑就认为这些能力已交付。当前原生剪贴板、保存、导入与文件访问的边界应以桌面端口能力和测试为准。
+当前桌面已接通单份文生图：经桌面端口与本机服务调用团队网关，结果和任务记录落在任务目录；尚未实现的整理等能力保持明确不可用，不能因共享前端已有领域逻辑就认为这些能力已交付。归档与取消归档已由本机 Go 服务执行（20 个可编辑画板位、只读与版本冲突保护）。本机用量统计、未引用清理与回收恢复已通过桌面壳的 Usage 服务接通真实数据根；它按本机文件字节计量，不表示 token 或金额配额。画板包导出与完整结果保存已由本机 Pack 服务接通（#160）。其余原生剪贴板、保存、导入与文件访问的边界应以桌面端口能力和测试为准。
 
 ## 验证
 

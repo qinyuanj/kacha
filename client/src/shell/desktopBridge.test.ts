@@ -10,7 +10,7 @@ const INFO: DesktopInfo = {
   version: "0.1.0",
   user_data_root: "C:/data",
   board_root: "C:/data/画板",
-  features: { generation: false, usage: false, pack_export: false },
+  features: { generation: false, usage: false, pack_export: false, archive: true },
 };
 
 /** 记下每次调用的方法名，按名字回值；不起 MyGo runtime。 */
@@ -21,6 +21,7 @@ function recordingBridge() {
     if (method === "Shell.Info") return Promise.resolve(INFO);
     if (method === "Clipboard.Read") return Promise.resolve({ kind: "empty", text: "", images: [], reason: "", formats: [] });
     if (method === "Local.ReadBoard") return Promise.resolve({ main: null, bak: null, version: null });
+    if (method === "Local.ArchiveBoard" || method === "Local.UnarchiveBoard") return Promise.resolve({ ok: true, kind: "", message: "", version: "" });
     return Promise.reject(new Error("没实现：" + method));
   };
   return { bridge: mygoBridge(callFn), calls };
@@ -81,5 +82,31 @@ describe("剪贴板句柄（#129）", () => {
     await bridge.info();
     await bridge.local.readBoard("/x");
     expect(calls.map((c) => c.method)).toEqual(["Shell.Info", "Local.ReadBoard"]);
+  });
+
+  it("归档 / 取消归档的桥名与 Go 绑定一致（Local.ArchiveBoard / Local.UnarchiveBoard）", async () => {
+    const { bridge, calls } = recordingBridge();
+    await bridge.local.archiveBoard("/~/a", "/~/归档/a", "v1");
+    await bridge.local.unarchiveBoard("/~/归档/a", "/~/a");
+    expect(calls).toEqual([
+      { method: "Local.ArchiveBoard", args: ["/~/a", "/~/归档/a", "v1"] },
+      { method: "Local.UnarchiveBoard", args: ["/~/归档/a", "/~/a"] },
+    ]);
+  });
+});
+describe("本机用量句柄（#159）", () => {
+  it("usage 句柄按 Usage.* 调 Go 绑定，方法名错一个就 notBound", async () => {
+    const { bridge, calls } = recordingBridge();
+    await bridge.usage!.usage().catch(() => undefined);
+    await bridge.usage!.cleanup(["2026-11-01/x"]).catch(() => undefined);
+    await bridge.usage!.setLimit(1024).catch(() => undefined);
+    await bridge.usage!.recycle().catch(() => undefined);
+    await bridge.usage!.restore("r000001").catch(() => undefined);
+    await bridge.usage!.purgeExpired().catch(() => undefined);
+    expect(calls.map((c) => c.method)).toEqual([
+      "Usage.Usage", "Usage.Cleanup", "Usage.SetLimit", "Usage.Recycle", "Usage.Restore", "Usage.PurgeExpired",
+    ]);
+    expect(calls[1].args).toEqual([["2026-11-01/x"]]);
+    expect(calls[4].args).toEqual(["r000001"]);
   });
 });

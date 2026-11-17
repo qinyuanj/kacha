@@ -5,7 +5,7 @@ import type { SaveCopyOutcome } from "../shell/port";
 /** 导出用的端口。 */
 export interface PreviewExportPort {
   saveCopyAs(absPath: string): Promise<SaveCopyOutcome>;
-  downloadImage(path: string): void;
+  downloadImage(path: string): Promise<SaveCopyOutcome>;
 }
 
 /** 导出失败时的提示。 */
@@ -15,7 +15,7 @@ export const exportFailedText = (reason: string) => `导出失败：${reason}`;
 export const exportOneText = "已开始下载";
 
 /** 全部图层导出完成的提示。 */
-export const exportAllText = "已开始下载：底图、全部图层与 layers.json（zip）";
+export const exportAllText = "已保存：底图、全部图层与 layers.json（zip）";
 
 /** 跑一次导出：成功给提示，失败给失败提示。 */
 export async function runExport(
@@ -46,7 +46,8 @@ export async function exportOneImage(port: PreviewExportPort, toast: (message: s
 /** 导出底图 + 全部图层 + layers.json（zip）。 */
 export async function exportAllImages(port: PreviewExportPort, toast: (message: string) => void, setBusy: (busy: boolean) => void, absPath: string): Promise<void> {
   await runExport(toast, setBusy, async () => {
-    port.downloadImage(absPath);
-    return exportAllText;
+    const outcome = await port.downloadImage(absPath);
+    // 系统「另存为」被取消时没有产物，不报成功。
+    return outcome.kind === "cancelled" ? null : exportAllText;
   });
 }

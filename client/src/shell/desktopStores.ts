@@ -2,17 +2,19 @@
 // 拆开之后每个函数的复杂度单独看得到，门禁也按函数计。
 import { FEATURE_LABELS, PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore } from "./port";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
-import type { BoardListing, BoardTexts, BoardWriteOptions, ImageInfo, UsagePort } from "./types";
+import type { BoardListing, BoardTexts, BoardWriteOptions, ImageInfo, RecycleEntry, Usage, UsagePort } from "./types";
 import { base64Of, base64ToBytes } from "../core/base64";
 import { joinPath } from "../core/paths";
 import type { DirEntry } from "../core/relocate";
-import type { DesktopLocalBridge, DesktopOutcome } from "./desktop";
+import type { DesktopLocalBridge, DesktopOutcome, DesktopUsageBridge } from "./desktop";
 
 /** Go 侧的失败类别 → 端口失败类别；未列出的按 failed 处理（消息保持原文）。 */
-const KIND_BY_GO: Record<string, "conflict" | "missing" | "alreadyExists" | "invalid" | "failed"> = {
+const KIND_BY_GO: Record<string, "conflict" | "missing" | "alreadyExists" | "slotsFull" | "archived" | "invalid" | "failed"> = {
   conflict: "conflict",
   missing: "missing",
   alreadyExists: "alreadyExists",
+  slotsFull: "slotsFull",
+  archived: "archived",
   invalid: "invalid",
 };
 
@@ -38,7 +40,7 @@ export async function localRun<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** 结局失败折成类别化 PortError。 */
-export function checked(outcome: DesktopOutcome): void {
+export function checked(outcome: { ok: boolean; kind: string; message: string; version?: string }): void {
   if (outcome.ok) return;
   const kind = KIND_BY_GO[outcome.kind] ?? "failed";
   throw new PortError({ kind, code: outcome.kind || "failed", message: outcome.message, status: 0 });
@@ -56,8 +58,10 @@ export function desktopBoardStore(local: DesktopLocalBridge, userRoot: string): 
       localRun(async () => checked(await local.writeBoard(path, text, { version: options?.version, create_only: options?.createOnly }))),
     rename: (from: string, to: string, version?: string): Promise<void> => localRun(async () => checked(await local.renameBoard(from, to, version))),
     remove: (path: string, version?: string): Promise<void> => localRun(async () => checked(await local.deleteBoard(path, version))),
-    archive: async (): Promise<void> => unavailable("archive"),
-    unarchive: async (): Promise<void> => unavailable("archive"),
+    archive: (from: string, to: string, version?: string): Promise<void> =>
+      localRun(async () => checked(await local.archiveBoard(from, to, version))),
+    unarchive: (from: string, to: string): Promise<void> =>
+      localRun(async () => checked(await local.unarchiveBoard(from, to))),
     listNames: (dir: string): Promise<string[]> => localRun(() => local.listBoardNames(dir)),
     list: (): Promise<BoardListing> =>
       localRun(async () => {
@@ -154,19 +158,45 @@ export function desktopMediaStore(root: string): MediaStore {
     copyImage: async (): Promise<never> => unavailable("copyImage"),
     readClipboard: async (): Promise<null> => null,
     saveCopyAs: async (): Promise<never> => unavailable("saveImage"),
-    downloadImage: (): void => {
-      void unavailable("downloadImage");
-    },
-    downloadBoardResults: (): void => {
-      void unavailable("downloadResults");
-    },
+    downloadImage: async (): Promise<never> => unavailable("downloadImage"),
+    downloadBoardResults: async (): Promise<never> => unavailable("downloadResults"),
   };
 }
 
-/** 用量统计那一组：桌面壳没有用量统计。 */
-export function desktopUsageStore(): UsagePort {
+/** 能力未开时用量统计明确不可用，不返回空成功。 */
+export function unavailableUsageStore(): UsagePort {
   return {
     usage: async (): Promise<never> => unavailable("usage"),
     cleanupUnreferenced: async (): Promise<never> => unavailable("usage"),
+    setLimit: async (): Promise<never> => unavailable("usage"),
+    recycle: async (): Promise<never> => unavailable("usage"),
+    restore: async (): Promise<never> => unavailable("usage"),
+    purgeExpired: async (): Promise<never> => unavailable("usage"),
+  };
+}
+
+const USAGE_LEVELS = new Set(["warn", "alert"]);
+
+/** Go 的提醒档位是空串表示不提醒；端口用 null 表达同一个意思。 */
+function usageOf(raw: Awaited<ReturnType<DesktopUsageBridge["usage"]>>): Usage {
+  return {
+    ...raw,
+    limit_level: USAGE_LEVELS.has(raw.limit_level ?? "") ? (raw.limit_level as Usage["limit_level"]) : null,
+  };
+}
+
+/** 用量统计那一组：读、清理、阈值与回收恢复都落到 Go 的 Usage 服务。 */
+export function desktopUsageStore(usage: DesktopUsageBridge): UsagePort {
+  return {
+    usage: (): Promise<Usage> => localRun(async () => usageOf(await usage.usage())),
+    cleanupUnreferenced: (dirs: string[]) => localRun(async () => {
+      const result = await usage.cleanup(dirs);
+      checked(result);
+      return result;
+    }),
+    setLimit: (bytes: number): Promise<void> => localRun(async () => checked(await usage.setLimit(bytes))),
+    recycle: (): Promise<RecycleEntry[]> => localRun(() => usage.recycle()),
+    restore: (id: string): Promise<void> => localRun(async () => checked(await usage.restore(id))),
+    purgeExpired: (): Promise<void> => localRun(async () => checked(await usage.purgeExpired())),
   };
 }

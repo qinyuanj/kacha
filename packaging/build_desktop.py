@@ -88,13 +88,18 @@ def main() -> int:
         run(["npm", "ci"], root / "client")
 
     # CLI 钉在 go.mod 的 tool 指令上；buildCommand（前端构建）由 mygo build 自己跑。
+    # debug 只验证可执行程序；正式构建必须让 MyGo 生成当前用户 NSIS 安装器。
     output = Path("build") / "debug" / "windows-amd64" if args.debug else OUT
     debug_args = ["-debug", "-o", "build/debug"] if args.debug else []
-    run(["go", "tool", "mygo", "build", "-platform", PLATFORM, "-skip-installer", *debug_args], root)
+    installer_args = ["-skip-installer"] if args.debug else []
+    run(["go", "tool", "mygo", "build", "-platform", PLATFORM, *installer_args, *debug_args], root)
 
     exe = root / output / "Kacha.exe"
     if not exe.exists():
         raise SystemExit(f"构建没有产出 {exe}")
+    installer = root / output / f"kacha-setup-{version}-amd64.exe"
+    if not args.debug and not installer.exists():
+        raise SystemExit(f"正式构建没有产出当前用户安装器 {installer}")
 
     mygo = parse_mygo_version(capture(["go", "tool", "mygo", "version"], root))
     if mygo is not None and mygo != MYGO_VERSION:
@@ -108,6 +113,7 @@ def main() -> int:
         "webview2": webview2_version(),
         "profile": "debug" if args.debug else "release",
         "exe": (output / "Kacha.exe").as_posix(),
+        "installer": installer.relative_to(root).as_posix() if not args.debug else None,
     }
     (root / output / "build-info.json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

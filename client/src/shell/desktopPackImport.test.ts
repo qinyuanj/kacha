@@ -127,6 +127,15 @@ describe("桌面壳：画板包导入（#131）", () => {
     expect(opened).toEqual([]);
   });
 
+  it("画板位满：导入结局是 slotsFull，界面按统一文案提示", async () => {
+    const { bridge } = fakeBridge({ picked: "C:/包.ugcpack" });
+    const { port } = await createDesktopPort(bridge);
+    const file = (await port.media.pickPackFile())!;
+    (bridge.pack as DesktopPackBridge).start = async () => ({ ok: false, kind: "slotsFull", step: "boards", message: "画板位已满（20/20）" });
+
+    expect(await port.pack.import(file, options())).toEqual({ kind: "slotsFull", message: "画板位已满（20/20）" });
+  });
+
   it("写入画板失败：结局是 commitFailed，界面据此说「画板没有写入」", async () => {
     const { bridge } = fakeBridge({ picked: "C:/包.ugcpack" });
     (bridge.pack as DesktopPackBridge).start = async () => ({ ok: false, kind: "failed", step: "boards", message: "画板没有写入：磁盘写满" });

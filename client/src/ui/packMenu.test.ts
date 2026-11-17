@@ -32,12 +32,13 @@ describe("下载整板结果", () => {
     expect(toast.mock.calls[0][0]).not.toContain("已开始下载");
   });
 
-  it("端口正常时照旧说已开始下载", () => {
+  it("端口正常时给出已保存提示", async () => {
     const port = createFakePort();
     const toast = vi.fn();
     downloadBoardResults(port as ShellPort, "/~/画板/a.ugcboard.json", toast);
+    await Promise.resolve();
     expect(toast).toHaveBeenCalledTimes(1);
-    expect(toast.mock.calls[0][0]).toContain("已开始下载");
+    expect(toast.mock.calls[0][0]).toContain("已保存整板结果");
   });
 
   it("其它失败按失败说，不冒充「尚不可用」", () => {
@@ -50,5 +51,15 @@ describe("下载整板结果", () => {
     expect(toast).toHaveBeenCalledTimes(1);
     expect(toast.mock.calls[0][0]).toContain("网络断了");
     expect(toast.mock.calls[0][0]).not.toContain(UNAVAILABLE_TEXT);
+  });
+
+  it("用户取消系统另存为：不说已开始下载", async () => {
+    const port = createFakePort();
+    port.media.downloadBoardResults = vi.fn(async () => ({ kind: "cancelled" as const })) as unknown as ShellPort["media"]["downloadBoardResults"];
+    const toast = vi.fn();
+    downloadBoardResults(port as ShellPort, "/~/画板/a.ugcboard.json", toast);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(toast).not.toHaveBeenCalled();
   });
 });

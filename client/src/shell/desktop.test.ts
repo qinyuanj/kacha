@@ -10,7 +10,7 @@ const INFO: DesktopInfo = {
   version: "0.1.0",
   user_data_root: "C:/Users/me/AppData/Roaming/Kacha/data",
   board_root: "C:/Users/me/AppData/Roaming/Kacha/data/画板",
-  features: { generation: false, usage: false, pack_export: false },
+  features: { generation: false, usage: false, pack_export: false, archive: true },
 };
 
 /** 假桥：测试不碰真窗口与真磁盘。 */
@@ -31,10 +31,10 @@ describe("桌面壳端口", () => {
     expect(port.userRoot).toBe("C:/Users/me/AppData/Roaming/Kacha/data");
   });
 
-  it("本切片没有的能力在 features 里都是关的", async () => {
+  it("未实现的能力在 features 里关着；归档已接通", async () => {
     const { port } = await createDesktopPort(fakeBridge());
     // packImport（#131）也关着：这个假桥上没有 Pack 服务，导入无从谈起。
-    expect(port.features).toEqual({ generation: false, usage: false, packExport: false, packImport: false, tidy: false, downloadResults: false });
+    expect(port.features).toEqual({ generation: false, usage: false, packExport: false, packImport: false, tidy: false, archive: true });
   });
 
   it("生成报 unavailable，并带上能力名", async () => {
@@ -82,23 +82,23 @@ describe("桌面壳端口", () => {
     await expect(port.pack.exportPack("x", { task_dirs: [], texts: [], files: [], omitted: [] })).rejects.toMatchObject({ kind: "unavailable", feature: "packExport" });
   });
 
-  it("归档与整理也报 unavailable", async () => {
+  it("归档真的走本地服务，整理仍报 unavailable", async () => {
     const { port } = await createDesktopPort(fakeBridge());
-    await expect(port.board.archive("a", "b")).rejects.toMatchObject({ kind: "unavailable", feature: "archive" });
+    // 假桥上的 Local 全拒绝：归档把失败原样带回来，而不是假装能力还不可用。
+    await expect(port.board.archive("a", "b")).rejects.toMatchObject({ kind: "failed" });
     await expect(port.board.measure("{}")).rejects.toMatchObject({ kind: "unavailable", feature: "tidy" });
   });
 
-  it("结果下载在桌面壳不可用：拒绝而不是报成功", async () => {
-    const { port } = await createDesktopPort(fakeBridge());
-    // 端口同步抛：调用点按类别折成「尚不可用」。
-    expect(() => port.media.downloadBoardResults("/~/画板/a.ugcboard.json")).toThrow(PortError);
-    try {
-      port.media.downloadBoardResults("/~/画板/a.ugcboard.json");
-    } catch (e) {
-      const failure = portFailureOf(e);
-      expect(failure.kind).toBe("unavailable");
-      expect(failure.message).toContain(UNAVAILABLE_TEXT);
-    }
+  it("整板结果保存走 Local 服务：取消不报成功", async () => {
+    const base = fakeBridge();
+    const local = new Proxy({} as DesktopLocalBridge, {
+      get: (_target, prop: string) =>
+        prop === "saveBoardResults"
+          ? () => Promise.resolve({ ok: false, kind: "cancelled", message: "已取消保存", version: "" })
+          : () => Promise.reject(new Error("没实现的本地调用")),
+    });
+    const { port } = await createDesktopPort({ ...base, local });
+    await expect(port.media.downloadBoardResults("/~/画板/a.ugcboard.json")).resolves.toEqual({ kind: "cancelled" });
   });
 
   it("壳信息读不出来时直接失败，不静默降级", async () => {

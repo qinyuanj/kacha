@@ -422,6 +422,41 @@ func TestImportConflictsDoNotOverwriteLocalTaskDir(t *testing.T) {
 	}
 }
 
+// 画板位满时导入必须被本机存储拒绝：不能绕过 20 位约束，也没有半成品画板。
+func TestImportRespectsBoardSlots(t *testing.T) {
+	root := t.TempDir()
+	store := localstore.New(root)
+	for i := 1; i <= localstore.BoardSlots; i++ {
+		if _, r := store.CreateBoard(fmt.Sprintf("本地%d", i), "{}"); !r.OK {
+			t.Fatalf("CreateBoard #%d: %+v", i, r)
+		}
+	}
+	pack := buildPack(t,
+		zipEntry{name: "manifest.json", data: manifestV2("1.0.0", []string{"画板/导入.ugcboard.json"}, nil)},
+		zipEntry{name: "画板/导入.ugcboard.json", data: []byte(boardText)},
+		zipEntry{name: "2026-01-02/t1/task.json", data: []byte("{}")},
+	)
+
+	_, err := NewWithStore(store).Import(pack)
+	if err == nil {
+		t.Fatal("画板位满却导入成功了")
+	}
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Kind != KindSlotsFull || failure.Step != StepBoards {
+		t.Fatalf("err = %v, want slotsFull at boards", err)
+	}
+	if !strings.Contains(failure.Message, "画板位已满") {
+		t.Fatalf("message = %q, want 带上原因", failure.Message)
+	}
+	names, err := os.ReadDir(filepath.Join(root, "画板"))
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(names) != localstore.BoardSlots {
+		t.Fatalf("画板数 = %d, want %d", len(names), localstore.BoardSlots)
+	}
+}
+
 // failingStore 在写第 failAt 块画板时失败：用来验「后一块写失败时前面写好的撤掉」。
 type failingStore struct {
 	inner  *localstore.Store

@@ -14,15 +14,17 @@ import (
 type Features struct {
 	// Generation 是生成（网关调用）：#152 的配置/密钥/发现与 #153 的单份生成已接通。
 	Generation bool `json:"generation"`
-	// Usage 是用量统计与未引用清理：本地没有配额。
+	// Usage 是本机真实用量统计、未引用清理与回收恢复（#159）。
 	Usage bool `json:"usage"`
-	// PackExport 是画板包导出：导入是本地能力，导出还没实现。
+	// PackExport 是画板包导出：由本机 Pack 服务打包，目标选择经系统对话框。
 	PackExport bool `json:"pack_export"`
+	// Archive 是归档与取消归档：本机存储执行画板位与只读约束，端口已接通。
+	Archive bool `json:"archive"`
 }
 
-// DesktopFeatures 返回桌面壳本切片的能力开关：生成已接通，用量与导出仍未实现。
+// DesktopFeatures 返回桌面壳的能力开关：归档、画板包导出、本机用量与单份生成都已接通。
 func DesktopFeatures() Features {
-	return Features{Generation: true, Usage: false, PackExport: false}
+	return Features{Generation: true, Usage: true, PackExport: true, Archive: true}
 }
 
 // Info 是界面启动时读一次的壳信息。
