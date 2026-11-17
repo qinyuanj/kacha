@@ -2,6 +2,8 @@
 // 可见判定在 ui/settingsPanelView.ts（#137），这里只留接线与 DOM 摆放。
 import { useEffect, useState } from "react";
 import { useShell } from "./shell";
+import { DataRootSection } from "./DataRootSection";
+import type { DataRootActions } from "./dataRootMove";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 import { DEFAULT_SETTINGS, MAX_CONCURRENCY, MIN_CONCURRENCY, normalizeBaseUrl } from "../core/settings";
 import { UpdateSection } from "./UpdateSection";
@@ -15,6 +17,8 @@ interface Props {
   onClose: () => void;
   /** 更新安装前的准备依赖：任务队列与严格落盘（#164）。 */
   update: UpdatePreparationPorts;
+  /** 数据位置迁移的接线（#161）；工作台没给就不显示这一段。 */
+  dataRoot?: DataRootActions;
 }
 
 /** 网关地址那一行：输入、错误与明文 HTTP 提示。 */
@@ -83,7 +87,7 @@ function ConcurrencyRow({
   );
 }
 
-export function SettingsPanel({ settings, onClose, update }: Props) {
+export function SettingsPanel({ settings, onClose, update, dataRoot }: Props) {
   const port = useShell();
   const [baseUrl, setBaseUrl] = useState(settings.settings.base_url);
   // 草稿是原始文本，输入中可为空或越界；失焦与保存时才经 parseConcurrency 钳制。
@@ -169,6 +173,8 @@ export function SettingsPanel({ settings, onClose, update }: Props) {
         />
 
         <UpdateSection queue={update.queue} saveBoards={update.saveBoards} saveUi={update.saveUi} />
+
+        {dataRoot && <DataRootSection actions={dataRoot} />}
 
         <DiagnosticsSection />
 

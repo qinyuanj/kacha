@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/shellapp"
 )
 
@@ -18,8 +19,9 @@ var bindOnce sync.Once
 func generatedClient(t *testing.T) string {
 	t.Helper()
 	bindOnce.Do(func() {
-		shell := shellapp.New("test", t.TempDir())
-		bindServices(shell, t.TempDir())
+		// 服务拿可切换的共享数据根（#161）：绑一次就够，迁移测试也复用它。
+		shell := shellapp.NewFollowing("test", dataroot.NewRoots(t.TempDir()))
+		bindServices(shell, dataroot.NewRoots(t.TempDir()))
 	})
 	client, err := mygo.GenerateTypeScript()
 	if err != nil {

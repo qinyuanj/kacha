@@ -87,6 +87,17 @@ func TestStartImportsInBackgroundAndReportsOutcome(t *testing.T) {
 // 已有导入在跑时再开一份被拒：两次导入不互相踩。
 func TestStartRejectsSecondImportWhileRunning(t *testing.T) {
 	svc := New(t.TempDir())
+	// 后台导入还在写文件时 t.TempDir 的清理会撞上 Windows 的文件占用，
+	// 表现为 RemoveAll 失败（与导入逻辑无关）。先等它结束再让测试收尾。
+	t.Cleanup(func() {
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if !svc.Snapshot().Running {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	})
 	pack := buildPack(t)
 	if got := svc.Start(pack); !got.OK {
 		t.Fatalf("Start = %+v", got)

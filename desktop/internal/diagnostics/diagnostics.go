@@ -23,6 +23,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
@@ -71,6 +72,8 @@ type logEntry struct {
 type Service struct {
 	version string
 	root    string
+	// roots 是可切换的数据根（迁移 #161）：装了它，日志跟着新位置写。
+	roots   *dataroot.Roots
 	secrets func() []string
 
 	mu      sync.Mutex
@@ -84,10 +87,28 @@ type Service struct {
 
 // New 用应用版本、数据根与「读当前秘密」的回调造服务；回调只在脱敏时调用。
 func New(version, root string, secrets func() []string) *Service {
+	return &Service{version: version, root: root, secrets: orNone(secrets)}
+}
+
+// NewFollowing 造一个跟着共享数据根走的服务：迁移切换后日志写到新位置。
+func NewFollowing(version string, roots *dataroot.Roots, secrets func() []string) *Service {
+	return &Service{version: version, roots: roots, secrets: orNone(secrets)}
+}
+
+// orNone 让 nil 回调也能安全调用。
+func orNone(secrets func() []string) func() []string {
 	if secrets == nil {
-		secrets = func() []string { return nil }
+		return func() []string { return nil }
 	}
-	return &Service{version: version, root: root, secrets: secrets}
+	return secrets
+}
+
+// Root 返回当前数据根。
+func (s *Service) Root() string {
+	if s.roots != nil {
+		return s.roots.Current()
+	}
+	return s.root
 }
 
 // truncate 把过长文本截断并留下痕迹，避免一条日志把整包撑大。
@@ -185,7 +206,7 @@ func (s *Service) appendToFile(entry logEntry) {
 	if err != nil {
 		return
 	}
-	path := filepath.Join(s.root, logFileName)
+	path := filepath.Join(s.Root(), logFileName)
 	// 文件已超上限时先截断重来，保证容量有界（内容都是脱敏后的旧日志）。
 	if info, statErr := os.Stat(path); statErr == nil && info.Size() >= maxLogFileBytes {
 		_ = os.Remove(path)
@@ -200,7 +221,7 @@ func (s *Service) appendToFile(entry logEntry) {
 
 // readFileLogs 读回落盘的脱敏日志；文件不存在返回空。
 func (s *Service) readFileLogs() []logEntry {
-	data, err := os.ReadFile(filepath.Join(s.root, logFileName))
+	data, err := os.ReadFile(filepath.Join(s.Root(), logFileName))
 	if err != nil {
 		return nil
 	}
@@ -237,7 +258,7 @@ func (s *Service) allowlist() []collector {
 
 // collectFacts 生成版本、平台与运行状态；凭据与画板只报存在与计数，不报内容与路径。
 func (s *Service) collectFacts() ([]byte, error) {
-	info, err := os.Stat(s.root)
+	info, err := os.Stat(s.Root())
 	if err != nil {
 		return nil, fmt.Errorf("数据根不可读: %w", err)
 	}
@@ -245,7 +266,7 @@ func (s *Service) collectFacts() ([]byte, error) {
 		return nil, errors.New("数据根不是目录")
 	}
 	count := 0
-	entries, err := os.ReadDir(filepath.Join(s.root, localstore.BoardsDir))
+	entries, err := os.ReadDir(filepath.Join(s.Root(), localstore.BoardsDir))
 	if err == nil {
 		for _, e := range entries {
 			if !e.IsDir() && !strings.HasSuffix(e.Name(), ".bak") {
