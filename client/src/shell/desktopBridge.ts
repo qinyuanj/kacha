@@ -4,7 +4,7 @@
 // 源码与单测在没有它时也要能编译。调用名与 Go 侧绑定名一致（Shell.Info / Local.WriteBoard）。
 import { call } from "mygo-runtime";
 
-import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy, DesktopUsageBridge } from "./desktop";
+import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy, DesktopUsageBridge } from "./desktop";
 
 /** camelCase 的页面侧方法名 → Go 侧的 PascalCase 绑定名。 */
 function goName(method: string): string {
@@ -33,6 +33,13 @@ export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promi
     snapshot: () => callFn("Pack.Snapshot") as Promise<DesktopPackSnapshot>,
     cancel: () => callFn("Pack.Cancel") as Promise<void>,
   };
+  // 网关与密钥（#152）：与 Go 侧 BindAs("Gateway", ...) 对齐。
+  const gateway: DesktopGatewayBridge = {
+    request: (url, method, headers, body) => callFn("Gateway.Request", url, method, headers, body) as Promise<DesktopGatewayResponse>,
+    readApiKey: () => callFn("Gateway.ReadApiKey") as Promise<string | null>,
+    writeApiKey: (key) => callFn("Gateway.WriteApiKey", key) as Promise<void>,
+    deleteApiKey: () => callFn("Gateway.DeleteApiKey") as Promise<void>,
+  };
   // 本机用量与回收（#159）：与 Go 侧 BindAs("Usage", usageservice.New(store)) 对齐。
   const usage = new Proxy({} as DesktopUsageBridge, {
     get: (_target, prop: string) => (...args: unknown[]) => callFn(`Usage.${goName(prop)}`, ...args),
@@ -42,6 +49,7 @@ export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promi
     local,
     clipboard,
     pack,
+    gateway,
     usage,
   };
 }

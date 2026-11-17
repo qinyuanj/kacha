@@ -140,8 +140,8 @@ describe("动作对象的字段", () => {
     expect(actions.table).toBe(BUILTIN_TABLE);
     expect(actions.userRoot).toBe(ROOT);
     expect(actions.concurrency).toBe(2);
-    // discovery = none 且没失败：上架清单就是可用模型。
-    expect(actions.availableModels.length).toBe(BUILTIN_TABLE.models.length);
+    // 还没从网关发现过：没有模型可选，静态上架清单不能冒充成功。
+    expect(actions.availableModels).toEqual([]);
   });
 
   it("perform 经 ref 转发最新一版（画布每次渲染重建新建类函数）", () => {

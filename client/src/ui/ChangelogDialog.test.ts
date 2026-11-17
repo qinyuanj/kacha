@@ -51,6 +51,17 @@ describe("更新说明弹窗", () => {
     expect(scroll).toHaveBeenCalledWith({ block: "start" });
     expect(document.activeElement?.textContent).toBe("关闭");
   });
+  it("只展示当前及更早版本，尚未发布版本不进入弹窗", async () => {
+    vi.spyOn(changelog, "parseChangelog").mockReturnValue([
+      { version: "1.6.0", groups: [{ title: "新增", items: [{ text: "未来功能", notice: false }] }] },
+      { version: "1.5.0", groups: [{ title: "改进", items: [{ text: "当前说明", notice: false }] }] },
+      { version: "1.4.0", groups: [{ title: "修复", items: [{ text: "旧版说明", notice: false }] }] },
+    ]);
+    await show("1.5.5");
+    const headings = [...container.querySelectorAll("section.changelog-release h2")].map((h) => h.textContent);
+    expect(headings).toEqual(["1.5.0", "1.4.0"]);
+    expect(container.textContent).not.toContain("未来功能");
+  });
   it("当前版本未收录时仍展示已有说明，不误标当前版本", async () => {
     await show("dev");
     expect(container.textContent).toContain("Windows 桌面客户端");

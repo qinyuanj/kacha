@@ -1,0 +1,29 @@
+# 更新说明来源与核对结果
+
+`docs/release/changelog.md` 是当前与历史更新说明的唯一展示源；产品版本仍只由仓库根 `mygo.config.ts` 声明。本文件只记录恢复来源与核对结果，不参与构建取版本，也不另设产品版本线。
+
+历史条目保留发布当时的语境；旧说明中关于网页版、旧桌面壳、归档、整理、自动更新和生成能力的描述，不构成当前 MyGo / Go 桌面已经交付这些能力的证据。当前能力只看 `changelog.md` 的 1.5.0 节和桌面端口测试。
+
+| 版本 | 恢复来源 | 核对结果 |
+| --- | --- | --- |
+| 1.5.0 | 当前桌面说明；迁移前同号旧稿：commit `7a8e8fe` 的 `docs/release/web-changelog.md` | 同号合并为一节；按当前桌面实际能力改写并标注尚不可用能力，旧稿不复制为当前证据。 |
+| 1.4.0 | commit `7a8e8fe` 的 `docs/release/web-changelog.md`；tag `v1.4.0` | 已逐条转写为新增 / 改进分组，标题与版本一致。 |
+| 1.3.1 | commit `7a8e8fe` 的 `docs/release/web-changelog.md`；tag `v1.3.1` | 已逐条转写，修复条目保留。 |
+| 1.3.0 | commit `7a8e8fe` 的 `docs/release/web-changelog.md`；tag `v1.3.0` | 已逐条转写；当时的 10 块画板位与归档说明保留历史语境。 |
+| 1.2.0 | commit `7a8e8fe` 的 `docs/release/web-changelog.md`；tag `v1.2.0` | 已逐条转写。 |
+| 1.1.1 | commit `7a8e8fe` 的 `docs/release/web-changelog.md`；tag `v1.1.1` | 已逐条转写；管理员恢复措辞保留当时语境。 |
+| 1.1.0 | commit `7a8e8fe` 的 `docs/release/web-changelog.md`；tag `v1.1.0` | 已逐条转写。 |
+| 1.0.0 | commit `7a8e8fe` 的 `docs/release/web-changelog.md`；tag `v1.0.0` | 已逐条转写；网页版与服务端措辞保留当时语境。 |
+| 0.3.2 | tag `v0.3.2` / commit `bcbc3c7` 的 `docs/release/release-notes-0.3.2.md`；`packaging/README.md` 同一提交 | 已核对小写输出目录变更与发布约定；历史发行资料只作来源，不恢复旧打包链。 |
+| 0.3.1 | tag `v0.3.1` / commit `ea7a780` 的 `docs/release/release-notes-0.3.1.md` | 已核对 Flash、区域、透明背景、图层与 Lite 退役说明。 |
+| 0.3.0 | commit `b283724` 的 `docs/release/release-notes-0.3.0.md`（该版无本地 tag） | 已核对 NSIS 安装器、签名更新、检查周期与更新前保护说明；历史流程不作为当前桌面已交付证据。 |
+| 0.2.2 | tag `v0.2.2` 的 `docs/release/release-notes-0.2.2.md` | 已核对更名、不可运行原因和测试连接提示。 |
+| 0.2.1 | tag `v0.2.1` 的 `docs/release/release-notes-0.2.1.md` | 已核对自动宽高比、尺寸常驻与手填比例。 |
+| 0.2.0 | tag `v0.2.0` 的 `docs/release/release-notes-0.2.0.md` | 已核对 v2 首个版本、画板、模型、图层、画板包与诊断说明；安装平台措辞保留当时语境。 |
+| 0.1.0 | tag `v0.1.0` 的 `docs/release/release-notes-0.1.0.md` | 历史索引继续核对后补入；已核对首个本地工作台、明文 HTTP 与未签名包的当时约束。 |
+
+## 核对方法
+
+- `git show <来源>` 逐版读取原文，按「新增 / 改进 / 修复」重排为用户可扫读的一条一句；不新增当时没有的功能描述。
+- 一级标题只保留版本号，完整索引由 `client/src/core/changelog.test.ts` 与本表同序守护；解析器同时拒绝重复和乱序。
+- 尚未发布版本只允许作为未收录的源码改动存在，正常发行时先取产品版本再写入对应标题；弹窗只显示当前及更早版本。

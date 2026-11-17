@@ -22,7 +22,7 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 		t.Fatalf("GenerateTypeScript: %v", err)
 	}
 	src := string(client)
-	for _, want := range []string{"Shell", "Local", "Usage", "Clipboard", "Pack"} {
+	for _, want := range []string{"Shell", "Local", "Usage", "Clipboard", "Pack", "Gateway"} {
 		if !strings.Contains(src, want) {
 			t.Fatalf("生成的客户端里没有 %s 服务：\n%s", want, src)
 		}
@@ -46,6 +46,12 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 	// 少这个方法时复制图片在桌面壳里只会静默失败。
 	if !strings.Contains(src, "copyImage") {
 		t.Fatalf("Clipboard 上没有 copyImage 方法：\n%s", src)
+	}
+	// 网关与密钥服务（#152）：少绑一个，设置面板的测试连接与密钥管理会落到 notBound。
+	for _, want := range []string{"Gateway", "request", "readApiKey", "writeApiKey", "deleteApiKey"} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("生成的客户端里没有 %q（网关服务没绑上）：\n%s", want, src)
+		}
 	}
 	// 结局的键名来自 Go 的 json tag：页面按 ok / kind / message / bytes 读。
 	for _, key := range []string{"ok", "kind", "message", "container", "bytes"} {

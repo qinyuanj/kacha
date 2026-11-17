@@ -65,7 +65,7 @@ export function discoveryText(discovery: { source: "live" | "cached" | "none"; f
   const at = discovery.fetchedAt ? new Date(discovery.fetchedAt).toLocaleString() : "";
   if (discovery.source === "live") return `模型列表：已从网关获取（${at}）`;
   if (discovery.source === "cached") return `模型列表：离线，使用缓存（${at}）`;
-  return "模型列表：尚未从网关获取，暂按上架清单显示";
+  return "模型列表：尚未从网关获取，模型不可选；请配置密钥并测试连接";
 }
 
 /** 保存时要写入的设置：在已存设置上套用表单。 */
