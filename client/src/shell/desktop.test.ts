@@ -10,7 +10,7 @@ const INFO: DesktopInfo = {
   version: "0.1.0",
   user_data_root: "C:/Users/me/AppData/Roaming/Kacha/data",
   board_root: "C:/Users/me/AppData/Roaming/Kacha/data/画板",
-  features: { generation: false, usage: false, pack_export: false },
+  features: { generation: false, usage: false, pack_export: false, archive: true },
 };
 
 /** 假桥：测试不碰真窗口与真磁盘。 */
@@ -31,10 +31,10 @@ describe("桌面壳端口", () => {
     expect(port.userRoot).toBe("C:/Users/me/AppData/Roaming/Kacha/data");
   });
 
-  it("本切片没有的能力在 features 里都是关的", async () => {
+  it("未实现的能力在 features 里关着；归档已接通", async () => {
     const { port } = await createDesktopPort(fakeBridge());
     // packImport（#131）也关着：这个假桥上没有 Pack 服务，导入无从谈起。
-    expect(port.features).toEqual({ generation: false, usage: false, packExport: false, packImport: false, tidy: false });
+    expect(port.features).toEqual({ generation: false, usage: false, packExport: false, packImport: false, tidy: false, archive: true });
   });
 
   it("生成报 unavailable，并带上能力名", async () => {
@@ -57,9 +57,10 @@ describe("桌面壳端口", () => {
     await expect(port.pack.exportPack("x", { task_dirs: [], texts: [], files: [], omitted: [] })).rejects.toMatchObject({ kind: "unavailable", feature: "packExport" });
   });
 
-  it("归档与整理也报 unavailable", async () => {
+  it("归档真的走本地服务，整理仍报 unavailable", async () => {
     const { port } = await createDesktopPort(fakeBridge());
-    await expect(port.board.archive("a", "b")).rejects.toMatchObject({ kind: "unavailable", feature: "archive" });
+    // 假桥上的 Local 全拒绝：归档把失败原样带回来，而不是假装能力还不可用。
+    await expect(port.board.archive("a", "b")).rejects.toMatchObject({ kind: "failed" });
     await expect(port.board.measure("{}")).rejects.toMatchObject({ kind: "unavailable", feature: "tidy" });
   });
 

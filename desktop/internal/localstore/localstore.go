@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 const (
@@ -91,6 +92,8 @@ const (
 	KindMissing      = "missing"
 	KindConflict     = "conflict"
 	KindAlreadyExist = "alreadyExists"
+	KindSlotsFull    = "slotsFull"
+	KindArchived     = "archived"
 	KindInvalid      = "invalid"
 	KindFailed       = "failed"
 )
@@ -153,6 +156,9 @@ type DirEntry struct {
 
 // Store 是数据根上的文件层。
 type Store struct {
+	// mu 串行化画板的创建 / 归档 / 取消归档：画板位与文件搬移都是一个原子决定，
+	// 并发抢位时不能各看到 19 位然后都写进去。
+	mu   sync.Mutex
 	root string
 }
 
@@ -274,9 +280,15 @@ type WriteOptions struct {
 // 只新建（createOnly）：主文件或只剩 .bak 的孤儿占住名字都拒绝。
 // 带版本：主文件不在就说画板没了（不凭空建出同名画板），内容变了就是冲突。
 func (s *Store) WriteBoard(path, text string, opts WriteOptions) Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	abs, err := s.Resolve(path)
 	if err != nil {
 		return fail(KindInvalid, err.Error())
+	}
+	// 归档画板只读：本机存储层也拒绝写入，界面判定不是唯一防线。
+	if s.withinArchiveDir(abs) {
+		return fail(KindArchived, "归档画板只读，不能写入")
 	}
 	old, readErr := os.ReadFile(abs)
 	exists := readErr == nil
@@ -289,6 +301,14 @@ func (s *Store) WriteBoard(path, text string, opts WriteOptions) Result {
 		}
 		if _, err := os.Stat(abs + ".bak"); err == nil {
 			return fail(KindAlreadyExist, "目标已存在，只新建不覆盖")
+		}
+		// 画板位由本机存储执行：新建、复制、导入都走只新建这条，抢位时也拦得住。
+		used, err := s.editableBoardCount()
+		if err != nil {
+			return fail(KindFailed, err.Error())
+		}
+		if used >= BoardSlots {
+			return fail(KindSlotsFull, fmt.Sprintf("画板位已满（%d/%d），归档或删掉一块再新建。", used, BoardSlots))
 		}
 	}
 	if opts.Version != "" {
@@ -413,13 +433,88 @@ func (s *Store) RenameBoard(from, to string, version string) Result {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fail(KindFailed, err.Error())
 	}
-	if _, err := os.Stat(src); err == nil {
-		if err := os.Rename(src, dst); err != nil {
-			return fail(KindFailed, err.Error())
+	if err := moveBoard(src, dst); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	return ok("")
+}
+
+// ArchiveBoard 把可编辑画板搬进归档目录：带版本时内容已变就拒绝；归档后只读、不占画板位。
+// 主文件与 .bak 一起搬；任一步失败都尽力回滚，绝不把半完成的搬移报成成功。
+func (s *Store) ArchiveBoard(from, to, version string) Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	src, err := s.Resolve(from)
+	if err != nil {
+		return fail(KindInvalid, err.Error())
+	}
+	dst, err := s.Resolve(to)
+	if err != nil {
+		return fail(KindInvalid, err.Error())
+	}
+	if s.withinArchiveDir(src) {
+		return fail(KindArchived, "画板已归档")
+	}
+	if !s.withinArchiveDir(dst) {
+		return fail(KindInvalid, "归档目标必须在归档目录里")
+	}
+	if !s.exists(src) {
+		return fail(KindMissing, "画板不存在")
+	}
+	if version != "" {
+		if got := s.checkVersion(src, version); !got.OK {
+			return got
 		}
 	}
-	if bak, err := os.Stat(src + ".bak"); err == nil && !bak.IsDir() {
-		_ = os.Rename(src+".bak", dst+".bak")
+	if s.exists(dst) {
+		return fail(KindAlreadyExist, "归档目标已存在")
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	if err := moveBoard(src, dst); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	return ok("")
+}
+
+// UnarchiveBoard 把归档画板搬回画板目录：可编辑画板位满时拒绝，归档原件不动。
+// 归档画板不会在归档期间被改写，因此不需要再核对内容版本。
+func (s *Store) UnarchiveBoard(from, to string) Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	src, err := s.Resolve(from)
+	if err != nil {
+		return fail(KindInvalid, err.Error())
+	}
+	dst, err := s.Resolve(to)
+	if err != nil {
+		return fail(KindInvalid, err.Error())
+	}
+	if !s.withinArchiveDir(src) {
+		return fail(KindInvalid, "源画板不在归档目录里")
+	}
+	if !s.withinBoardDir(dst) {
+		return fail(KindInvalid, "取消归档目标必须在画板目录里")
+	}
+	if !s.exists(src) {
+		return fail(KindMissing, "归档画板不存在")
+	}
+	used, err := s.editableBoardCount()
+	if err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	if used >= BoardSlots {
+		return fail(KindSlotsFull, fmt.Sprintf("画板位已满（%d/%d），先归档或删掉一块再取消归档。", used, BoardSlots))
+	}
+	if s.exists(dst) {
+		return fail(KindAlreadyExist, "目标已存在")
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fail(KindFailed, err.Error())
+	}
+	if err := moveBoard(src, dst); err != nil {
+		return fail(KindFailed, err.Error())
 	}
 	return ok("")
 }
@@ -548,6 +643,52 @@ func (s *Store) WriteMeta(name, text string) Result {
 		return fail(KindFailed, err.Error())
 	}
 	return ok("")
+}
+
+// editableBoardCount 是可编辑画板数：画板目录顶层的主文件与 .bak 孤儿各算一块，同一块只算一次。
+// 归档子目录由 ListBoardNames 跳过，因此归档画板不占画板位。
+func (s *Store) editableBoardCount() (int, error) {
+	names, err := s.ListBoardNames(s.BoardDir())
+	if err != nil {
+		return 0, err
+	}
+	return len(names), nil
+}
+
+// withinArchiveDir 报告路径是不是画板目录下的归档子目录（含更深层）。
+func (s *Store) withinArchiveDir(abs string) bool {
+	return withinRoot(filepath.Join(s.BoardDir(), ArchiveDir), filepath.Clean(abs))
+}
+
+// withinBoardDir 报告路径是不是可编辑画板目录里的顶层画板（归档子目录除外）。
+func (s *Store) withinBoardDir(abs string) bool {
+	return withinRoot(s.BoardDir(), filepath.Clean(abs)) && !s.withinArchiveDir(abs)
+}
+
+// moveBoard 把主文件与 .bak 一起搬：备份搬失败时尽力把主文件搬回原处。
+// 只在调用方确认目标不存在、版本匹配后调用。
+func moveBoard(src, dst string) error {
+	hadMain := isRegularFile(src)
+	if hadMain {
+		if err := os.Rename(src, dst); err != nil {
+			return err
+		}
+	}
+	if isRegularFile(src + ".bak") {
+		if err := os.Rename(src+".bak", dst+".bak"); err != nil {
+			if hadMain {
+				_ = os.Rename(dst, src)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// isRegularFile 报告路径是不是一个真实文件（目录与不存在的都不算）。
+func isRegularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // exists 报告画板在不在：主文件或只剩 .bak 的孤儿都算在。

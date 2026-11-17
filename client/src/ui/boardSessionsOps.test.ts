@@ -106,6 +106,25 @@ describe("取消归档与另存", () => {
     expect(port.calls.unarchive).toHaveLength(1);
   });
 
+  it("画板位满：取消归档被拒，归档原件不动", async () => {
+    const port = createFakePort({ boards: [{ path: "/~/画板/归档/a.ugcboard.json", main: "{}", version: "v1", archived: true }], slots: { used: 20, total: 20 } });
+    const movedTo = vi.fn();
+    const refusal = await unarchiveBoardSession(storeOf([]), port as unknown as SessionPorts, "/~", movedTo, "/~/画板/归档/a.ugcboard.json");
+    expect(refusal).toContain("画板位");
+    expect(port.calls.unarchive).toHaveLength(0);
+    expect(movedTo).not.toHaveBeenCalled();
+  });
+
+  it("画板位满：复制归档画板被拒，不写新画板", async () => {
+    const main = JSON.stringify(board("a"));
+    const port = createFakePort({ boards: [{ path: "/~/画板/归档/a.ugcboard.json", main, version: "v1", archived: true }], slots: { used: 20, total: 20 } });
+    const openPath = vi.fn(async () => true);
+    const refusal = await copyAsNewBoardSession(storeOf([]), port as unknown as SessionPorts, "/~", openPath, "/~/画板/归档/a.ugcboard.json");
+    expect(refusal).toContain("画板位");
+    expect(port.calls.write).toHaveLength(0);
+    expect(openPath).not.toHaveBeenCalled();
+  });
+
   it("复制为新画板：另存到画板目录", async () => {
     const main = JSON.stringify({ format_version: 2, title: "a", viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges: [], extra: {} });
     const port = createFakePort({ boards: [{ path: "/~/画板/归档/a.ugcboard.json", main, version: "v1", archived: true }] });

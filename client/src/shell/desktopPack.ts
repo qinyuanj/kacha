@@ -44,6 +44,8 @@ function failureResult(outcome: DesktopPackOutcome): ImportResult {
   if (outcome.kind === "corrupt") return { kind: "corrupt", reason: outcome.message };
   if (outcome.kind === "newer") return { kind: "newer", message: outcome.message };
   if (outcome.kind === "cancelled") return { kind: "cancelled" };
+  // 画板位由本机存储执行：导入撞满位时给界面统一文案，不折成笼统的写入失败。
+  if (outcome.kind === "slotsFull") return { kind: "slotsFull", message: outcome.message };
   // 画板没有写入；合并中途失败时已移入的任务目录保留。
   if (outcome.kind === "conflict" || outcome.kind === "failed") return { kind: "commitFailed", error: outcome.message };
   return { kind: "failed", error: outcome.message };

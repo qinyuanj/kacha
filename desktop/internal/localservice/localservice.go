@@ -164,6 +164,18 @@ func (s *Service) DeleteBoard(path string, version string) Outcome {
 	return Outcome{OK: result.OK, Kind: result.Kind, Message: result.Message, Version: result.Version}
 }
 
+// ArchiveBoard 把画板搬进归档目录：带版本时内容已变就拒绝，归档后只读且不占画板位。
+func (s *Service) ArchiveBoard(from, to, version string) Outcome {
+	result := s.store.ArchiveBoard(from, to, version)
+	return Outcome{OK: result.OK, Kind: result.Kind, Message: result.Message, Version: result.Version}
+}
+
+// UnarchiveBoard 把归档画板搬回画板目录：画板位满时结局是 slotsFull。
+func (s *Service) UnarchiveBoard(from, to string) Outcome {
+	result := s.store.UnarchiveBoard(from, to)
+	return Outcome{OK: result.OK, Kind: result.Kind, Message: result.Message, Version: result.Version}
+}
+
 // ReadFile 读数据根里的文件字节（base64 传给页面）。
 func (s *Service) ReadFile(path string) (string, error) {
 	data, err := s.store.ReadFile(path)

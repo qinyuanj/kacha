@@ -18,11 +18,13 @@ type Features struct {
 	Usage bool `json:"usage"`
 	// PackExport 是画板包导出：由本机 Pack 服务打包，目标选择经系统对话框。
 	PackExport bool `json:"pack_export"`
+	// Archive 是归档与取消归档：本机存储执行画板位与只读约束，端口已接通。
+	Archive bool `json:"archive"`
 }
 
-// DesktopFeatures 返回桌面壳的能力开关：画板包导出与本机用量已接通，生成仍未实现。
+// DesktopFeatures 返回桌面壳的能力开关：归档、画板包导出与本机用量已接通，生成仍未实现。
 func DesktopFeatures() Features {
-	return Features{Generation: false, Usage: true, PackExport: true}
+	return Features{Generation: false, Usage: true, PackExport: true, Archive: true}
 }
 
 // Info 是界面启动时读一次的壳信息。
