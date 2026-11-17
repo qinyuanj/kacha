@@ -20,6 +20,8 @@ import { checked, desktopBoardStore, desktopFileStore, desktopMediaStore, deskto
 import { createDesktopPack } from "./desktopPack";
 import { imageCodec } from "./imageCodec";
 import { composeOverlay } from "./overlay";
+import { createGatewayPorts } from "./desktopGateway";
+import { DEFAULT_SETTINGS } from "../core/settings";
 
 /** Go 侧写操作的结局：成功时 kind 为空，失败时 kind 是类别（见 localservice.Outcome）。 */
 export interface DesktopOutcome {
@@ -154,6 +156,23 @@ export interface DesktopPackBridge {
   cancel(): Promise<void>;
 }
 
+/**
+ * Go 侧网关服务（Gateway 服务，#152）：真实 HTTP 请求与 Windows 系统保护的密钥。
+ * 页面不直接发网关请求，也不把密钥写进普通设置。
+ */
+export interface DesktopGatewayResponse {
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+}
+
+export interface DesktopGatewayBridge {
+  request(url: string, method: string, headers: Record<string, string>, body?: string): Promise<DesktopGatewayResponse>;
+  readApiKey(): Promise<string | null>;
+  writeApiKey(key: string): Promise<void>;
+  deleteApiKey(): Promise<void>;
+}
+
 /** MyGo 桥：Go 侧绑定与测试替身都满足它。 */
 export interface DesktopBridge {
   info(): Promise<DesktopInfo>;
@@ -162,6 +181,8 @@ export interface DesktopBridge {
   clipboard?: DesktopClipboardBridge;
   /** 画板包导入（#131）；没有这一项的替身按「尚不可用」处理。 */
   pack?: DesktopPackBridge;
+  /** 网关与密钥（#152）；没有这一项的替身按「尚不可用」处理。 */
+  gateway?: DesktopGatewayBridge;
 }
 
 /** 本切片还没有的能力：以 kind: "unavailable" 拒绝。 */
@@ -313,6 +334,9 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
 
   const usage: UsagePort = desktopUsageStore();
 
+  // 网关配置、系统保护的密钥与模型发现（#152）：经 Gateway 绑定走 Go 服务。
+  const gatewayPorts = createGatewayPorts(bridge);
+
   const port: ShellPort = {
     userRoot: info.user_data_root,
     features,
@@ -341,15 +365,13 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
       packFs: { isFile: files.isFile, sha256: files.sha256 },
       imageProbe: { inspectImage: files.inspectImage },
       settingsPorts: {
+        ...gatewayPorts,
         readSettings: meta.readSettings,
-        defaultBaseUrl: (): Promise<string> => Promise.resolve(""),
+        // 没有 settings.json 时用 core 的唯一默认地址，不让首次启动变成空网关。
+        defaultBaseUrl: (): Promise<string> => Promise.resolve(DEFAULT_SETTINGS.base_url),
         writeSettings: meta.writeSettings,
         readModelsCache: meta.readModelsCache,
         writeModelsCache: meta.writeModelsCache,
-        readApiKey: (): Promise<string | null> => Promise.resolve(null),
-        writeApiKey: (): Promise<void> => Promise.resolve(),
-        deleteApiKey: (): Promise<void> => Promise.resolve(),
-        fetch: async (): Promise<never> => unavailable("generation"),
         now: () => new Date(),
         log: (): void => {},
       },

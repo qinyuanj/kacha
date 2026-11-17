@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { createDesktopPort, type DesktopBridge, type DesktopInfo, type DesktopLocalBridge } from "./desktop";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
+import { DEFAULT_SETTINGS } from "../core/settings";
 import { PortError, portFailureOf } from "./port";
 
 const INFO: DesktopInfo = {
@@ -98,6 +99,53 @@ function uploadBridge(behaviour: "ok" | "alreadyExists" = "ok"): { bridge: Deskt
 
 const PNG_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 
+
+describe("网关配置与密钥（#152）", () => {
+  const KEY = "sk-spec152-synthetic-not-real";
+
+  it("设置端口接到真实 Gateway 绑定：密钥读写与请求都过桥，默认地址来自 core", async () => {
+    const calls: string[] = [];
+    const bridge: DesktopBridge = {
+      ...fakeBridge(),
+      gateway: {
+        request: (url, method, headers) => {
+          calls.push("Gateway.Request " + url + " " + method + " " + headers["Accept"]);
+          return Promise.resolve({ status: 200, headers: {}, body: "{}" });
+        },
+        readApiKey: () => {
+          calls.push("Gateway.ReadApiKey");
+          return Promise.resolve(KEY);
+        },
+        writeApiKey: (_key) => {
+          calls.push("Gateway.WriteApiKey");
+          return Promise.resolve();
+        },
+        deleteApiKey: () => {
+          calls.push("Gateway.DeleteApiKey");
+          return Promise.resolve();
+        },
+      },
+    };
+    const { port } = await createDesktopPort(bridge);
+    expect(await port.core.settingsPorts.defaultBaseUrl()).toBe(DEFAULT_SETTINGS.base_url);
+    expect(await port.core.settingsPorts.readApiKey()).toBe(KEY);
+    await port.core.settingsPorts.writeApiKey(KEY);
+    await port.core.settingsPorts.deleteApiKey();
+    await port.core.settingsPorts.fetch("http://gw:3001/v1/models", { method: "GET", headers: { Accept: "application/json" } });
+    expect(calls).toEqual([
+      "Gateway.ReadApiKey",
+      "Gateway.WriteApiKey",
+      "Gateway.DeleteApiKey",
+      "Gateway.Request http://gw:3001/v1/models GET application/json",
+    ]);
+  });
+
+  it("没有 Gateway 绑定时，密钥与请求明确不可用，不用空成功冒充", async () => {
+    const { port } = await createDesktopPort(fakeBridge());
+    await expect(port.core.settingsPorts.readApiKey()).rejects.toMatchObject({ kind: "unavailable", feature: "gateway" });
+    await expect(port.core.settingsPorts.fetch("http://gw/v1/models", { method: "GET", headers: {} })).rejects.toMatchObject({ kind: "unavailable", feature: "gateway" });
+  });
+});
 describe("本机图片进 导入参考图/（#129）", () => {
   it("文件名是内容的 sha256、扩展名按格式、落在 导入参考图/ 下", async () => {
     const { bridge, writes } = uploadBridge();

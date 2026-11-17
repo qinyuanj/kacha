@@ -62,7 +62,7 @@ describe("高级设置面板", () => {
   });
 
   it("模型列表说明：三种来源各一句", () => {
-    expect(discoveryText({ source: "none" })).toContain("尚未从网关获取");
+    expect(discoveryText({ source: "none" })).toContain("模型不可选");
     expect(discoveryText({ source: "live", fetchedAt: new Date(0).toISOString() })).toContain("已从网关获取");
     expect(discoveryText({ source: "cached", fetchedAt: new Date(0).toISOString() })).toContain("离线，使用缓存");
   });

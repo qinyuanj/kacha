@@ -12,7 +12,7 @@ import (
 
 // Features 告诉界面哪些可选能力在这个实现里有；没有的入口按「尚不可用」隐藏。
 type Features struct {
-	// Generation 是生成（网关调用）：桌面壳还没有网关客户端。
+	// Generation 是生成（网关调用）：网关配置、密钥与模型发现已接通，但生成调用还没接上。
 	Generation bool `json:"generation"`
 	// Usage 是用量统计与未引用清理：本地没有配额。
 	Usage bool `json:"usage"`

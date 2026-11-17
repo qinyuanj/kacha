@@ -70,6 +70,8 @@ export function useSettings() {
       const result = await saveSettingsState(settingsPorts, current, next, apiKey);
       if (!result.ok) return saveProblemOf(result);
       setState(result.state);
+      // 凭据换了，缓存里的旧发现不能拿来给新密钥兜底。
+      if (apiKey !== current.apiKey) models.cacheRef.current = null;
       if (result.baseChanged) models.refreshVersion.current++;
       if (apiKey && (result.baseChanged || apiKey !== current.apiKey)) void refreshModels(next.base_url, apiKey);
       return null;
