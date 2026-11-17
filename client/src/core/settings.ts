@@ -168,9 +168,9 @@ function shelved(table: CapabilityTable): ModelCapability[] {
   return modelsByTier(table).flatMap((g) => g.models);
 }
 
-/** 任务节点模型列表 = 发现结果 ∩ 上架清单；从未发现过时退回上架清单。 */
+/** 任务节点模型列表 = 发现结果 ∩ 上架清单；没有有效发现或缓存时一个也不给，静态清单不算发现。 */
 export function availableModels(table: CapabilityTable, discovery: Discovery): ModelCapability[] {
-  if (discovery.source === "none") return discovery.failed ? [] : shelved(table);
+  if (discovery.source === "none") return [];
   const ids = new Set(discovery.ids);
   return shelved(table).filter((m) => ids.has(m.model_id));
 }
@@ -190,11 +190,13 @@ export const PREFERRED_TASK_MODEL = "doubao-seedream-5-0-flash-260915";
 /** 新建任务节点沿用有效最近选择，否则保留 Flash 身份；不可用由任务视图明确阻止，不自动替代。 */
 export function defaultTaskModel(table: CapabilityTable, discovery: Discovery, lastModel: string | null | undefined): string | null {
   const available = availableModels(table, discovery);
-  if (lastModel && available.some((m) => m.model_id === lastModel)) return lastModel;
+  // 没有发现结果时不自动换掉画板已有的选择：那属于用户身份，不是「清单里有这个模型」的声明。
+  const known = available.length === 0 && discovery.source === "none" ? table.models : available;
+  if (lastModel && known.some((m) => m.model_id === lastModel)) return lastModel;
   return PREFERRED_TASK_MODEL;
 }
 
-/** 迭代动作用的默认编辑模型：工具栏模型（支持图片编辑时）→ 可用列表里第一个支持图片编辑的 → 上架清单里第一个；都没有为 null。 */
+/** 迭代动作用的默认编辑模型：工具栏模型 → 已发现可用列表 → 上架清单；编辑动作不依赖网关在线。 */
 export function defaultEditModel(table: CapabilityTable, discovery: Discovery, lastModel: string | null | undefined): ModelCapability | null {
   const canEdit = (m: ModelCapability) => m.workflows.image_edit.max_references > 0;
   const toolbar = table.models.find((m) => m.model_id === defaultTaskModel(table, discovery, lastModel));
