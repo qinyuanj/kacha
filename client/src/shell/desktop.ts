@@ -2,7 +2,7 @@
 //
 // 界面只认 ShellPort（见 shell/port.ts），本文件负责 MyGo 桌面实现。
 // 画板、文件与元数据经 MyGo 绑定（Go 侧 internal/localstore 与 internal/localservice）落到本机数据根；
-// 本切片还没有的能力（生成、用量、画板包导出、整理、结果中转）按 features 关掉，
+// 本切片还没有的能力（生成、整理、结果中转）按 features 关掉，
 // 调用时以 kind: "unavailable" 拒绝：界面据此标「尚不可用」，不失败得更晚，也不伪装成功。
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
@@ -10,14 +10,14 @@
 import { PortError, portFailureOf, type ClipboardContent, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort } from "./port";
 import type { PackEntryFact, PackExportSpec } from "../core/boardPack";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
-import type { BrowserOptions, ImageInfo, UsagePort } from "./types";
+import type { BrowserOptions, ImageInfo, RecycleEntry, UsageCandidate, UsagePort } from "./types";
 import type { LogKind } from "./log";
 import { base64Of } from "../core/base64";
 import { clipboardContentOf, extensionOf } from "./desktopClipboard";
 import { sha256Hex } from "../core/sha256";
 import { IMPORTED_REFERENCES_DIR } from "../core/boardPack";
 import { joinPath, toRootRelative } from "../core/paths";
-import { checked, desktopBoardStore, desktopFileStore, desktopMediaStore, desktopMetaStore, desktopUsageStore, localRun, unavailable } from "./desktopStores";
+import { checked, desktopBoardStore, desktopFileStore, desktopMediaStore, desktopMetaStore, desktopUsageStore, localRun, unavailable, unavailableUsageStore } from "./desktopStores";
 import { createDesktopPack } from "./desktopPack";
 import { imageCodec } from "./imageCodec";
 import { composeOverlay } from "./overlay";
@@ -185,6 +185,46 @@ export interface DesktopPackBridge {
   cancelExport?(): Promise<void>;
 }
 
+/** Go 侧用量快照（Usage.Usage）：字段与本机的真实文件统计一一对应。 */
+export interface DesktopUsage {
+  total_bytes: number;
+  boards_bytes: number;
+  meta_bytes: number;
+  last_access: number;
+  by_date: { date: string; bytes: number }[];
+  unreferenced: UsageCandidate[] | null;
+  unreadable_board: string | null;
+  limit_bytes: number | null;
+  limit_level: "" | "warn" | "alert" | null;
+}
+
+/** Usage 服务的写结局：Go 侧只有 ok / kind / message 三个字段。 */
+export interface DesktopUsageOutcome {
+  ok: boolean;
+  kind: string;
+  message: string;
+}
+
+/** Go 侧清理结局：部分跳过与失败逐项给出，成功也可能只处理其中一部分。 */
+export interface DesktopCleanupResult extends DesktopUsageOutcome {
+  moved: UsageCandidate[];
+  skipped: string[];
+  failed: string[];
+}
+
+/** Go 侧回收区一行：原位置、清理时间与到期状态。 */
+export type DesktopRecycleEntry = RecycleEntry;
+
+/** Go 侧 Usage 服务：四种能力都是本机绑定，不是前端计算。 */
+export interface DesktopUsageBridge {
+  usage(): Promise<DesktopUsage>;
+  cleanup(dirs: string[]): Promise<DesktopCleanupResult>;
+  setLimit(bytes: number): Promise<DesktopUsageOutcome>;
+  recycle(): Promise<DesktopRecycleEntry[]>;
+  restore(id: string): Promise<DesktopUsageOutcome>;
+  purgeExpired(): Promise<DesktopUsageOutcome>;
+}
+
 /**
  * Go 侧网关服务（Gateway 服务，#152）：真实 HTTP 请求与 Windows 系统保护的密钥。
  * 页面不直接发网关请求，也不把密钥写进普通设置。
@@ -212,6 +252,8 @@ export interface DesktopBridge {
   pack?: DesktopPackBridge;
   /** 网关与密钥（#152）；没有这一项的替身按「尚不可用」处理。 */
   gateway?: DesktopGatewayBridge;
+  /** 本机用量与回收（#159）；没有这一项的替身按「尚不可用」处理。 */
+  usage?: DesktopUsageBridge;
 }
 
 /** 本切片还没有的能力：以 kind: "unavailable" 拒绝。 */
@@ -372,7 +414,7 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     installInputTakeover: installPageInputTakeover,
   };
 
-  const usage: UsagePort = desktopUsageStore();
+  const usage: UsagePort = info.features.usage && bridge.usage ? desktopUsageStore(bridge.usage) : unavailableUsageStore();
 
   // 网关配置、系统保护的密钥与模型发现（#152）：经 Gateway 绑定走 Go 服务。
   const gatewayPorts = createGatewayPorts(bridge);

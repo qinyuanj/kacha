@@ -77,7 +77,7 @@ describe("仓库里的更新说明与桌面版本", () => {
     expect(section, `docs/release/changelog.md 缺少当前版本 ${desktop} 的一节`).toBeDefined();
     expect(section!.groups.flatMap((g) => g.items).length, `docs/release/changelog.md 中 ${desktop} 一节没有条目`).toBeGreaterThan(0);
     const currentText = JSON.stringify(section!.groups);
-    expect(currentText).toContain("生成、整理与用量管理尚不可用");
+    expect(currentText).toContain("生成与整理尚不可用");
   });
 
   it("恢复全部可查版本，按新在前排列且不重复、不缺漏", () => {

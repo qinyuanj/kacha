@@ -94,3 +94,19 @@ describe("剪贴板句柄（#129）", () => {
     ]);
   });
 });
+describe("本机用量句柄（#159）", () => {
+  it("usage 句柄按 Usage.* 调 Go 绑定，方法名错一个就 notBound", async () => {
+    const { bridge, calls } = recordingBridge();
+    await bridge.usage!.usage().catch(() => undefined);
+    await bridge.usage!.cleanup(["2026-11-01/x"]).catch(() => undefined);
+    await bridge.usage!.setLimit(1024).catch(() => undefined);
+    await bridge.usage!.recycle().catch(() => undefined);
+    await bridge.usage!.restore("r000001").catch(() => undefined);
+    await bridge.usage!.purgeExpired().catch(() => undefined);
+    expect(calls.map((c) => c.method)).toEqual([
+      "Usage.Usage", "Usage.Cleanup", "Usage.SetLimit", "Usage.Recycle", "Usage.Restore", "Usage.PurgeExpired",
+    ]);
+    expect(calls[1].args).toEqual([["2026-11-01/x"]]);
+    expect(calls[4].args).toEqual(["r000001"]);
+  });
+});

@@ -8,11 +8,11 @@ import (
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
-// 画板包导出已经在桌面壳接通；生成与用量仍未实现。
+// 桌面壳的能力开关：画板包导出与本机用量已接通，生成仍未实现。
 func TestDesktopFeatures(t *testing.T) {
 	f := DesktopFeatures()
-	if f.Generation || f.Usage || !f.PackExport {
-		t.Fatalf("features = %+v, want generation/usage off, pack_export on", f)
+	if f.Generation || !f.Usage || !f.PackExport {
+		t.Fatalf("features = %+v, want generation off, usage/pack_export on", f)
 	}
 }
 
@@ -37,8 +37,8 @@ func TestInfoReportsRootsAndCreatesBoardRoot(t *testing.T) {
 	if stat, err := os.Stat(info.BoardRoot); err != nil || !stat.IsDir() {
 		t.Fatalf("board root not created: %v", err)
 	}
-	if info.Features.Generation || info.Features.Usage || !info.Features.PackExport {
-		t.Fatalf("features = %+v, want generation/usage off, pack_export on", info.Features)
+	if info.Features.Generation || !info.Features.Usage || !info.Features.PackExport {
+		t.Fatalf("features = %+v, want generation off, usage/pack_export on", info.Features)
 	}
 }
 
