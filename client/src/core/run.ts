@@ -10,6 +10,7 @@ import { firstRegionOf, slotsFromReferences } from "./region";
 import { planSend } from "./sendPlan";
 import { isAutoRatio, resolveSize } from "./size";
 import { snapshotOf } from "./submission";
+import { submissionBlockers } from "./taskView";
 import { LocalError, newTaskId, readSubmission, taskDirOfTaskId, saveLayers, saveResult, sniffImage, writeSubmission, type LayerRecord, type ReferenceSource, type SubmissionPlan, type TaskFs } from "./taskDir";
 import { errorText } from "./errors";
 
@@ -141,9 +142,13 @@ function layerOptions(enabled: boolean, layerSize: SubmissionPlan["layerSize"]):
   return enabled ? { layerSize: layerSize ?? "auto" } : {};
 }
 
-function validateSubmissionInputs(model: ModelCapability, send: ReturnType<typeof planSend>, sourceCount: number, slotCount: number, flashLayers: boolean): void {
-  if (isFlashShape(model) && send.referenceProblems.issues.length) throw new LocalError(send.referenceProblems.issues.join("；"));
-  if (isFlashShape(model) && slotCount > 10) throw new LocalError("Flash 参考图最多 10 张");
+/**
+ * 提交前拦下不合规输入：名额、区域、负向与越界引用对所有模型一视同仁，
+ * 文案与任务视图同源（taskView.submissionBlockers），界面标红的和这里拦下的是同一句话。
+ */
+function validateSubmissionInputs(board: Board, table: CapabilityTable, taskNodeId: string, sourceCount: number, slotCount: number, flashLayers: boolean): void {
+  const blockers = submissionBlockers(board, table, taskNodeId);
+  if (blockers.length) throw new LocalError(blockers.map((b) => b.text).join("；"));
   // 先按用户连线读全部源图，再按展开槽组装：叠加槽由其原图合成。
   // 读到即按该任务模型的输入规则处理成参考图快照；叠加图从处理后的快照合成，两者尺寸一致。
   if (flashLayers && (sourceCount !== 1 || slotCount !== 1)) throw new LocalError("图层拆分需要恰好一张参考图，不支持区域派生图");
@@ -211,7 +216,7 @@ export async function prepareJob(
   const sources = imageSources(board, taskNodeId, userRoot);
   const slots = imagePortSlots(board, table, taskNodeId);
   const send = planSend(model, slots, snapshot.prompt, snapshot.negative_prompt);
-  validateSubmissionInputs(model, send, sources.length, slots.length, flashLayers);
+  validateSubmissionInputs(board, table, taskNodeId, sources.length, slots.length, flashLayers);
   const sourceBytes = await readSourceImages(deps, sources, model, flashLayers);
   const references = await prepareReferences(deps, slots, snapshot, sourceBytes, model);
   // 同一次提交按份数展开的各份共用提交时刻，任务记录除任务编号外相同。

@@ -84,6 +84,19 @@ const NOT_READY: ReadonlySet<ReasonKind> = new Set(["positiveMissing", "positive
 
 const reason = (kind: ReasonKind, text: string): UnrunnableReason => ({ kind, category: NOT_READY.has(kind) ? "notReady" : "error", text });
 
+/**
+ * 提交前必须拦下的输入问题（#154）：与任务视图共用同一份判断与文案。
+ * 界面标红说「参考图 4 张超出模型上限 3 张」，提交时也得说同一句话并真的不发请求；
+ * 依赖界面采集事实（缺图、网关发现）的原因不在这里，缺图在读取参考图那一步失败。
+ */
+export function submissionBlockers(board: Board, table: CapabilityTable, taskId: string): UnrunnableReason[] {
+  const task = findTask(board, taskId);
+  const model = task ? findModel(table, task.model) : undefined;
+  if (!task || !model) return [];
+  const refs = imageRefProblems(board, table, taskId);
+  return dedupe([...modelReasons(board, model, task), ...refs.issues.map((text) => reason("referenceOutOfRange", text))]);
+}
+
 export function taskView(board: Board, table: CapabilityTable, taskId: string, facts: TaskFacts): TaskView | null {
   const task = findTask(board, taskId);
   if (!task) return null;

@@ -379,15 +379,23 @@ describe("桌面端口的单份文生图闭环（#153）", () => {
     expect(s.changes.some((c) => c.kind === "runResult")).toBe(false);
   });
 
+  // 等到这一份真的进了退避：429 的响应处理与定时器挂上都发生在请求返回之后，
+  // 先推进假时钟会让 30s 定时器挂到已经走过的时刻上，永远不触发（与产品的退避无关）。
+  async function untilBackoff(s: Setup): Promise<void> {
+    await until(() => s.runner.getSnapshot().board("A").nodes.get("t")?.copies.some((c) => c.status.kind === "backoff"));
+  }
+
   it("429 按既有退避重试后失败，不新增自动收费重试", async () => {
     const s = await setup("rate");
     await s.runner.submit(s.target, s.board, ["t"], { t: 1 });
-    await until(() => s.generated.length >= 1);
+    await untilBackoff(s);
     expect(s.generated).toHaveLength(1);
     s.advance(30_000);
     await until(() => s.generated.length >= 2);
+    await untilBackoff(s);
     s.advance(60_000);
     await until(() => s.generated.length >= 3);
+    await untilBackoff(s);
     s.advance(120_000);
     const { record: outcome } = await outcomeOf(s);
     expect(outcome).toMatchObject({ outcome: "failed", label: "网关限流" });

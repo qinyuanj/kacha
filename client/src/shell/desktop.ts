@@ -12,10 +12,11 @@ import type { PackEntryFact, PackExportSpec } from "../core/boardPack";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
 import type { BrowserOptions, ImageInfo, RecycleEntry, UsageCandidate, UsagePort } from "./types";
 import type { LogKind } from "./log";
-import { base64Of } from "../core/base64";
-import { clipboardContentOf, extensionOf } from "./desktopClipboard";
+import { base64Of, base64ToBytes } from "../core/base64";
+import { bytesToFile, clipboardContentOf, extensionOf } from "./desktopClipboard";
 import { sha256Hex } from "../core/sha256";
 import { IMPORTED_REFERENCES_DIR } from "../core/boardPack";
+import { sniffImage } from "../core/taskDir";
 import { joinPath, toRootRelative } from "../core/paths";
 import { checked, desktopBoardStore, desktopFileStore, desktopMediaStore, desktopMetaStore, desktopUsageStore, localRun, unavailable, unavailableUsageStore } from "./desktopStores";
 import { createDesktopPack } from "./desktopPack";
@@ -58,6 +59,8 @@ export interface DesktopLocalBridge {
   archiveBoard(from: string, to: string, version?: string): Promise<DesktopOutcome>;
   unarchiveBoard(from: string, to: string): Promise<DesktopOutcome>;
   readFile(path: string): Promise<string>;
+  /** 本机选图（#154）：Go 弹系统对话框并按路径读成 base64——页面拿不到本机路径，也读不到数据根之外的文件。 */
+  pickImages(multiple: boolean): Promise<DesktopPickedImage[]>;
   writeNewFile(path: string, bytes: Uint8Array): Promise<DesktopOutcome>;
   /** 与 writeNewFile 相同，字节以 base64 传（Uint8Array 在 JSON 里解不进 Go 的 []byte）。 */
   writeNewFileBase64(path: string, data: string): Promise<DesktopOutcome>;
@@ -80,6 +83,12 @@ export interface DesktopLocalBridge {
   readCapabilityOverride(): Promise<string>;
   boardsDir(): Promise<string>;
   userDataRoot(): Promise<string>;
+}
+
+/** Go 侧选中的本机图片（Local.PickImages）：name 是文件名，data 是 base64 的原始字节。 */
+export interface DesktopPickedImage {
+  name: string;
+  data: string;
 }
 
 /** Go 侧剪贴板快照（Clipboard.Read）：类别与 desktop/internal/clipboard 的 Kind 一致。 */
@@ -291,7 +300,8 @@ async function uploadReference(local: DesktopLocalBridge, userRoot: string, file
   const bytes = new Uint8Array(await file.arrayBuffer());
   const sha = await sha256Hex(bytes);
   // 端口约定：返回相对数据根的路径，绝对路径只在本函数里用。
-  const abs = joinPath(joinPath(userRoot, IMPORTED_REFERENCES_DIR), sha + "." + extensionOf(file));
+  // 扩展名按字节认（本机选来的图可能是 JPEG / WebP），认不出才用 File 的类型提示。
+  const abs = joinPath(joinPath(userRoot, IMPORTED_REFERENCES_DIR), sha + "." + (sniffImage(bytes)?.ext ?? extensionOf(file)));
   const path = toRootRelative(userRoot, abs);
   try {
     checked(await local.writeNewFileBase64(abs, base64Of(bytes)));
@@ -299,6 +309,18 @@ async function uploadReference(local: DesktopLocalBridge, userRoot: string, file
     if (portFailureOf(e).kind !== "alreadyExists") throw e;
   }
   return { path, sha256: sha };
+}
+
+/**
+ * 本机选图（#154）：系统对话框在 Go 侧弹，字节由 Go 按用户选中的路径读成 base64。
+ * 这里还原成 File 交给既有导入链路（isImageFile → uploadReference），页面不碰本机路径，也不读数据根之外的文件。
+ */
+async function pickLocalImages(local: DesktopLocalBridge, multiple: boolean): Promise<File[]> {
+  const picked = await localRun(() => local.pickImages(multiple));
+  return picked.map((image) => {
+    const bytes = base64ToBytes(image.data);
+    return bytesToFile(bytes, image.name, sniffImage(bytes)?.mediaType ?? "");
+  });
 }
 
 /**
@@ -425,6 +447,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     ...desktopMediaStore(info.user_data_root),
     // 选画板包用系统对话框（页面拿不到 File 的路径），之后交给 Pack.Import。
     pickPackFile: () => desktopPack.pickPackFile(),
+    // 选参考图同样走系统对话框：Go 读字节，页面只拿 File。
+    pickImages: (multiple: boolean): Promise<File[]> => pickLocalImages(local, multiple),
     uploadReference: (file: File): Promise<{ path: string; sha256: string }> => uploadReference(local, info.user_data_root, file),
     readClipboard: (): Promise<ClipboardContent | null> => readClipboardSnapshot(bridge),
     copyText: (text: string): Promise<void> => copyTextToSystemClipboard(bridge, text),
