@@ -47,7 +47,13 @@ function settings(overrides: Partial<SettingsState> = {}): PanelSettings {
 }
 
 async function show(port: FakePort, state = settings()): Promise<void> {
-  await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: state, onClose: vi.fn() }) })));
+  // 更新段的准备依赖（#164）：面板只摆放，替身给空队列与即时保存。
+  const update = {
+    queue: { pending: () => 0, setSubmissionGuard: () => undefined },
+    saveBoards: async () => undefined,
+    saveUi: async () => undefined,
+  };
+  await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: state, onClose: vi.fn(), update }) })));
 }
 
 /** 密钥输入框（密码框，不把密钥显示成普通文本）。 */

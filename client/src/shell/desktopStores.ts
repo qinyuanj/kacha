@@ -2,11 +2,12 @@
 // 拆开之后每个函数的复杂度单独看得到，门禁也按函数计。
 import { FEATURE_LABELS, PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore } from "./port";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
-import type { BoardListing, BoardTexts, BoardWriteOptions, ImageInfo, RecycleEntry, Usage, UsagePort } from "./types";
+import type { BoardListing, BoardTexts, BoardWriteOptions, ImageInfo, RecycleEntry, UpdatePort, Usage, UsagePort } from "./types";
 import { base64Of, base64ToBytes } from "../core/base64";
 import { joinPath } from "../core/paths";
 import type { DirEntry } from "../core/relocate";
-import type { DesktopLocalBridge, DesktopOutcome, DesktopUsageBridge } from "./desktop";
+import type { DesktopLocalBridge, DesktopOutcome, DesktopUpdateBridge, DesktopUsageBridge } from "./desktop";
+import { emptySnapshot, type UpdatePhase, type UpdateSnapshot } from "../core/update";
 
 /** Go 侧的失败类别 → 端口失败类别；未列出的按 failed 处理（消息保持原文）。 */
 const KIND_BY_GO: Record<string, "conflict" | "missing" | "alreadyExists" | "slotsFull" | "archived" | "invalid" | "failed"> = {
@@ -163,15 +164,67 @@ export function desktopMediaStore(root: string): MediaStore {
   };
 }
 
+/**
+ * 能力未开时的分组：每个方法都以同一类别明确不可用，不返回空成功。
+ *
+ * 各能力用自己的名字拒绝（C4）：用量说「用量统计」，更新说「自动更新」，
+ * 不把「生成尚不可用」当成别的能力没实现的理由。
+ */
+function unavailableStore<T>(feature: FeatureId, methods: readonly string[]): T {
+  const store: Record<string, () => Promise<never>> = {};
+  for (const method of methods) store[method] = async (): Promise<never> => unavailable(feature);
+  return store as T;
+}
+
 /** 能力未开时用量统计明确不可用，不返回空成功。 */
 export function unavailableUsageStore(): UsagePort {
+  return unavailableStore<UsagePort>("usage", ["usage", "cleanupUnreferenced", "setLimit", "recycle", "restore", "purgeExpired"]);
+}
+
+/** 更新阶段的白名单：Go 侧给不认识的值时按 error 处理，不静默当成可安装。 */
+const UPDATE_PHASES = new Set<UpdatePhase>([
+  "disabled",
+  "idle",
+  "checking",
+  "up_to_date",
+  "available",
+  "downloading",
+  "ready",
+  "installing",
+  "error",
+]);
+
+/** Go 侧快照 → 页面快照：字段一一对应，阶段不认识就按 error 收。 */
+export function updateSnapshotOf(raw: Awaited<ReturnType<DesktopUpdateBridge["status"]>>): UpdateSnapshot {
+  const phase = UPDATE_PHASES.has(raw.phase as UpdatePhase) ? (raw.phase as UpdatePhase) : "error";
   return {
-    usage: async (): Promise<never> => unavailable("usage"),
-    cleanupUnreferenced: async (): Promise<never> => unavailable("usage"),
-    setLimit: async (): Promise<never> => unavailable("usage"),
-    recycle: async (): Promise<never> => unavailable("usage"),
-    restore: async (): Promise<never> => unavailable("usage"),
-    purgeExpired: async (): Promise<never> => unavailable("usage"),
+    ...emptySnapshot(),
+    phase,
+    current: raw.current ?? "",
+    version: raw.version ?? "",
+    notes: raw.notes ?? "",
+    page_url: raw.page_url ?? "",
+    downloaded: raw.downloaded ?? 0,
+    total: raw.total ?? 0,
+    // 验签与可安装只信 Go 侧的说法：界面不自己推断。
+    verified: raw.verified === true,
+    installable: raw.installable === true,
+    error: raw.error ?? "",
+    checked_at: raw.checked_at ?? "",
+  };
+}
+
+/** 能力未开时更新入口明确不可用，不返回空成功。 */
+export function unavailableUpdateStore(): UpdatePort {
+  return unavailableStore<UpdatePort>("update", ["status", "check", "install"]);
+}
+
+/** 自动更新那一组：检查、读快照与安装都落到 Go 的 Update 服务。 */
+export function desktopUpdateStore(update: DesktopUpdateBridge): UpdatePort {
+  return {
+    status: (): Promise<UpdateSnapshot> => localRun(async () => updateSnapshotOf(await update.status())),
+    check: (): Promise<void> => localRun(() => update.check()),
+    install: (): Promise<void> => localRun(() => update.install()),
   };
 }
 
