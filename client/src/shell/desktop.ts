@@ -446,11 +446,13 @@ function diagnosticsOutcomeOf(outcome: DesktopDiagnosticsOutcome): DiagnosticsOu
   return { kind: "failed", message: outcome.message || "导出诊断包失败" };
 }
 
-/** 造桌面壳端口：读一次壳信息，之后都从这份快照回答。 */
-export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopShell> {
-  const info = await bridge.info();
-  const local = bridge.local;
-  const features: ShellFeatures = {
+/**
+ * 能力开关：每项只在「桥上有真实服务」时打开，没有实现就明确不可用（界面据此隐藏入口）。
+ *
+ * 单独成函数：这些判断随切片增长，留在 createDesktopPort 里会把它压成一张难读的开关表。
+ */
+export function desktopFeatures(bridge: DesktopBridge, info: DesktopInfo): ShellFeatures {
+  return {
     generation: info.features.generation,
     usage: info.features.usage,
     packExport: info.features.pack_export,
@@ -467,6 +469,13 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     // 数据位置迁移（#161）：桥上有真实 Storage 服务才开放，否则入口不出现。
     dataRoot: bridge.dataRoot !== undefined,
   };
+}
+
+/** 造桌面壳端口：读一次壳信息，之后都从这份快照回答。 */
+export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopShell> {
+  const info = await bridge.info();
+  const local = bridge.local;
+  const features: ShellFeatures = desktopFeatures(bridge, info);
 
   const board = desktopBoardStore(local, info.user_data_root);
 
