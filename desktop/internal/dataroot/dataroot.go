@@ -1,4 +1,4 @@
-// Package dataroot 决定本机唯一一份用户数据根，并在状态文件里记住它。
+// Package dataroot 决定本机唯一一份数据根，并在状态文件里记住它。
 //
 // 一份安装只有一份数据：默认位置是 MyGo 的用户数据目录下的 data，首次启动创建并写进状态文件；
 // 之后启动一律回到记下的位置，即使默认位置被改了也不搬数据。状态文件读不懂时退回默认位置并重写，
@@ -25,17 +25,17 @@ func StatePath(appDataDir string) string {
 	return filepath.Join(appDataDir, stateFile)
 }
 
-// Resolve 返回用户数据根：状态文件里记下的位置优先，否则用默认位置。返回前确保目录存在。
+// Resolve 返回数据根：状态文件里记下的位置优先，否则用默认位置。返回前确保目录存在。
 func Resolve(statePath, defaultRoot string) (string, error) {
 	root := defaultRoot
 	if saved, ok := readState(statePath); ok && saved.Root != "" {
 		root = filepath.FromSlash(saved.Root)
 	}
 	if root == "" {
-		return "", errors.New("用户数据根为空")
+		return "", errors.New("数据根为空")
 	}
 	if err := os.MkdirAll(root, 0o755); err != nil {
-		return "", fmt.Errorf("创建用户数据根 %s: %w", root, err)
+		return "", fmt.Errorf("创建数据根 %s: %w", root, err)
 	}
 	if err := writeState(statePath, root); err != nil {
 		return "", err

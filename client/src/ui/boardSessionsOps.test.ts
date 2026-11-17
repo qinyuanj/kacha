@@ -88,7 +88,7 @@ describe("归档画板", () => {
     expect(String(port.calls.archive[0].to)).toContain("归档");
   });
 
-  it("没有用户数据根：什么都不做", async () => {
+  it("没有数据根：什么都不做", async () => {
     const port = createFakePort();
     const movedTo = vi.fn();
     await archiveBoardSession(storeOf([okSession()]), port as unknown as SessionPorts, null, async () => undefined, new Set(), movedTo, "/~/a.ugcboard.json");
@@ -146,7 +146,7 @@ describe("改名", () => {
 });
 
 describe("重载", () => {
-  it("读回服务端的画板", async () => {
+  it("读回存储端口的画板", async () => {
     const port = createFakePort({ boards: [{ path: "/~/a.ugcboard.json", main: '{"format_version":2,"title":"远端","viewport":{"zoom":1,"x":0,"y":0},"nodes":[],"edges":[],"extra":{}}', version: "v2" }] });
     const store = storeOf([okSession()]);
     await reloadBoardSession(store, port as unknown as SessionPorts, "/~", new Set(), "k1");

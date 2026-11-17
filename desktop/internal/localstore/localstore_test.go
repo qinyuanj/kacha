@@ -134,7 +134,7 @@ func TestRemoveBoardMovesToRecycle(t *testing.T) {
 	}
 }
 
-// 越出用户数据根的路径一律拒绝。
+// 越出数据根的路径一律拒绝。
 func TestResolveRejectsOutsideRoot(t *testing.T) {
 	s := New(t.TempDir())
 	if _, err := s.Resolve(filepath.Join("..", "outside.txt")); err == nil {

@@ -31,7 +31,7 @@ describe("画板列表", () => {
     expect(g.editable.map((b) => b.name)).toEqual(["big", "small"]);
   });
 
-  it("普通列表：照服务端给的顺序", () => {
+  it("普通列表：照存储端口给的顺序", () => {
     const g = boardGroups(listing([entry("small", { bytes: 10 }), entry("big", { bytes: 900 })]), false);
     expect(g.editable.map((b) => b.name)).toEqual(["small", "big"]);
   });
@@ -60,6 +60,6 @@ describe("画板列表", () => {
     expect(listTitle(false, "管理画板")).toBe("画板列表");
     expect(listTitle(true, "管理画板")).toBe("管理画板");
     expect(listDescription(true)).toContain("按画板体量从大到小");
-    expect(listDescription(false)).toContain("画板保存在服务端");
+    expect(listDescription(false)).toContain("画板保存在这台电脑");
   });
 });

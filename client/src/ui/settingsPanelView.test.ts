@@ -56,7 +56,7 @@ describe("高级设置面板", () => {
     expect(concurrencyOnBlur("", 4)).toBe("4");
   });
 
-  it("连接测试结果：成功给模型数，失败给服务端的话", () => {
+  it("连接测试结果：成功给模型数，失败给存储端口的话", () => {
     expect(connectionText({ ok: true, count: 3 })).toBe("连接成功，网关提供 3 个模型");
     expect(connectionText({ ok: false, message: "网关不可达" })).toBe("网关不可达");
   });

@@ -420,3 +420,40 @@ describe("警告与未引用序号", () => {
     expect(view(ready(patch, [], "a cat"), t).warnings).toEqual([]);
   });
 });
+
+describe("组合约束的原因顺序", () => {
+  it("未就绪先于模型能力、开关和缺图；引用越界仍先于缺图", () => {
+    const table = withModel((m) => {
+      m.workflows.image_edit.max_references = 0;
+      m.workflows.image_edit.supports_negative_prompt = "unsupported";
+      m.workflows.image_edit.layer_decomposition = "unsupported";
+      m.transparent_background = "unsupported";
+      m.region_hint = { highlight_overlay: "unsupported", marked_image: "unsupported", bbox_tag: "unsupported" };
+    });
+    const b = ready({ model: "test-model", layer_decomposition: true, transparent_background: true, size_spec: { tier: "4K", ratio: "1:1", width: null, height: null } }, ["r1"], " ");
+    b.edges[1] = { ...b.edges[1], region: REGION };
+    b.edges.push(edge("p", "t", "negative"));
+    const facts = { ...UNKNOWN, missingNodes: new Set(["r1"]) };
+    expect(kinds(b, table, facts)).toEqual([
+      ["positiveEmpty", "notReady"],
+      ["imageEditUnsupported", "error"],
+      ["regionUnsupported", "error"],
+      ["negativeUnsupported", "error"],
+      ["sizeUnsupported", "error"],
+      ["layerUnsupported", "error"],
+      ["transparentUnsupported", "error"],
+      ["imageMissing", "error"],
+    ]);
+    const p = b.nodes[0];
+    if (p.type !== "prompt") throw new Error("expected prompt");
+    p.text = "@图9 改为红色";
+    const reasons = view(b, table, facts).reasons;
+    expect(reasons.slice(-2).map((r) => r.kind)).toEqual(["referenceOutOfRange", "imageMissing"]);
+    expect(new Set(reasons.map((r) => r.kind + "\u0000" + r.text)).size).toBe(reasons.length);
+  });
+
+  it("自定义尺寸越界的原因保留像素值", () => {
+    const b = ready({ size_spec: { tier: null, ratio: null, width: 1, height: 1 } }, [], "猫");
+    expect(view(b).reasons).toEqual([{ kind: "sizeUnsupported", category: "error", text: "自定义尺寸 1×1 超出模型范围" }]);
+  });
+});

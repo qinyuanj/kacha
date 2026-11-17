@@ -1,5 +1,5 @@
-// 壳端口（#126）：界面只认这一组接口，Web 实现在 webPort.ts（同源 HTTP + 浏览器能力）。
-// 换底层实现（桌面 Go 壳，见 ADR 0023）只换实现、不改调用点：缺的能力由 features 提前关掉，
+// 壳端口：界面通过这组接口使用 MyGo / Go 本机能力（ADR 0023）。
+// 缺的能力由 features 提前关掉，
 // 或在调用时返回 kind: "unavailable"，界面据此隐藏入口而不是失败得很晚。
 import { errorText } from "../core/errors";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
@@ -12,7 +12,7 @@ import type { TaskFs } from "../core/taskDir";
 import type { ClipboardContent } from "../core/clipboardDispatch";
 import type { BoardMeasure } from "../core/tidy";
 import type { LogKind } from "./log";
-import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, SessionPort, UsagePort } from "./types";
+import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, UsagePort } from "./types";
 
 export type { ImageInfo } from "./types";
 
@@ -20,7 +20,7 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "login" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults";
+export type FeatureId = "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
@@ -30,20 +30,15 @@ export interface ShellFeatures {
   /** 画板包导出（打包并下载）。 */
   packExport: boolean;
   /**
-   * 画板包导入（#131）：桌面壳在本机解压合并，Web 走服务端合并。
-   * 不声明按有处理（两种实现都有）；只有实现明确做不到时才写 false。
+   * 画板包导入：桌面壳交给 Go 在本机解压合并。
+   * 未声明时按可用处理；实现不可用时明确写 false。
    */
   readonly packImport?: boolean;
   /**
    * 整理模式（按任务目录量画板体量）：桌面壳本切片还没实现，没做时入口标「尚不可用」。
-   * 不声明按有处理（Web 版有）。
+   * 未声明时按可用处理。
    */
   readonly tidy?: boolean;
-  /**
-   * 能直接读系统剪贴板（#129）：桌面壳为 true，粘贴先读原生快照；Web 不声明，
-   * 继续用 paste 事件带的内容（内网 HTTP 下页面读不到剪贴板，见 ADR 0018）。
-   */
-  readonly nativeClipboard?: boolean;
 }
 
 /** 端口失败的类别：界面只按它分支。 */
@@ -70,7 +65,7 @@ export interface PortFailure {
   /** 实现的原始错误码（日志与排查用），界面不据此分支。 */
   code: string;
   message: string;
-  /** 原始状态码（Web 是 HTTP 状态，桌面适配器可留 0）。 */
+  /** 底层状态码；无对应状态时为 0。 */
   status: number;
   /** kind = unavailable 时是哪个能力。 */
   feature?: FeatureId;
@@ -105,7 +100,7 @@ export function portFailureOf(error: unknown): PortFailure {
  * 端口说这项能力还没有时给用户的说法（#127）；不是 unavailable 就返回 null。
  *
  * 桌面壳本切片没有生成、结果下载、画板包导出等能力：调用点拿到 unavailable 时要说清「还没做」，
- * 不能报成功，也不能把内部错误原文丢给用户。其它失败仍按各自原有的文案处理（Web 版不变）。
+ * 不能报成功，也不能把内部错误原文丢给用户。其它失败按各自的错误类别显示。
  */
 export function unavailableMessage(error: unknown): string | null {
   const failure = portFailureOf(error);
@@ -125,7 +120,6 @@ export const FEATURE_LABELS: Record<FeatureId, string> = {
   archive: "归档",
   tidy: "整理",
   relay: "结果中转",
-  login: "登录",
   copyImage: "复制图片",
   copyText: "复制文本",
   saveImage: "另存为",
@@ -151,7 +145,7 @@ export interface BoardStore {
   measure(text: string): Promise<BoardMeasure>;
 }
 
-/** 用户数据根里的文件：任务目录、参考图、画板包规划都要它。 */
+/** 数据根里的文件：任务目录、参考图、画板包规划都要它。 */
 export interface FileStore {
   readFile(absPath: string): Promise<Uint8Array>;
   /** 原子写新文件；目标已存在 alreadyExists。 */
@@ -212,7 +206,7 @@ export interface MediaStore {
   thumbUrl(absPath: string): string;
   pickImages(multiple: boolean): Promise<File[]>;
   pickPackFile(): Promise<File | null>;
-  /** 本机图片进用户数据根的 导入参考图/，返回相对用户数据根的路径与 sha256。 */
+  /** 本机图片进数据根的 导入参考图/，返回相对数据根的路径与 sha256。 */
   uploadReference(file: File): Promise<{ path: string; sha256: string }>;
   copyText(text: string): Promise<void>;
   /** 复制一张图到系统剪贴板；format 是路径扩展名给的提示，实现按字节判断容器。 */
@@ -227,8 +221,7 @@ export interface MediaStore {
 
 /**
  * 画板包：导入与导出都经这里。
- * import 是整条导入（本地检查 → 去重上传 → 合并 → 提交画板），进度与结局由调用方给的选项接；
- * 桌面适配器可以整条自己实现，Web 实现把它转给 core 的 importPack（经 io）。
+ * import 由 Go 完成本机解压、合并与画板提交；io 只提供取消，选项接收进度与结局。
  */
 export interface PackStore {
   readonly io: PackIo;
@@ -263,9 +256,9 @@ export interface CorePorts {
   settingsPorts: SettingsPorts;
 }
 
-/** 壳端口：界面唯一依赖的实现接缝（Web 见 webPort.ts，测试见 testing/fakePort.ts）。 */
+/** 壳端口：界面唯一依赖的实现接缝；桌面实现见 desktop.ts，测试替身见 testing/fakePort.ts。 */
 export interface ShellPort {
-  /** 用户数据根：core 按它拼绝对路径；Web 是虚拟根 /~，桌面是本机真实目录。 */
+  /** 本机数据根的绝对路径，core 据此拼接文件路径。 */
   readonly userRoot: string;
   readonly features: ShellFeatures;
   readonly board: BoardStore;
@@ -275,6 +268,5 @@ export interface ShellPort {
   readonly pack: PackStore;
   readonly ui: UiStore;
   readonly usage: UsagePort;
-  readonly session: SessionPort;
   readonly core: CorePorts;
 }

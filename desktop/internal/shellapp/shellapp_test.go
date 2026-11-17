@@ -16,7 +16,7 @@ func TestDesktopFeaturesAreOff(t *testing.T) {
 	}
 }
 
-// Info 报出版本、用户数据根与画板根；画板根在用户数据根里，首次调用就建好。
+// Info 报出版本、数据根与画板根；画板根在数据根里，首次调用就建好。
 func TestInfoReportsRootsAndCreatesBoardRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "data")
 	shell := New("0.1.0", root)
@@ -54,7 +54,7 @@ func TestBoardRootSharesLocalstoreBoardsDir(t *testing.T) {
 	}
 }
 
-// 用户数据根不存在时 Info 也把它建出来，界面拿到的路径总是可用的。
+// 数据根不存在时 Info 也把它建出来，界面拿到的路径总是可用的。
 func TestInfoCreatesMissingUserDataRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "nested", "data")
 	shell := New("0.1.0", root)

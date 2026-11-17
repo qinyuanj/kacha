@@ -18,7 +18,7 @@ import { posOf } from "./canvasPoint";
 import type { BoardActions } from "./context";
 import type { PreviewRequest } from "./PreviewDialog";
 
-/** 缺图节点重新定位的两条路：pick = 选本机文件，search = 在用户数据根内按身份找。 */
+/** 缺图节点重新定位的两条路：pick = 选本机文件，search = 在数据根内按身份找。 */
 type RelocateMode = BoardActions["relocate"] extends (nodeId: string, mode: infer M) => void ? M : never;
 
 /** 重新定位的日志结局：成功，或未找到 / 读不了。 */
@@ -57,7 +57,7 @@ export interface CanvasBoardActionsDeps {
   toast: (message: string) => void;
   /** perform 依赖每次渲染重建的新建类函数，经 ref 取最新一版，动作对象因此可以稳定。 */
   performRef: MutableRefObject<BoardActions["perform"]>;
-  /** 壳端口：选文件、上传参考图、读图片信息、在用户数据根里找文件与日志。 */
+  /** 壳端口：选文件、上传参考图、读图片信息、在数据根里找文件与日志。 */
   port: ShellPort;
 }
 
@@ -139,7 +139,7 @@ function relocateMissingText(node: ImageNode): string {
   return RELOCATE_TEXT.missing(name);
 }
 
-/** 选文件重定位：本机文件先上传到当前用户数据根，再更新节点引用。 */
+/** 选文件重定位：本机文件先上传到当前数据根，再更新节点引用。 */
 async function relocateByPick(deps: CanvasBoardActionsDeps, node: ImageNode): Promise<void> {
   const logRelocate = relocateLog(deps, node, "pick");
   const files = await deps.port.media.pickImages(false);
@@ -158,7 +158,7 @@ async function relocateByPick(deps: CanvasBoardActionsDeps, node: ImageNode): Pr
   }
 }
 
-/** 在用户数据根内按身份找：结果按 task_id 找任务目录，参考图按 sha256 找文件。 */
+/** 在数据根内按身份找：结果按 task_id 找任务目录，参考图按 sha256 找文件。 */
 async function relocateBySearch(deps: CanvasBoardActionsDeps, node: ImageNode): Promise<void> {
   const logRelocate = relocateLog(deps, node, "search");
   const abs =
@@ -180,7 +180,7 @@ async function relocateBySearch(deps: CanvasBoardActionsDeps, node: ImageNode): 
   }
 }
 
-/** 缺图节点重新定位：pick = 选文件，search = 在用户数据根内按身份找。 */
+/** 缺图节点重新定位：pick = 选文件，search = 在数据根内按身份找。 */
 function relocateAction(deps: CanvasBoardActionsDeps): BoardActions["relocate"] {
   return (nodeId, mode) =>
     void (async () => {

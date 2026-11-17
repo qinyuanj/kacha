@@ -1,6 +1,6 @@
-// Package localstore 是桌面壳的本地文件层：画板、用户数据根里的文件与元数据。
+// Package localstore 是桌面壳的本地文件层：画板、数据根里的文件与元数据。
 //
-// 一切都在用户数据根里：画板在 画板/，元数据在 .kacha/，删除的画板进 回收区/。
+// 一切都在数据根里：画板在 画板/，元数据在 .kacha/，删除的画板进 回收区/。
 // 写入是原子的（临时文件 + 改名），覆盖前把旧主文件留一份 .bak；内容版本是主文件字节的 sha256。
 // 这里不碰界面，go test 就能跑。
 package localstore
@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	// BoardsDir 是画板目录名（与 Web 服务端一致，见 core/paths.ts 的 BOARDS_DIR_NAME）。
+	// BoardsDir 是画板目录名（见 core/paths.ts 的 BOARDS_DIR_NAME）。
 	BoardsDir = "画板"
 	// ArchiveDir 是归档画板目录名（画板目录下的子目录）。
 	ArchiveDir = "归档"
@@ -28,7 +28,7 @@ const (
 	RecycleDir = "回收区"
 	// BoardExt 是画板文件扩展名。
 	BoardExt = ".ugcboard.json"
-	// BoardSlots 是画板位上限：本切片本地没有服务端配额，给一个宽松的默认值。
+	// BoardSlots 是本机可编辑画板的数量上限。
 	BoardSlots = 20
 	// DefaultBoardTitle 是新建画板的默认标题（与共享契约 contracts/board-policy.json 一致）。
 	DefaultBoardTitle = "未命名画板"
@@ -151,17 +151,17 @@ type DirEntry struct {
 	IsDir bool   `json:"is_dir"`
 }
 
-// Store 是用户数据根上的文件层。
+// Store 是数据根上的文件层。
 type Store struct {
 	root string
 }
 
-// New 造一个以 root 为用户数据根的 Store。
+// New 造一个以 root 为数据根的 Store。
 func New(root string) *Store {
 	return &Store{root: root}
 }
 
-// Root 返回用户数据根。
+// Root 返回数据根。
 func (s *Store) Root() string { return s.root }
 
 // BoardDir 返回画板目录的绝对路径。
@@ -170,8 +170,8 @@ func (s *Store) BoardDir() string { return filepath.Join(s.root, BoardsDir) }
 // MetaPath 返回元数据文件（settings.json、ui-state.json 等）的绝对路径。
 func (s *Store) MetaPath(name string) string { return filepath.Join(s.root, MetaDir, name) }
 
-// Resolve 把界面给的路径解析成绝对路径：绝对路径照用，相对路径按用户数据根拼。
-// 越出用户数据根的路径一律拒绝（导入与外部引用都不能跑出去）。
+// Resolve 把界面给的路径解析成绝对路径：绝对路径照用，相对路径按数据根拼。
+// 越出数据根的路径一律拒绝（导入与外部引用都不能跑出去）。
 func (s *Store) Resolve(path string) (string, error) {
 	if path == "" {
 		return "", errors.New("路径为空")
@@ -183,7 +183,7 @@ func (s *Store) Resolve(path string) (string, error) {
 	abs = filepath.Clean(abs)
 	root := filepath.Clean(s.root)
 	if !withinRoot(root, abs) {
-		return "", fmt.Errorf("路径越出用户数据根：%s", path)
+		return "", fmt.Errorf("路径越出数据根：%s", path)
 	}
 	// 词法前缀不够：根内一个指向根外的符号链接会被顺着读 / 写，必须按真实路径再判一次。
 	if err := checkRealContainment(root, abs); err != nil {
@@ -212,7 +212,7 @@ func checkRealContainment(root, abs string) error {
 		return err
 	}
 	if !withinRoot(filepath.Clean(realRoot), filepath.Clean(realAbs)) {
-		return fmt.Errorf("路径经符号链接越出用户数据根：%s", abs)
+		return fmt.Errorf("路径经符号链接越出数据根：%s", abs)
 	}
 	return nil
 }
@@ -326,7 +326,7 @@ func (s *Store) CreateBoard(title, text string) (string, Result) {
 	return path, result
 }
 
-// ListBoardNames 列出目录里的画板文件名：带扩展名，与 Web 服务端口径一致
+// ListBoardNames 列出目录里的画板文件名，保留扩展名
 // （只剩 .bak 的孤儿也算一块画板，主文件与它的 .bak 是同一块，列一次）。
 func (s *Store) ListBoardNames(dir string) ([]string, error) {
 	abs, err := s.Resolve(dir)
@@ -460,7 +460,7 @@ func (s *Store) RemoveBoard(path string, version string) Result {
 	return ok("")
 }
 
-// ReadFile 读用户数据根里的文件字节。
+// ReadFile 读数据根里的文件字节。
 func (s *Store) ReadFile(path string) ([]byte, error) {
 	abs, err := s.Resolve(path)
 	if err != nil {
@@ -585,7 +585,7 @@ func dedupe(names []string) []string {
 	return out
 }
 
-// rel 把绝对路径写成相对用户数据根的正斜杠路径；根目录外的保留绝对路径。
+// rel 把绝对路径写成相对数据根的正斜杠路径；根目录外的保留绝对路径。
 func (s *Store) rel(abs string) string {
 	root := filepath.Clean(s.root)
 	if strings.HasPrefix(strings.ToLower(abs), strings.ToLower(root)+string(os.PathSeparator)) {

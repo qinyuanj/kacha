@@ -6,11 +6,10 @@ import { useEffect, useRef, type RefObject } from "react";
 import type { BoardChange } from "../core/edit";
 import type { ClipboardContent } from "../core/clipboardDispatch";
 import type { PasteContext } from "../core/pageInput";
-import { clipboardNoticeText, pasteRefusalText } from "./boardText";
-import { isImageFile } from "./canvasDrop";
+import { clipboardNoticeText, pasteRefusalText, PASTE_TEXT } from "./boardText";
 import { nextPasteClip, readClipboard, writeClipboard } from "./canvasKeyboard";
 import { applyPasteEffect, pasteEffect, type PasteSinks } from "./canvasPasteApply";
-import { decideClipboardPaste, decidePaste, pastePosition, pastedFacts } from "./canvasPasteFacts";
+import { decideClipboardPaste, pastePosition } from "./canvasPasteFacts";
 
 interface Options {
   /** 画布根元素：粘贴落点跟着它上面的指针位置。 */
@@ -32,20 +31,9 @@ interface Options {
   importPastedImages: (files: File[], at: { x: number; y: number }) => void;
   /** 焦点 / 点击是否落在可编辑控件里（端口：桌面壳按自己的 DOM 判定）。 */
   isEditableTarget: (target: EventTarget | null) => boolean;
-  /** 读系统剪贴板（端口）：桌面壳直接读，Web 返回 null，改用 paste 事件带的内容。 */
+  /** 读系统剪贴板（端口）：桌面壳直接读取原生快照，读不到时明确提示。 */
   readClipboard: () => Promise<ClipboardContent | null>;
-  /**
-   * 这一端能不能直接读系统剪贴板（端口的 features.nativeClipboard）。
-   * 能读就先吞掉默认行为再等快照；不能读（Web）仍按 paste 事件同步分派，行为与 #96 完全一致。
-   */
-  nativeClipboard: boolean;
 }
-
-/** paste 事件带的内容：文件与纯文本（合成事件可能没有 clipboardData）。 */
-const eventContent = (data: DataTransfer | null) => ({ files: [...(data?.files ?? [])], text: data?.getData("text/plain") || null });
-
-/** 这一批文件里能读出内容的图片：读不到内容的（只有名字）不算。 */
-const imagesOf = (files: File[]) => files.filter((f) => isImageFile(f) && f.size > 0);
 
 /** 页面级粘贴：剪贴板里是本应用的节点标记就粘节点，是图片就落成参考图，其余（文本、读不到的文件）放行或提示。 */
 export function useCanvasPaste({
@@ -60,7 +48,6 @@ export function useCanvasPaste({
   importPastedImages,
   isEditableTarget,
   readClipboard: readClipboardPort,
-  nativeClipboard,
 }: Options): void {
   // 粘贴落点跟着鼠标：记下最后在画布内的位置（没有则取视口中心）。
   const lastPointer = useRef<{ x: number; y: number } | null>(null);
@@ -106,36 +93,27 @@ export function useCanvasPaste({
     const run = (action: Parameters<typeof pasteEffect>[0], images: () => File[]): boolean =>
       applyPasteEffect(pasteEffect(action, { images, readClipboard, refuseText: pasteRefusalText, noticeText: clipboardNoticeText }), sinks);
 
-    /** Web 的路：内容只能从 paste 事件里读，同步分派，放行时一点都不拦（输入框、页面文字照旧）。 */
-    const pasteFromEvent = (event: ClipboardEvent) => {
-      const { files, text } = eventContent(event.clipboardData);
-      const action = decidePaste(pastedFacts(null, files, text, isImageFile), context(landing()));
-      if (run(action, () => imagesOf(files))) event.preventDefault();
-    };
-
     /** 桌面壳的路：系统剪贴板要经 Go 读，是异步的（等主线程）。 */
-    const pasteFromNative = (event: ClipboardEvent) => {
-      const { files, text } = eventContent(event.clipboardData);
+    const pasteFromNative = () => {
       const at = landing();
       void (async () => {
         const snapshot = await readClipboardPort().catch(() => null);
-        // 读不到快照（桥里没有剪贴板）就退回 paste 事件带的内容，与 Web 同一套语义。
-        const action = snapshot
-          ? decideClipboardPaste(snapshot, context(at))
-          : decidePaste(pastedFacts(null, files, text, isImageFile), context(at));
-        // 先吞掉默认行为，否则同一个 Ctrl+V 会既落一份到页面、又落一份到画板。
-        if (run(action, () => (snapshot ? snapshot.images : imagesOf(files)))) event.preventDefault();
+        if (!snapshot) { toast(PASTE_TEXT.unavailable); return; }
+        const action = decideClipboardPaste(snapshot, context(at));
+        run(action, () => snapshot.images);
       })();
     };
 
     const onPaste = (event: ClipboardEvent) => {
-      if (!nativeClipboard) return pasteFromEvent(event);
+      if (modalOpen || dialogOpen.current) return;
       // 输入框里的文本粘贴完全交给浏览器：不读快照、不吞，文本照旧落进输入框。
       // （剪贴板里没有文本时仍走下面的原生读法：粘截图进画板与焦点在不在输入框无关。）
       if (isEditableTarget(document.activeElement) && (event.clipboardData?.getData("text/plain") ?? "") !== "") return;
-      pasteFromNative(event);
+      // 原生读取是异步的，必须在事件返回前阻止 WebView 的默认粘贴。
+      event.preventDefault();
+      pasteFromNative();
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [apply, centerPosition, dialogOpen, importPastedImages, isEditableTarget, modalOpen, nativeClipboard, readClipboardPort, readOnly, toast]);
+  }, [apply, centerPosition, dialogOpen, importPastedImages, isEditableTarget, modalOpen, readClipboardPort, readOnly, toast]);
 }

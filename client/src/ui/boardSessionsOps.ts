@@ -159,7 +159,7 @@ export async function createBoardSession(
   setActiveKey: (key: string) => void,
 ): Promise<string | null> {
   if (!userRoot) return null;
-  // 读不到列表时不拦：服务端仍会检查。
+  // 读不到列表时不拦：本机存储仍会检查。
   const slots = await ports.board.list().then((l) => l.slots, () => null);
   const refusal = slots ? slotsRefusal(slots, 1) : null;
   if (refusal) return refusal;
@@ -256,7 +256,7 @@ async function archiveMove(
   movedTo(path, to);
 }
 
-/** 取消归档：画板位满时返回统一文案（先按列表判定，抢位时由服务端 409 拒绝）；成功为 null。 */
+/** 取消归档：画板位满时返回统一文案（先按列表判定，抢位时由本机存储 409 拒绝）；成功为 null。 */
 export async function unarchiveBoardSession(
   store: SessionStore,
   ports: SessionPorts,
@@ -353,7 +353,7 @@ export async function renamedPath(store: SessionStore, ports: SessionPorts, path
   return joinPath(dir, uniqueBoardFileName(title, [...onDisk, ...openHere], self));
 }
 
-/** 冲突后由用户显式重新载入服务端的画板；本页未保存的改动随之放弃（不做自动合并）。 */
+/** 冲突后由用户显式重新载入本机存储的画板；本页未保存的改动随之放弃（不做自动合并）。 */
 export async function reloadBoardSession(
   store: SessionStore,
   ports: SessionPorts,

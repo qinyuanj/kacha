@@ -134,7 +134,7 @@ export function SettingsPanel({ settings, onClose }: Props) {
 
         <div className="form-row">
           <span>API 密钥</span>
-          <span className="muted small">密钥由进入界面管理；换密钥即视为新用户，看不到原来的画板与结果。要换密钥请先退出。</span>
+          <span className="muted small">生成与网关连接尚不可用，当前无法设置 API 密钥；更换密钥不会改变本机画板。</span>
         </div>
 
         <ConnectionRow testResult={testResult} canTest={view.canTest} testLabel={view.testLabel} onTest={() => void test()} />

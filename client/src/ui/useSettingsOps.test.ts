@@ -72,7 +72,7 @@ describe("结果", () => {
     expect(connectionResultOf({ ok: true, cache: { base_url: "http://a", fetched_at: "", model_ids: ["a", "b"] } })).toEqual({ ok: true, count: 2 });
   });
 
-  it("连接失败：给服务端的话", () => {
+  it("连接失败：给存储端口的话", () => {
     expect(connectionResultOf({ ok: false, message: "网关不可达" })).toEqual({ ok: false, message: "网关不可达" });
   });
 

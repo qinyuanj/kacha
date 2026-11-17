@@ -17,7 +17,8 @@ import type { BoardChange, EditResult } from "../core/edit";
 import { countLabel } from "../core/history";
 import { edgeHoverInfo } from "../core/hoverInfo";
 import { LOCKED_HINT, PASTE_OFFSET, TASK_BUSY } from "../core/iterate";
-import { MAX_PASTE_BYTES, nodeMarker, PASTE_NAME_PREFIX } from "../core/pageInput";
+import { MAX_PASTE_BYTES, isNodeMarker, nodeMarker, PASTE_NAME_PREFIX } from "../core/pageInput";
+import type { ClipboardContent } from "../core/clipboardDispatch";
 import type { BoardMeasure } from "../core/tidy";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { BoardCanvas } from "./BoardCanvas";
@@ -147,12 +148,15 @@ let root: Root;
 let elementAt: Mock<() => Element | null>;
 /** 壳端口的另存为替身（每次 beforeEach 重新装）。 */
 let port: FakePort;
+let nativeClipboard: ClipboardContent;
 /** 「另存为」的替身（每次 beforeEach 重新装）。 */
 let saveCopyAs: (absPath: string) => Promise<{ kind: "saved" | "cancelled" }>;
 
 beforeEach(() => {
   vi.clearAllMocks();
   port = createFakePort();
+  nativeClipboard = { kind: "empty", text: null, images: [], reason: null, readFailureCount: 0 };
+  port.media.readClipboard = vi.fn(async () => nativeClipboard);
   port.files.inspectImage = vi.fn(async () => IMAGE_INFO);
   port.board.measure = vi.fn(async () => ({ nodes: {}, dirs: {} } satisfies BoardMeasure));
   port.ui.ask = vi.fn(async () => true);
@@ -353,7 +357,7 @@ async function pointerMove(x: number, y: number): Promise<void> {
   });
 }
 
-/** 剪贴板替身：paste 事件的 clipboardData 由测试给（文本 + 文件）。 */
+/** 原生剪贴板替身的输入；paste 事件只负责触发，文本同时供输入框默认粘贴判断。 */
 interface ClipboardStub {
   /** 纯文本（`getData("text/plain")` 的返回值），缺省空串。 */
   text?: string;
@@ -364,16 +368,27 @@ interface ClipboardStub {
 /** jsdom 没有 ClipboardEvent / DataTransfer：用普通 Event 挂上 paste 处理器读的字段。返回事件本体。 */
 async function paste(clipboard: ClipboardStub = {}, target: EventTarget = document.body): Promise<Event> {
   const files = clipboard.files ?? [];
+  const text = clipboard.text ?? null;
+  const images = files.filter(file => file.type.startsWith("image/") && file.size > 0);
+  const tooLarge = images.some(file => file.size > MAX_PASTE_BYTES);
+  nativeClipboard = {
+    kind: isNodeMarker(text) ? "mark" : tooLarge ? "unsupported" : images.length ? "images" : files.length ? "unsupported" : text ? "text" : "empty",
+    text,
+    images: tooLarge ? [] : images,
+    reason: tooLarge ? "tooLarge" : files.length && !images.length ? "files" : null,
+    readFailureCount: files.length - images.length,
+  };
   const event = new Event("paste", { bubbles: true, cancelable: true });
   Object.defineProperty(event, "clipboardData", {
     value: {
       getData: (type: string) => (type === "text/plain" ? (clipboard.text ?? "") : ""),
-      files,
-      items: files.map((file) => ({ kind: "file", type: file.type, getAsFile: () => file })),
+      // 图片只从原生端口快照读取，事件不提供图片回退。
+      files: [],
     },
   });
   await act(async () => {
     target.dispatchEvent(event);
+    await Promise.resolve();
   });
   await flush();
   return event;
@@ -610,7 +625,7 @@ describe("上下文菜单", () => {
     await openNodeMenu("x1", 20, 20);
     await act(async () => menuItemButton(resultMenu, "saveAs").click());
     await flush();
-    // 结果节点的绝对路径来自用户数据根 + 节点路径；带图层时服务端打 zip，提示同一句。
+    // 结果节点的绝对路径来自数据根 + 节点路径；带图层时存储端口打 zip，提示同一句。
     expect(saveCopyAs).toHaveBeenCalledWith("/~/tasks/t1/result.png");
     expect(harness.toast).toHaveBeenCalledWith(SAVE_TEXT.started);
 

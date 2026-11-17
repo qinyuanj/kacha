@@ -114,7 +114,7 @@ describe("桌面壳的画板方法", () => {
     expect(failure?.kind).toBe("conflict");
   });
 
-  it("列出画板：名字带扩展名，路径是用户数据根下的绝对路径", async () => {
+  it("列出画板：名字带扩展名，路径是数据根下的绝对路径", async () => {
     const stub = stubBridge();
     const { port } = await createDesktopPort(stub.bridge);
 
@@ -131,7 +131,7 @@ describe("桌面壳的画板方法", () => {
     await expect(port.board.listNames("C:/data/画板")).resolves.toEqual(["本地.ugcboard.json"]);
   });
 
-  it("画板列表的路径是用户数据根下的绝对路径（与界面别处同一形状）", async () => {
+  it("画板列表的路径是数据根下的绝对路径（与界面别处同一形状）", async () => {
     const stub = stubBridge();
     const { port } = await createDesktopPort(stub.bridge);
 

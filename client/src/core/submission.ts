@@ -1,7 +1,7 @@
 // 提交前的纯函数：脏判据快照、运行范围、二次确认清单。
 import type { OutputOptions } from "./gateway";
 import { isFlashShape, outputOptions } from "./gateway";
-import { copyTaskIds, runCopies, type Board, type Region, type TaskNode } from "./board";
+import { findTask, copyTaskIds, runCopies, type Board, type Region, type TaskNode } from "./board";
 import { findModel, type CapabilityTable } from "./capabilities";
 import { imageEdges, imageKey, imageSources, promptText } from "./graph";
 import type { SendPlan } from "./sendPlan";
@@ -26,11 +26,6 @@ export interface Snapshot {
   output_options?: OutputOptions;
   layer_size?: import("./gateway").LayerSize;
   images: SnapshotImage[];
-}
-
-function findTask(board: Board, id: string): TaskNode | undefined {
-  const node = board.nodes.find((n) => n.id === id);
-  return node?.type === "task" ? node : undefined;
 }
 
 export function snapshotOf(board: Board, table: CapabilityTable, taskId: string): Snapshot | null {

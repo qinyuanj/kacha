@@ -115,14 +115,13 @@ export function AppToolbar({
   onOpenChangelog,
   settingsLoaded,
   onOpenSettings,
-  onLogout,
 }: {
   /** 画布把工具栏 portal 进这个容器。 */
   setToolbarSlot(slot: HTMLElement | null): void;
   canvasReady: boolean;
   runIndicator: ComponentProps<typeof RunIndicator>;
   packMenuOpen: boolean;
-  /** 没有用户数据根时画板包入口不可用。 */
+  /** 没有数据根时画板包入口不可用。 */
   packMenuDisabled: boolean;
   /** 打开菜单时给它的位置（按钮下缘）。 */
   onTogglePackMenu(at: { x: number; y: number }): void;
@@ -131,7 +130,6 @@ export function AppToolbar({
   onOpenChangelog(): void;
   settingsLoaded: boolean;
   onOpenSettings(): void;
-  onLogout?: () => void;
 }) {
   return (
     <div className="board-toolbar">
@@ -157,11 +155,6 @@ export function AppToolbar({
         <button className="topbar-button" onClick={onOpenSettings} disabled={!settingsLoaded}>
           ⚙ 高级设置
         </button>
-        {onLogout && (
-          <button className="topbar-button" onClick={onLogout} title="退出当前会话；换密钥即视为新用户">
-            退出
-          </button>
-        )}
       </div>
     </div>
   );

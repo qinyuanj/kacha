@@ -25,7 +25,7 @@ export async function writeSession(
   const text = serializeBoard(s.board);
   await port.board.write(s.path, text, s.version ? { version: s.version } : { createOnly: true });
   const version = await sha256Hex(new TextEncoder().encode(text));
-  patch(key, (x) => (samePath(x.path, s.path) ? { ...x, version, saveError: null } : x));
+  patch(key, (x) => (samePath(x.path, s.path) ? { ...x, version, saveError: null, missing: false, conflicted: false } : x));
 }
 
 /** 这一轮要不要写：会话不在、不是 ok、冲突或只读都不写。 */
@@ -46,7 +46,7 @@ export function noteSaveFailure(
   patch(key, (x) => ({ ...x, saveError: saveErrorText(s.path, errorText(e), isMissingError(e)), ...saveErrorFlags(e) }));
 }
 
-/** 读不到画板文件算不算「服务端已没有这块画板」。 */
+/** 读不到画板文件算不算「本机存储已没有这块画板」。 */
 function isMissingError(e: unknown): boolean {
   const kind = (e as { kind?: string } | null)?.kind;
   return kind === "missing";
@@ -85,7 +85,7 @@ export function useAutosave(
       saver.chain = saver.chain.then(async () => {
         // 写入时再取最新会话：路径可能刚被重命名或另存。
         const s = sessionOf(key);
-        // 归档画板只读（#90）：从不写回，服务端也会拒绝。
+        // 归档画板只读（#90）：从不写回，本机存储也会拒绝。
         if (!writableNow(s, isReadOnlyPath)) return;
         try {
           await writeSession(port, patch, key, s);
@@ -106,7 +106,7 @@ export function useAutosave(
     },
     [flush, saverOf],
   );
-  /** 关闭全部标签页（切换用户数据根时用）；先落盘。 */
+  /** 关闭全部标签页（切换数据根时用）；先落盘。 */
   const flushAll = useCallback(async () => {
     const pending = [...savers.current.entries()].filter(([, s]) => s.timer !== null).map(([key]) => flush(key));
     await Promise.all([...pending, ...[...savers.current.values()].map((s) => s.chain)]);

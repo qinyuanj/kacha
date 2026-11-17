@@ -1,7 +1,7 @@
 // 桌面壳端口（#127）：壳端口（#126）的桌面实现。
 //
-// 界面只认 ShellPort（见 shell/port.ts）：Web 实现在 webPort.ts，本文件是同一接口的桌面版本。
-// 画板、文件与元数据经 MyGo 绑定（Go 侧 internal/localstore 与 internal/localservice）落到本机用户数据根；
+// 界面只认 ShellPort（见 shell/port.ts），本文件负责 MyGo 桌面实现。
+// 画板、文件与元数据经 MyGo 绑定（Go 侧 internal/localstore 与 internal/localservice）落到本机数据根；
 // 本切片还没有的能力（生成、用量、画板包导出、归档、整理、结果中转）按 features 关掉，
 // 调用时以 kind: "unavailable" 拒绝：界面据此标「尚不可用」，不失败得更晚，也不伪装成功。
 //
@@ -9,7 +9,7 @@
 // 各组实现（画板、文件、元数据、媒体、画板包、用量）在 shell/desktopStores.ts（#137），这里只做接线。
 import { PortError, portFailureOf, type ClipboardContent, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort } from "./port";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
-import type { BrowserOptions, ImageInfo, SessionPort, UsagePort } from "./types";
+import type { BrowserOptions, ImageInfo, UsagePort } from "./types";
 import type { LogKind } from "./log";
 import { base64Of } from "../core/base64";
 import { clipboardContentOf, extensionOf } from "./desktopClipboard";
@@ -18,6 +18,8 @@ import { IMPORTED_REFERENCES_DIR } from "../core/boardPack";
 import { joinPath, toRootRelative } from "../core/paths";
 import { checked, desktopBoardStore, desktopFileStore, desktopMediaStore, desktopMetaStore, desktopUsageStore, localRun, unavailable } from "./desktopStores";
 import { createDesktopPack } from "./desktopPack";
+import { imageCodec } from "./imageCodec";
+import { composeOverlay } from "./overlay";
 
 /** Go 侧写操作的结局：成功时 kind 为空，失败时 kind 是类别（见 localservice.Outcome）。 */
 export interface DesktopOutcome {
@@ -54,7 +56,7 @@ export interface DesktopLocalBridge {
   writeNewFile(path: string, bytes: Uint8Array): Promise<DesktopOutcome>;
   /** 与 writeNewFile 相同，字节以 base64 传（Uint8Array 在 JSON 里解不进 Go 的 []byte）。 */
   writeNewFileBase64(path: string, data: string): Promise<DesktopOutcome>;
-  /** 把用户数据根里的图片另存为用户选的位置（#130 的「另存为…」兜底）。 */
+  /** 把数据根里的图片另存为用户选的位置（#130 的「另存为…」兜底）。 */
   saveCopyAs(path: string): Promise<DesktopOutcome>;
   isFile(path: string): Promise<boolean>;
   listDir(path: string): Promise<{ name: string; is_dir: boolean }[]>;
@@ -103,7 +105,7 @@ export interface DesktopTextCopy {
 /** Go 侧剪贴板服务（Clipboard 服务）：读快照（#129）与把图片写进系统剪贴板（#130）。 */
 export interface DesktopClipboardBridge {
   read(): Promise<DesktopClipboardSnapshot>;
-  /** 字节由 Go 自己按路径读（用户数据根在那边），页面只给路径与格式提示。 */
+  /** 字节由 Go 自己按路径读（数据根在那边），页面只给路径与格式提示。 */
   copyImage(path: string, format: string): Promise<DesktopImageCopy>;
   /** 把纯文本写进系统剪贴板（#124）：Go 原生 Clipboard.WriteText，不依赖浏览器权限。 */
   writeText(text: string): Promise<DesktopTextCopy>;
@@ -178,7 +180,7 @@ export interface DesktopShell {
 async function uploadReference(local: DesktopLocalBridge, userRoot: string, file: File): Promise<{ path: string; sha256: string }> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const sha = await sha256Hex(bytes);
-  // 端口约定：返回相对用户数据根的路径（与 Web 上传一致），绝对路径只在本函数里用。
+  // 端口约定：返回相对数据根的路径，绝对路径只在本函数里用。
   const abs = joinPath(joinPath(userRoot, IMPORTED_REFERENCES_DIR), sha + "." + extensionOf(file));
   const path = toRootRelative(userRoot, abs);
   try {
@@ -266,8 +268,6 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     packImport: bridge.pack !== undefined,
     // 整理模式本切片还没实现（度量画板体量留给后续切片）。
     tidy: false,
-    // 桌面壳直接读系统剪贴板（#129）：粘贴截图不必先存成文件。
-    nativeClipboard: true,
   };
 
   const board = desktopBoardStore(local, info.user_data_root);
@@ -294,7 +294,7 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
   const pack = desktopPack.store;
 
   const ui = {
-    // 确认框与提示框用窗口自带的：桌面壳没有服务端，浏览器能力照样有。
+    // 确认框与提示框由桌面窗口的 WebView 提供。
     ask: (message: string, _options?: BrowserOptions): Promise<boolean> => Promise.resolve(window.confirm(message)),
     message: (text: string, _options?: BrowserOptions): Promise<void> => {
       window.alert(text);
@@ -313,19 +313,6 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
 
   const usage: UsagePort = desktopUsageStore();
 
-  const session: SessionPort = {
-    // 桌面壳没有服务端会话：不需要登录界面（Root 看到它就直接进工作台）。
-    requiresLogin: false,
-    login: async (): Promise<never> => unavailable("login"),
-    current: (): Promise<{ fingerprint: string }> => Promise.resolve({ fingerprint: LOCAL_FINGERPRINT }),
-    logout: (): Promise<void> => Promise.resolve(),
-    config: (): Promise<{ version: string; gateway_url: string }> => Promise.resolve({ version: info.version, gateway_url: "" }),
-    onExpired: (): (() => void) => () => {},
-    readStoredKey: (): null => null,
-    storeKey: (): void => {},
-    clearStoredKey: (): void => {},
-  };
-
   const port: ShellPort = {
     userRoot: info.user_data_root,
     features,
@@ -336,10 +323,11 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     pack,
     ui,
     usage,
-    session,
     core: {
       taskFs: { writeNewFile: files.writeNewFile, readFile: files.readFile },
       runDeps: {
+        imageCodec,
+        composeOverlay,
         writeNewFile: files.writeNewFile,
         readFile: files.readFile,
         fetch: async (): Promise<never> => unavailable("generation"),
@@ -370,6 +358,3 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
 
   return { port, info };
 }
-
-/** 本机标识：固定值，不含密钥，也不随密钥变化。 */
-export const LOCAL_FINGERPRINT = "local";

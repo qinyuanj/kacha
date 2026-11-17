@@ -1,6 +1,6 @@
-// Package packimport 把一个手工导出的画板包（.ugcpack）导入本地用户数据根。
+// Package packimport 把一个手工导出的画板包（.ugcpack）导入本地数据根。
 //
-// 包格式与 Web 服务端的实现一致（见 client/src/core/boardPack.ts 与 ADR 0013）：zip 里是
+// 画板包格式见 client/src/core/boardPack.ts：zip 里是
 // manifest.json、画板/<文件>.ugcboard.json、<日期>/<task_id>/… 与 导入参考图/<文件>。
 // 导入分九步（检查 → 解压到临时目录 → 还原被省略的重复内容 → 核对 → 合并 → 提交画板 → 清理），
 // 检查通过之前不写任何东西：路径越界、符号链接、缺失条目与读不懂的清单都在这一步被拒，
@@ -29,13 +29,13 @@ import (
 )
 
 const (
-	// TempPrefix 是导入临时目录的前缀（在用户数据根下，导入结束无论成败都删掉）。
+	// TempPrefix 是导入临时目录的前缀（在数据根下，导入结束无论成败都删掉）。
 	TempPrefix = ".ugcpack-import."
 	// ManifestName 是包内清单的文件名。
 	ManifestName = "manifest.json"
-	// BoardsDirName 是包内画板目录名（与用户数据根里的画板目录同名）。
+	// BoardsDirName 是包内画板目录名（与数据根里的画板目录同名）。
 	BoardsDirName = localstore.BoardsDir
-	// ReferencesDirName 是包内、也是用户数据根里的导入参考图目录名。
+	// ReferencesDirName 是包内、也是数据根里的导入参考图目录名。
 	ReferencesDirName = "导入参考图"
 	// TaskRecordName 是任务目录里判定「同一份」的身份文件。
 	TaskRecordName = "task.json"
@@ -106,7 +106,7 @@ type Report struct {
 	Outcomes []Outcome `json:"outcomes"`
 	// Bytes 是解压出来的字节数。
 	Bytes int64 `json:"bytes"`
-	// Boards 是新画板相对用户数据根的路径。
+	// Boards 是新画板相对数据根的路径。
 	Boards []string `json:"boards"`
 	// Imported 是移入的任务目录数。
 	Imported int `json:"imported"`
@@ -122,20 +122,20 @@ type Report struct {
 
 // Store 是导入需要的本地文件层（生产实现是 localstore.Store）。
 type Store interface {
-	// Root 是用户数据根的绝对路径：导入的一切都写在这里面。
+	// Root 是数据根的绝对路径：导入的一切都写在这里面。
 	Root() string
 	// CreateBoard 在画板目录里新建一块画板（只新建，名字由标题派生）。
 	CreateBoard(title, text string) (string, localstore.Result)
 }
 
-// Importer 把画板包导入一个用户数据根。进度回调与取消判定都可以为 nil。
+// Importer 把画板包导入一个数据根。进度回调与取消判定都可以为 nil。
 type Importer struct {
 	store      Store
 	onProgress func(Progress)
 	cancelled  func() bool
 }
 
-// New 造一个以 root 为用户数据根的导入器。
+// New 造一个以 root 为数据根的导入器。
 func New(root string) *Importer {
 	return NewWithStore(localstore.New(root))
 }
@@ -232,7 +232,7 @@ func (im *Importer) Import(packPath string) (Report, error) {
 	return report, nil
 }
 
-// root 返回用户数据根。
+// root 返回数据根。
 func (im *Importer) root() string { return im.store.Root() }
 
 // readPlan 只读清单、画板文本与条目名，判版本与布局：不合格的包在这里就被拒，一个字节都不写。
@@ -522,7 +522,7 @@ func (im *Importer) restoreDuplicates(tempDir string, planned plan) error {
 	return nil
 }
 
-// verifyUnits 核对每个合并单元都在、且身份文件在：包内容不完整时在这里拒绝，还没动用户数据根。
+// verifyUnits 核对每个合并单元都在、且身份文件在：包内容不完整时在这里拒绝，还没动数据根。
 func verifyUnits(tempDir string, units []unit) error {
 	for _, u := range units {
 		info, err := os.Stat(filepath.Join(tempDir, filepath.FromSlash(u.path)))
@@ -661,7 +661,7 @@ func summarize(outcomes []Outcome, units []unit, boards []string, bytes int64, m
 
 // missingImages 列出画板引用了、但本机没有的图片：节点保留，界面显示缺图占位。
 //
-// 只看 reference 与 result 节点的 path：它们指向用户数据根里的图片；根目录外的绝对路径同样按文件判断。
+// 只看 reference 与 result 节点的 path：它们指向数据根里的图片；根目录外的绝对路径同样按文件判断。
 func missingImages(boards []packBoard, root string) []string {
 	missing := []string{}
 	seen := map[string]bool{}
@@ -843,7 +843,7 @@ func within(root, p string) bool {
 	return strings.HasPrefix(strings.ToLower(absPath), strings.ToLower(absRoot)+string(os.PathSeparator))
 }
 
-// rel 把绝对路径写成相对用户数据根的正斜杠路径；根目录外的保留绝对路径。
+// rel 把绝对路径写成相对数据根的正斜杠路径；根目录外的保留绝对路径。
 func rel(root, abs string) string {
 	if strings.HasPrefix(strings.ToLower(abs), strings.ToLower(root)+string(os.PathSeparator)) {
 		return filepath.ToSlash(strings.TrimPrefix(abs, root+string(os.PathSeparator)))

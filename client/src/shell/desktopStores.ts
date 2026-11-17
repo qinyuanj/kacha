@@ -6,7 +6,6 @@ import type { BoardListing, BoardTexts, BoardWriteOptions, ImageInfo, UsagePort 
 import { base64ToBytes } from "../core/base64";
 import { joinPath } from "../core/paths";
 import type { DirEntry } from "../core/relocate";
-import { copyTextToClipboard } from "./clipboard";
 import type { DesktopLocalBridge, DesktopOutcome } from "./desktop";
 
 /** Go 侧的失败类别 → 端口失败类别；未列出的按 failed 处理（消息保持原文）。 */
@@ -64,7 +63,7 @@ export function desktopBoardStore(local: DesktopLocalBridge, userRoot: string): 
       localRun(async () => {
         const listing = await local.listBoards();
         return {
-          // Go 侧给的是相对用户数据根的路径；这里拼成绝对路径，
+          // Go 侧给的是相对数据根的路径；这里拼成绝对路径，
           // 与界面别处（画板目录、标签页会话路径）同一形状：列表 → 打开 → 保存 → 删除一路对得上。
           boards: listing.boards.map((b) => ({ name: b.name, path: joinPath(userRoot, b.path), archived: b.archived, bytes: b.bytes })),
           slots: listing.slots,
@@ -112,15 +111,15 @@ export function desktopMetaStore(local: DesktopLocalBridge): MetaStore {
 }
 
 /**
- * 用户数据根下的文件在页面上可读的地址。
+ * 数据根下的文件在页面上可读的地址。
  *
  * WebView2 的页面来自 http://mygo.localhost，不允许这种 http 页面加载 file:// 子资源：用 file:// 时
- * 节点上的图片一律显示「图片缺失」。Go 侧把用户数据根注册成自定义协议 kacha（见 desktop/wiring.go
+ * 节点上的图片一律显示「图片缺失」。Go 侧把数据根注册成自定义协议 kacha（见 desktop/wiring.go
  * 的 registerAssetProtocol），页面通过 http://kacha.localhost/<相对路径> 取图。
  */
 const ASSET_ORIGIN = "http://kacha.localhost/";
 
-/** 相对用户数据根的路径（正斜杠）；不在根内返回 null。根比较不区分大小写（Windows）。 */
+/** 相对数据根的路径（正斜杠）；不在根内返回 null。根比较不区分大小写（Windows）。 */
 function rootRelative(root: string, absPath: string): string | null {
   const base = root.replace(/\\/g, "/").replace(/\/+$/, "");
   const abs = absPath.replace(/\\/g, "/");
@@ -129,7 +128,7 @@ function rootRelative(root: string, absPath: string): string | null {
   return abs.toLowerCase().startsWith(prefix) ? abs.slice(base.length + 1) : null;
 }
 
-/** 本机文件地址：用户数据根内走 kacha 协议，根外退回 file:///（画板契约要求路径在根内）。 */
+/** 本机文件地址：数据根内走 kacha 协议，根外退回 file:///（画板契约要求路径在根内）。 */
 export function servedFileUrl(root: string, absPath: string): string {
   const rel = rootRelative(root, absPath);
   if (rel === null) return fileUrl(absPath);
@@ -149,7 +148,7 @@ export function desktopMediaStore(root: string): MediaStore {
     pickImages: async (): Promise<never> => unavailable("generation"),
     pickPackFile: async (): Promise<never> => unavailable("packExport"),
     uploadReference: async (): Promise<never> => unavailable("generation"),
-    copyText: (text: string): Promise<void> => copyTextToClipboard(text),
+    copyText: async (): Promise<never> => unavailable("copyText"),
     // 各能力用自己的名字，别把「生成尚不可用」当成保存 / 下载的理由（C4）。
     copyImage: async (): Promise<never> => unavailable("copyImage"),
     readClipboard: async (): Promise<null> => null,

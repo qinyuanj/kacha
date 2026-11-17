@@ -1,5 +1,5 @@
-// 画板列表：画板在服务端，关掉的标签页与另一个浏览器都从这里重新打开（桌面版靠启动参数 / 拖入文件）；也在这里删除画板。
-// 列表由服务端拼好（#87）：每行带画板体量「约 X」，越过服务端配置的提醒线标黄 / 标红，只提醒。
+// 画板列表：重新打开或删除保存在这台电脑上的画板。
+// 列表由本机存储拼好（#87）：每行带画板体量「约 X」，越过本机存储配置的提醒线标黄 / 标红，只提醒。
 // 同一对话框也是用量提醒里的「管理画板」（#88），那时按体量从大到小排。
 // 可见判定在 ui/boardListView.ts（#137），这里只留接线与 DOM 摆放。
 import { useCallback, useEffect, useState } from "react";
@@ -120,10 +120,12 @@ function DeleteConfirm({
   onExport,
   onConfirm,
   onCancel,
+  canExport,
 }: {
   title: string;
   busy: boolean;
   error: string | null;
+  canExport: boolean;
   onExport(): void;
   onConfirm(): void;
   onCancel(): void;
@@ -140,12 +142,11 @@ function DeleteConfirm({
         <h2>删除画板「{title}」？</h2>
         <ul className="delete-notes">
           <li>画板里的生成结果仍保留在任务目录中，删除画板不会删除图片。</li>
-          <li>不再被任何画板引用的结果之后可能被清理。</li>
-          <li>误删可在 14 天内联系管理员恢复。</li>
+          <li>删除后不能在客户端撤销，请先备份数据根。</li>
         </ul>
         {error && <div className="bar bar-error">删除失败：{error}</div>}
         <div className="modal-foot">
-          <button onClick={onExport} disabled={busy}>
+          <button onClick={onExport} disabled={busy || !canExport}>
             先导出画板包
           </button>
           <button className="danger" onClick={onConfirm} disabled={busy}>
@@ -240,6 +241,7 @@ function useBoardConfirm(refresh: () => void) {
 
 export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose, onArchive, onUnarchive, onCopy, manage = false }: Props) {
   const { listing, error, refresh } = useBoardListing();
+  const port = useShell();
   const confirm = useBoardConfirm(refresh);
   const { deleting, setDeleting, archiving, setArchiving } = confirm;
   /** 取消归档 / 复制为新画板被拒（画板位满）或失败时的说明。 */
@@ -279,6 +281,7 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
       </div>
       {deleting && (
         <DeleteConfirm
+          canExport={port.features.packExport}
           title={boardRow(deleting.entry, openPaths, listing).title}
           busy={deleting.busy}
           error={deleting.error}

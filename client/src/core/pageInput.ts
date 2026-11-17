@@ -30,33 +30,18 @@ export function isNodeMarker(text: string | null): boolean {
   return text !== null && NODE_MARKER_RE.test(text.trim());
 }
 
-/**
- * 单次粘贴一张图片的上限（字节），与服务端单请求上限一致：超限在客户端就提示、不发请求。
- * 真源头是 server/src/lib.rs 的 `MAX_BODY_BYTES`；客户端另有一份画板包单份内容的副本
- * （core/boardPack 的 `MAX_CONTENT_BYTES`，同样指这个服务端上限），两者的一致性由
- * pageInput 的单测盯着——改一处忘了另一处会在测试里现形。
- */
+/** 单次粘贴一张图片的独立上限：64 MiB，避免剪贴板图片占用过多内存。 */
 export const MAX_PASTE_BYTES = 64 * 1024 * 1024;
 
-/** 粘贴图片的显示名前缀。产物名只在这里定义，界面与 e2e 都 import 它。 */
+/** 粘贴图片的显示名前缀。 */
 export const PASTE_NAME_PREFIX = "粘贴";
 
 /** 画布坐标。 */
 export type PastePos = [number, number];
 
-/** 剪贴板快照：由界面层从 paste 事件里读出来（这里不碰 ClipboardEvent）。 */
-export interface PasteFacts {
-  /** 剪贴板里的纯文本；没有为 null。 */
-  text: string | null;
-  /** 能读出内容的图片张数。 */
-  images: number;
-  /** 读不到内容的文件个数（例如资源管理器里复制的文件）。 */
-  opaqueFiles: number;
-}
-
 /** 粘贴时的界面状态：判定只看这些，不看画板内容。 */
 export interface PasteContext {
-  /** 当前是否打开着一块画板（登录页 / 没有画板为 false）。 */
+  /** 当前是否打开着一块画板（没有画板为 false）。 */
   board: boolean;
   /** 归档只读画板。 */
   readOnly: boolean;
@@ -79,24 +64,6 @@ export type PasteAction = { kind: "pass" } | { kind: "pasteNodes" } | { kind: "i
 export function markerPaste(context: PasteContext): PasteAction {
   if (context.readOnly) return { kind: "refuse", reason: "readOnly" };
   return context.hasNodeClip ? { kind: "pasteNodes" } : { kind: "refuse", reason: "staleNodeClip" };
-}
-
-/**
- * 一个 Ctrl+V 落在哪条路上：先看有没有画板与模态，再看剪贴板里是什么。
- * 顺序照 ADR 0021：标记优先于图片，避免复制节点后立刻粘贴粘出几小时前的旧截图。
- */
-export function dispatchPaste(facts: PasteFacts, context: PasteContext): PasteAction {
-  if (!context.board) return { kind: "pass" };
-  if (context.modal) return { kind: "pass" };
-  if (isNodeMarker(facts.text)) return markerPaste(context);
-  // 输入框里粘文本照旧：只有「没有文本」（纯图片或文件）时才轮到下面的分支。
-  if (context.textFocus && facts.text !== null) return { kind: "pass" };
-  if (facts.images > 0) {
-    if (context.readOnly) return { kind: "refuse", reason: "readOnly" };
-    return { kind: "importImages", at: context.at };
-  }
-  if (facts.opaqueFiles > 0) return { kind: "refuse", reason: "filesNotReadable" };
-  return { kind: "pass" };
 }
 
 const pad2 = (n: number): string => String(n).padStart(2, "0");

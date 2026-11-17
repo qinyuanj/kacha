@@ -1,7 +1,7 @@
 // 测试用的内存壳端口（#126）：驱动打开画板、复制图片、粘贴图片、导入画板包，
 // 并能返回成功、部分成功与失败结局，让界面把这些结局原样传出去（不必起 MyGo runtime、不发请求）。
 // 形状与真实适配器一致：失败一律是 PortError，类别（conflict / missing / slotsFull / alreadyExists, ...）与
-// Web 实现折出来的同一套，界面按类别分支的分支点因此在替身下也走得到。
+// 壳端口使用同一套类别，界面按类别分支的分支点因此在替身下也走得到。
 // 各分组的替身在 shell/testing/fakePortStores.ts（#137），这里只把它们拼起来。
 import { buildZip, type FixtureEntry } from "../../core/testing/zipFixture";
 import { PortError, type CorePorts, type FeatureId, type PortFailureKind, type ShellPort } from "../port";
@@ -12,7 +12,6 @@ import {
   fakeMediaStore,
   fakeMetaStore,
   fakePackStore,
-  fakeSessionStore,
   fakeUiStore,
   fakeUsageStore,
 } from "./fakePortStores";
@@ -103,7 +102,6 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
   const pack = fakePackStore(imports, calls);
   const ui = fakeUiStore(calls);
   const usage = fakeUsageStore(new Set<string>(missing));
-  const session = fakeSessionStore(options);
   const core = fakeCorePorts(files, meta);
 
   return {
@@ -122,7 +120,6 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
     pack,
     ui,
     usage,
-    session,
     core,
     calls,
   };

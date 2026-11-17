@@ -46,7 +46,7 @@ export interface DragRef {
   copies: number;
 }
 
-/** 已读好的参考图文件：path 用户数据根内为相对路径。 */
+/** 已读好的参考图文件：path 数据根内为相对路径。 */
 export interface ImportedImage {
   path: string;
   sha256: string;
@@ -112,7 +112,7 @@ export type BoardChange =
   | { kind: "deleteStage"; stageId: string }
   /** 标记 / 取消定稿：nodes 里只有结果节点生效。 */
   | { kind: "setFinal"; nodes: string[]; final: boolean }
-  /** 收掉未定稿：删去选中阶段里未定稿且没有下游连线的结果（判定见 prunableResults）；任务目录不删，按清理规则释放。 */
+  /** 收掉未定稿：删去选中阶段里未定稿且没有下游连线的结果（判定见 prunableResults）；任务目录保留。 */
   | { kind: "pruneUnfinal"; stageIds: string[] }
   /** 自动划分阶段：把还没进任何阶段的节点按一次生成尝试划成阶段（划分规则见 autoStages）；算不出要动的东西就不动画板。 */
   | { kind: "autoStages" }

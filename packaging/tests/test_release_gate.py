@@ -5,18 +5,15 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from release_gate import check_release_notes, check_version_line, parse_config_version  # noqa: E402
+from release_gate import check_release_notes, desktop_version, parse_config_version  # noqa: E402
 
 
-def write_repo(root: Path, *, server: str | None = "1.5.0", desktop: str | None = "1.5.0", notes: str = "") -> Path:
-    """最小仓库：两张清单与更新说明。传 None 表示那张清单里不写版本。"""
-    (root / "server").mkdir(parents=True, exist_ok=True)
+def write_repo(root: Path, *, desktop: str | None = "1.5.0", notes: str = "") -> Path:
+    """最小仓库：桌面版本清单与更新说明。传 None 表示不写版本。"""
     (root / "docs" / "release").mkdir(parents=True, exist_ok=True)
-    manifest = '[package]\nname = "kacha-server"\n' + (f'version = "{server}"\n' if server else "")
-    (root / "server" / "Cargo.toml").write_text(manifest, encoding="utf-8")
     config = 'export default {\n  name: "Kacha",\n' + (f'  version: "{desktop}",\n' if desktop else "") + "};\n"
     (root / "mygo.config.ts").write_text(config, encoding="utf-8")
-    (root / "docs" / "release" / "web-changelog.md").write_text(notes, encoding="utf-8")
+    (root / "docs" / "release" / "changelog.md").write_text(notes, encoding="utf-8")
     return root
 
 
@@ -28,7 +25,7 @@ class ReleaseNotesGateTest(unittest.TestCase):
 
     def assert_rejected(self, notes: str, version: str = "1.5.0") -> str:
         with tempfile.TemporaryDirectory() as tmp:
-            root = write_repo(Path(tmp), server=version, desktop=version, notes=notes)
+            root = write_repo(Path(tmp), desktop=version, notes=notes)
             with self.assertRaises(SystemExit) as caught:
                 check_release_notes(root, version)
             message = str(caught.exception)
@@ -60,38 +57,19 @@ class ReleaseNotesGateTest(unittest.TestCase):
         self.assert_rejected("# 1.5.0\n\n# 1.4.0\n\n## 新增\n\n- 旧版本的一条。\n")
 
 
-class VersionLineGateTest(unittest.TestCase):
-    """版本线门禁：服务端清单与桌面配置同号，不同号时说清两边各是什么。"""
-
-    def test_returns_the_shared_version(self):
+class DesktopVersionGateTest(unittest.TestCase):
+    def test_reads_the_only_version_manifest_without_a_server_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = write_repo(Path(tmp), server="1.5.0", desktop="1.5.0")
-            self.assertEqual(check_version_line(root), "1.5.0")
-
-    def test_names_both_sides_when_they_differ(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = write_repo(Path(tmp), server="1.5.0", desktop="0.2.0")
-            with self.assertRaises(SystemExit) as caught:
-                check_version_line(root)
-            message = str(caught.exception)
-            self.assertIn("1.5.0", message)
-            self.assertIn("0.2.0", message)
-            self.assertIn("server/Cargo.toml", message)
-            self.assertIn("mygo.config.ts", message)
+            root = write_repo(Path(tmp), desktop="1.5.0")
+            self.assertEqual(desktop_version(root), "1.5.0")
+            self.assertFalse((root / "server").exists())
 
     def test_reports_the_desktop_config_without_a_version(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = write_repo(Path(tmp), desktop=None)
             with self.assertRaises(SystemExit) as caught:
-                check_version_line(root)
+                desktop_version(root)
             self.assertIn("mygo.config.ts", str(caught.exception))
-
-    def test_reports_the_server_manifest_without_a_version(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = write_repo(Path(tmp), server=None)
-            with self.assertRaises(SystemExit) as caught:
-                check_version_line(root)
-            self.assertIn("server/Cargo.toml", str(caught.exception))
 
 
 class ConfigVersionParsingTest(unittest.TestCase):

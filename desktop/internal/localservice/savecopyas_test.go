@@ -63,7 +63,7 @@ func TestSaveCopyAsCancelIsNoError(t *testing.T) {
 	}
 }
 
-// TestSaveCopyAsRejectsOutsideRoot 用户数据根外的路径不许读出来另存。
+// TestSaveCopyAsRejectsOutsideRoot 数据根外的路径不许读出来另存。
 func TestSaveCopyAsRejectsOutsideRoot(t *testing.T) {
 	base := t.TempDir()
 	outside := filepath.Join(base, "secret.png")
@@ -72,6 +72,6 @@ func TestSaveCopyAsRejectsOutsideRoot(t *testing.T) {
 	}
 	store := localstore.New(filepath.Join(base, "root"))
 	if _, err := New(store).SaveCopyAs(outside); err == nil {
-		t.Fatal("越出用户数据根的路径应被拒绝")
+		t.Fatal("越出数据根的路径应被拒绝")
 	}
 }

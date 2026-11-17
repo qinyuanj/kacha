@@ -25,7 +25,7 @@ export interface BoardGroups {
   archived: BoardListEntry[];
 }
 
-/** 「管理画板」按体量从大到小排，普通列表照服务端给的顺序。 */
+/** 「管理画板」按体量从大到小排，普通列表照本机存储给的顺序。 */
 export function boardGroups(listing: BoardListing | null, manage: boolean): BoardGroups {
   const boards = listing?.boards ?? [];
   const sorted = manage ? bySizeDescending(boards) : boards;
@@ -49,7 +49,7 @@ export function slotsFull(listing: BoardListing | null): boolean {
   return listing.slots.used >= listing.slots.total;
 }
 
-/** 画板位超出（老用户）：列表顶部提醒「归档几块后才能新建」。 */
+/** 画板位超出：列表顶部提醒先备份并删除不再需要的画板。 */
 export function overSlots(listing: BoardListing | null): boolean {
   if (!listing) return false;
   return listing.slots.used > listing.slots.total;
@@ -63,6 +63,6 @@ export function listTitle(manage: boolean, manageTitle: string): string {
 /** 列表的说明文字：两种入口各一句。 */
 export function listDescription(manage: boolean): string {
   return manage
-    ? "按画板体量从大到小排列：先整理最大的几块。删除画板、整理掉不要的结果后，图片按清理规则释放空间。"
-    : "画板保存在服务端；换浏览器后用同一把密钥也能看到同一份。";
+    ? "按画板体量从大到小排列。删除画板不会删除任务目录中的图片；请先备份数据根。"
+    : "画板保存在这台电脑的数据根中；更换 API 密钥不会改变已有画板。";
 }

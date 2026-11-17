@@ -237,7 +237,7 @@ describe("自动宽高比的补算时机", () => {
     expect(applied).toHaveLength(2);
   });
 
-  it("画板 / 锁定集 / 能力表 / 用户数据根变化时补算，画板文件变化不补算", async () => {
+  it("画板 / 锁定集 / 能力表 / 数据根变化时补算，画板文件变化不补算", async () => {
     let props = propsOf();
     await show(props);
     const mounted = applied.length;

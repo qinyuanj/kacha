@@ -28,7 +28,7 @@ describe("只读画板", () => {
     expect(isReadOnly("/~", "/~/画板/a.ugcboard.json")).toBe(false);
   });
 
-  it("没有用户数据根：判不了只读", () => {
+  it("没有数据根：判不了只读", () => {
     expect(isReadOnly(null, "/~/画板/归档/a.ugcboard.json")).toBe(false);
   });
 });
@@ -41,9 +41,9 @@ describe("路径比较", () => {
 });
 
 describe("保存失败的提示", () => {
-  it("画板已不存在：单独说，并提示先导出画板包", () => {
+  it("画板已不存在：单独说，并提示恢复原文件路径", () => {
     expect(saveErrorText("/~/a", "offline", true)).toContain(BOARD_MISSING_TEXT);
-    expect(saveErrorText("/~/a", "offline", true)).toContain("导出画板包");
+    expect(saveErrorText("/~/a", "offline", true)).toContain("恢复原文件路径");
   });
 
   it("其余失败：给路径与原因", () => {

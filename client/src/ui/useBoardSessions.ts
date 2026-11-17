@@ -38,7 +38,7 @@ export type Session =
       saveError: string | null;
       version: string | null;
       conflicted: boolean;
-      /** 服务端已没有这块画板（在别处删除或改名）：不能重新载入，只能导出画板包或关闭。 */
+      /** 本机存储已没有这块画板（在别处删除或改名）：保留本页改动，等待恢复原文件路径后重试保存。 */
       missing: boolean;
     }
   | { key: string; path: string; status: "newer"; version: number }
@@ -154,7 +154,7 @@ export function useSessionLifecycle(options: {
   const userRootRef = useRef(userRoot);
   userRootRef.current = userRoot;
   const closeBoardRef = useRef<(key: string) => Promise<void>>(async () => undefined);
-  /** 关闭全部标签页（切换用户数据根时用）；先落盘。 */
+  /** 关闭全部标签页（切换数据根时用）；先落盘。 */
   const closeAll = useCallback(async () => {
     for (const s of store.sessionsRef.current) await closeBoardRef.current(s.key);
   }, [store]);
@@ -171,12 +171,12 @@ export function useSessionLifecycle(options: {
       moveOutStageSession(store, ports, envOf(key), userRootRef.current, readOnlyPath, movingSessions.current, movingOut, apply, key, stageId),
     [store, envOf, apply, readOnlyPath],
   );
-  /** 导入画板由服务端在锁内写好；本页只打开返回路径。 */
+  /** 导入画板由本机存储在锁内写好；本页只打开返回路径。 */
   const openImportedBoard = useCallback(async (path: string): Promise<void> => {
-    if (!userRoot) throw new Error("用户数据根未就绪");
+    if (!userRoot) throw new Error("数据根未就绪");
     if (!await openPath(resolveFromRoot(userRoot, path), true)) throw new Error("导入画板已写入但无法打开，请重新载入画板列表");
   }, [openPath, userRoot]);
-  /** 关掉标签页且不再保存：画板已删除，或用户放弃一块服务端已不存在的画板。 */
+  /** 关掉标签页且不再保存：画板已删除，或用户放弃一块本机存储已不存在的画板。 */
   const dropSession = useCallback(
     (key: string) => {
       cancelTimer(key);
@@ -213,7 +213,7 @@ export function useSessionArchive(options: {
   const closeBoard = useCallback(
     async (key: string) => {
       await flushPending(key, saverOf, flush);
-      // 保存失败不能丢改动：标签页留着，修好后重试或先导出画板包。
+      // 保存失败不能丢改动：标签页留着，恢复原文件路径后重试保存。
       const current = store.sessionOf(key);
       if (current?.status === "ok" && current.saveError) return;
       dropSession(key);
@@ -256,9 +256,11 @@ export function useSessionArchive(options: {
   const dismissNotice = useCallback((key: string) => store.patch(key, (x) => ({ ...x, notice: null })), [store]);
   /** 保存失败后显式重试：改动一直在页面里，这里只是再写一次。 */
   const retrySave = useCallback(async (key: string) => {
+    // 只有用户明确重试缺失文件时才解除阻断；原 version 不变，外部改动仍会被写入校验拒绝。
+    store.patch(key, (s) => s.missing ? { ...s, conflicted: false } : s);
     await flush(key);
-  }, [flush]);
-  /** 冲突后由用户显式重新载入服务端的画板；本页未保存的改动随之放弃（不做自动合并）。 */
+  }, [flush, store]);
+  /** 冲突后由用户显式重新载入本机存储的画板；本页未保存的改动随之放弃（不做自动合并）。 */
   const reload = useCallback(async (key: string) => reloadBoardSession(store, ports, userRootRef.current, movingSessions.current, key), [store]);
   return { closeBoard, deleteBoard, archiveBoard, unarchiveBoard, copyAsNewBoard, keyOf, renameBoard, dismissNotice, retrySave, reload };
 }

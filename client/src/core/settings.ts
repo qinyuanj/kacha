@@ -28,7 +28,7 @@ export type LoadedSettings =
   | { kind: "ok"; settings: Settings }
   | { kind: "newer"; version: number; settings: Settings }
   | { kind: "corrupt"; reason: string; settings: Settings }
-  /** 服务端有文件但这次没读到（断网、5xx）：文件不存在由 loadSettings 合成默认值，不会落到这里。 */
+  /** 读取本机设置失败（权限、I/O 等）；文件不存在由 loadSettings 合成默认值，不会落到这里。 */
   | { kind: "unreadable"; settings: Settings };
 
 /** 保存时能否写 settings.json：newer 与 unreadable 的原文件不能被本次的默认设置覆盖。 */
@@ -67,6 +67,11 @@ export function parseSettings(text: string | null): LoadedSettings {
   const version = raw.format_version;
   if (!Number.isInteger(version) || (version as number) < 1) return corrupt("format_version 必须是正整数");
   if ((version as number) > SETTINGS_FORMAT_VERSION) return { kind: "newer", version: version as number, settings: DEFAULT_SETTINGS };
+  return parseSettingsFields(raw);
+}
+
+/** 版本可读后再校验设置值；未知字段原样保留。 */
+function parseSettingsFields(raw: Json): LoadedSettings {
   const baseUrl = raw.base_url ?? DEFAULT_SETTINGS.base_url;
   const concurrency = raw.concurrency ?? DEFAULT_SETTINGS.concurrency;
   if (typeof baseUrl !== "string") return corrupt("base_url 必须是字符串");
@@ -205,7 +210,7 @@ export type KeyPersistence = "persisted" | "session";
 export interface SettingsPorts {
   /** settings.json 原文；文件不存在为 null。 */
   readSettings(): Promise<string | null>;
-  /** 服务端下发的网关地址：settings.json 不存在时作首次使用的默认。 */
+  /** 壳提供的默认网关地址：settings.json 不存在时作首次使用的默认。 */
   defaultBaseUrl(): Promise<string>;
   writeSettings(text: string): Promise<void>;
   readModelsCache(): Promise<string | null>;
@@ -235,7 +240,7 @@ export interface InitialSettings {
   cache: ModelsCache | null;
 }
 
-/** 首次使用（还没有 settings.json）时以服务端下发的网关地址为默认，避免两端默认不一致。 */
+/** 首次使用（还没有 settings.json）时采用壳提供的默认网关地址。 */
 async function readSettingsFile(ports: SettingsPorts): Promise<LoadedSettings> {
   const text = await ports.readSettings();
   const loaded = parseSettings(text);

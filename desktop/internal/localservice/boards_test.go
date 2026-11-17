@@ -104,7 +104,7 @@ func TestReadBoardRoundTrip(t *testing.T) {
 	}
 }
 
-// 服务层画板列表：行里带画板文件名（带扩展名）与相对用户数据根的路径。
+// 服务层画板列表：行里带画板文件名（带扩展名）与相对数据根的路径。
 func TestListBoardsReportsNameAndPath(t *testing.T) {
 	store := localstore.New(t.TempDir())
 	svc := New(store)

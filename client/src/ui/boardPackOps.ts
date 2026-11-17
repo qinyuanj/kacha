@@ -37,7 +37,7 @@ export async function exportPlanStep(
     return { kind: "failed", text: unavailableMessage(e) ?? planFailedText(e instanceof Error ? e.message : String(e)) };
   }
   const { stem } = exportTargetOf(boardFile);
-  // hash 阶段：服务端给逐文件长度与 sha256，core 据此去重并算预估大小，再请用户确认（包格式 v2）。
+  // hash 阶段：本机存储给逐文件长度与 sha256，core 据此去重并算预估大小，再请用户确认（包格式 v2）。
   // runCancellable 把异常压成文本，类别就丢了：端口说「尚不可用」时在这里先记下来。
   let unavailable: string | null = null;
   const outcome = await runCancellable(deps.io, progress(`正在计算画板包大小：${stem}`), async () => {

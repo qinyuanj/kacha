@@ -98,7 +98,7 @@ export function useCanvasStageView({ board, boardRef, readOnly, measured, tidyin
   const hidden = useMemo(() => collapsedMembers(board, readOnly), [board, readOnly]);
   const boxes = useMemo(() => stageBoxes(board, (id) => measured[id], readOnly), [board, measured, readOnly]);
   const [editingStage, setEditingStage] = useState<string | null>(null);
-  // 整理模式：各阶段体量、「收掉未定稿」的张数与预计减少的体量（按任务目录，服务端量）。
+  // 整理模式：各阶段体量、「收掉未定稿」的张数与预计减少的体量（按任务目录，本机存储量）。
   const tidyMeasure = useTidyMeasure(board, tidying);
   // 建议保留（#144）：渲染时现算，退出整理模式即空集——不写画板、不进撤销步，因此不参与脏判据。
   const suggested = useMemo(() => (tidying ? suggestKeep(board) : NO_SUGGESTIONS), [board, tidying]);

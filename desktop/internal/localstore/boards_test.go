@@ -16,7 +16,7 @@ func sha256Hex(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// 画板文件名与 Web 服务端口径一致：带扩展名；只剩 .bak 的孤儿也算一块；同一块只算一次。
+// 画板文件名带扩展名；只剩 .bak 的孤儿也算一块；同一块只算一次。
 func TestListBoardNamesReturnsBoardFileNames(t *testing.T) {
 	s := New(t.TempDir())
 	dir := s.BoardDir()
@@ -64,7 +64,7 @@ func TestListBoardNamesToleratesMissingDir(t *testing.T) {
 	}
 }
 
-// 画板列表的行：文件名带扩展名，路径是相对用户数据根的正斜杠路径。
+// 画板列表的行：文件名带扩展名，路径是相对数据根的正斜杠路径。
 func TestListReportsBoardFileNameAndRelativePath(t *testing.T) {
 	s := New(t.TempDir())
 	if r := s.WriteBoard(filepath.Join(s.BoardDir(), "一"+BoardExt), "{}", WriteOptions{CreateOnly: true}); !r.OK {
@@ -139,7 +139,7 @@ func TestCreateThenReadRoundTrip(t *testing.T) {
 	}
 }
 
-// 只新建：主文件不在但 .bak 还在时也拒绝（Web 口径：孤儿 .bak 也占住名字）。
+// 只新建：主文件不在但 .bak 还在时也拒绝，孤儿 .bak 也占住名字。
 func TestWriteCreateOnlyRefusesOrphanBackup(t *testing.T) {
 	s := New(t.TempDir())
 	path := filepath.Join(s.BoardDir(), "画板"+BoardExt)
@@ -215,7 +215,7 @@ func TestWriteFailureKeepsOldContentByteForByteAndCleansTemp(t *testing.T) {
 	}
 }
 
-// 越出用户数据根的写入一律拒绝，根外不留下任何文件。
+// 越出数据根的写入一律拒绝，根外不留下任何文件。
 func TestWriteRejectsPathOutsideRoot(t *testing.T) {
 	base := t.TempDir()
 	s := New(filepath.Join(base, "root"))

@@ -64,6 +64,11 @@ describe("高级设置 settings.json", () => {
     expect(parseSettings(JSON.stringify({ format_version: 2, base_url: "x" }))).toEqual({ kind: "newer", version: 2, settings: DEFAULT_SETTINGS });
   });
 
+  it("更新版本优先于字段类型校验，当前版本的 null 设置值按缺省处理", () => {
+    expect(parseSettings('{"format_version":2,"base_url":3,"concurrency":99}')).toEqual({ kind: "newer", version: 2, settings: DEFAULT_SETTINGS });
+    expect(parseSettings('{"format_version":1,"base_url":null,"concurrency":null}')).toEqual({ kind: "ok", settings: DEFAULT_SETTINGS });
+  });
+
   it("损坏报错并用默认值", () => {
     for (const text of ["{oops", "[]", '{"format_version":1,"base_url":3}', '{"format_version":1,"concurrency":11}', '{"format_version":0}']) {
       const parsed = parseSettings(text);

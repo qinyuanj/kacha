@@ -216,11 +216,11 @@ describe("drop", () => {
 
   it("上传失败：提示原因，不落盘", async () => {
     port.media.uploadReference = async () => {
-      throw new Error("服务端拒绝");
+      throw new Error("存储端口拒绝");
     };
     canvasEl.dispatchEvent(dragEvent("drop", fileDrag(fileOf("a.png", "image/png"))));
     await settle();
-    expect(toast).toHaveBeenCalledWith(IMPORT_TEXT.failed("a.png", "服务端拒绝"));
+    expect(toast).toHaveBeenCalledWith(IMPORT_TEXT.failed("a.png", "存储端口拒绝"));
     expect(apply).not.toHaveBeenCalled();
   });
 });

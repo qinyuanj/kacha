@@ -118,7 +118,7 @@ const stagedBoard = (): Board => ({
   stages: [stage("s1", ["t1", "r1", "r2"]), stage("s2", ["t2", "r3"])],
 });
 
-/** 服务端量出的体量：三条结果的目录各自独占，收掉即释放 1.0 + 0.5 + 0.5 KiB。 */
+/** 存储端口量出的体量：三条结果的目录各自独占，收掉即释放 1.0 + 0.5 + 0.5 KiB。 */
 const STAGED_MEASURE: BoardMeasure = {
   nodes: { t1: ["t1-run"], t2: ["t2-run"], r1: ["d1"], r2: ["d2"], r3: ["d3"] },
   dirs: { "t1-run": 100, "t2-run": 100, d1: 1024, d2: 512, d3: 512 },

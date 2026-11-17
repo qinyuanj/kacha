@@ -99,7 +99,7 @@ func TestResolveRepairsBrokenState(t *testing.T) {
 	}
 }
 
-// 只有一份：状态文件里的位置就是唯一一份用户数据根，Resolve 不产生第二份目录。
+// 只有一份：状态文件里的位置就是唯一一份数据根，Resolve 不产生第二份目录。
 func TestResolveKeepsSingleRoot(t *testing.T) {
 	base := t.TempDir()
 	statePath := filepath.Join(base, "state.json")

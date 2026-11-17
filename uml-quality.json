@@ -1,7 +1,7 @@
 {
   "version": 1,
   "standardTools": {
-    "sourceRoots": ["client/src", "server/src"],
+    "sourceRoots": ["client/src"],
     "exclude": [
       "client/src/**/*.test.ts",
       "client/src/**/*.test.tsx",

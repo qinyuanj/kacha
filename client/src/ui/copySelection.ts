@@ -2,7 +2,7 @@
 // 其余选区（提示词节点、生成任务节点、多选、空选区）仍复制节点标记。
 //
 // 纯逻辑：不碰 DOM、不起 MyGo runtime、不读文件——真正的写入由壳端口的 media.copyImage 负责
-// （桌面壳走 Go 原生剪贴板，Web 走 legacy 的复制命令），这样判定可以在单测里验，
+// （桌面壳走 Go 原生剪贴板），这样判定可以在单测里验，
 // 而「往剪贴板里写」只有一处。
 import type { Board } from "../core/board";
 import { copyTarget } from "../core/pageInput";
@@ -14,7 +14,7 @@ export type CopyOutcome = { kind: "image"; path: string; format: string } | { ki
 /**
  * 选区 → 这次 Ctrl+C 要做什么。
  *
- * 图片路径原样交给端口（相对用户数据根或绝对路径都可以，端口按它取字节）；
+ * 图片路径原样交给端口（相对数据根或绝对路径都可以，端口按它取字节）；
  * format 只是提示，Go 侧仍按字节判断容器（HEIC、TIFF 由那边明确失败）。
  */
 export function copyOutcome(board: Board, selectedIds: readonly string[]): CopyOutcome {

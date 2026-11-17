@@ -189,7 +189,7 @@ func TestBoundCopyImageReadFailure(t *testing.T) {
 	}
 }
 
-// TestBoundCopyImageReadsThroughStore 绑定服务用真实 store 读绝对路径：用户数据根内的绝对路径照用，
+// TestBoundCopyImageReadsThroughStore 绑定服务用真实 store 读绝对路径：数据根内的绝对路径照用，
 // 越出根的路径被拒绝（复制不能把任意本机文件写进剪贴板）。
 func TestBoundCopyImageReadsThroughStore(t *testing.T) {
 	root := t.TempDir()
@@ -216,7 +216,7 @@ func TestBoundCopyImageReadsThroughStore(t *testing.T) {
 	}
 	refused := Bound{Service: Service{Writer: &fakeWriter{}}, read: store.ReadFile}.CopyImage(outside, "png")
 	if refused.OK {
-		t.Fatal("越出用户数据根的路径不该被读")
+		t.Fatal("越出数据根的路径不该被读")
 	}
 }
 

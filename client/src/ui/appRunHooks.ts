@@ -151,7 +151,7 @@ function useTextActions(options: {
     [activeKey, userRoot, boards, ctx, setSendText],
   );
   const copyText = useCallback(
-    // 内网 HTTP 不是安全上下文，navigator.clipboard 不可用；壳层用 textarea 回退。
+    // 文本复制经桌面端口交给 Go 原生系统剪贴板。
     (text: string) => void copySendText({ copyText: (t) => port.media.copyText(t), toast }, text),
     [toast],
   );

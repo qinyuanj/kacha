@@ -1,4 +1,5 @@
 // 工作台的启动流程判定（#137）：从 src/App.tsx 拆出的纯逻辑，便于单测。
+import { MISSING_BOARD_RECOVERY_TEXT } from "./boardText";
 import { errorText } from "../core/errors";
 import { effectiveTable, type CapabilityTable } from "../core/capabilities";
 import { parseUiState, type UiState } from "../core/uiState";
@@ -75,8 +76,8 @@ export function stopTasksText(count: number): string {
   return `还有 ${count} 个任务在排队或执行。关闭后不会在后台继续；已在执行的只停止本地等待，网关侧计算可能仍在继续。`;
 }
 
-/** 放弃一块服务端已不存在的画板前的确认文案。 */
-export const discardMissingText = "服务端已没有这块画板，关闭后本页内容将丢失。需要保留的话请先导出画板包。";
+/** 放弃一块本机存储已不存在的画板前的确认文案。 */
+export const discardMissingText = `画板文件已不存在，关闭后本页内容将丢失。${MISSING_BOARD_RECOVERY_TEXT}。`;
 
 /** 画板列表里打开不存在的画板时的提示。 */
 export const boardMissingText = "画板不存在，可能已在别处改名或删除；请刷新列表";

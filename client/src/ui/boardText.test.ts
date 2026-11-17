@@ -6,10 +6,10 @@ describe("画板位文案（#89）", () => {
   it("放得下时不拒绝，放不下时给出带实际数字的统一文案", () => {
     expect(slotsRefusal({ used: 7, total: 10 }, 1)).toBeNull();
     expect(slotsRefusal({ used: 7, total: 10 }, 3)).toBeNull();
-    expect(slotsRefusal({ used: 9, total: 10 }, 2)).toBe("画板位满了（9/10），归档或删掉一块再新建。");
-    expect(slotsRefusal({ used: 10, total: 10 }, 1)).toBe("画板位满了（10/10），归档或删掉一块再新建。");
+    expect(slotsRefusal({ used: 9, total: 10 }, 2)).toBe("画板位满了（9/10），备份并删掉不再需要的画板后再新建。");
+    expect(slotsRefusal({ used: 10, total: 10 }, 1)).toBe("画板位满了（10/10），备份并删掉不再需要的画板后再新建。");
     // 超出画板位的老用户：照实际数字写。
-    expect(slotsRefusal({ used: 12, total: 10 }, 1)).toBe("画板位满了（12/10），归档或删掉一块再新建。");
+    expect(slotsRefusal({ used: 12, total: 10 }, 1)).toBe("画板位满了（12/10），备份并删掉不再需要的画板后再新建。");
   });
 
   it("不新增画板时不拒绝", () => {
@@ -82,7 +82,7 @@ describe("粘贴文案（#96）", () => {
 // 「文案一字不改」；别处的测试一律导入这些常量，不再手抄。
 describe("画布动作文案", () => {
   it("另存为：成功一句，失败带原因", () => {
-    expect(SAVE_TEXT.started).toBe("已开始下载（结果带图层时为 zip）");
+    expect(SAVE_TEXT.started).toBe("已保存图片副本");
     expect(SAVE_TEXT.failed("磁盘满了")).toBe("另存失败：磁盘满了");
   });
 
@@ -105,7 +105,7 @@ describe("画布动作文案", () => {
   });
 
   it("重新定位：没找到可改手动选文件，读不了带原因", () => {
-    expect(RELOCATE_TEXT.missing("res1.png")).toBe("在用户数据根内没有找到 res1.png，可改为手动选择文件");
+    expect(RELOCATE_TEXT.missing("res1.png")).toBe("在数据根内没有找到 res1.png，可改为手动选择文件");
     expect(RELOCATE_TEXT.unreadable("坏.png", "网关拒绝")).toBe("无法读取 坏.png：网关拒绝");
   });
 
@@ -179,7 +179,7 @@ describe("阶段与画板位的存量文案", () => {
 
   it("按统一文案的开头认出「画板位满」：其它报错不算", () => {
     expect(isSlotsFullText(boardSlotsFullText({ used: 9, total: 10 }))).toBe(true);
-    expect(isSlotsFullText("服务端返回 HTTP 500")).toBe(false);
+    expect(isSlotsFullText("存储端口返回 HTTP 500")).toBe(false);
   });
 
   it("画板位用量写 used/total", () => {

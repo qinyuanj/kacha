@@ -94,7 +94,7 @@ export async function planExport(board: Board, userRoot: string, fs: PackFs): Pr
 
 // ---- 按内容去重（包格式 v2） ----
 
-/** 能被省略的路径：只有任务目录与导入参考图下的条目（清单、画板不行，与 inspectPack 的校验规则一致）。 */
+/** 能被省略的路径：只有任务目录与导入参考图下的条目（清单、画板不省略）。 */
 const omittable = (entry: string) => {
   const parts = entry.split("/");
   return taskDirOfRelPath(entry) !== null || (parts.length === 2 && parts[0] === IMPORTED_REFERENCES_DIR);

@@ -55,7 +55,7 @@ export function concurrencyOnBlur(draft: string, savedConcurrency: number): stri
   return String(parseConcurrency(draft, savedConcurrency));
 }
 
-/** 连接测试的结果文案：成功给模型数，失败给服务端的话。 */
+/** 连接测试的结果文案：成功给模型数，失败给本机存储的话。 */
 export function connectionText(result: { ok: true; count: number } | { ok: false; message: string }): string {
   return result.ok ? `连接成功，网关提供 ${result.count} 个模型` : result.message;
 }

@@ -65,7 +65,7 @@ type Service struct {
 	generation atomic.Int64
 }
 
-// New 造一个以 root 为用户数据根的服务。
+// New 造一个以 root 为数据根的服务。
 func New(root string) *Service {
 	return &Service{root: root}
 }
@@ -119,7 +119,7 @@ func (s *Service) Snapshot() Snapshot {
 	return Snapshot{Running: s.running, Progress: s.progress, Outcome: s.outcome}
 }
 
-// Cancel 取消当前导入：已移入的任务目录保留，画板不再写入（与 Web 版一致）。
+// Cancel 取消当前导入：已移入的任务目录保留，画板不再写入。
 func (s *Service) Cancel() {
 	s.mu.Lock()
 	running := s.running

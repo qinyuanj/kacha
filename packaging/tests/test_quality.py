@@ -28,8 +28,8 @@ REPORT = """DUPLICATE score=0.91
   client/src/a.ts:3-13
   client/src/b.ts:3-14
 DUPLICATE score=0.85
-  server/src/x.rs:10-30
-  server/src/y.rs:40-61
+  client/src/x.ts:10-30
+  client/src/y.ts:40-61
 """
 
 
@@ -50,72 +50,44 @@ class ScopeTest(unittest.TestCase):
     def test_scope_comes_from_uml_quality_json(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "uml-quality.json").write_text(json.dumps({"version": 1, "standardTools": {
-                "sourceRoots": ["client/src", "server/src"], "exclude": ["**/*.test.ts"]}}), encoding="utf-8")
-            scope = Scope.load(root)
-        self.assertEqual(scope, Scope(roots=("client/src", "server/src"), excludes=("**/*.test.ts",)))
+            (root / "uml-quality.json").write_text(json.dumps({"standardTools": {
+                "sourceRoots": ["client/src"], "exclude": ["**/*.test.ts"]}}), encoding="utf-8")
+            self.assertEqual(Scope.load(root), Scope(roots=("client/src",), excludes=("**/*.test.ts",)))
 
-    def test_only_typescript_and_rust_sources_under_a_root_are_in_scope(self):
-        scope = Scope(roots=("client/src", "server/src"), excludes=())
-        self.assertEqual(in_scope(scope, ["client/src/a.ts", "client/src/b.tsx", "server/src/x.rs", "client/e2e/c.ts",
-                                          "server/tests/t.rs", "client/src/style.css", "docs/a.md"]),
-                         ["client/src/a.ts", "client/src/b.tsx", "server/src/x.rs"])
+    def test_only_typescript_sources_under_a_root_are_in_scope(self):
+        scope = Scope(roots=("client/src",), excludes=())
+        self.assertEqual(in_scope(scope, ["client/src/a.ts", "client/src/b.tsx", "desktop/main.go",
+                                          "client/e2e/c.ts", "client/src/style.css", "docs/a.md"]),
+                         ["client/src/a.ts", "client/src/b.tsx"])
 
 
 class PackagesTest(unittest.TestCase):
-    """每个源码根的上一级是一个包（client、server），工具以包为根运行，范围与改动都换算成包内路径。"""
+    scope = Scope(roots=("client/src",), excludes=("client/src/**/*.test.ts", "client/src/core/testing"))
 
-    scope = Scope(roots=("client/src", "server/src"), excludes=("client/src/**/*.test.ts", "client/src/core/testing"))
-
-    def test_each_source_root_becomes_a_package_with_its_own_relative_scope(self):
-        client, server = packages(self.scope)
-        self.assertEqual((client.root, client.tool_args()),
-                         ("client", ["--root", "client", "-s", "src", "--exclude", "src/**/*.test.ts", "--exclude", "src/core/testing"]))
-        self.assertEqual((server.root, server.tool_args()), ("server", ["--root", "server", "-s", "src"]))
-
-    def test_changed_files_are_split_per_package_and_made_relative(self):
-        client, server = packages(self.scope)
-        changed = ["client/src/a.ts", "server/src/x.rs", "client/src/ui/b.tsx"]
-        self.assertEqual(client.own(changed), ["src/a.ts", "src/ui/b.tsx"])
-        self.assertEqual(server.own(changed), ["src/x.rs"])
+    def test_frontend_scope_is_relative_to_its_package(self):
+        (client,) = packages(self.scope)
+        self.assertEqual(client.tool_args(), ["--root", "client", "-s", "src", "--exclude", "src/**/*.test.ts",
+                                              "--exclude", "src/core/testing"])
+        self.assertEqual(client.own(["client/src/a.ts", "desktop/main.go", "client/src/ui/b.tsx"]),
+                         ["src/a.ts", "src/ui/b.tsx"])
 
 
 class ToolCommandTest(unittest.TestCase):
-    """三个工具都是同一个 uml-viewer 二进制的子命令，不再各装一个 Python 工具（见 docs/adr/0022）。"""
-
-    scope = Scope(roots=("client/src", "server/src"), excludes=("client/src/**/*.test.ts",))
-
     def test_crapper_and_dryer_keep_their_scope_arguments_as_subcommands(self):
-        client = packages(self.scope)[0]
+        client = Package(root="client", source="src", excludes=())
         self.assertEqual(tool_command(BINARY, "crap", [*client.tool_args(), "--threshold", "10", "src/a.ts"]),
-                         [str(BINARY), "crap", "--root", "client", "-s", "src", "--exclude", "src/**/*.test.ts",
-                          "--threshold", "10", "src/a.ts"])
+                         [str(BINARY), "crap", "--root", "client", "-s", "src", "--threshold", "10", "src/a.ts"])
         self.assertEqual(tool_command(BINARY, "dry", [*client.tool_args(), "--threshold", "0.8"]),
-                         [str(BINARY), "dry", "--root", "client", "-s", "src", "--exclude", "src/**/*.test.ts",
-                          "--threshold", "0.8"])
+                         [str(BINARY), "dry", "--root", "client", "-s", "src", "--threshold", "0.8"])
 
 
 class MutationCommandTest(unittest.TestCase):
-    """mutator 的变异副本里要有仓库根的包外依赖，否则基线测试一读就失败（见 #102、#141）。"""
-
-    scope = Scope(roots=("client/src", "server/src"), excludes=("client/src/**/*.test.ts",))
-
-    def test_the_mutator_command_copies_everything_outside_the_package(self):
-        client = packages(self.scope)[0]
+    def test_work_copy_includes_contracts_notes_and_only_version_manifest(self):
+        client = Package(root="client", source="src", excludes=())
+        self.assertEqual(MUTATION_COPIES, ("../contracts", "../docs/release", "../mygo.config.ts"))
         self.assertEqual(mutation_command(BINARY, client, ["src/a.ts"]),
-                         [str(BINARY), "mutate", "--root", "client", "-s", "src", "--exclude", "src/**/*.test.ts",
-                          "--copy", "../contracts", "--copy", "../docs/release", "--copy", "../server/Cargo.toml",
-                          "--copy", "../mygo.config.ts", "src/a.ts"])
-
-    def test_both_packages_are_one_level_below_the_repository_root(self):
-        client, server = packages(self.scope)
-        # 包外依赖：contracts/ 与 docs/release 是目录，server/Cargo.toml 与 mygo.config.ts 是单个文件。
-        self.assertEqual(MUTATION_COPIES, ("../contracts", "../docs/release", "../server/Cargo.toml",
-                                          "../mygo.config.ts"))
-        self.assertEqual(mutation_command(BINARY, client, [])[2:6], ["--root", "client", "-s", "src"])
-        self.assertEqual(mutation_command(BINARY, server, [])[2:],
-                         ["--root", "server", "-s", "src", "--copy", "../contracts", "--copy", "../docs/release",
-                          "--copy", "../server/Cargo.toml", "--copy", "../mygo.config.ts"])
+                         [str(BINARY), "mutate", "--root", "client", "-s", "src", "--copy", "../contracts",
+                          "--copy", "../docs/release", "--copy", "../mygo.config.ts", "src/a.ts"])
 
     def test_only_the_mutator_gets_the_copy_flag(self):
         self.assertNotIn("--copy", tool_command(BINARY, "crap", []))
@@ -149,7 +121,7 @@ class CrapUnmeasuredTest(unittest.TestCase):
 
 class DryOffendersTest(unittest.TestCase):
     def test_a_pair_touching_a_changed_file_is_an_offence(self):
-        self.assertEqual(dry_offenders(REPORT, {"server/src/y.rs"}), ["0.85 server/src/x.rs:10-30 <-> server/src/y.rs:40-61"])
+        self.assertEqual(dry_offenders(REPORT, {"client/src/y.ts"}), ["0.85 client/src/x.ts:10-30 <-> client/src/y.ts:40-61"])
 
     def test_pairs_between_untouched_files_are_existing_debt_not_offences(self):
         self.assertEqual(dry_offenders(REPORT, {"client/src/other.ts"}), [])
@@ -200,7 +172,7 @@ class UncoveredSitesTest(unittest.TestCase):
 
     def test_a_package_without_snapshots_has_no_gaps(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(uncovered_sites(Path(tmp), Package(root="server", source="src", excludes=()), ["src/x.rs"]), 0)
+            self.assertEqual(uncovered_sites(Path(tmp), Package(root="client", source="src", excludes=()), ["src/x.ts"]), 0)
 
 
 class ViewerBinaryTest(unittest.TestCase):
@@ -263,7 +235,7 @@ class QualityBaseTest(unittest.TestCase):
         git(self.root, "config", "user.email", "t@example.com")
         git(self.root, "config", "user.name", "t")
         (self.root / "uml-quality.json").write_text(json.dumps({"standardTools": {
-            "sourceRoots": ["client/src", "server/src"]}}), encoding="utf-8")
+            "sourceRoots": ["client/src"]}}), encoding="utf-8")
         self.commit_all("base")
         self.update_ref("main")
         self.update_ref("pr-base")
@@ -284,6 +256,8 @@ class QualityBaseTest(unittest.TestCase):
             result = quality.main([])
         self.assertEqual(result, 0)
         self.assertIn("自 origin/main", output.getvalue())
+        self.assertIn("Go 当前只由 go test ./... 验证", output.getvalue())
+        self.assertIn("未接入这三项质量指标", output.getvalue())
 
     def test_an_explicit_pr_base_is_used_for_the_comparison(self):
         output = io.StringIO()
@@ -336,6 +310,33 @@ class QualityBaseTest(unittest.TestCase):
 
 
 class ChangedFilesTest(unittest.TestCase):
+    def test_committed_changes_then_worktree_deletion_and_rename_use_only_current_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            git(root, "init", "-q", "-b", "main")
+            git(root, "config", "user.email", "t@example.com")
+            git(root, "config", "user.name", "t")
+            for name in ("edited.ts", "renamed.ts"):
+                (root / name).write_text("base\n", encoding="utf-8")
+            git(root, "add", ".")
+            git(root, "commit", "-q", "-m", "base")
+            base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
+                                  text=True, check=True, env=git_env()).stdout.strip()
+            for name in ("edited.ts", "renamed.ts", "added.ts"):
+                (root / name).write_text("committed change\n", encoding="utf-8")
+            git(root, "add", ".")
+            git(root, "commit", "-q", "-m", "change")
+            # 提交以来有改动的旧路径，后来在工作区被删或改名；不能传给质量工具。
+            (root / "edited.ts").unlink()
+            (root / "added.ts").unlink()
+            (root / "renamed.ts").rename(root / "current.ts")
+            with mock.patch.dict(os.environ, git_env(), clear=True):
+                self.assertEqual(changed_files(root, base), ["current.ts"])
+            # 暂存 rename 后仍然只检查当前文件，不复活旧提交里的路径。
+            git(root, "add", "-A")
+            with mock.patch.dict(os.environ, git_env(), clear=True):
+                self.assertEqual(changed_files(root, base), ["current.ts"])
+
     def test_committed_since_base_and_uncommitted_changes_count_but_deletions_do_not(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

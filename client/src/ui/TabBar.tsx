@@ -13,7 +13,7 @@ interface Props {
   onClose: (key: string) => void;
   onRename: (key: string, title: string) => void;
   onCreate: () => void;
-  /** 打开服务端画板列表（Web 版重新打开已有关掉的画板）。 */
+  /** 打开本机画板列表，重新打开已关闭的画板。 */
   onOpenList?: () => void;
   onExportPack: (key: string) => void;
 }
@@ -125,7 +125,7 @@ export function TabBar({ sessions, activeKey, onActivate, onClose, onRename, onC
         ＋
       </button>
       {onOpenList && (
-        <button className="tab-list" title="列出服务端已有画板并打开" onClick={onOpenList}>
+        <button className="tab-list" title="列出本机存储已有画板并打开" onClick={onOpenList}>
           画板列表
         </button>
       )}

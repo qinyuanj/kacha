@@ -1,7 +1,7 @@
 // 内存壳端口的各个分组（#137）：从 shell/testing/fakePort.ts 拆出，一个分组一个函数。
 // 拆开之后每个函数的复杂度单独看得到，门禁也按函数计。
-import type { ImportOptions, ImportResult, MergeReport, PackEntryFact } from "../../core/boardPack";
-import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, SessionPort, UsagePort } from "../types";
+import type { ImportOptions, ImportResult } from "../../core/boardPack";
+import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, UsagePort } from "../types";
 import { PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore, type PackStore, type PortFailureKind, type UiStore } from "../port";
 import type { FakeBoard, FakeCalls, FakeImportOutcome, FakePortOptions } from "./fakePortTypes";
 
@@ -247,20 +247,7 @@ export async function runImport(
 
 /** 画板包那一组。 */
 export function fakePackStore(imports: FakeImportOutcome[], calls: FakeCalls): PackStore {
-  const io = {
-    cancel: async () => undefined,
-    existing: async () => [],
-    hash: async (): Promise<PackEntryFact[]> => [],
-    stage: async () => "staging-1",
-    uploadContent: async () => undefined,
-    importContent: async (): Promise<MergeReport & { boards: string[] }> => ({ outcomes: [], bytes: 0, boards: [] }),
-    discardStaging: async () => undefined,
-    upload: async () => "pack-1",
-    entries: async () => [],
-    readTexts: async () => ({}),
-    importUnits: async (): Promise<MergeReport & { boards: string[] }> => ({ outcomes: [], bytes: 0, boards: [] }),
-    discard: async () => undefined,
-  };
+  const io = { cancel: async () => undefined };
   return {
     io,
     import: async (file, importOptions: ImportOptions) => runImport(imports, calls, file, importOptions),
@@ -297,21 +284,5 @@ export function fakeUsageStore(missing: Set<string>): UsagePort {
       return { total_bytes: 0, boards_bytes: 0, meta_bytes: 0, last_access: 0, by_date: [], unreferenced: null, unreadable_board: null, limit_bytes: null, limit_level: null };
     },
     cleanupUnreferenced: async () => ({ moved: [], skipped: [] }),
-  };
-}
-
-/** 会话那一组。 */
-export function fakeSessionStore(options: { requiresLogin?: boolean; storedKey?: string | null } = {}): SessionPort {
-  return {
-    // requiresLogin 可改：桌面壳（不登录）与 Web 版（要登录）用同一个替身。
-    requiresLogin: options.requiresLogin ?? true,
-    login: async () => ({ fingerprint: "fake" }),
-    current: async () => ({ fingerprint: "fake" }),
-    logout: async () => undefined,
-    config: async () => ({ version: "9.9.9", gateway_url: "http://gateway.invalid" }),
-    onExpired: () => () => undefined,
-    readStoredKey: () => options.storedKey ?? null,
-    storeKey: () => undefined,
-    clearStoredKey: () => undefined,
   };
 }

@@ -1,6 +1,6 @@
-// Package localservice 是绑定给页面的本地能力：画板、用户数据根里的文件、元数据。
+// Package localservice 是绑定给页面的本地能力：画板、数据根里的文件、元数据。
 //
-// 方法只做转发与形状转换：文件语义在 internal/localstore，界面语义在 client/src/shell/desktopPort.ts。
+// 方法只做转发与形状转换：文件语义在 internal/localstore，界面语义在 client/src/shell/desktop.ts。
 // 失败一律返回类型化的结局（kind = conflict / missing / alreadyExists / invalid / failed），
 // 界面按类别分支，不看文案。
 package localservice
@@ -164,7 +164,7 @@ func (s *Service) DeleteBoard(path string, version string) Outcome {
 	return Outcome{OK: result.OK, Kind: result.Kind, Message: result.Message, Version: result.Version}
 }
 
-// ReadFile 读用户数据根里的文件字节（base64 传给页面）。
+// ReadFile 读数据根里的文件字节（base64 传给页面）。
 func (s *Service) ReadFile(path string) (string, error) {
 	data, err := s.store.ReadFile(path)
 	if err != nil {
@@ -196,7 +196,7 @@ var saveDialog = func(opts mygo.SaveDialogOptions) (string, error) { return mygo
 
 // SaveCopyAs 把 path 指向的图片另存为用户选的位置（#130）：复制图片失败时界面指向的「另存为…」就是它。
 //
-// 字节由 Go 按用户数据根读（越界由 localstore 拒绝）；目标位置由系统「另存为」对话框选，
+// 字节由 Go 按数据根读（越界由 localstore 拒绝）；目标位置由系统「另存为」对话框选，
 // 用户取消返回 kind = cancelled，不写文件。这样承诺的兜底是真能用的，而不是一句「尚不可用」。
 func (s *Service) SaveCopyAs(path string) (Outcome, error) {
 	data, err := s.store.ReadFile(path)
@@ -315,7 +315,7 @@ func (s *Service) BoardsDir() string {
 	return s.store.BoardDir()
 }
 
-// UserDataRoot 返回用户数据根的绝对路径。
+// UserDataRoot 返回数据根的绝对路径。
 func (s *Service) UserDataRoot() string {
 	return s.store.Root()
 }

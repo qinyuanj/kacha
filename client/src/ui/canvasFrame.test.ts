@@ -9,8 +9,8 @@ import { menuItems, type MenuFacts, type MenuItem } from "../core/contextMenu";
 import type { HoverInfo } from "../core/hoverInfo";
 import { SAVE_TEXT } from "./boardText";
 
-const isEditableTarget = webPort.ui.isEditableTarget;
-import { webPort } from "../shell/webPort";
+
+import { isEditableTarget } from "../shell/pageInput";
 import {
   blockNativeContextMenu,
   connectionAllowed,

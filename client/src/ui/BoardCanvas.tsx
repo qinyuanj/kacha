@@ -223,7 +223,7 @@ export function BoardCanvas({
     [table, boardFile, userRoot, discovery, concurrency, apply, requestPromptFocus, setPromptDrafts, setExpandOverrides, actionBar.unhoverNode, overlays.openPreview, onRegenerate, toast, port],
   );
 
-  // 本机图片先上传到用户数据根的 导入参考图/，再按服务端给出的路径导入（端口见 canvasDrop 的 ImagePorts）。
+  // 本机图片先上传到数据根的 导入参考图/，再按本机存储给出的路径导入（端口见 canvasDrop 的 ImagePorts）。
   const importLocalFiles = useCallback(
     async (files: File[], at: { x: number; y: number }, attach?: { taskId: string; place: "asIs" | "left" }) => {
       const images: ImportedImage[] = await importImages(files, { userRoot, toast, ports: imageImportPorts(port) });
@@ -285,8 +285,6 @@ export function BoardCanvas({
     importPastedImages: pasteImages,
     isEditableTarget: port.ui.isEditableTarget,
     readClipboard: port.media.readClipboard,
-    // 桌面壳能直接读系统剪贴板（#129）：粘贴先读原生快照，Web 仍用 paste 事件带的内容。
-    nativeClipboard: port.features.nativeClipboard ?? false,
   });
   useEffect(() => handlers.focusNode(focus), [focus]);
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """在开发机构建 Kacha Windows 桌面客户端；只依赖 Python 标准库。
 
-与 build_web.py 同一套约定：从仓库根运行，命令按 PATH 与 PATHEXT 解析，失败即以中文信息退出。
+从仓库根运行，命令按 PATH 与 PATHEXT 解析，失败即以中文信息退出。
 产物在 build/windows-amd64/：Kacha.exe、build-info.json（本次构建记录的 MyGo / Go / WebView2 版本）。
 """
 
@@ -14,8 +14,7 @@ import shutil
 import subprocess
 import sys
 
-# parse_config_version 是给既有调用点的同名转发（规则在 release_gate 里，这里不重写一遍）。
-from release_gate import check_release_notes, check_version_line, parse_config_version
+from release_gate import check_release_notes, desktop_version
 
 MYGO_VERSION = "0.9.0"
 """固定的 MyGo 版本：go.mod 的 tool 指令也钉在同一版本，升级要单独验证（ADR 0023）。"""
@@ -78,19 +77,22 @@ def webview2_version() -> str | None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="构建 Kacha Windows 桌面客户端到 build/windows-amd64")
     parser.add_argument("--skip-install", action="store_true", help="沿用已按 package-lock.json 安装的前端依赖")
+    parser.add_argument("--debug", action="store_true", help="验证用 debug 构建，输出到 build/debug/windows-amd64")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
-    # 门禁：两张清单同号、更新说明有当前版本一节；不通过就不跑任何构建。
-    version = check_version_line(root)
+    # 产品版本只来自桌面配置；门禁失败时不运行构建。
+    version = desktop_version(root)
     check_release_notes(root, version)
 
     if not args.skip_install:
         run(["npm", "ci"], root / "client")
 
     # CLI 钉在 go.mod 的 tool 指令上；buildCommand（前端构建）由 mygo build 自己跑。
-    run(["go", "tool", "mygo", "build", "-platform", PLATFORM, "-skip-installer"], root)
+    output = Path("build") / "debug" / "windows-amd64" if args.debug else OUT
+    debug_args = ["-debug", "-o", "build/debug"] if args.debug else []
+    run(["go", "tool", "mygo", "build", "-platform", PLATFORM, "-skip-installer", *debug_args], root)
 
-    exe = root / OUT / "Kacha.exe"
+    exe = root / output / "Kacha.exe"
     if not exe.exists():
         raise SystemExit(f"构建没有产出 {exe}")
 
@@ -104,9 +106,10 @@ def main() -> int:
         "mygo": mygo,
         "go": parse_go_version(capture(["go", "version"], root)),
         "webview2": webview2_version(),
-        "exe": (OUT / "Kacha.exe").as_posix(),
+        "profile": "debug" if args.debug else "release",
+        "exe": (output / "Kacha.exe").as_posix(),
     }
-    (root / OUT / "build-info.json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (root / output / "build-info.json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     print(f"客户端：{exe}")
     print(f"记录：MyGo {info['mygo']} / {info['go']} / WebView2 {info['webview2']}")

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { servedFileUrl } from "./desktopStores";
 
 // 本机图片地址（#132 真机验收发现）：WebView2 的页面来自 http://mygo.localhost，不能加载 file://，
-// 用户数据根里的图片必须经 Go 注册的 kacha 协议读取，否则节点一律显示「图片缺失」。
+// 数据根里的图片必须经 Go 注册的 kacha 协议读取，否则节点一律显示「图片缺失」。
 describe("servedFileUrl", () => {
   it("根内文件走 kacha 协议，正斜杠相对路径", () => {
     expect(servedFileUrl("C:\\Users\\x\\data", "C:\\Users\\x\\data\\2026-11-15\\t1\\result.png")).toBe(

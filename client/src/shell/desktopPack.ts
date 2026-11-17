@@ -44,7 +44,7 @@ function failureResult(outcome: DesktopPackOutcome): ImportResult {
   if (outcome.kind === "corrupt") return { kind: "corrupt", reason: outcome.message };
   if (outcome.kind === "newer") return { kind: "newer", message: outcome.message };
   if (outcome.kind === "cancelled") return { kind: "cancelled" };
-  // 画板没有写入；合并中途失败时已移入的任务目录保留（与 Web 版同一说法）。
+  // 画板没有写入；合并中途失败时已移入的任务目录保留。
   if (outcome.kind === "conflict" || outcome.kind === "failed") return { kind: "commitFailed", error: outcome.message };
   return { kind: "failed", error: outcome.message };
 }
@@ -117,16 +117,13 @@ async function importPackFile(pack: DesktopPackBridge, path: string, options: Im
   return resultOf(await awaitImport(pack, options, publish), options);
 }
 
-/** PackIo：去重上传协议是 Web 版的路子，桌面壳整包在本机合并；只有取消是真的。 */
+/** 取消本机导入；false 复位由 Go 在开始新导入时处理。 */
 function packIo(pack: DesktopPackBridge | undefined): PackIo {
-  return new Proxy({} as PackIo, {
-    get: (_target, prop: string) =>
-      prop === "cancel"
-        ? async (cancelled: boolean): Promise<void> => {
-            if (cancelled && pack) await localRun(() => pack.cancel());
-          }
-        : async (): Promise<never> => unavailable("packExport"),
-  });
+  return {
+    cancel: async (cancelled) => {
+      if (cancelled && pack) await localRun(() => pack.cancel());
+    },
+  };
 }
 
 /** 画板包那一组：导入走本机 Pack 服务，导出还没有。 */

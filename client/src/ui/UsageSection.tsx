@@ -1,10 +1,10 @@
-// 用量与自助清理（Web 版，ADR 0018）：高级设置里的一块；清单来自服务端，服务端逐条重算候选资格。
+// 用量与自助清理区块；桌面尚未实现时由壳端口能力隐藏入口。
 // 可见判定在 ui/usageView.ts（#137），这里只留接线与 DOM 摆放。
 import { useCallback, useEffect, useState } from "react";
 import type { Usage } from "../shell/types";
 import { errorText } from "../core/errors";
 import { useShell } from "./shell";
-import { formatBytes, IDLE_USER_RULE_TEXT } from "./boardText";
+import { formatBytes } from "./boardText";
 import { canClean, unreadableNotice, unreferencedSummary, usageBreakdown, usageByDate } from "./usageView";
 import { cleanUnreferenced } from "./usageClean";
 
@@ -42,8 +42,7 @@ function UnreferencedRow({ usage, busy, onClean }: { usage: Usage; busy: boolean
           {unreadableNotice(usage.unreadable_board)}
         </div>
       )}
-      <div className="muted small form-hint" data-testid="usage-idle-rule">{IDLE_USER_RULE_TEXT}</div>
-      <div className="muted small form-hint">没有画板引用、建立超过 30 天的任务目录可以清理；清掉的先进回收区，14 天内可找管理员恢复。</div>
+      <div className="muted small form-hint">这里只清理没有任何画板引用的任务目录；操作前请先备份数据根。</div>
     </>
   );
 }
@@ -57,7 +56,7 @@ function CleanConfirm({ usage, busy, onConfirm, onCancel }: { usage: Usage; busy
         <div className="modal-head">
           <strong>清理未引用任务目录</strong>
         </div>
-        <p className="muted small">以下 {dirs.length} 个任务目录没有任何画板引用，将移入回收区（保留 14 天，只能由管理员恢复）。被引用的结果不在清单里。</p>
+        <p className="muted small">以下 {dirs.length} 个任务目录没有任何画板引用，将移入回收区。被引用的结果不在清单里。</p>
         <ul className="usage-candidates">
           {dirs.map((d) => (
             <li key={d.dir}>

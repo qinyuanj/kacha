@@ -1,111 +1,34 @@
 # 团队网关契约
 
-本目录保存通过团队网关真实交互获得的脱敏契约夹具。夹具验证器只接受明确记录的实测结果，不根据 OpenAI、DashScope 或其他厂商文档推断路径和载荷。
+本文件记录模型请求协议与脱敏夹具证据。客户端只通过团队 new-api 网关调用模型，生成端口当前尚未接入桌面；保留协议和回放测试不代表桌面已经能生成。HTTP 网关仅用于可信内网或 VPN。
 
-## 适配器实现状态
+## 请求与结局
 
-v1 适配器 `src/ugc_image_tool/team_gateway.py`（已归档于 `archive/v1` 分支）依据本目录夹具实现；v2 客户端 `client/src/core/gateway.ts` 沿用实测响应，并按当前 new-api 插件契约调整请求：
+- 模型发现：`GET /v1/models`，Bearer 鉴权，按完整模型 ID 与本地能力表求交集，未知模型不启用。
+- Qwen 文生图与编辑：`POST /v1/images/generations`，顶层 `model`、`prompt`、`negative_prompt`、`n:1`、`size`（`WxH`）、`watermark`，参考图为有序 `image` data-URL 数组。当前请求不使用 `input` / `parameters`。结果取 `metadata.output.choices[].message.content[].image`，兼容 URL 与 base64。
+- Seedream 文生图与编辑：同一 generations 端点，顶层有序 `image`，结果取 `data`；Flash 的具体约束见下文。
+- 发送文本由发送计划统一生成，序号与区域引用在提交前校验。Qwen 负向走原生字段，Seedream 负向拼入文本。
+- 401 为鉴权失败，429 为限流，其他 4xx 为拒绝，5xx 为网关错误，连接或下载失败明确失败。生成不依赖未经证实的幂等键、网关取消、任务查询或 `Retry-After`。
+- Flash 拒绝含 429 不自动重发或换模型；取消只表示客户端不再等待和落结果。
 
-- **模型发现**：`GET /v1/models`，`Authorization: Bearer` 鉴权；`data[].id` 作为模型 ID 交给本地能力表合并，未知模型保持禁用。
-- **文生图**：`POST /v1/images/generations`，仅发送实测字段 `model`、`prompt`、`negative_prompt`、`n`、`size`（`WxH`）、`watermark`。
-- **图片编辑**：自 2026-11-06 起与文生图统一使用 `POST /v1/images/generations`。参考图编码为顶层 `image` data-URL 数组，提示词、原生负向、出图数量、尺寸与水印使用顶层 `prompt`、`negative_prompt`、`n`、`size`（`WxH`）与 `watermark`，不再发送旧 `input` / `parameters`。提示词发送前由客户端注入数量与顺序前缀（如「本次提供 2 张参考图，按顺序为图1、图2。」），让用户提示词里的「图1/图2」有确定所指。成功响应以 `metadata.output.choices[].message.content[].image` 为出图真源保存。
-- **错误映射**：401 → 鉴权失败；429 → 网关限流（可操作提示，不依赖 `Retry-After`）；4xx → 网关拒绝；5xx → 网关服务错误；连接失败 → 网络不可达（任务状态为结果未知）。
-- **重试**：模型列表等只读请求由发现层有限重试；生成请求不自动重发，契约未确认幂等键，不使用稳定任务 ID 重试。
-- **保持关闭（未实测）**：生成请求的幂等键、运行中取消、任务查询和 `Retry-After`。这些能力在真实交互验证前不向网关发出。
-- **负向提示词**：按能力表 `supports_negative_prompt` 分流。qwen 文生图与图片编辑均走顶层 `negative_prompt`，不并入文本。Seedream 系列无原生字段，负向以「避免出现：」/「Avoid: 」拼在提示词之后、区域固定句之前。
+## Flash 普通通路
 
-## 2026-08-31 历史实测结论
+完整 ID 为 `doubao-seedream-5-0-flash-260915`。普通文生图与编辑使用精确 `WxH`，默认 url/png/无水印，提示词优化只用 standard。最多 10 张实际参考图，叠加图也占名额。单图保守上限为 30000000 字节，像素、边长、比例和格式均按能力表校验实际发送快照，处理失败不可退回不合规原字节。
 
-以下契约在内网主机 `http://lzxsvn:3001`（new-api，2026-08-29 为 v1.0.0-rc.27 官方零补丁，2026-08-31 上游已升级、版本号未重新核对）真实验证；文生图与模型列表夹具保存于 `contracts/fixtures/2026-08-17-team-gateway/`，JSON 图片编辑夹具保存于 `contracts/fixtures/2026-08-29-team-gateway-edit-json/`，编辑边界（3 张参考图、n=3/5、原生负向提示词）夹具保存于 `contracts/fixtures/2026-08-31-team-gateway-edit-boundaries/`。其中编辑请求形态已被 2026-11-06 的当前契约取代，夹具仅用于响应回放：
+不发送 `n`、原生 `negative_prompt`、`seed`、`mask`、`input.messages`、组图、流式或搜索参数。普通响应必须恰好一项有效 URL 或 base64 图片，多项、空项、坏项及下载失败均失败。临时 URL 立即下载，不写进长期任务记录。
 
-- 鉴权使用 `Authorization` 头；无效密钥返回 401 和 `new_api_error`。
-- 模型列表为 `GET /v1/models`，返回 `data` 模型数组和 `success: true`。
-- 文生图为 `POST /v1/images/generations`，使用 `model`、`prompt`、`negative_prompt`、`n`、`size`（`WxH`）和 `watermark` 字段；成功返回临时 `url`，并在元数据中返回图片内容。
-- 图片编辑为 `POST /v1/images/edits`，编码为 JSON 而非 multipart；multipart 路径已被 JSON data-URL 编码取代。
-- 编辑透传实测：`parameters.size=1024*1024` 使 800x400（2:1）输入输出为 1024x1024 方形（尺寸生效）；双参考图响应 `input_image_count=2`（两张参考图均被采纳）；`parameters.n=2` 响应 `output_image_count=2`（出图数量生效）。
-- 出图真源是 `metadata.output.choices[].message.content[].image`；`n>1` 时上游把多张图放进同一个 choice 的 `message.content`，网关顶层 `data` 仅产出一条且 `data[0].url` 被覆盖成最后一张，顶层 `data` 视图在 `n>1` 时丢图，客户端不得依赖它统计出图数量。实测 metadata 图片为临时地址（URL）而非 base64，解析须同时兼容两种形态。
-- 已验证模型仅为 `qwen-image-3.0-pro`；列表中的其他模型不得启用。
+区域可使用高亮叠加或提示文本中的 `<point>` / `<bbox>`，提示坐标范围 0 至 999。透明背景只用于恰好一张确认带 alpha 的实际参考图，输出必须 PNG；叠加把输入展开成两张时不满足该条件。
 
-部分失败、幂等键、运行中取消、任务查询和可靠 `Retry-After` 没有得到足够的真实证据，均记录为 `unknown`，客户端不得依赖这些行为。顶层 `data` 与元数据输出数量不一致只能证明响应视图不可靠，不能证明网关提供了可依赖的部分失败语义，适配器必须将其视为未知结果并保守处理。`parameters.n` 经网关按百炼 `usage.image_count` 结算，JSON 透传不会造成漏计费。
+图层拆分使用 `layer_decomposition:true`，单张 PNG/JPEG 输入，尺寸仅 `1K` / `1.5K` / `2K` / `auto`，不发普通精确像素。输出按 `z_index` 识别底图与排序，位置来自 `bounding_box.absolute`，`normalized` 范围 0 至 1000。名称和描述可选，关键定位或任一图层无效则整体失败。没有真实 Flash 图层夹具，不把合成回放当网关实测。
 
-未实测（如实标注）：非法或不支持的 size 档位报错形态；JSON 路径失败场景的错误映射是否与 multipart 一致；其余模型的图片编辑；`input.negative_prompt` 对出图效果的实际约束强度（协议层已实测接受，需人工视觉对比）。
+## 证据与限制
 
-## 2026-09-16 冒烟：多轮消息、序号措辞与高亮叠加
+- `contracts/fixtures/2026-08-17-team-gateway/`：模型发现、Qwen 文生图和错误响应。
+- `contracts/fixtures/2026-08-29-team-gateway-edit-json/` 与 `2026-08-31-team-gateway-edit-boundaries/`：旧嵌套编辑协议，仅保留响应回放与边界证据，不作为当前请求模板。元数据与顶层 data 数量曾不一致，因此不能用顶层 data 统计 Qwen 出图数量。
+- `contracts/fixtures/2026-09-16-team-gateway-multiturn-refs-mask/`：Qwen 不支持多轮消息，结果回灌可用；图 N 与 Image N 指代、高亮叠加有实际证据，原生 mask 猜测字段被忽略。
+- `contracts/fixtures/2026-09-17-team-gateway-seedream/`：当时 pro/Lite 参考图和区域行为。不能直接用来证明 Flash 能力，Lite 不再上架。
+- [Flash 夹具](../../contracts/fixtures/2026-10-09-team-gateway-flash/manifest.json)：1024x1024 文生图、双图高亮叠加、1536x1536 透明三组真实脱敏交互。视觉结论来自原采集者，替代图片字节和合成测试只证明客户端处理。
 
-夹具保存于 `contracts/fixtures/2026-09-16-team-gateway-multiturn-refs-mask/`（仅 `qwen-image-3.0-pro`，合成几何图形）：
+默认只有真实夹具确认的能力才准入。Flash 例外允许官方明确支持、客户端实现与自动化验证齐备的能力开放，官方支持、网关实测和实现证据仍分别记录，见 [ADR 0001](../adr/0001-integrate-only-through-team-gateway.md) 与 [Flash 依据](../research/seedream-flash.md)。未知协议保持未知，不将发现列表当生成成功。
 
-- **多轮消息不可用**：`input.messages` 放两条 user 消息或含 assistant 角色均返回 HTTP 400（上游明确「only supports single-turn conversation」）。多轮修改只能结果回灌：上一轮结果图作为参考图重新提交，无状态单轮即可累计效果。
-- **参考图序号措辞**：3 张参考图下「图N」「Image N」「Picture N」「图N（汉字）」各测序号 2 与 3，8/8 命中。客户端默认改写为「图N」/「Image N」并保留数量顺序前缀。
-- **无原生 mask**：`input.mask` 与 `parameters.mask_image_url` 被网关与上游静默忽略（HTTP 200，整图改色）；百炼文档亦无 mask/区域参数。
-- **高亮叠加有效**：原图 + 「紫色半透明高亮叠加图」作第 2 张参考图并在提示词说明只改高亮区域，3/3 只改高亮区域，且 5 个相同物体只高亮其一时恰好命中；无叠加图对照随机。代价：占用一个参考图名额。
-- **速率限制**：6～10 个请求并发时返回 HTTP 429，无 `Retry-After`；间隔 60 s 串行重试成功。
-
-## 2026-09-17 冒烟：Seedream 5.0 pro / lite
-
-夹具保存于 `contracts/fixtures/2026-09-17-team-gateway-seedream/`（`doubao-seedream-5-0-pro-260628`、`doubao-seedream-5-0-lite-260128`，合成几何图形，脚本 `contracts/smoke/multiturn-refs-mask/seedream.py`）：
-
-- **模型 ID**：网关只认 `-lite-` 别名；文档正式 ID `doubao-seedream-5-0-260128` 返回 HTTP 503 `model_not_found`。
-- **请求形态**：`POST /v1/images/generations`，顶层 `model`、`prompt`、`size`（`WxH` 或 `2K` 档位）、`image`（data-URL 数组）、`response_format:"url"`、`watermark`、`output_format`；`/v1/images/edits` 同形态等价。qwen 的 `input.messages` 形态 HTTP 200 但参考图被静默丢弃（`usage.input_images=0`），不得使用。出图在顶层 `data[].url`，不是 `metadata.output.choices`。
-- **多轮消息不可用**，沿用结果回灌。
-- **参考图序号措辞**：「图N」「Image N」「图一/二/三」各测序号 2 与 3，两模型各 6/6。
-- **区域指示**：高亮叠加参考图、图上标记（红框画在原图上替换原图）两模型各 2/2；`<bbox>` 坐标标签（0～999）pro 2/2，lite 也 2/2 但文档仅 pro 支持，能力表保守不开；无指示对照未命中目标。
-- **参考图上限**：pro 10、lite 14，超限 HTTP 400「number of reference images cannot exceed N」。
-- **速率限制**：每模型 10 并发全部 HTTP 200，未触发 429；阈值未探。
-- **多区域**：双区域不同指令，高亮叠加（紫 / 黄分色）、图上标记（紫 / 黄框）、坐标标签（两段 `<bbox>`）两模型各 3/3，无残留。
-- **透明背景**：pro 单张带 alpha 输入 + `background:"transparent"` 输出 RGBA；不带参数输出白底 RGB；lite 忽略该参数。
-- **图层拆分**：`layer_decomposition` 三种猜测形态均被静默忽略；真实参数未知。
-
-## 探测流程
-
-> 历史命令，已退役：下面的 `ugc_image_tool.contracts.cli` 属于 v1，已随 `archive/v1` 分支归档，当前仓库中无法运行，仅作记录。
-
-临时密钥只能通过环境变量或权限受限的临时文件提供：
-
-```bash
-export UGC_IMAGE_TOOL_GATEWAY_API_KEY='temporary-key'
-PYTHONPATH=src python3 -m ugc_image_tool.contracts.cli record \
-  --base-url 'http://lzxsvn:3001' \
-  --interface models \
-  --path '<通过实测确认的路径>' \
-  --method GET \
-  --output .scratch/models-exchange.json
-```
-
-文生图和图片编辑探测使用经过团队批准的测试载荷文件：
-
-```bash
-PYTHONPATH=src python3 -m ugc_image_tool.contracts.cli record \
-  --base-url 'http://lzxsvn:3001' \
-  --interface text_to_image \
-  --path '<通过实测确认的路径>' \
-  --method POST \
-  --body-file .scratch/text-to-image-request.json \
-  --output .scratch/text-to-image-exchange.json
-```
-
-探测器只执行一次请求，不自动重试生成请求。输出会替换鉴权头、提示词、参考图、图片字节和有效 URL；生成正式夹具前仍需人工检查脱敏结果。
-
-将交互整理进 `contracts/fixtures/<版本>/manifest.json` 后运行：
-
-```bash
-PYTHONPATH=src python3 -m ugc_image_tool.contracts.cli validate contracts/fixtures/<版本>
-```
-
-完整清单必须记录三类接口、主要错误映射、部分失败以及五项行为（幂等键、运行中取消、任务查询、`Retry-After`、部分失败）的 `supported`、`unsupported` 或 `unknown` 结论和证据。只覆盖部分接口的清单视为 partial manifest（如 `2026-08-29-team-gateway-edit-json/` 的编辑专用清单）：`interfaces` 缺任一三类接口即为 partial，此时仅校验已记录的接口与行为（行为结论另可用 `confirmed` 表示本轮实测确认），跳过主要错误映射、`unsafe_to_enable` 和全接口覆盖的强制要求，其余规则不变。只有 `supported` 且有真实夹具的能力才可进入本地模型能力表；Flash 专属例外如下，不改变其他模型准入。
-
-## 2026-10-10 Flash 普通通路与证据准入
-
-按 [Issue #8 最终 Resolution](https://github.com/qinyuanj/kacha/issues/8#issuecomment-6093423192)，Flash 官方明确支持能力可在客户端实现及自动化验证完成后开放，无须逐项真实网关冒烟。官方支持、当前网关实测、客户端实现分开记录，详见 [Flash 研究](../research/seedream-flash.md)。路径与有序 `image` 已有真实证据；普通输入/尺寸边界、JPEG、水印、base64、standard 优化按官方规则验证，不冒称网关已测。
-
-#15 普通文生图与编辑均使用 `POST /v1/images/generations`：完整模型 ID `doubao-seedream-5-0-flash-260915`，精确 `WxH`，顶层有序 `image`（0 图时省略），默认 url/png/watermark:false，优化仅 standard。最多 10 张；保守字节政策 30000000（官方 30MB 未定义二进制/十进制），实际参考图快照必须通过格式、字节、像素、边长和比例校验；处理失败不可退回违规原字节。不得发送 n、negative_prompt、seed、mask、input.messages、sequential_image_generation、流式或搜索字段。
-
-普通 `data` 必须恰好一项有效 URL 或 base64 图片；多项、空/坏项、下载失败均失败。URL 立即下载并保存，不持久化临时签名地址。HTTP 拒绝含 429 不自动重发/退避、不换模型。幂等、网关取消、Retry-After、任务查询继续 unknown。真实夹具从 `c3646077d5d9a252c541ae8434308f947030127e` 原样取回 manifest/text/overlay/transparent 四份；回放的替代图片字节和浏览器生成响应明确是合成测试数据，不证明真实编辑视觉语义。
-
-## 2026-10-10 Flash 区域、透明与图层通路（#17–#20）
-
-以下通路已在客户端实现并完成自动化验证；证据等级逐条标注，不与上文真实夹具混同。
-
-- **区域指示（#17）**：发送文本支持 `<point>x y</point>` 与 `<bbox>x1 y1 x2 y2</bbox>` 标签，空格分隔，提示坐标范围 0–999（官方编辑指南明确适用于 Flash）；高亮叠加沿用 Kacha 已有实测方案（2026-09-16 / 2026-09-17 冒烟），不冒称官方独立 API 模式。坐标模式只发送原图，区域保存在参考图快照元数据中；同一任务可混用两种表达，共用连续区域编号。越界引用、非法矩形、展开后超 10 张明确拒绝，不截断。网关真实证据仍只覆盖一张原图加一张高亮叠加图；坐标、多区域与跨图自动化只证明客户端表达与接线，本轮未付费调用。
-- **透明背景（#18）**：`background:"transparent"` 仅用于恰好一张已确认带 alpha 的实际参考图且输出 PNG；客户端按展开后的实际快照字节解码校验，未知 alpha 不当真。真实脱敏夹具为 1536×1536 RGBA（原采集者视觉记录）；区域叠加把唯一输入展开成原图 + 叠加图后，任务在运行前以「透明背景需要恰好一张实际参考图」阻断，控件与运行器同一理由。
-- **图层拆分（#19）**：`layer_decomposition:true`；`size` 仅 `1K` / `1.5K` / `2K` / `auto`（默认 auto），不发送普通生成的 `WxH`；输入恰好一张 PNG/JPEG，保守 30000000 字节（官方 30MB 未定义十进制 / 二进制）、262144–36000000 像素、1/16–16；`prompt` 可省略表示自动拆分。响应 `data[]` 平铺 `z_index` / `name` / `description` / `bounding_box`（`absolute` 底图像素坐标与 `normalized` 0–1000，与提示坐标 0–999 区分）；按 `z_index` 识别底图（z_index=0）并升序叠放图层，不以 `data[0]` 身份充当层级；名称与描述是可选元数据，不臆造；关键定位数据缺失 / 无效作协议校验错误，不猜测铺满。任一图层下载、格式或 alpha 失败则整体失败。**无真实 Flash 图层网关夹具：全部按官方契约构建合成响应回放，资产明确标记为合成，不宣称网关实测或视觉验证。**
-- **图层保存 / 导出 / 来源图层 / 画板包往返（#20）**：纯客户端持久化与交互行为，不进网关协议。图层文件与 layers.json 由任务目录真源保存，重开与画板包导入按真源还原；来源图层连线发送所选图层的实际字节，谱系仍指向产出它的生成结果；图层文件缺失或身份无效明确阻断，不回落底图。
+夹具不得包含密钥、完整提示词、输入图片或有效签名 URL。记录新交互前需明确授权载荷与费用，整理后人工核对脱敏；现有夹具不因文档精简而改写。

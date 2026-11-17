@@ -52,7 +52,7 @@ describe("复制分派：单选一张图才复制图片", () => {
     expect(copyOutcome(board(result("res1", "任务/t1/result.webp")), ["res1"])).toMatchObject({ format: "webp" });
   });
 
-  it("用户数据根外的绝对路径原样交给端口", () => {
+  it("数据根外的绝对路径原样交给端口", () => {
     expect(copyOutcome(board(reference("r1", "D:/别处/cat.png")), ["r1"])).toMatchObject({ path: "D:/别处/cat.png" });
   });
 

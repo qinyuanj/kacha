@@ -53,14 +53,14 @@ describe("任务编号与目录", () => {
     expect(taskDirOfTaskId("not-a-task")).toBeNull();
   });
 
-  it("任务目录里的文件路径：拼在用户数据根下；任务编号不是本工具生成的为 null", () => {
+  it("任务目录里的文件路径：拼在数据根下；任务编号不是本工具生成的为 null", () => {
     const id = "20260916T091500Z-3f9c2a1b";
     expect(taskFilePath("/root", id, "result.png")).toBe("/root/2026-09-16/20260916T091500Z-3f9c2a1b/result.png");
     expect(taskFilePath("/~", id, "layers/01.png")).toBe("/~/2026-09-16/20260916T091500Z-3f9c2a1b/layers/01.png");
     expect(taskFilePath("/root", "not-a-task", "result.png")).toBeNull();
   });
 
-  it("相对用户数据根的路径落在 <日期>/<task_id>/… 里时还原任务目录", () => {
+  it("相对数据根的路径落在 <日期>/<task_id>/… 里时还原任务目录", () => {
     expect(taskDirOfRelPath("2026-09-16/t1/result.png")).toBe("2026-09-16/t1");
     expect(taskDirOfRelPath("2026-09-16/t1/layers/01.png")).toBe("2026-09-16/t1");
     expect(taskDirOfRelPath("2026-09-16/t1")).toBeNull();
@@ -71,6 +71,18 @@ describe("任务编号与目录", () => {
 });
 
 describe("图片格式识别", () => {
+  it("GIF 两代签名与 TIFF 两种字节序可读，截断签名不能冒充图片", () => {
+    const encode = (text: string) => new TextEncoder().encode(text);
+    for (const signature of ["GIF87a", "GIF89a"]) {
+      expect(sniffImage(encode(signature))).toEqual({ ext: "gif", mediaType: "image/gif" });
+    }
+    for (const signature of [[0x49, 0x49, 0x2a, 0x00], [0x4d, 0x4d, 0x00, 0x2a]]) {
+      expect(sniffImage(new Uint8Array(signature))).toEqual({ ext: "tiff", mediaType: "image/tiff" });
+      expect(sniffImage(new Uint8Array(signature.slice(0, 3)))).toBeNull();
+    }
+    expect(sniffImage(encode("GIF89"))).toBeNull();
+    expect(sniffImage(encode("RIFF"))).toBeNull();
+  });
   it("按文件头识别扩展名与媒体类型", () => {
     expect(sniffImage(PNG)).toEqual({ ext: "png", mediaType: "image/png" });
     expect(sniffImage(JPEG)).toEqual({ ext: "jpg", mediaType: "image/jpeg" });
@@ -335,7 +347,7 @@ describe("读回旧任务目录（真实旧夹具，见 __fixtures__/README.md�
 });
 
 describe("保存结果图", () => {
-  it("按文件头定扩展名，返回相对用户数据根的正斜杠路径", async () => {
+  it("按文件头定扩展名，返回相对数据根的正斜杠路径", async () => {
     const fs = memoryTaskFs();
     const saved = await saveResult(fs, "/~", "2026-09-16/t1", PNG);
     expect(saved).toEqual({ file: "result.png", path: "2026-09-16/t1/result.png" });
@@ -452,6 +464,14 @@ describe("图层元数据真源 layers.json", () => {
       { file: "layers/01.png", z_index: 1, bounding_box: box1, name: "主体", description: "官方契约合成资产" },
       { file: "layers/02.png", z_index: 2, bounding_box: box2 },
     ]);
+  });
+
+  it("底图层序缺省补零，未知元数据原样保留；不含底图的旧记录仍可读", () => {
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+    expect(parseLayersFile(encode({ base: { file: "", name: "", future: { source: "imported" } }, layers: [] }))).toEqual({
+      base: { file: "", name: "", future: { source: "imported" }, z_index: 0 }, layers: [],
+    });
+    expect(parseLayersFile(encode({ layers: [] }))).toEqual({ layers: [] });
   });
 
   it("parseLayersFile：底图身份形状无效明确失败", () => {

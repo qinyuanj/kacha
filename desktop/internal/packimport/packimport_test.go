@@ -86,7 +86,7 @@ func quotePairs(pairs map[string]string) string {
 
 const boardText = "{\"format_version\":2,\"title\":\"画板一\",\"viewport\":{\"zoom\":1,\"x\":0,\"y\":0},\"nodes\":[{\"id\":\"n1\",\"type\":\"reference\",\"path\":\"导入参考图/abc.png\",\"sha256\":\"abc\"}],\"edges\":[]}"
 
-// 导入一个真实的包之后：画板、任务目录、图片与图层文件都落在用户数据根里，内容逐字节一致。
+// 导入一个真实的包之后：画板、任务目录、图片与图层文件都落在数据根里，内容逐字节一致。
 func TestImportWritesBoardTaskDirsImagesAndLayers(t *testing.T) {
 	root := t.TempDir()
 	pack := buildPack(t,
@@ -132,7 +132,7 @@ func TestImportWritesBoardTaskDirsImagesAndLayers(t *testing.T) {
 	}
 }
 
-// tempDirs 列出用户数据根下残留的导入临时目录。
+// tempDirs 列出数据根下残留的导入临时目录。
 func tempDirs(t *testing.T, root string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(root)
@@ -148,7 +148,7 @@ func tempDirs(t *testing.T, root string) []string {
 	return out
 }
 
-// snapshot 记下用户数据根里的全部文件与内容：用来断言「拒绝后本地数据保持不变」。
+// snapshot 记下数据根里的全部文件与内容：用来断言「拒绝后本地数据保持不变」。
 func snapshot(t *testing.T, root string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
@@ -177,7 +177,7 @@ func snapshot(t *testing.T, root string) map[string]string {
 	return out
 }
 
-// seededRoot 是拒绝类用例共用的前置：用户数据根里已经有一块画板与一个任务目录。
+// seededRoot 是拒绝类用例共用的前置：数据根里已经有一块画板与一个任务目录。
 func seededRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -223,7 +223,7 @@ func TestRejectsTraversalPath(t *testing.T) {
 	}
 }
 
-// 包内符号链接：拒绝（链接可以指向用户数据根之外），本地数据不变。
+// 包内符号链接：拒绝（链接可以指向数据根之外），本地数据不变。
 func TestRejectsSymlinkEntry(t *testing.T) {
 	root := seededRoot(t)
 	before := snapshot(t, root)

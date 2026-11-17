@@ -1,4 +1,4 @@
-// 重新定位：画板引用的图片缺失时，在用户数据根内按身份找回；不扫全盘。
+// 重新定位：画板引用的图片缺失时，在数据根内按身份找回；不扫全盘。
 // 结果按 task_id 找任务目录，参考图按 sha256 找文件。文件系统由调用方注入。
 import { BOARDS_DIR_NAME, joinPath } from "./paths";
 import { taskFilePath } from "./taskDir";
@@ -30,6 +30,11 @@ export async function findResultFile(fs: RelocateFs, root: string, ref: { task_i
   return null;
 }
 
+function searchableEntry(entry: DirEntry, atRoot: boolean): boolean {
+  if (entry.name.startsWith(".")) return false;
+  return !(entry.is_dir && atRoot && entry.name === BOARDS_DIR_NAME);
+}
+
 /** 递归遍历根目录（跳过画板目录与隐藏条目——未清理的导入临时目录、原子写临时文件都以 `.` 开头）：返回名字符合的目录，或 dirs 为 false 时返回名字符合的文件。 */
 async function walk(fs: RelocateFs, root: string, match: (name: string) => boolean, dirs = true): Promise<string[]> {
   const found: string[] = [];
@@ -37,10 +42,9 @@ async function walk(fs: RelocateFs, root: string, match: (name: string) => boole
   while (stack.length) {
     const dir = stack.pop()!;
     for (const entry of await quiet(fs.listDir(dir), [])) {
-      if (entry.name.startsWith(".")) continue;
+      if (!searchableEntry(entry, dir === root)) continue;
       const path = joinPath(dir, entry.name);
       if (entry.is_dir) {
-        if (dir === root && entry.name === BOARDS_DIR_NAME) continue;
         stack.push(path);
         if (dirs && match(entry.name)) found.push(path);
       } else if (!dirs && match(entry.name)) {

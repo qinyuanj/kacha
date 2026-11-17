@@ -72,12 +72,10 @@ const EMPTY_BOARD: Board = { format_version: 2, title: "", viewport: { zoom: 1, 
 
 /** 工作台的 props。 */
 export interface AppProps {
-  onLogout?: () => void;
   version?: string | null;
-  sessionExpired?: boolean;
 }
 
-export function App({ onLogout, version, sessionExpired = false }: AppProps) {
+export function App({ version }: AppProps) {
   const port = useShell();
   const userRoot = port.userRoot;
   const store = useAppState();
@@ -214,7 +212,7 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
     [boards, openPath, pack, toast],
   );
 
-  /** 放弃一块服务端已不存在的画板：本页内容随之丢弃，先确认。 */
+  /** 放弃一块本机存储已不存在的画板：本页内容随之丢弃，先确认。 */
   const discardMissingBoard = useCallback(
     async (key: string) => {
       await discardMissingAction(
@@ -278,7 +276,7 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
   if (state.fatal) return <div className="fatal">启动失败：{state.fatal}</div>;
 
   const updateNotice = updateNoticeOf(ready, versionOrEmpty(version), state.lastSeenVersion, shouldShowUpdateNotice);
-  /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框、会话失效遮罩）：粘贴放行给弹窗，不落到背后的画板（#96）。 */
+  /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框）：粘贴放行给弹窗，不落到背后的画板（#96）。 */
   const modalOpen = modalOpenOf({
     settingsOpen: state.settingsOpen,
     changelogOpen: state.changelogOpen,
@@ -286,7 +284,6 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
     confirmOpen: state.confirm !== null,
     sendTextOpen: state.sendText !== null,
     packDialogOpen: pack.dialog !== null,
-    sessionExpired,
   });
   return (
 
@@ -379,7 +376,6 @@ export function App({ onLogout, version, sessionExpired = false }: AppProps) {
         onCloseMissing={(key) => void discardMissingBoard(key)}
         onImportPack={() => void pack.importPack()}
         importDisabled={view.importDisabled}
-        onLogout={onLogout}
         onToolbarSlot={setToolbarSlot}
       />
       <AppOverlays
