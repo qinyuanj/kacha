@@ -16,6 +16,7 @@ import (
 	"github.com/qinyuanj/kacha/desktop/internal/packservice"
 	"github.com/qinyuanj/kacha/desktop/internal/shellapp"
 	"github.com/qinyuanj/kacha/desktop/internal/storage"
+	"github.com/qinyuanj/kacha/desktop/internal/updateservice"
 	"github.com/qinyuanj/kacha/desktop/internal/usageservice"
 )
 
@@ -43,6 +44,15 @@ func bindServices(shell *shellapp.Shell, roots *dataroot.Roots) {
 	mygo.BindAs("Gateway", gw)
 	// Diagnostics 只从 Gateway 读「当前有没有密钥」用于脱敏（#162）：
 	// 它拿到的只是临时字符串，用于把同值从日志与包里替换掉，不缓存、不写出。
+	// Update 检查、下载、验签并交给真实安装器（#164）：信任规则全在 Go 侧，
+	// 页面只按快照分支。没有内置发布者公钥时服务仍是 disabled，入口明确不可用。
+	// 下载目录跟着当前数据根走（RootFunc）：迁移之后不往旧位置写。
+	updates := updateservice.New(updateservice.Options{
+		Current:  shell.Version(),
+		RootFunc: roots.Current,
+		Quit:     mygo.App.Quit,
+	})
+	mygo.BindAs("Update", updates)
 	mygo.BindAs("Diagnostics", diagnostics.NewFollowing(shell.Version(), roots, func() []string {
 		key, err := gw.ReadApiKey()
 		if err != nil || key == "" {

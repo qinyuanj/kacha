@@ -21,11 +21,17 @@ type Features struct {
 	PackExport bool `json:"pack_export"`
 	// Archive 是归档与取消归档：本机存储执行画板位与只读约束，端口已接通。
 	Archive bool `json:"archive"`
+	// Update 是可信自动更新（#164）：Go 侧真实验签并交给真实安装器。
+	// 只有内置发布者公钥的发布构建才为 true；开发构建为 false，入口按「尚不可用」处理。
+	Update bool `json:"update"`
 }
 
 // DesktopFeatures 返回桌面壳的能力开关：归档、画板包导出、本机用量与单份生成都已接通。
-func DesktopFeatures() Features {
-	return Features{Generation: true, Usage: true, PackExport: true, Archive: true}
+//
+// Update 由 hasPublisherKey 决定：没有内置发布者公钥的构建不能验证更新签名，
+// 宁可让入口显示「尚不可用」，也不能放开一条无法验签的更新路径。
+func DesktopFeatures(hasPublisherKey bool) Features {
+	return Features{Generation: true, Usage: true, PackExport: true, Archive: true, Update: hasPublisherKey}
 }
 
 // Info 是界面启动时读一次的壳信息。
@@ -46,6 +52,8 @@ type Shell struct {
 	root    string
 	// roots 是可切换的数据根（迁移 #161）：装了它就跟它走，没装就是固定的 root。
 	roots *dataroot.Roots
+	// hasPublisherKey 表示这次构建内置了发布者公钥（能验证更新签名）。
+	hasPublisherKey bool
 }
 
 // New 用应用版本与已定好的数据根造一个 Shell。
@@ -58,7 +66,16 @@ func NewFollowing(version string, roots *dataroot.Roots) *Shell {
 	return &Shell{version: version, roots: roots}
 }
 
-// UserDataRoot 返回当前数据根。
+// WithPublisherKey 告诉壳「这次构建能验证更新签名」，能力开关据此决定更新入口是否开放。
+//
+// 没有内置公钥的构建（开发构建、未配 updates 的发布）不能验签，
+// 更新入口必须显示「尚不可用」，而不是放开一条无法验证发布者的路径。
+func (s *Shell) WithPublisherKey(ok bool) *Shell {
+	s.hasPublisherKey = ok
+	return s
+}
+
+// UserDataRoot 返回当前数据根：迁移切换后报的是新位置。
 func (s *Shell) UserDataRoot() string {
 	if s.roots != nil {
 		return s.roots.Current()
@@ -82,6 +99,6 @@ func (s *Shell) Info() (Info, error) {
 		Version:      s.version,
 		UserDataRoot: root,
 		BoardRoot:    boardRoot,
-		Features:     DesktopFeatures(),
+		Features:     DesktopFeatures(s.hasPublisherKey),
 	}, nil
 }

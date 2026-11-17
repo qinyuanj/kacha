@@ -30,7 +30,7 @@ func TestInfoJSONKeys(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	for _, key := range []string{"generation", "usage", "pack_export", "archive"} {
+	for _, key := range []string{"generation", "usage", "pack_export", "archive", "update"} {
 		if _, ok := raw[key]; !ok {
 			t.Fatalf("Features 的 JSON 缺少 %q：%s", key, data)
 		}

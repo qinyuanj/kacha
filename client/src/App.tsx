@@ -3,6 +3,7 @@ import { type Board } from "./core/board";
 import { BUILTIN_TABLE, type CapabilityTable } from "./core/capabilities";
 import type { BoardChange } from "./core/edit";
 import type { Runner, RunTarget } from "./core/runner";
+import type { UpdatePreparationPorts } from "./core/updatePreparation";
 import { useActiveBoardSize } from "./ui/useBoardSize";
 import { shouldShowUpdateNotice } from "./core/changelog";
 import { useUsageLimit } from "./ui/useUsageLimit";
@@ -282,6 +283,22 @@ export function App({ version }: AppProps) {
     return port.meta.writeUiState(text);
   }, [boards, state.lastSeenVersion, state.sizeNotices, port]);
   const persistUi = useUiStateWriter(writeUi);
+
+  // 更新安装前的准备依赖（#164）：任务队列用 runner 的真实份数与提交守护，
+  // 保存用画板会话的严格落盘与界面状态写入；准备失败时界面恢复创作，旧版本照常可用。
+  const updateDeps = useMemo<UpdatePreparationPorts>(
+    () => ({
+      queue: {
+        pending: () => runner.getSnapshot().pending(),
+        setSubmissionGuard: (guard) => runner.setSubmissionGuard(guard),
+      },
+      saveBoards: () => boards.flushAll(),
+      saveUi: async () => {
+        await persistUi();
+      },
+    }),
+    [runner, boards, persistUi],
+  );
   const uiSignature = JSON.stringify([sessions.map((s) => s.path), sessions.find((s) => s.key === activeKey)?.path, state.lastSeenVersion, state.sizeNotices]);
   const persistRef = useRef(persistUi);
   persistRef.current = persistUi;
@@ -423,6 +440,7 @@ export function App({ version }: AppProps) {
         onSendTextClose={() => store.setSendText(null)}
         packDialog={pack.dialog}
         toastText={state.toastText}
+        update={updateDeps}
         dataRoot={dataRootActions}
       />
     </>

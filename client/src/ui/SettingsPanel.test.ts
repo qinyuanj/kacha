@@ -46,8 +46,15 @@ function settings(overrides: Partial<SettingsState> = {}): PanelSettings {
   } as unknown as PanelSettings;
 }
 
+// 更新段的准备依赖（#164）：面板只摆放，替身给空队列与即时保存。
+const UPDATE_DEPS = {
+  queue: { pending: () => 0, setSubmissionGuard: () => undefined },
+  saveBoards: async () => undefined,
+  saveUi: async () => undefined,
+};
+
 async function show(port: FakePort, state = settings(), dataRoot?: Parameters<typeof SettingsPanel>[0]["dataRoot"]): Promise<void> {
-  await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: state, onClose: vi.fn(), ...(dataRoot ? { dataRoot } : {}) }) })));
+  await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: state, onClose: vi.fn(), update: UPDATE_DEPS, ...(dataRoot ? { dataRoot } : {}) }) })));
 }
 
 /** 密钥输入框（密码框，不把密钥显示成普通文本）。 */
@@ -211,7 +218,7 @@ describe("诊断包导出（#162）", () => {
   it("点弹窗外面的遮罩会关闭设置", async () => {
     const close = vi.fn();
     const port = createFakePort();
-    await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: settings(), onClose: close }) })));
+    await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: settings(), onClose: close, update: UPDATE_DEPS }) })));
     const backdrop = container.querySelector(".modal-backdrop")!;
     await act(async () => backdrop.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
     expect(close).toHaveBeenCalledTimes(1);

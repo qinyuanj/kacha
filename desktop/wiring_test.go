@@ -15,14 +15,7 @@ import (
 //
 // 用 GenerateTypeScript 验：它列出的就是页面能调到的全部服务与方法，不起窗口、不读真剪贴板。
 func TestBindServicesExposeClipboardRead(t *testing.T) {
-	shell := shellapp.New("test", t.TempDir())
-	bindServices(shell, dataroot.NewRoots(t.TempDir()))
-
-	client, err := mygo.GenerateTypeScript()
-	if err != nil {
-		t.Fatalf("GenerateTypeScript: %v", err)
-	}
-	src := string(client)
+	src := generatedClient(t)
 	for _, want := range []string{"Shell", "Local", "Usage", "Clipboard", "Pack", "Gateway", "Diagnostics"} {
 		if !strings.Contains(src, want) {
 			t.Fatalf("生成的客户端里没有 %s 服务：\n%s", want, src)
@@ -145,7 +138,7 @@ func TestRegisterAssetProtocol(t *testing.T) {
 
 // 桌面壳的能力开关：画板包导出（#160）、本机用量（#159）与单份生成（#153）都已接通。
 func TestDesktopFeaturesEnableUsagePackExportAndGeneration(t *testing.T) {
-	features := shellapp.DesktopFeatures()
+	features := shellapp.DesktopFeatures(true)
 	if !features.Usage || !features.PackExport || !features.Generation {
 		t.Fatalf("本机用量、画板包导出与单份生成都已实现，能力开关必须打开：%+v", features)
 	}

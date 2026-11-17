@@ -9,6 +9,7 @@ import (
 
 	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/shellapp"
+	"github.com/qinyuanj/kacha/desktop/internal/updateservice"
 )
 
 // devVersion 是未经打包（go run / go test）时的版本占位。
@@ -43,7 +44,8 @@ func main() {
 	if err := registerAssetProtocol(roots); err != nil {
 		log.Fatalf("kacha: 注册本机文件协议失败: %v", err)
 	}
-	shell := shellapp.NewFollowing(version(), roots)
+	// 内置了发布者公钥的构建才能验证更新签名：能力开关据此决定更新入口是否开放。
+	shell := shellapp.NewFollowing(version(), roots).WithPublisherKey(updateservice.PublisherKey() != "")
 
 	// 页面经这些服务读取壳信息、操作本地文件和系统剪贴板、导入画板包、迁移数据位置。
 	bindServices(shell, roots)

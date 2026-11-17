@@ -46,6 +46,10 @@ export interface FakePortOptions {
   dirs?: string[];
   /** 诊断包导出的脚本化结局（缺省成功）。 */
   diagnosticsOutcome?: DiagnosticsOutcome;
+  /** 更新快照：status() 返回它（缺省 idle 快照）；check / install 也按它演。 */
+  update?: import("../../core/update").UpdateSnapshot;
+  /** install 的失败：命中时以该类别拒绝（验界面在安装失败后解除保护）。 */
+  updateInstallFailure?: PortFailureKind;
   /** 数据位置迁移（#161）：依次返回的目标目录（空了表示用户取消）。 */
   pickTargets?: string[];
   /** 迁移失败的类别；缺省成功。 */
@@ -63,6 +67,9 @@ export interface FakeCalls {
   archive: { from: string; to: string; version?: string }[];
   unarchive: { from: string; to: string }[];
   import: { file: File; options: ImportOptions }[];
+  /** 更新：检查与安装各被调用几次。 */
+  updateCheck: number;
+  updateInstall: number;
   copyImage: { path: string; format?: string }[];
   copyText: string[];
   pickImages: { multiple: boolean; files: File[] }[];

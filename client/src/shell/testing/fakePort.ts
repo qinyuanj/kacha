@@ -14,6 +14,7 @@ import {
   fakeMetaStore,
   fakePackStore,
   fakeUiStore,
+  fakeUpdateStore,
   fakeUsageStore,
 } from "./fakePortStores";
 
@@ -44,6 +45,8 @@ export function emptyFakeCalls(): FakeCalls {
     import: [],
     copyImage: [],
     copyText: [],
+    updateCheck: 0,
+    updateInstall: 0,
     pickImages: [],
     pickPackFile: [],
     saveCopyAs: [],
@@ -104,6 +107,7 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
   const pack = fakePackStore(imports, calls);
   const ui = fakeUiStore(calls, options);
   const usage = fakeUsageStore(new Set<string>(missing));
+  const update = fakeUpdateStore(missing, options, calls);
   const dataRoot = fakeDataRootStore(calls, options);
   const core = fakeCorePorts(files, meta);
 
@@ -117,7 +121,8 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
       packImport: !missing.has("packImport"),
       diagnostics: !missing.has("diagnostics"),
       archive: !missing.has("archive"),
-      // 数据位置迁移（#161）：替身默认有；-- 缺这个能力时入口消失。
+      update: !missing.has("update"),
+      // 数据位置迁移（#161）：替身默认有；缺这个能力时入口消失。
       dataRoot: !missing.has("dataRoot"),
     },
     board,
@@ -127,6 +132,7 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
     pack,
     ui,
     usage,
+    update,
     dataRoot,
     core,
     calls,

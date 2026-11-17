@@ -4,7 +4,7 @@
 // 源码与单测在没有它时也要能编译。调用名与 Go 侧绑定名一致（Shell.Info / Local.WriteBoard）。
 import { call } from "mygo-runtime";
 
-import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopDataRootBridge, DesktopDataRootOutcome, DesktopDataRootStatus, DesktopDiagnosticsBridge, DesktopDiagnosticsOutcome, DesktopExportOutcome, DesktopExportSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy, DesktopUsageBridge } from "./desktop";
+import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopDataRootBridge, DesktopDataRootOutcome, DesktopDataRootStatus, DesktopDiagnosticsBridge, DesktopDiagnosticsOutcome, DesktopExportOutcome, DesktopExportSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy, DesktopUpdateBridge, DesktopUsageBridge } from "./desktop";
 import type { PackEntryFact } from "../core/boardPack";
 
 /** camelCase 的页面侧方法名 → Go 侧的 PascalCase 绑定名。 */
@@ -51,6 +51,13 @@ export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promi
   const usage = new Proxy({} as DesktopUsageBridge, {
     get: (_target, prop: string) => (...args: unknown[]) => callFn(`Usage.${goName(prop)}`, ...args),
   });
+  // 可信自动更新（#164）：与 Go 侧 BindAs("Update", updateservice.New(...)) 对齐。
+  // 选版、验签与真实安装器都在 Go 侧；这里只转发三个动作。
+  const update: DesktopUpdateBridge = {
+    status: () => callFn("Update.Status") as Promise<Awaited<ReturnType<DesktopUpdateBridge["status"]>>>,
+    check: () => callFn("Update.Check") as Promise<void>,
+    install: () => callFn("Update.Install") as Promise<void>,
+  };
   // 诊断采集与导出（#162）：与 Go 侧 BindAs("Diagnostics", ...) 对齐。
   const diagnostics: DesktopDiagnosticsBridge = {
     // 日志是尽力而为的旁路：采集失败不能影响界面，错误在这里就地吞掉。
@@ -74,6 +81,7 @@ export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promi
     pack,
     gateway,
     usage,
+    update,
     diagnostics,
   };
 }
