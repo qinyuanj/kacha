@@ -151,12 +151,15 @@ function enabledToggleReasons(task: TaskNode, layer: string | null, transparent:
   ];
 }
 
+/** 缺图文案：任务视图标红与提交前读取共用一份。 */
+export const missingImageText = (index: number, label: string): string => `图${index + 1} 图片缺失：${label}`;
+
 function imageSourceReasons(board: Board, taskId: string, facts: TaskFacts): UnrunnableReason[] {
   return imageSources(board, taskId, "").flatMap((src, i) => {
     if (src.absPath === null) return [reason("sourceLayerInvalid", `图${i + 1} 来源图层无效：${src.label}`)];
     // 缺图按来源分键：图层线只看自己那层，底图线只看底图，互不株连。
     const key = imageKey(src.nodeId, src.sourceLayer);
-    return facts.missingNodes.has(key) ? [reason("imageMissing", `图${i + 1} 图片缺失：${src.label}`)] : [];
+    return facts.missingNodes.has(key) ? [reason("imageMissing", missingImageText(i, src.label))] : [];
   });
 }
 

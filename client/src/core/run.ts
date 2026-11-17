@@ -10,7 +10,7 @@ import { firstRegionOf, slotsFromReferences } from "./region";
 import { planSend } from "./sendPlan";
 import { isAutoRatio, resolveSize } from "./size";
 import { snapshotOf } from "./submission";
-import { submissionBlockers } from "./taskView";
+import { missingImageText, submissionBlockers } from "./taskView";
 import { LocalError, newTaskId, readSubmission, taskDirOfTaskId, saveLayers, saveResult, sniffImage, writeSubmission, type LayerRecord, type ReferenceSource, type SubmissionPlan, type TaskFs } from "./taskDir";
 import { errorText } from "./errors";
 
@@ -35,6 +35,8 @@ export interface RunDeps extends TaskFs {
   composeOverlay?(image: Uint8Array, rects: [number, number, number, number][], firstRegion: number): Promise<Uint8Array>;
   /** 按模型输入规则缩放 / 转码参考图快照用的解码 / 编码（壳层 canvas 实现）；未注入时原样发送。 */
   imageCodec?: ImageCodec;
+  /** 数据根里的文件在不在（与界面探针同源）；有它时缺图按界面同一句话拒绝，不等读取报错。 */
+  isFile?(absPath: string): Promise<boolean>;
 }
 
 export interface PreparedJob {
@@ -160,6 +162,8 @@ async function readSourceImages(deps: RunDeps, sources: ReturnType<typeof imageS
   for (const [i, src] of sources.entries()) {
     // 无效来源图层身份：明确失败，不回落底图、不猜 layers/NN 路径。
     if (src.absPath === null) throw new LocalError(`图${i + 1}（${src.label}）的来源图层身份无效`);
+    // 缺图说界面标的同一句话（missingImageText）：界面标红与提交拦下一致，不是两套说法。
+    if (deps.isFile && !(await deps.isFile(src.absPath))) throw new LocalError(missingImageText(i, src.label));
     let bytes: Uint8Array;
     try {
       bytes = await deps.readFile(src.absPath);

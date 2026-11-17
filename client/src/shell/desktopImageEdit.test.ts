@@ -8,6 +8,7 @@
 // core/fitImage.test.ts、core/overlay.test.ts 与 shell 的 canvas 包装负责。
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
@@ -23,6 +24,7 @@ import { createRunner, type RunTarget, type Runner, type RunnerChange } from "..
 import { buildConfirmItems, collectRunFacts } from "../core/submission";
 import { PNG_1X1 } from "../core/testing/png";
 import { createDesktopPort, type DesktopBridge, type DesktopGatewayBridge, type DesktopLocalBridge } from "./desktop";
+import { PortError } from "./port";
 
 const KEY = "sk-synthetic-153";
 const MODEL = "qwen-image-3.0-pro";
@@ -145,6 +147,9 @@ async function setup(options: { mode?: Mode; refPath?: string; refs?: number; pr
   // 用户选中的本机图片在数据根之外：Go 侧读成 base64 给页面，页面不碰本机路径。
   const pickedFile = join(pickRoot, "橘猫.png");
   await writeFile(pickedFile, PNG_1X1);
+  // 默认画板里的参考图是数据根里真实存在的一张图（缺图另有专门的用例）。
+  await mkdir(join(root, "导入参考图"), { recursive: true });
+  await writeFile(join(root, "导入参考图", "seed.png"), PNG_1X1);
 
   const local = new Proxy({} as DesktopLocalBridge, {
     get: (_t, prop: string) => {
@@ -169,7 +174,12 @@ async function setup(options: { mode?: Mode; refPath?: string; refs?: number; pr
       if (prop === "isFile") return async (abs: string) => {
         try { await readFile(resolve(abs)); return true; } catch { return false; }
       };
-      if (prop === "inspectImage") return async () => ({ sha256: "x".repeat(64), bytes: PNG_1X1.length, width: SOURCE.width, height: SOURCE.height, format: "png", has_alpha: false });
+      // 与 Go 的 InspectImage 同形：文件不在就报 missing，界面据此标「图片缺失」。
+      if (prop === "inspectImage") return async (abs: string) => {
+        const bytes = await readFile(resolve(abs)).catch(() => null);
+        if (!bytes) throw new PortError({ kind: "missing", code: "missing", message: "文件不存在", status: 404 });
+        return { sha256: "x".repeat(64), bytes: bytes.length, width: SOURCE.width, height: SOURCE.height, format: "png", has_alpha: false };
+      };
       return () => Promise.reject(new Error("Unexpected local." + prop));
     },
   });
@@ -203,7 +213,7 @@ async function setup(options: { mode?: Mode; refPath?: string; refs?: number; pr
   };
   const { port } = await createDesktopPort(bridge);
 
-  let current = boardOf(options.refPath ?? join(pickRoot, "导入参考图", "x.png"), options);
+  let current = boardOf(options.refPath ?? "导入参考图/seed.png", options);
   const changes: RunnerChange[] = [];
   const apply = (_key: string, change: RunnerChange) => {
     changes.push(change);
@@ -294,8 +304,9 @@ describe("桌面端口选本机图片（#154）", () => {
     expect(first.path.endsWith(".png")).toBe(true);
     expect(new Uint8Array(await readFile(resolve(s.root, first.path)))).toEqual(PNG_1X1);
     // 同一张图再导一次：内容已在盘上，按成功处理（去重），不覆盖也不报错，也不会多出一个文件。
+    const before = await readdir(resolve(s.root, "导入参考图"));
     await expect(s.port.media.uploadReference(file)).resolves.toMatchObject({ path: first.path });
-    expect(await readdir(resolve(s.root, "导入参考图"))).toEqual([first.path.split("/").at(-1)]);
+    expect(await readdir(resolve(s.root, "导入参考图"))).toEqual(before);
   });
 });
 
@@ -372,6 +383,52 @@ describe("桌面端口的参考图编辑闭环（#154）", () => {
     expect(reasons2).toContain("提示词引用了图9，但只接了 1 张参考图");
     expect(await outOfRange.runner.submit(outOfRange.target, outOfRange.board, ["t"], { t: 1 })).toEqual(reasons2);
     expect(outOfRange.generated).toHaveLength(0);
+  });
+
+  it("缺图在提交前按界面同一句话拦下，不落任务目录、不调网关", async () => {
+    const s = await setup({ refPath: "导入参考图/不存在.png", regions: false });
+    const [item] = buildConfirmItems(s.board, BUILTIN_TABLE, ["t"], await factsOf(s));
+    const reasons = item.reasons.map((r) => r.text);
+    expect(reasons).toContain("图1 图片缺失：橘猫.png");
+    expect(await s.runner.submit(s.target, s.board, ["t"], { t: 1 })).toEqual(reasons);
+    expect(s.generated).toHaveLength(0);
+    expect(s.writes.filter((p) => p.endsWith("task.json"))).toEqual([]);
+  });
+
+  it("取消与中断的任务都能主动重新生成：按任务目录重算，不自动续算", async () => {
+    const s = await setup({ regions: false });
+    const [file] = await s.port.media.pickImages(true);
+    const uploaded = await s.port.media.uploadReference(file);
+    s.setBoard(boardOf(uploaded.path, { regions: false }));
+
+    // 取消：派发后取消，落已取消结局，不产结果，也不自动再来一次。
+    await s.runner.submit(s.target, s.board, ["t"], { t: 1 });
+    const taskJson = await until(() => s.writes.find((p) => p.endsWith("task.json")));
+    s.runner.cancel({ kind: "task", boardKey: "A", taskNodeId: "t" });
+    expect((await outcomeOf(s)).record).toMatchObject({ outcome: "cancelled" });
+    const sent = s.generated.length;
+    await new Promise((r) => setTimeout(r, 200));
+    expect(s.generated).toHaveLength(sent);
+    expect(s.changes.some((c) => c.kind === "runResult")).toBe(false);
+
+    // 主动重新生成：读上次的任务目录重算发送计划，出新结果。
+    expect(await s.runner.regenerate(s.target, s.board, "t")).toBeNull();
+    const first = await until(() => s.changes.find((c) => c.kind === "runResult"));
+    if (first.kind !== "runResult") return;
+    expect(s.generated.at(-1)!.prompt).toContain("背景改成蓝色");
+
+    // 中断：任务目录在、没有结局（应用重启后），节点记着这个任务编号，同样可主动重新生成。
+    const interruptedId = "20261117T000000Z-99999999";
+    const from = dirname(taskJson);
+    const to = join(dirname(from), interruptedId);
+    await cp(from, to, { recursive: true });
+    const raw = JSON.parse(await readFile(join(to, "task.json"), "utf8"));
+    await writeFile(join(to, "task.json"), JSON.stringify({ ...raw, task_id: interruptedId }));
+    s.setBoard({ ...s.board, nodes: s.board.nodes.map((n) => n.id === "t" && n.type === "task" ? { ...n, last_submitted: { ...n.last_submitted!, task_id: interruptedId } } : n) });
+    const before = s.changes.filter((c) => c.kind === "runResult").length;
+    expect(await s.runner.regenerate(s.target, s.board, "t")).toBeNull();
+    expect(await until(() => s.changes.filter((c) => c.kind === "runResult").length > before)).toBe(true);
+    expect(s.generated).toHaveLength(sent + 2);
   });
 
   it("生成变体固定一份、进同一结果列不覆盖已有结果；失败后重新生成按当前能力重算发送文本", async () => {

@@ -540,6 +540,7 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
         composeOverlay,
         writeNewFile: files.writeNewFile,
         readFile: files.readFile,
+        isFile: files.isFile,
         // 生成请求与模型发现共用 #152 接通的 Gateway 绑定；没有绑定时由 gatewayPorts 明确报不可用。
         fetch: info.features.generation ? gatewayPorts.fetch : async (): Promise<never> => unavailable("generation"),
         now: () => new Date(),
