@@ -16,13 +16,13 @@ type Features struct {
 	Generation bool `json:"generation"`
 	// Usage 是用量统计与未引用清理：本地没有配额。
 	Usage bool `json:"usage"`
-	// PackExport 是画板包导出：导入是本地能力，导出还没实现。
+	// PackExport 是画板包导出：由本机 Pack 服务打包，目标选择经系统对话框。
 	PackExport bool `json:"pack_export"`
 }
 
-// DesktopFeatures 返回桌面壳本切片的能力开关：三项都没有。
+// DesktopFeatures 返回桌面壳的能力开关：画板包导出已接通，生成与用量仍未实现。
 func DesktopFeatures() Features {
-	return Features{Generation: false, Usage: false, PackExport: false}
+	return Features{Generation: false, Usage: false, PackExport: true}
 }
 
 // Info 是界面启动时读一次的壳信息。

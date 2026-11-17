@@ -8,6 +8,7 @@
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
 // 各组实现（画板、文件、元数据、媒体、画板包、用量）在 shell/desktopStores.ts（#137），这里只做接线。
 import { PortError, portFailureOf, type ClipboardContent, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort } from "./port";
+import type { PackEntryFact, PackExportSpec } from "../core/boardPack";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
 import type { BrowserOptions, ImageInfo, UsagePort } from "./types";
 import type { LogKind } from "./log";
@@ -58,6 +59,10 @@ export interface DesktopLocalBridge {
   writeNewFileBase64(path: string, data: string): Promise<DesktopOutcome>;
   /** 把数据根里的图片另存为用户选的位置（#130 的「另存为…」兜底）。 */
   saveCopyAs(path: string): Promise<DesktopOutcome>;
+  /** 单结果保存（带图层打 zip）；目标由 Go 弹系统对话框。 */
+  saveResult(path: string): Promise<DesktopOutcome>;
+  /** 整板结果保存；目标由 Go 弹系统对话框。 */
+  saveBoardResults(path: string): Promise<DesktopOutcome>;
   isFile(path: string): Promise<boolean>;
   listDir(path: string): Promise<{ name: string; is_dir: boolean }[]>;
   fileSha256(path: string): Promise<string>;
@@ -146,12 +151,34 @@ export interface DesktopPackSnapshot {
   outcome: DesktopPackOutcome | null;
 }
 
-/** Go 侧画板包服务（Pack 服务，#131）：选包、开始导入、轮询状态、取消。 */
+/** Go 侧画板包导出的结局（Pack.ExportSnapshot.outcome）。 */
+export interface DesktopExportOutcome {
+  ok: boolean;
+  kind: string;
+  step: string;
+  message: string;
+  result?: { task_dirs: number; bytes: number } | null;
+}
+
+/** Go 侧导出状态快照。 */
+export interface DesktopExportSnapshot {
+  running: boolean;
+  progress: DesktopPackProgress;
+  outcome: DesktopExportOutcome | null;
+}
+
+/** Go 侧画板包服务（Pack 服务）：导入 + 导出都在这里。 */
 export interface DesktopPackBridge {
   pick(): Promise<string>;
   start(path: string): Promise<DesktopPackOutcome>;
   snapshot(): Promise<DesktopPackSnapshot>;
   cancel(): Promise<void>;
+  /** 导出能力：目标选择、事实、打包、进度与取消；旧替身没有这些时按 unavailable 处理。 */
+  pickExport?(name: string): Promise<string>;
+  facts?(spec: Pick<PackExportSpec, "task_dirs" | "files">): Promise<PackEntryFact[]>;
+  exportPack?(target: string, spec: PackExportSpec): Promise<DesktopExportOutcome>;
+  exportSnapshot?(): Promise<DesktopExportSnapshot>;
+  cancelExport?(): Promise<void>;
 }
 
 /** MyGo 桥：Go 侧绑定与测试替身都满足它。 */
@@ -221,10 +248,17 @@ async function copyTextToSystemClipboard(bridge: DesktopBridge, text: string): P
  * 用户取消（kind = cancelled）当作没发生，不弹失败提示。
  */
 async function saveCopyAsThroughLocal(local: DesktopLocalBridge, absPath: string): Promise<SaveCopyOutcome> {
-  const outcome = await localRun(() => local.saveCopyAs(absPath));
-  // 用户取消不是保存：返回 cancelled，调用点不提示「已开始下载」。
+  return saveThroughLocal(() => local.saveCopyAs(absPath));
+}
+
+/** 保存结果 / 整板结果：目标由 Go 弹系统对话框，取消不报成功，缺图与写失败带原因。 */
+async function saveThroughLocal(call: () => Promise<DesktopOutcome>): Promise<SaveCopyOutcome> {
+  const outcome = await localRun(call);
   if (outcome.kind === "cancelled") return { kind: "cancelled" };
-  if (!outcome.ok) checked(outcome);
+  if (!outcome.ok) {
+    if (outcome.kind === "missing") throw new PortError({ kind: "missing", code: outcome.kind, message: outcome.message, status: 0 });
+    checked(outcome);
+  }
   return { kind: "saved" };
 }
 
@@ -289,6 +323,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     copyText: (text: string): Promise<void> => copyTextToSystemClipboard(bridge, text),
     copyImage: (absPath: string, format = ""): Promise<ImageCopyResult> => copyImageToSystemClipboard(bridge, absPath, format),
     saveCopyAs: (absPath: string): Promise<SaveCopyOutcome> => saveCopyAsThroughLocal(local, absPath),
+    downloadImage: (absPath: string): Promise<SaveCopyOutcome> => saveThroughLocal(() => local.saveResult(absPath)),
+    downloadBoardResults: (boardPath: string): Promise<SaveCopyOutcome> => saveThroughLocal(() => local.saveBoardResults(boardPath)),
   };
 
   const pack = desktopPack.store;
