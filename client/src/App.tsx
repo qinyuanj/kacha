@@ -323,6 +323,7 @@ export function App({ version }: AppProps) {
         usageNotice={usageNotice}
         runIndicator={{
           active: runState.active,
+          activity: runState.activity,
           titleOf: view.titleOf,
           onJump: (t) => jumpToTask(boards.setActiveKey, store.setFocus, state.focus, t),
           onCancelCopy: (taskId) => runner.cancel({ kind: "copy", taskId }),
