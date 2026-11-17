@@ -5,6 +5,7 @@ import { refreshModels, type SettingsPorts } from "../core/settings";
 import { PortError } from "./port";
 import type { DesktopBridge, DesktopGatewayResponse } from "./desktop";
 import { createGatewayPorts } from "./desktopGateway";
+import { base64Of } from "../core/base64";
 
 const SYNTHETIC = "sk-spec152-synthetic-not-real";
 const INFO = { version: "test", user_data_root: "C:/data", board_root: "C:/data/画板", features: { generation: false, usage: false, pack_export: false } };
@@ -80,6 +81,17 @@ describe("网关壳端口", () => {
     await ports.deleteApiKey();
     expect(await ports.readApiKey()).toBeNull();
     expect(calls.map((c) => c.method)).toEqual(["Gateway.ReadApiKey", "Gateway.WriteApiKey", "Gateway.ReadApiKey", "Gateway.DeleteApiKey", "Gateway.ReadApiKey"]);
+  });
+
+  it("结果图的二进制响应经 body_base64 还原成原始字节，不按 UTF-8 文本损坏", async () => {
+    const calls: { method: string; args: unknown[] }[] = [];
+    const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 255, 128, 64]);
+    const bridge = fakeBridge({ status: 200, headers: { "content-type": "image/png" }, body: "", body_base64: base64Of(bytes) } as unknown as DesktopGatewayResponse, calls);
+    const ports = createGatewayPorts(bridge);
+    const response = await ports.fetch("http://gw/result.png", { method: "GET", headers: { Accept: "image/*" } });
+    expect(await response.text()).toBe("");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    expect(calls[0]).toMatchObject({ method: "Gateway.Request", args: ["http://gw/result.png", "GET", { Accept: "image/*" }, ""] });
   });
 
   it("桥上没有 Gateway 时明确报 unavailable，不空成功", async () => {

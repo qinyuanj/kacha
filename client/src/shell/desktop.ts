@@ -2,7 +2,7 @@
 //
 // 界面只认 ShellPort（见 shell/port.ts），本文件负责 MyGo 桌面实现。
 // 画板、文件与元数据经 MyGo 绑定（Go 侧 internal/localstore 与 internal/localservice）落到本机数据根；
-// 本切片还没有的能力（生成、整理、结果中转）按 features 关掉，
+// 本切片还没有的能力（整理、结果中转）按 features 关掉，
 // 调用时以 kind: "unavailable" 拒绝：界面据此标「尚不可用」，不失败得更晚，也不伪装成功。
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
@@ -233,6 +233,8 @@ export interface DesktopGatewayResponse {
   status: number;
   headers: Record<string, string>;
   body: string;
+  /** 二进制响应（结果图）走 base64，避免 UTF-8 文本转换损坏字节。 */
+  body_base64?: string;
 }
 
 export interface DesktopGatewayBridge {
@@ -480,7 +482,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
         composeOverlay,
         writeNewFile: files.writeNewFile,
         readFile: files.readFile,
-        fetch: async (): Promise<never> => unavailable("generation"),
+        // 生成请求与模型发现共用 #152 接通的 Gateway 绑定；没有绑定时由 gatewayPorts 明确报不可用。
+        fetch: info.features.generation ? gatewayPorts.fetch : async (): Promise<never> => unavailable("generation"),
         now: () => new Date(),
         schedule: (ms: number, fn: () => void) => {
           const timer = setTimeout(fn, ms);

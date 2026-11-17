@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,8 @@ type Response struct {
 	Status  int               `json:"status"`
 	Headers map[string]string `json:"headers"`
 	Body    string            `json:"body"`
+	// BodyBase64 承载二进制响应（结果图）：JSON 字符串不能保住任意图片字节。
+	BodyBase64 string `json:"body_base64,omitempty"`
 }
 
 // requestTimeout 防止网关无响应时把界面卡住；超时按网络错误返回。
@@ -45,11 +48,25 @@ func (s *Service) Request(url string, method string, headers map[string]string, 
 	if err != nil {
 		return Response{}, fmt.Errorf("读取网关响应失败：%s", redact(err.Error(), headers))
 	}
-	result := Response{Status: resp.StatusCode, Headers: map[string]string{}, Body: redact(string(data), headers)}
+	result := Response{Status: resp.StatusCode, Headers: map[string]string{}}
 	for name, values := range resp.Header {
 		result.Headers[name] = strings.Join(values, ",")
 	}
+	if isTextResponse(result.Headers["Content-Type"]) {
+		result.Body = redact(string(data), headers)
+	} else {
+		result.BodyBase64 = base64.StdEncoding.EncodeToString(data)
+	}
 	return result, nil
+}
+
+// isTextResponse 判断能否按 UTF-8 文本回传；结果图等二进制走 base64，未知类型按二进制保真。
+func isTextResponse(contentType string) bool {
+	c := strings.ToLower(contentType)
+	if c == "" {
+		return true
+	}
+	return strings.Contains(c, "json") || strings.Contains(c, "text/") || strings.Contains(c, "xml") || strings.Contains(c, "urlencoded")
 }
 
 // redact 把请求头里的 Bearer 令牌从文本中去掉，避免网关原文回显密钥。

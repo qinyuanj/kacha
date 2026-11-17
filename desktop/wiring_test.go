@@ -87,6 +87,10 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 			t.Fatalf("Diagnostics 服务里没有 %q：\n%s", want, section)
 		}
 	}
+	// 结果图的二进制响应字段（#153）：页面按 body_base64 还原字节，少了这个键就会静默损坏图片。
+	if !strings.Contains(src, "body_base64") {
+		t.Fatalf("生成的客户端里没有 body_base64（网关二进制响应没绑上）：\n%s", src)
+	}
 }
 
 // 剪贴板服务的快照字段是页面的约定（client/src/shell/desktop.ts 的 DesktopClipboardSnapshot）：
@@ -115,13 +119,10 @@ func TestRegisterAssetProtocol(t *testing.T) {
 		t.Fatalf("协议 %q 没注册上：页面读不到数据根里的图片", assetScheme)
 	}
 }
-// 桌面壳的能力开关：画板包导出（#160）与本机用量（#159）都已接通，生成仍未实现。
-func TestDesktopFeaturesEnableUsageAndPackExport(t *testing.T) {
+// 桌面壳的能力开关：画板包导出（#160）、本机用量（#159）与单份生成（#153）都已接通。
+func TestDesktopFeaturesEnableUsagePackExportAndGeneration(t *testing.T) {
 	features := shellapp.DesktopFeatures()
-	if !features.Usage || !features.PackExport {
-		t.Fatalf("本机用量与画板包导出都已实现，features.usage / features.pack_export 必须打开：%+v", features)
-	}
-	if features.Generation {
-		t.Fatalf("生成仍未接通，features.generation 必须关闭：%+v", features)
+	if !features.Usage || !features.PackExport || !features.Generation {
+		t.Fatalf("本机用量、画板包导出与单份生成都已实现，能力开关必须打开：%+v", features)
 	}
 }

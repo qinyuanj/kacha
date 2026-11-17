@@ -1,3 +1,4 @@
+import { base64ToBytes } from "../core/base64";
 import type { FetchLike } from "../core/gateway";
 import type { DesktopBridge } from "./desktop";
 import { localRun, unavailable } from "./desktopStores";
@@ -30,7 +31,10 @@ function gatewayFetch(bridge: DesktopBridge): FetchLike {
       status: response.status,
       headers: { get: (name: string) => headerValue(response.headers, name) },
       text: async () => response.body,
-      arrayBuffer: async () => new TextEncoder().encode(response.body).buffer,
+      arrayBuffer: async () =>
+        response.body_base64
+          ? (base64ToBytes(response.body_base64).buffer as ArrayBuffer)
+          : (new TextEncoder().encode(response.body).buffer as ArrayBuffer),
     };
   };
 }
