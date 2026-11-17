@@ -34,7 +34,80 @@ describe("桌面壳端口", () => {
   it("未实现的能力在 features 里关着；归档已接通", async () => {
     const { port } = await createDesktopPort(fakeBridge());
     // packImport（#131）也关着：这个假桥上没有 Pack 服务，导入无从谈起。
-    expect(port.features).toEqual({ generation: false, usage: false, packExport: false, packImport: false, tidy: false, diagnostics: false, archive: true });
+    // update（#164）同理：这个假桥上没有 Update 服务，自动更新无从谈起。
+    expect(port.features).toEqual({ generation: false, usage: false, packExport: false, packImport: false, tidy: false, diagnostics: false, archive: true, update: false });
+  });
+
+  it("自动更新：没有 Update 服务时明确不可用，不返回空成功", async () => {
+    const { port } = await createDesktopPort(fakeBridge());
+    await expect(port.update.status()).rejects.toBeInstanceOf(PortError);
+    await expect(port.update.check()).rejects.toBeInstanceOf(PortError);
+    await expect(port.update.install()).rejects.toBeInstanceOf(PortError);
+    try {
+      await port.update.check();
+    } catch (e) {
+      const failure = portFailureOf(e);
+      expect(failure.kind).toBe("unavailable");
+      expect(failure.feature).toBe("update");
+    }
+  });
+
+  it("自动更新：有 Update 服务时才开放，快照照 Go 的说法给", async () => {
+    const info = { ...INFO, features: { ...INFO.features, update: true } };
+    const bridge: DesktopBridge = {
+      ...fakeBridge(info),
+      update: {
+        status: async () => ({
+          phase: "ready",
+          current: "1.5.0",
+          version: "1.6.0",
+          notes: "# 1.6.0",
+          page_url: "http://lzxsvn:3000/qinyuanj/kacha/releases/tag/v1.6.0",
+          downloaded: 200,
+          total: 200,
+          verified: true,
+          installable: true,
+          error: "",
+          checked_at: "2026-11-17T12:00:00Z",
+        }),
+        check: async () => undefined,
+        install: async () => undefined,
+      },
+    };
+    const { port } = await createDesktopPort(bridge);
+    expect(port.features.update).toBe(true);
+    const snapshot = await port.update.status();
+    expect(snapshot.phase).toBe("ready");
+    expect(snapshot.verified).toBe(true);
+    expect(snapshot.installable).toBe(true);
+  });
+
+  it("自动更新：不认识的阶段按 error 收，不静默当成可安装", async () => {
+    const info = { ...INFO, features: { ...INFO.features, update: true } };
+    const bridge: DesktopBridge = {
+      ...fakeBridge(info),
+      update: {
+        status: async () => ({
+          phase: "something-new",
+          current: "1.5.0",
+          version: "1.6.0",
+          notes: "",
+          page_url: "",
+          downloaded: 0,
+          total: 0,
+          // 就算实现说可装，阶段不认识时也不能当成可安装。
+          verified: true,
+          installable: true,
+          error: "",
+          checked_at: "",
+        }),
+        check: async () => undefined,
+        install: async () => undefined,
+      },
+    };
+    const { port } = await createDesktopPort(bridge);
+    const snapshot = await port.update.status();
+    expect(snapshot.phase).toBe("error");
   });
 
   it("生成报 unavailable，并带上能力名", async () => {

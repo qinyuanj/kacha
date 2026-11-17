@@ -1,7 +1,8 @@
 // 内存壳端口的各个分组（#137）：从 shell/testing/fakePort.ts 拆出，一个分组一个函数。
 // 拆开之后每个函数的复杂度单独看得到，门禁也按函数计。
 import type { ImportOptions, ImportResult } from "../../core/boardPack";
-import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, UsagePort } from "../types";
+import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, UpdatePort, UsagePort } from "../types";
+import { emptySnapshot, type UpdateSnapshot } from "../../core/update";
 import { PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore, type PackStore, type PortFailureKind, type UiStore } from "../port";
 import type { DiagnosticsOutcome } from "../port";
 import type { FakeBoard, FakeCalls, FakeImportOutcome, FakePortOptions } from "./fakePortTypes";
@@ -284,6 +285,31 @@ export function fakeUiStore(calls: FakeCalls, options: FakePortOptions): UiStore
 }
 
 /** 用量统计那一组。 */
+/**
+ * 更新分组（#164）：快照按选项脚本化，check / install 只记次数。
+ *
+ * 替身不模拟选版与验签：那些判定在 Go 侧，前端替身声称「能装」时也必须已经
+ * verified + installable，否则会把界面的信任假设测成假的。
+ */
+export function fakeUpdateStore(missing: Set<string>, options: FakePortOptions, calls: FakeCalls): UpdatePort {
+  const snapshot: UpdateSnapshot = options.update ?? emptySnapshot();
+  return {
+    status: async () => {
+      if (missing.has("update")) throw fakeFailureOf("unavailable", "桌面版没有自动更新", "update");
+      return snapshot;
+    },
+    check: async () => {
+      if (missing.has("update")) throw fakeFailureOf("unavailable", "桌面版没有自动更新", "update");
+      calls.updateCheck++;
+    },
+    install: async () => {
+      if (missing.has("update")) throw fakeFailureOf("unavailable", "桌面版没有自动更新", "update");
+      calls.updateInstall++;
+      if (options.updateInstallFailure) throw fakeFailureOf(options.updateInstallFailure, "安装失败");
+    },
+  };
+}
+
 export function fakeUsageStore(missing: Set<string>): UsagePort {
   return {
     usage: async () => {
