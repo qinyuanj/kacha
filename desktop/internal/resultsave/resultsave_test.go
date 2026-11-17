@@ -119,6 +119,24 @@ func TestSaveBoardResultsIncludesLayersAndMissingList(t *testing.T) {
 	}
 }
 
+// 包内说明是用户可见文案：只用词表的「数据根」，不用词表禁用的「用户数据根」等说法。
+func TestMissingNoteUsesGlossaryWord(t *testing.T) {
+	root, _, board := seedRoot(t)
+	target := filepath.Join(t.TempDir(), "结果板-结果.zip")
+	if err := SaveBoardResults(root, board, target); err != nil {
+		t.Fatalf("SaveBoardResults: %v", err)
+	}
+	note := zipNames(t, target)["缺失文件.txt"]
+	if !strings.Contains(note, "数据根") {
+		t.Fatalf("缺失说明没有用「数据根」：%q", note)
+	}
+	for _, banned := range []string{"用户数据根", "用户根目录", "输出目录", "数据目录", "工作区"} {
+		if strings.Contains(note, banned) {
+			t.Fatalf("缺失说明用了词表禁用的说法 %q：%q", banned, note)
+		}
+	}
+}
+
 func TestSaveBoardResultsCorruptBoardIsExplicit(t *testing.T) {
 	root, _, _ := seedRoot(t)
 	board := filepath.Join(root, "画板", "坏.ugcboard.json")

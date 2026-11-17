@@ -1,0 +1,316 @@
+{
+  "note": "任务目录识别（ADR 0010）的跨语言夹具：Go 的 desktop/internal/taskref 与前端 client/src/core/taskDir.ts 用同一批用例，解析结果必须一致。改规则时两边一起改这里。",
+  "paths": [
+    {
+      "rel": "2026-01-01/20260101T000000Z-aaaaaaaa/result.png",
+      "task_dir": "2026-01-01/20260101T000000Z-aaaaaaaa"
+    },
+    {
+      "rel": "2026-01-01/20260101T000000Z-aaaaaaaa/layers/01.png",
+      "task_dir": "2026-01-01/20260101T000000Z-aaaaaaaa"
+    },
+    {
+      "rel": "2026-01-01/20260101T000000Z-aaaaaaaa",
+      "task_dir": null
+    },
+    {
+      "rel": "导入参考图/bbbb.png",
+      "task_dir": null
+    },
+    {
+      "rel": "画板/板.ugcboard.json",
+      "task_dir": null
+    },
+    {
+      "rel": "2026-9-1/t1/result.png",
+      "task_dir": null
+    },
+    {
+      "rel": "2026-01-01//result.png",
+      "task_dir": null
+    },
+    {
+      "rel": "",
+      "task_dir": null
+    }
+  ],
+  "task_ids": [
+    {
+      "task_id": "20260101T000000Z-aaaaaaaa",
+      "task_dir": "2026-01-01/20260101T000000Z-aaaaaaaa"
+    },
+    {
+      "task_id": "20260916T091500Z-3f9c2a1b",
+      "task_dir": "2026-09-16/20260916T091500Z-3f9c2a1b"
+    },
+    {
+      "task_id": "not-a-task",
+      "task_dir": null
+    },
+    {
+      "task_id": "20260101T00000Z-aaaaaaaa",
+      "task_dir": null
+    },
+    {
+      "task_id": "",
+      "task_dir": null
+    }
+  ],
+  "boards": [
+    {
+      "name": "任务节点的份数与结果节点指向同一批任务目录",
+      "board": {
+        "format_version": 2,
+        "title": "体量",
+        "viewport": {
+          "zoom": 1,
+          "x": 0,
+          "y": 0
+        },
+        "nodes": [
+          {
+            "id": "p",
+            "type": "prompt",
+            "pos": [
+              0,
+              0
+            ],
+            "size": [
+              1,
+              1
+            ],
+            "text": "猫"
+          },
+          {
+            "id": "t",
+            "type": "task",
+            "pos": [
+              0,
+              0
+            ],
+            "size": [
+              1,
+              1
+            ],
+            "model": "m",
+            "size_spec": {
+              "tier": null,
+              "ratio": null,
+              "width": null,
+              "height": null
+            },
+            "image_ports": 0,
+            "layer_decomposition": false,
+            "transparent_background": false,
+            "last_submitted": {
+              "task_id": "20260101T000000Z-aaaaaaaa",
+              "copy_task_ids": [
+                "20260101T000000Z-bbbbbbbb"
+              ]
+            }
+          },
+          {
+            "id": "r",
+            "type": "result",
+            "pos": [
+              0,
+              0
+            ],
+            "size": [
+              1,
+              1
+            ],
+            "task_id": "20260101T000000Z-aaaaaaaa",
+            "file": "result.png",
+            "path": "2026-01-01/20260101T000000Z-aaaaaaaa/result.png",
+            "layer_count": 0,
+            "record": {
+              "model": "m",
+              "prompt": "",
+              "negative_prompt": "",
+              "submitted_at": "",
+              "layers": [],
+              "size_spec": {
+                "tier": null,
+                "ratio": null,
+                "width": null,
+                "height": null
+              }
+            }
+          },
+          {
+            "id": "i",
+            "type": "reference",
+            "pos": [
+              0,
+              0
+            ],
+            "size": [
+              1,
+              1
+            ],
+            "path": "导入参考图/cccc.png",
+            "sha256": "cccc",
+            "display_name": "参考.png"
+          }
+        ],
+        "edges": []
+      },
+      "task_dirs": [
+        "2026-01-01/20260101T000000Z-aaaaaaaa",
+        "2026-01-01/20260101T000000Z-bbbbbbbb"
+      ]
+    },
+    {
+      "name": "阶段与图层结果只算任务目录本身",
+      "board": {
+        "format_version": 2,
+        "title": "图层",
+        "viewport": {
+          "zoom": 1,
+          "x": 0,
+          "y": 0
+        },
+        "nodes": [
+          {
+            "id": "r1",
+            "type": "result",
+            "pos": [
+              0,
+              0
+            ],
+            "size": [
+              1,
+              1
+            ],
+            "task_id": "20260916T091500Z-3f9c2a1b",
+            "file": "result.png",
+            "path": "2026-09-16/20260916T091500Z-3f9c2a1b/result.png",
+            "layer_count": 2,
+            "record": {
+              "model": "m",
+              "prompt": "",
+              "negative_prompt": "",
+              "submitted_at": "",
+              "layers": [
+                {
+                  "file": "layers/01.png",
+                  "z_index": 1,
+                  "bounding_box": [
+                    0,
+                    0,
+                    1,
+                    1
+                  ]
+                },
+                {
+                  "file": "layers/02.png",
+                  "z_index": 2,
+                  "bounding_box": [
+                    0,
+                    0,
+                    1,
+                    1
+                  ]
+                }
+              ],
+              "size_spec": {
+                "tier": null,
+                "ratio": null,
+                "width": null,
+                "height": null
+              }
+            }
+          },
+          {
+            "id": "t1",
+            "type": "task",
+            "pos": [
+              0,
+              0
+            ],
+            "size": [
+              1,
+              1
+            ],
+            "model": "m",
+            "size_spec": {
+              "tier": null,
+              "ratio": null,
+              "width": null,
+              "height": null
+            },
+            "image_ports": 0,
+            "layer_decomposition": true,
+            "transparent_background": false,
+            "last_submitted": {
+              "task_id": "20260916T091500Z-3f9c2a1b",
+              "copy_task_ids": []
+            }
+          }
+        ],
+        "edges": [],
+        "stages": [
+          {
+            "id": "s",
+            "name": "阶段 1",
+            "nodes": [
+              "t1",
+              "r1"
+            ],
+            "collapsed": false
+          }
+        ]
+      },
+      "task_dirs": [
+        "2026-09-16/20260916T091500Z-3f9c2a1b"
+      ]
+    },
+    {
+      "name": "旧格式（v1）结果节点照样认出任务目录",
+      "board": {
+        "format_version": 1,
+        "title": "旧画板",
+        "viewport": {
+          "zoom": 1,
+          "x": 0,
+          "y": 0
+        },
+        "nodes": [
+          {
+            "id": "r",
+            "type": "result",
+            "pos": [
+              0,
+              0
+            ],
+            "size": [
+              1,
+              1
+            ],
+            "task_id": "20260102T000000Z-eeeeeeee",
+            "file": "result.jpg",
+            "path": "2026-01-02/20260102T000000Z-eeeeeeee/result.jpg",
+            "layer_count": 0,
+            "record": {
+              "model": "m",
+              "prompt": "",
+              "negative_prompt": "",
+              "submitted_at": "",
+              "size_spec": {
+                "tier": null,
+                "ratio": null,
+                "width": null,
+                "height": null
+              }
+            }
+          }
+        ],
+        "edges": []
+      },
+      "task_dirs": [
+        "2026-01-02/20260102T000000Z-eeeeeeee"
+      ]
+    }
+  ]
+}

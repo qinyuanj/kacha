@@ -4,48 +4,25 @@
 // 口径与词表里的画板体量一致：一块画板引用的任务目录与独立图片的总字节，同一任务目录在这块画板内
 // 只计一次；它不按节点数计，也不等于按内容去重后的画板包大小。
 //
-// 认引用的两种写法与清理（usageservice）同一套约定（ADR 0018）：<日期>/<task_id>/… 的相对路径，
-// 以及任务编号里带的 UTC 日期。区别在粒度：这里逐节点归因（阶段体量与「收掉未定稿」预计减少量要它），
-// 清理那边整份画板扫一遍（多认只会少清理）。读不懂的节点在这边按保守扫描，多认只影响体量。
+// 认引用的两种写法（<日期>/<task_id>/… 的相对路径，以及任务编号里带的 UTC 日期）与清理
+// （usageservice）、导入导出同一套规则，规则本身只在 internal/taskref 里写一份（ADR 0010）。
+// 区别在粒度：这里逐节点归因（阶段体量与「收掉未定稿」预计减少量要它），清理那边整份画板扫一遍。
 package boardmeasure
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/qinyuanj/kacha/desktop/internal/pathguard"
+	"github.com/qinyuanj/kacha/desktop/internal/taskref"
 )
 
 // BoardFormatVersion 是读得懂的画板格式版本上限（与前端 BOARD_FORMAT_VERSION 一致）。
 // 2 加入的阶段与定稿都不带来新的引用，规则不变。
 const BoardFormatVersion = 2
-
-var (
-	dateDir    = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
-	taskIDHead = regexp.MustCompile(`^([0-9]{4})([0-9]{2})([0-9]{2})T[0-9]{6}Z-`)
-	// 读不懂的节点里按整串认出的任务编号（保守扫描）。
-	taskIDAnywhere = regexp.MustCompile(`^([0-9]{4})([0-9]{2})([0-9]{2})T[0-9]{6}Z-[0-9a-fA-F]{8}$`)
-)
-
-// TaskDirOfRelPath 报告相对数据根的路径（正斜杠）是否落在 <日期>/<task_id>/… 里，是则返回任务目录。
-func TaskDirOfRelPath(rel string) (string, bool) {
-	parts := strings.Split(rel, "/")
-	if len(parts) < 3 || !dateDir.MatchString(parts[0]) || parts[1] == "" {
-		return "", false
-	}
-	return parts[0] + "/" + parts[1], true
-}
-
-// TaskDirOfTaskID 由任务编号开头的 UTC 时间戳还原任务目录；不是本工具生成的编号时报 false。
-func TaskDirOfTaskID(taskID string) (string, bool) {
-	c := taskIDHead.FindStringSubmatch(taskID)
-	if c == nil {
-		return "", false
-	}
-	return c[1] + "-" + c[2] + "-" + c[3] + "/" + taskID, true
-}
 
 // NodeRef 是一个节点引用的条目（任务目录或独立图片，相对数据根、正斜杠）。
 type NodeRef struct {
@@ -90,7 +67,7 @@ func (r *refs) addPath(v any) {
 	if !ok {
 		return
 	}
-	if dir, ok := TaskDirOfRelPath(rel); ok {
+	if dir, ok := taskref.TaskDirOfRelPath(rel); ok {
 		r.add(dir)
 		return
 	}
@@ -99,7 +76,7 @@ func (r *refs) addPath(v any) {
 
 func (r *refs) addTaskID(v any) {
 	if s, ok := v.(string); ok {
-		if dir, ok := TaskDirOfTaskID(s); ok {
+		if dir, ok := taskref.TaskDirOfTaskID(s); ok {
 			r.add(dir)
 		}
 	}
@@ -110,11 +87,11 @@ func (r *refs) addDeep(v any) {
 	switch x := v.(type) {
 	case string:
 		if rel, ok := relPath(x); ok {
-			if dir, ok := TaskDirOfRelPath(rel); ok {
+			if dir, ok := taskref.TaskDirOfRelPath(rel); ok {
 				r.add(dir)
 			}
 		}
-		if taskIDAnywhere.MatchString(x) {
+		if taskref.IsTaskID(x) {
 			r.addTaskID(x)
 		}
 	case []any:
@@ -300,8 +277,7 @@ func resolveInside(root, item string) (string, bool) {
 		return "", false
 	}
 	abs := filepath.Join(root, filepath.FromSlash(rel))
-	cleanRoot, cleanAbs := filepath.Clean(root), filepath.Clean(abs)
-	if !strings.EqualFold(cleanAbs, cleanRoot) && !strings.HasPrefix(strings.ToLower(cleanAbs), strings.ToLower(cleanRoot)+string(os.PathSeparator)) {
+	if !pathguard.InsideOrSame(root, abs) {
 		return "", false
 	}
 	return abs, true
