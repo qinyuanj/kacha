@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -21,17 +22,19 @@ from typing import Protocol
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from release_gate import desktop_version, validate_release_assets  # noqa: E402
+from release_gate import desktop_version, release_notes_section, validate_release_assets  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BASE_URL = "http://lzxsvn:3000"
 OWNER_REPO = "qinyuanj/kacha"
-INSTALLER_SUFFIX = "-setup-{version}-amd64.exe"
+INSTALLER = "kacha-setup-{version}-amd64.exe"
 DESCRIPTOR = "update-windows-amd64.json"
 CHECKSUMS = "SHA256SUMS"
+# 验签与客户端走同一条路径：内置公钥与 Ed25519 规则只在 Go 侧写一份。
+RELEASE_TOOL = ("go", "run", "./desktop/cmd/verifyrelease")
 REQUIRED = (
-    "kacha-setup-{version}-amd64.exe",
-    "kacha-setup-{version}-amd64.exe.sig",
+    INSTALLER,
+    INSTALLER + ".sig",
     DESCRIPTOR,
     CHECKSUMS,
 )
@@ -124,7 +127,47 @@ def parse_checksums(text: str) -> dict[str, str]:
     return result
 
 
-def collect_assets(release_dir: Path, version: str) -> list[Path]:
+def verify_release_signature(installer: Path, descriptor: Path, *, repo_root: Path = REPO_ROOT) -> None:
+    """用客户端内置的发布者公钥核对签名。
+
+    验签交给 desktop/cmd/verifyrelease：发布端与客户端用同一个内置公钥、同一条校验路径，
+    本脚本不另写一份 Ed25519 判断（两份迟早会漂移，而这里错一次就发出去一个装不上的包）。
+    """
+    command = [*RELEASE_TOOL, "-installer", str(installer), "-descriptor", str(descriptor)]
+    try:
+        result = subprocess.run(command, cwd=repo_root, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except OSError as error:
+        raise SystemExit(f"运行发布验签失败（需要 Go 工具链）：{error}") from error
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise SystemExit("发布签名验证失败：" + (detail or "描述里的签名与内置发布者公钥对不上"))
+
+
+def check_descriptor(descriptor: dict, version: str, base_url: str, repo: str, release_dir: Path) -> None:
+    """核对真实生成的更新描述：版本、平台、包地址、签名与签名资产都必须是这次发布的那一份。
+
+    描述由 tools/signrelease 写出（字段与客户端 updateservice.Manifest 一致），
+    这里逐项对回来，不用「拼一份看起来对的清单」代替真资产。
+    """
+    validate_release_assets({
+        "version": descriptor.get("version"),
+        "platform": descriptor.get("platform"),
+        "url": descriptor.get("url"),
+        "signature": descriptor.get("signature"),
+        "notes": descriptor.get("notes"),
+    }, version)
+    installer = release_dir / INSTALLER.format(version=version)
+    expected_url = f"{base_url.rstrip('/')}/{repo}/releases/download/v{version}/{installer.name}"
+    if descriptor.get("url") != expected_url:
+        raise SystemExit(
+            f"更新描述的包地址必须是这次发布的附件 {expected_url}，当前是 {descriptor.get('url')!r}"
+            "（地址指向别的宿主或别的版本时，客户端会装到不相干的包）")
+    signature = str(descriptor.get("signature", "")).strip()
+    if (release_dir / (installer.name + ".sig")).read_text(encoding="utf-8").strip() != signature:
+        raise SystemExit("更新描述里的签名与 .sig 附件不一致；半套资产的发行不能发布")
+
+
+def collect_assets(release_dir: Path, version: str, base_url: str, repo: str) -> list[Path]:
     paths = [release_dir / name.format(version=version) for name in REQUIRED]
     missing = [path.name for path in paths if not path.is_file()]
     if missing:
@@ -137,30 +180,18 @@ def collect_assets(release_dir: Path, version: str) -> list[Path]:
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
         if actual != expected:
             raise SystemExit(f"{path.name} 与 {CHECKSUMS} 不一致；拒绝发布")
-    descriptor = json.loads(paths[2].read_text(encoding="utf-8"))
-    descriptor_version = descriptor.get("version")
-    if not isinstance(descriptor_version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", descriptor_version):
-        raise SystemExit("更新描述缺少有效的版本字段")
-    if descriptor.get("platforms"):
-        raise SystemExit("更新描述含非 windows-amd64 平台，拒绝发布半套资产")
-    if not re.search(rf"^#\s+{re.escape(version)}\s*$", str(descriptor.get("notes", "")), re.MULTILINE):
-        raise SystemExit(f"更新描述缺少当前版本 {version} 的一级标题")
-    release_url = f"https://gitea.test/qinyuanj/kacha/releases/download/v{version}/kacha-setup-{version}-amd64.exe"
-    validate_release_assets({
-        "version": descriptor_version,
-        "platform": "windows-amd64",
-        "url": release_url,
-        "signature": "present",
-        "notes": "# " + descriptor_version,
-    }, version)
+    descriptor_path = release_dir / DESCRIPTOR
+    descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+    if not isinstance(descriptor, dict):
+        raise SystemExit(f"更新描述 {DESCRIPTOR} 不是 JSON 对象")
+    check_descriptor(descriptor, version, base_url, repo, release_dir)
+    verify_release_signature(release_dir / INSTALLER.format(version=version), descriptor_path)
     return paths
 
 
 def release_body(repo_root: Path, version: str) -> str:
-    path = repo_root / "docs" / "release" / f"release-notes-{version}.md"
-    if not path.is_file():
-        raise SystemExit(f"缺少发布说明：{path}；发布前必须有当前版本的更新描述")
-    return path.read_text(encoding="utf-8").rstrip()
+    """发布说明：唯一来源 docs/release/changelog.md 当前版本那一节（ADR 0024）。"""
+    return release_notes_section(repo_root, version).rstrip()
 
 
 def upload_replace(api: ReleaseApi, release_id: int, filename: str, data: bytes) -> None:
@@ -201,7 +232,7 @@ def main(argv: list[str] | None = None, *, repo_root: Path = REPO_ROOT,
         raise SystemExit("缺少环境变量 GITEA_TOKEN：发布脚本只从环境变量读取 token")
     version = desktop_version(repo_root)
     release_dir = Path(args.release_dir)
-    paths = collect_assets(release_dir, version)
+    paths = collect_assets(release_dir, version, args.base_url, args.repo)
     body = release_body(repo_root, version)
     api = client_factory(args.base_url, token, args.repo)  # type: ignore[operator]
     try:

@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
+	"github.com/qinyuanj/kacha/desktop/internal/pathguard"
+	"github.com/qinyuanj/kacha/desktop/internal/taskref"
 )
 
 const (
@@ -286,7 +288,7 @@ func readPlan(files []*zip.File) (plan, error) {
 		if name == ManifestName || isBoardEntry(name) {
 			continue
 		}
-		if dir, ok := taskDirOf(name); ok {
+		if dir, ok := taskref.TaskDirOfRelPath(name); ok {
 			taskDirs[dir] = true
 			continue
 		}
@@ -431,7 +433,7 @@ func checkDuplicates(duplicates map[string]string, entries map[string]bool, boar
 		if !entries[source] {
 			return nil, corruptf(StepCheck, "duplicates 指向包内不存在的条目：%s → %s", omitted, source)
 		}
-		if _, ok := taskDirOf(omitted); !ok {
+		if _, ok := taskref.TaskDirOfRelPath(omitted); !ok {
 			if parts := strings.Split(omitted, "/"); len(parts) != 2 || parts[0] != ReferencesDirName {
 				return nil, corruptf(StepCheck, "duplicates 只能省略任务目录或导入参考图里的文件：%s", omitted)
 			}
@@ -456,7 +458,7 @@ func (im *Importer) extract(tempDir string, planned plan) (int64, error) {
 		}
 		file := planned.entries[name]
 		dst := filepath.Join(tempDir, filepath.FromSlash(name))
-		if !within(tempDir, dst) {
+		if !pathguard.Inside(tempDir, dst) {
 			return 0, corruptf(StepExtract, "包内路径越出导入目录：%s", name)
 		}
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -505,7 +507,7 @@ func (im *Importer) restoreDuplicates(tempDir string, planned plan) error {
 		source := planned.duplicates[omitted]
 		src := filepath.Join(tempDir, filepath.FromSlash(source))
 		dst := filepath.Join(tempDir, filepath.FromSlash(omitted))
-		if !within(tempDir, dst) {
+		if !pathguard.Inside(tempDir, dst) {
 			return corruptf(StepRestore, "包内路径越出导入目录：%s", omitted)
 		}
 		if _, err := os.Stat(dst); err == nil {
@@ -809,43 +811,7 @@ func safeSegment(s string) bool {
 	return true
 }
 
-// taskDirOf 判相对路径落在 <YYYY-MM-DD>/<task_id>/… 里时返回任务目录。
-func taskDirOf(rel string) (string, bool) {
-	parts := strings.Split(rel, "/")
-	if len(parts) < 3 || !isDateDir(parts[0]) || parts[1] == "" {
-		return "", false
-	}
-	return parts[0] + "/" + parts[1], true
-}
 
-// isDateDir 判第一段是不是 UTC 日期目录（YYYY-MM-DD）。
-func isDateDir(s string) bool {
-	if len(s) != 10 || s[4] != '-' || s[7] != '-' {
-		return false
-	}
-	for i, r := range s {
-		if i == 4 || i == 7 {
-			continue
-		}
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// within 判 p 是否在 root 里（root 自己不算）。
-func within(root, p string) bool {
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return false
-	}
-	absPath, err := filepath.Abs(p)
-	if err != nil {
-		return false
-	}
-	return strings.HasPrefix(strings.ToLower(absPath), strings.ToLower(absRoot)+string(os.PathSeparator))
-}
 
 // rel 把绝对路径写成相对数据根的正斜杠路径；根目录外的保留绝对路径。
 func rel(root, abs string) string {

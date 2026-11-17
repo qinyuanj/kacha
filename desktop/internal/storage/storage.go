@@ -1,4 +1,4 @@
-// Package storageservice 是页面的「本机数据位置」能力（#161）：选目标、迁移、报告当前数据根。
+// Package storage 是页面的「本机数据位置」能力（#161）：选目标、迁移、报告当前数据根。
 //
 // 迁移本身在 internal/moveroot 里（复制、校验、切状态记录）；这里只做页面能调到的接线，
 // 并把切换结果同步到进程内共享的数据根，让已绑定的服务跟着换位置。
@@ -42,10 +42,9 @@ type Service struct {
 	statePath string
 	pick      func() (string, error)
 
-	mu     sync.Mutex
-	moving bool
-	done   int
-	total  int
+	mu    sync.Mutex
+	done  int
+	total int
 	// busy 报出别的在途操作（打包、导入、保存）；返回空串表示没有冲突。
 	busy func() string
 }
@@ -87,35 +86,29 @@ func (s *Service) pickDirectory() (string, error) {
 func (s *Service) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return Status{Root: s.roots.Current(), Moving: s.moving, Done: s.done, Total: s.total}
+	// 迁移中的标志只有一份（在共享数据根上）：状态、拒绝再开一次迁移、
+	// 以及拦下会写数据根的操作，都看它。
+	return Status{Root: s.roots.Current(), Moving: s.roots.Moving(), Done: s.done, Total: s.total}
 }
 
 // Move 把数据根迁到 target：复制并校验全部内容，成功后切状态记录与共享数据根。
 //
 // 失败时数据根不动，旧位置仍是唯一数据来源；目标里已写入的半份内容由 moveroot 清掉。
 func (s *Service) Move(target string) Outcome {
-	s.mu.Lock()
-	if s.moving {
-		s.mu.Unlock()
+	// 标记迁移中就发生在复制之前：这一段里写数据根的操作被拦下，
+	// 免得写进马上要被换成「旧位置」的那一份（切换重载后就丢了）。
+	if !s.roots.BeginMove() {
 		return Outcome{Kind: "busy", Message: "已有迁移在进行，请等它结束"}
 	}
-	busy := s.busy
-	s.moving = true
+	defer s.roots.EndMove()
+	s.mu.Lock()
 	s.done, s.total = 0, 0
 	s.mu.Unlock()
-	if busy != nil {
+	if busy := s.busy; busy != nil {
 		if reason := busy(); reason != "" {
-			s.mu.Lock()
-			s.moving = false
-			s.mu.Unlock()
 			return Outcome{Kind: "busy", Message: reason}
 		}
 	}
-	defer func() {
-		s.mu.Lock()
-		s.moving = false
-		s.mu.Unlock()
-	}()
 
 	source := s.roots.Current()
 	report, err := moveroot.Migrate(source, target, s.statePath, &moveroot.Options{

@@ -7,8 +7,14 @@
 // 用法（在仓库根）：
 //
 //	go run ./tools/signrelease -installer build/windows-amd64/kacha-setup-1.5.0-amd64.exe \
-//	    -version 1.5.0 -notes docs/release/release-notes-1.5.0.md \
+//	    -version 1.5.0 -notes docs/release/changelog.md \
 //	    -base-url http://lzxsvn:3000 -out build/windows-amd64
+//
+// 发布说明的唯一来源是 docs/release/changelog.md（ADR 0024）：传整份文档即可，
+// 工具取其中当前版本那一节写进描述。另立一份 release-notes-<版本>.md 会让说明有两个来源。
+//
+// 验签（发布前核对资产）走 desktop/cmd/verifyrelease：内置公钥在 desktop/internal 下，
+// 只有 desktop/ 里的代码能读到它，发布脚本因此调那条命令而不是在这里再写一份。
 //
 // 私钥来自 MYGO_UPDATER_PRIVATE_KEY（`go tool mygo keygen` 生成的 mygo-update.key 内容）。
 package main
@@ -47,7 +53,7 @@ type descriptor struct {
 func main() {
 	installer := flag.String("installer", "", "安装器路径（必填）")
 	version := flag.String("version", "", "版本号 X.Y.Z（必填）")
-	notes := flag.String("notes", "", "发布说明 Markdown 路径（必填，需含 # <版本> 标题）")
+	notes := flag.String("notes", "", "更新说明文档（必填）：传 docs/release/changelog.md，取其中当前版本一节")
 	baseURL := flag.String("base-url", "http://lzxsvn:3000", "Gitea 地址")
 	out := flag.String("out", "", "输出目录（默认与安装器同目录）")
 	flag.Parse()
@@ -72,12 +78,13 @@ func run(installer, version, notesPath, baseURL, out string) error {
 	if err != nil {
 		return err
 	}
-	notes, err := os.ReadFile(notesPath)
+	notesText, err := os.ReadFile(notesPath)
 	if err != nil {
 		return err
 	}
-	if !hasHeading(string(notes), "# "+version) {
-		return fmt.Errorf("发布说明缺少「# %s」标题：描述不完整时不能发布", version)
+	notes, ok := notesSection(string(notesText), version)
+	if !ok {
+		return fmt.Errorf("发布说明缺少「# %s」一节：更新说明的唯一来源是 docs/release/changelog.md", version)
 	}
 	sum := sha256.Sum256(pkg)
 	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(key, sum[:]))
@@ -124,12 +131,28 @@ func signingKey() (ed25519.PrivateKey, error) {
 	return ed25519.PrivateKey(raw), nil
 }
 
-// hasHeading 要求说明里有本版本的一级标题：没有标题等于描述不完整。
-func hasHeading(notes, heading string) bool {
-	for _, line := range strings.Split(notes, "\n") {
-		if strings.TrimSpace(line) == heading {
-			return true
+// notesSection 取发布说明里当前版本那一节（含一级标题，到下一个一级标题前）。
+//
+// 说明的唯一来源是 docs/release/changelog.md：它把当前版本写在前、历史版本留在后面，
+// 所以按一级标题切出当前版本这一节，描述里就不会混进历史版本的条目。
+func notesSection(text, version string) (string, bool) {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	start := -1
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "# ") {
+			continue
+		}
+		if start >= 0 {
+			return strings.TrimRight(strings.Join(lines[start:i], "\n"), "\n") + "\n", true
+		}
+		if strings.TrimSpace(line[2:]) == version {
+			start = i
 		}
 	}
-	return false
+	if start < 0 {
+		return "", false
+	}
+	return strings.TrimRight(strings.Join(lines[start:], "\n"), "\n") + "\n", true
 }
+
+

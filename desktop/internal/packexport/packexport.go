@@ -12,6 +12,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/qinyuanj/kacha/desktop/internal/pathguard"
+	"github.com/qinyuanj/kacha/desktop/internal/taskref"
 )
 
 // 失败类别：界面按类别分支，不看文案。
@@ -139,11 +142,11 @@ func collect(root string, spec Spec, includeOmitted bool) ([]item, *Error) {
 	}
 	items := []item{}
 	for _, dir := range spec.TaskDirs {
-		if !taskDirValid(dir) {
+		if !taskref.IsTaskDir(dir) {
 			return nil, invalidf("任务目录路径无效：%s", dir)
 		}
 		abs := filepath.Join(root, filepath.FromSlash(dir))
-		if !within(root, abs) {
+		if !pathguard.Inside(root, abs) {
 			return nil, invalidf("任务目录越出数据根：%s", dir)
 		}
 		found, err := walkTaskDir(root, abs, dir, omitted, includeOmitted)
@@ -160,7 +163,7 @@ func collect(root string, spec Spec, includeOmitted bool) ([]item, *Error) {
 		if !filepath.IsAbs(abs) {
 			abs = filepath.Join(root, abs)
 		}
-		if !within(root, abs) {
+		if !pathguard.Inside(root, abs) {
 			return nil, invalidf("源文件越出数据根：%s", file.Source)
 		}
 		if !omitted[file.Entry] || includeOmitted {
@@ -250,37 +253,4 @@ func safePath(name string) bool {
 	return true
 }
 
-// taskDirValid 只接受 <UTC 日期>/<task_id> 两段的任务目录。
-func taskDirValid(dir string) bool {
-	parts := strings.Split(dir, "/")
-	return len(parts) == 2 && isDate(parts[0]) && parts[1] != ""
-}
 
-func isDate(s string) bool {
-	if len(s) != 10 || s[4] != '-' || s[7] != '-' {
-		return false
-	}
-	for i, r := range s {
-		if i == 4 || i == 7 {
-			continue
-		}
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// within 判路径是否在 root 里（Windows 盘符大小写不敏感）。
-func within(root, path string) bool {
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return false
-	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	prefix := strings.ToLower(absRoot) + string(os.PathSeparator)
-	return strings.HasPrefix(strings.ToLower(absPath), prefix)
-}

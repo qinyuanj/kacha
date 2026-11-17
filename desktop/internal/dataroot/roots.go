@@ -12,6 +12,9 @@ import (
 type Roots struct {
 	mu   sync.RWMutex
 	root string
+	// moving 表示正在把数据根整份复制到新位置（#161）。复制期间状态记录还没切，
+	// 写进旧位置的内容在切换重载后就丢了，所以这一段里写数据根的操作一律拦下。
+	moving bool
 }
 
 // NewRoots 用启动时解析出的数据根造一个共享位置。
@@ -36,4 +39,31 @@ func (r *Roots) Switch(root string) {
 // Join 返回数据根下的绝对路径（拼一段相对路径）。
 func (r *Roots) Join(parts ...string) string {
 	return filepath.Join(append([]string{r.Current()}, parts...)...)
+}
+
+// BeginMove 标记迁移开始；已经在迁移中时返回 false（两次迁移不能同时跑）。
+//
+// 标记与复制必须在同一段里：标记之后的写入都被拦下，直到 Switch 或 EndMove。
+func (r *Roots) BeginMove() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.moving {
+		return false
+	}
+	r.moving = true
+	return true
+}
+
+// EndMove 结束迁移标记；成功与失败都要调，否则写入会一直是被拦的状态。
+func (r *Roots) EndMove() {
+	r.mu.Lock()
+	r.moving = false
+	r.mu.Unlock()
+}
+
+// Moving 报告是否正在迁移：期间写数据根的操作会被拦下，不写进即将作废的旧位置。
+func (r *Roots) Moving() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.moving
 }

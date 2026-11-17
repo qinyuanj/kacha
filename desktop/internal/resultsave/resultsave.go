@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/qinyuanj/kacha/desktop/internal/pathguard"
 )
 
 // 失败类别：界面按类别分支。
@@ -46,7 +48,7 @@ type zipItem struct {
 
 // SaveResult 保存一张结果：有图层时写底图 + layers.json + layers/* 的 zip，否则原样复制字节。
 func SaveResult(root, src, target string) *Error {
-	if !within(root, src) {
+	if !pathguard.Inside(root, src) {
 		return &Error{Kind: KindForbidden, Message: "结果不在数据根内，不能另存"}
 	}
 	info, err := os.Lstat(src)
@@ -66,7 +68,7 @@ func SaveResult(root, src, target string) *Error {
 
 // SaveBoardResults 按画板的结果节点保存整板：相对路径原样保留，图层跟在各自结果旁边。
 func SaveBoardResults(root, board, target string) *Error {
-	if !within(root, board) {
+	if !pathguard.Inside(root, board) {
 		return &Error{Kind: KindForbidden, Message: "画板不在数据根内，不能另存"}
 	}
 	text, err := os.ReadFile(board)
@@ -85,7 +87,7 @@ func SaveBoardResults(root, board, target string) *Error {
 	items, missing := boardItems(root, parsed.Nodes)
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		note := "以下结果在用户数据根中缺失，未打包（可在画板上重新定位后再保存）：\n" + strings.Join(missing, "\n") + "\n"
+		note := "以下结果在数据根中缺失，未打包（可在画板上重新定位后再保存）：\n" + strings.Join(missing, "\n") + "\n"
 		items = append(items, zipItem{name: "缺失文件.txt", text: note})
 	}
 	return writeZip(target, items)
@@ -93,7 +95,7 @@ func SaveBoardResults(root, board, target string) *Error {
 
 // SuggestedName 给系统「另存为」对话框一个默认名：带图层的结果用任务编号加 .zip。
 func SuggestedName(root, src string) string {
-	if within(root, src) {
+	if pathguard.Inside(root, src) {
 		if layers, failure := layerItems(src); failure == nil && len(layers) > 0 {
 			return filepath.Base(filepath.Dir(src)) + ".zip"
 		}
@@ -119,7 +121,7 @@ func boardItems(root string, nodes []struct {
 		if !filepath.IsAbs(abs) {
 			abs = filepath.Join(root, rel)
 		}
-		if !within(root, abs) {
+		if !pathguard.Inside(root, abs) {
 			missing = append(missing, node.Path)
 			continue
 		}
@@ -290,15 +292,4 @@ func commit(temp, target string, done *bool) *Error {
 	return nil
 }
 
-// within 判路径是否在数据根里（Windows 盘符大小写不敏感）。
-func within(root, path string) bool {
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return false
-	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	return strings.HasPrefix(strings.ToLower(absPath), strings.ToLower(absRoot)+string(os.PathSeparator))
-}
+

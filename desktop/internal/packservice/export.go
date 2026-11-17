@@ -61,6 +61,9 @@ func (s *Service) Facts(spec packexport.Spec) ([]packexport.Fact, error) {
 
 // Export 开始导出：立刻返回；真实进度与结局由 ExportSnapshot 取。
 func (s *Service) Export(target string, spec packexport.Spec) ExportOutcome {
+	if s.moving() {
+		return ExportOutcome{Kind: KindMoving, Step: packexport.StepCheck, Message: "正在迁移数据位置，完成前不能导出画板包"}
+	}
 	st := &s.export
 	st.mu.Lock()
 	if st.running {

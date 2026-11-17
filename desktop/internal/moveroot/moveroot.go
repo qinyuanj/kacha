@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
+	"github.com/qinyuanj/kacha/desktop/internal/pathguard"
 )
 
 // 失败类别：与端口失败类别同名，页面按类别分支（见 client/src/shell/port.ts）。
@@ -144,7 +145,7 @@ func prepare(source, target string) (string, string, error) {
 	if strings.EqualFold(src, dst) {
 		return "", "", fail(KindSameRoot, "目标就是当前数据根")
 	}
-	if within(src, dst) || within(dst, src) {
+	if pathguard.InsideOrSame(src, dst) || pathguard.InsideOrSame(dst, src) {
 		return "", "", fail(KindNested, "目标不能与当前数据根互相包含：%s", dst)
 	}
 	if err := writable(dst); err != nil {
@@ -153,10 +154,7 @@ func prepare(source, target string) (string, string, error) {
 	return src, dst, nil
 }
 
-// within 判断 child 是否等于 parent 或在 parent 之下（大小写不敏感，Windows）。
-func within(parent, child string) bool {
-	return strings.EqualFold(parent, child) || strings.HasPrefix(strings.ToLower(child), strings.ToLower(parent)+string(os.PathSeparator))
-}
+
 
 // writable 确认目标可写：目标已存在就要求是目录，不存在就要求能在最近的已存在祖先下建目录。
 func writable(dst string) error {

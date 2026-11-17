@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
+	"github.com/qinyuanj/kacha/desktop/internal/taskref"
 )
 
 const (
@@ -199,9 +200,6 @@ type recycleManifest struct {
 	Entries []recycleRecord `json:"entries"`
 }
 
-var taskPathRef = regexp.MustCompile(`(\d{4}-\d{2}-\d{2})[\\/]([^\\/" ]+)`)
-var taskIDRef = regexp.MustCompile(`(\d{4})(\d{2})(\d{2})T\d{6}Z-[0-9a-fA-F]{8}`)
-
 // relPath 把绝对路径写成相对数据根的正斜杠路径，供提示与记录使用。
 func relPath(root, abs string) string {
 	r, a := filepath.Clean(root), filepath.Clean(abs)
@@ -209,28 +207,6 @@ func relPath(root, abs string) string {
 		return filepath.ToSlash(a[len(r)+1:])
 	}
 	return filepath.ToSlash(a)
-}
-
-// collectRefs 从画板 JSON 里收出被引用的任务目录。任务目录的两种写法（相对路径与 task_id）
-// 都按数据根约定识别；多认不算危险（只会少清理），漏认才会误删。
-func collectRefs(v any, refs map[string]bool) {
-	switch x := v.(type) {
-	case map[string]any:
-		for _, value := range x {
-			collectRefs(value, refs)
-		}
-	case []any:
-		for _, value := range x {
-			collectRefs(value, refs)
-		}
-	case string:
-		for _, m := range taskPathRef.FindAllStringSubmatch(x, -1) {
-			refs[m[1]+"/"+m[2]] = true
-		}
-		for _, m := range taskIDRef.FindAllStringSubmatch(x, -1) {
-			refs[m[1]+"-"+m[2]+"-"+m[3]+"/"+m[0]] = true
-		}
-	}
 }
 
 // references 扫描可编辑与归档画板；任何相关文件读不出来时给出阻断原因，不返回半份引用表。
@@ -260,7 +236,9 @@ func (s *Service) references() (map[string]bool, *string, error) {
 				rel := relPath(s.store.Root(), abs)
 				return refs, &rel, nil
 			}
-			collectRefs(parsed, refs)
+			// 规则只在 internal/taskref 里写一份（ADR 0010）；这边整份画板扫一遍，
+			// 多认不算危险（只会少清理），漏认才会误删。
+			taskref.CollectRefs(parsed, refs)
 		}
 	}
 	return refs, nil, nil

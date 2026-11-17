@@ -5,7 +5,13 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from release_gate import check_release_notes, desktop_version, parse_config_version, validate_release_assets  # noqa: E402
+from release_gate import (  # noqa: E402
+    check_release_notes,
+    desktop_version,
+    parse_config_version,
+    release_notes_section,
+    validate_release_assets,
+)
 
 
 def write_repo(root: Path, *, desktop: str | None = "1.5.0", notes: str = "") -> Path:
@@ -55,6 +61,33 @@ class ReleaseNotesGateTest(unittest.TestCase):
 
     def test_items_of_other_versions_do_not_count(self):
         self.assert_rejected("# 1.5.0\n\n# 1.4.0\n\n## 新增\n\n- 旧版本的一条。\n")
+
+
+class ReleaseNotesSourceTest(unittest.TestCase):
+    """发布说明只有一个来源：changelog.md 的当前版本一节（ADR 0024）。"""
+
+    def test_section_is_taken_from_the_single_changelog(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = write_repo(Path(tmp), notes=VALID_NOTES)
+            section = release_notes_section(root, "1.5.0")
+            self.assertTrue(section.startswith("# 1.5.0"), section)
+            self.assertIn("- 版本号接在 1.4.0 后面。", section)
+            self.assertNotIn("旧版本的一条", section, "历史版本的条目不能混进当前版本的发布说明")
+            self.assertFalse((root / "docs" / "release" / "release-notes-1.5.0.md").exists())
+
+    def test_missing_section_is_reported_with_the_changelog_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = write_repo(Path(tmp), notes="# 1.4.0\n\n## 修复\n\n- 旧的一条。\n")
+            with self.assertRaises(SystemExit) as caught:
+                release_notes_section(root, "1.5.0")
+            self.assertIn("changelog.md", str(caught.exception))
+            self.assertIn("1.5.0", str(caught.exception))
+
+    def test_nothing_is_read_from_a_second_release_notes_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = write_repo(Path(tmp), notes=VALID_NOTES)
+            (root / "docs" / "release" / "release-notes-1.5.0.md").write_text("# 1.5.0\n\n另一份来源。\n", encoding="utf-8")
+            self.assertNotIn("另一份来源", release_notes_section(root, "1.5.0"))
 
 
 class DesktopVersionGateTest(unittest.TestCase):
