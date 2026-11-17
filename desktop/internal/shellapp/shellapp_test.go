@@ -8,11 +8,11 @@ import (
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
-// 桌面壳本次切片的能力开关：生成、用量、画板包导出都还没有。
+// 桌面壳本次切片的能力开关：只开放已真实接通的本机用量。
 func TestDesktopFeaturesAreOff(t *testing.T) {
 	f := DesktopFeatures()
-	if f.Generation || f.Usage || f.PackExport {
-		t.Fatalf("features = %+v, want generation/usage/pack_export all false", f)
+	if f.Generation || f.PackExport || !f.Usage {
+		t.Fatalf("features = %+v, want only usage enabled", f)
 	}
 }
 
@@ -37,8 +37,8 @@ func TestInfoReportsRootsAndCreatesBoardRoot(t *testing.T) {
 	if stat, err := os.Stat(info.BoardRoot); err != nil || !stat.IsDir() {
 		t.Fatalf("board root not created: %v", err)
 	}
-	if info.Features.Generation || info.Features.Usage || info.Features.PackExport {
-		t.Fatalf("features = %+v, want all off", info.Features)
+	if info.Features.Generation || info.Features.PackExport || !info.Features.Usage {
+		t.Fatalf("features = %+v, want only usage enabled", info.Features)
 	}
 }
 

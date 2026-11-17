@@ -78,7 +78,7 @@ describe("用量区块", () => {
     let cleaned: string[] = [];
     port.usage.cleanupUnreferenced = async (dirs) => {
       cleaned = dirs;
-      return { moved: [{ dir: "x", bytes: 1, last_write: 0 }], skipped: [] };
+      return { ok: true, kind: "", message: "", moved: [{ dir: "x", bytes: 1, last_write: 0 }], skipped: [], failed: [] };
     };
     await show(port);
     await act(async () => buttonWithText("清理未引用任务目录").click());
@@ -86,6 +86,32 @@ describe("用量区块", () => {
     await act(async () => buttonWithText("移入回收区").click());
     expect(cleaned).toEqual(["x"]);
     expect(container.textContent).toContain("已把 1 个任务目录移入回收区");
+  });
+
+  it("预览取消零修改：不调用清理，也不改目录", async () => {
+    const port = createFakePort();
+    port.usage.usage = async () => usage({ unreferenced: [{ dir: "x", bytes: 1, last_write: 0 }] });
+    let cleaned = false;
+    port.usage.cleanupUnreferenced = async () => {
+      cleaned = true;
+      return { ok: true, kind: "", message: "", moved: [], skipped: [], failed: [] };
+    };
+    await show(port);
+    await act(async () => buttonWithText("清理未引用任务目录").click());
+    await act(async () => buttonWithText("取消").click());
+    expect(cleaned).toBe(false);
+    expect(container.querySelector("[role='dialog']")).toBeNull();
+    expect(container.querySelector("[data-testid='usage-unreferenced-summary']")?.textContent).toContain("1 个未引用任务目录");
+  });
+
+  it("确认执行前重新检查引用由端口负责：跳过项在说明里可见", async () => {
+    const port = createFakePort();
+    port.usage.usage = async () => usage({ unreferenced: [{ dir: "x", bytes: 1, last_write: 0 }] });
+    port.usage.cleanupUnreferenced = async () => ({ ok: true, kind: "", message: "", moved: [], skipped: ["x"], failed: [] });
+    await show(port);
+    await act(async () => buttonWithText("清理未引用任务目录").click());
+    await act(async () => buttonWithText("移入回收区").click());
+    expect(container.textContent).toContain("1 个已不符合条件，未动");
   });
 
   it("读用量失败：显示错误", async () => {

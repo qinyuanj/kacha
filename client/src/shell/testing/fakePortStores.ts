@@ -283,6 +283,10 @@ export function fakeUsageStore(missing: Set<string>): UsagePort {
       if (missing.has("usage")) throw fakeFailureOf("unavailable", "桌面版没有用量统计", "usage");
       return { total_bytes: 0, boards_bytes: 0, meta_bytes: 0, last_access: 0, by_date: [], unreferenced: null, unreadable_board: null, limit_bytes: null, limit_level: null };
     },
-    cleanupUnreferenced: async () => ({ moved: [], skipped: [] }),
+    setLimit: async () => undefined,
+    recycle: async () => [],
+    restore: async () => undefined,
+    purgeExpired: async () => undefined,
+    cleanupUnreferenced: async () => ({ ok: true, kind: "", message: "", moved: [], skipped: [], failed: [] }),
   };
 }
