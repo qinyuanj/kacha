@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from release_gate import check_release_notes, desktop_version, parse_config_version  # noqa: E402
+from release_gate import check_release_notes, desktop_version, parse_config_version, validate_release_assets  # noqa: E402
 
 
 def write_repo(root: Path, *, desktop: str | None = "1.5.0", notes: str = "") -> Path:
@@ -70,6 +70,50 @@ class DesktopVersionGateTest(unittest.TestCase):
             with self.assertRaises(SystemExit) as caught:
                 desktop_version(root)
             self.assertIn("mygo.config.ts", str(caught.exception))
+
+
+class ReleaseAssetGateTest(unittest.TestCase):
+    """发布资产门禁：版本、平台、包 URL、签名与描述必须来自同一版本且完整。"""
+
+    @staticmethod
+    def manifest(**overrides: object) -> dict[str, object]:
+        data: dict[str, object] = {
+            "version": "1.5.0",
+            "platform": "windows-amd64",
+            "url": "https://gitea.example/qinyuanj/kacha/releases/download/v1.5.0/kacha-setup-1.5.0-amd64.exe",
+            "signature": "signature-for-v1.5.0",
+            "notes": "# 1.5.0\n\n## 新增\n\n- 一条。\n",
+        }
+        data.update(overrides)
+        return data
+
+    def test_accepts_a_complete_matching_manifest(self):
+        validate_release_assets(self.manifest(), "1.5.0")
+
+    def test_rejects_version_not_from_the_only_manifest(self):
+        with self.assertRaises(SystemExit) as caught:
+            validate_release_assets(self.manifest(version="1.4.0"), "1.5.0")
+        self.assertIn("版本", str(caught.exception))
+
+    def test_rejects_wrong_platform(self):
+        with self.assertRaises(SystemExit) as caught:
+            validate_release_assets(self.manifest(platform="linux-amd64"), "1.5.0")
+        self.assertIn("平台", str(caught.exception))
+
+    def test_rejects_package_url_without_the_product_tag(self):
+        with self.assertRaises(SystemExit) as caught:
+            validate_release_assets(self.manifest(url="https://gitea.example/kacha/latest/setup.exe"), "1.5.0")
+        self.assertIn("URL", str(caught.exception))
+
+    def test_hash_cannot_replace_signature(self):
+        with self.assertRaises(SystemExit) as caught:
+            validate_release_assets(self.manifest(signature=""), "1.5.0")
+        self.assertIn("签名", str(caught.exception))
+
+    def test_rejects_notes_from_another_version(self):
+        with self.assertRaises(SystemExit) as caught:
+            validate_release_assets(self.manifest(notes="# 1.4.0\n\n## 新增\n\n- old\n"), "1.5.0")
+        self.assertIn("描述", str(caught.exception))
 
 
 class ConfigVersionParsingTest(unittest.TestCase):

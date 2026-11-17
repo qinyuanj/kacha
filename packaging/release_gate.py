@@ -48,3 +48,24 @@ def check_release_notes(root: Path, version: str) -> None:
             items += 1
     if items == 0:
         raise SystemExit(f"{where} 中 {version} 一节没有条目：至少在「新增 / 改进 / 修复」之一下写一条")
+
+
+def validate_release_assets(manifest: dict[str, object], expected_version: str) -> None:
+    """发布前核对唯一版本、目标平台、包 URL、发布者签名与更新描述一致。
+
+    只检查可公开核对的清单字段；私钥不参与校验，也不能从哈希推导签名。
+    """
+    version = manifest.get("version")
+    if version != expected_version or not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise SystemExit(f"发布资产版本必须等于 mygo.config.ts 的 {expected_version}，当前是 {version!r}")
+    if manifest.get("platform") != "windows-amd64":
+        raise SystemExit(f"发布资产的平台必须是 windows/amd64，当前是 {manifest.get('platform')!r}")
+    url = manifest.get("url")
+    if not isinstance(url, str) or f"/v{version}/" not in url or "://" not in url:
+        raise SystemExit(f"发布包 URL 必须指向 v{version} 的 Gitea Release 附件")
+    signature = manifest.get("signature")
+    if not isinstance(signature, str) or not signature.strip():
+        raise SystemExit("发布资产缺少发布者签名：哈希不能替代更新签名")
+    notes = manifest.get("notes")
+    if not isinstance(notes, str) or not re.search(rf"^#\s+{re.escape(version)}\s*$", notes, re.MULTILINE):
+        raise SystemExit(f"更新描述缺少当前版本 {version} 的一级标题")

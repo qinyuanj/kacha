@@ -13,9 +13,10 @@ import (
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 	"github.com/qinyuanj/kacha/desktop/internal/packservice"
 	"github.com/qinyuanj/kacha/desktop/internal/shellapp"
+	"github.com/qinyuanj/kacha/desktop/internal/usageservice"
 )
 
-// bindServices 绑定页面能调到的全部服务：壳信息、本地文件、系统剪贴板、画板包导入。
+// bindServices 绑定页面能调到的全部服务：壳信息、本地文件、本机用量、系统剪贴板、画板包导入。
 //
 // 单独成函数是为了能在没有窗口的测试里验「该绑的都绑了」：少绑一个服务时页面调用会
 // 落到 notBound，前端只会静默退回 paste 事件——原生粘贴那条路就白做了（#129）。
@@ -23,6 +24,8 @@ func bindServices(shell *shellapp.Shell, root string) {
 	store := localstore.New(root)
 	mygo.BindAs("Shell", shellService{shell: shell})
 	mygo.BindAs("Local", localservice.New(store))
+	// Usage 是本机用量、未引用清理与回收恢复（#159）：真实数据根扫描，不用前端替身。
+	mygo.BindAs("Usage", usageservice.New(store))
 	// Clipboard 读写系统剪贴板（#129 / #130）：粘贴截图不必先存成文件，画板上的图也能交给别的软件。
 	// 复制按路径读数据根里的字节（localstore 自带越界拒绝），界面不把整张图搬过 IPC。
 	mygo.BindAs("Clipboard", clipboard.NewBound(store.ReadFile))

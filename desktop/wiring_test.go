@@ -22,9 +22,20 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 		t.Fatalf("GenerateTypeScript: %v", err)
 	}
 	src := string(client)
-	for _, want := range []string{"Shell", "Local", "Clipboard", "Pack", "Gateway", "Diagnostics"} {
+	for _, want := range []string{"Shell", "Local", "Usage", "Clipboard", "Pack", "Gateway", "Diagnostics"} {
 		if !strings.Contains(src, want) {
 			t.Fatalf("生成的客户端里没有 %s 服务：\n%s", want, src)
+		}
+	}
+	// 用量服务（#159）：页面按 Usage.Usage / Cleanup / SetLimit / Recycle / Restore / PurgeExpired 调用。
+	for _, want := range []string{"usage", "cleanup", "setLimit", "recycle", "restore", "purgeExpired"} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("生成的客户端里没有 %q：Usage 服务没绑上或方法名对不上：\n%s", want, src)
+		}
+	}
+	for _, key := range []string{"total_bytes", "unreferenced", "unreadable_board", "limit_level", "cleaned_at", "expired"} {
+		if !strings.Contains(src, key) {
+			t.Fatalf("生成的客户端类型里没有 %q：\n%s", key, src)
 		}
 	}
 	// 方法名与 client/src/shell/desktopBridge.ts 的调用名一致：Clipboard.Read。
@@ -40,6 +51,12 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 	for _, want := range []string{"Gateway", "request", "readApiKey", "writeApiKey", "deleteApiKey"} {
 		if !strings.Contains(src, want) {
 			t.Fatalf("生成的客户端里没有 %q（网关服务没绑上）：\n%s", want, src)
+		}
+	}
+	// 画板包导出与结果保存的方法名是页面调用约定，缺一个都会在 WebView 里静默失败。
+	for _, want := range []string{"facts", "export", "exportSnapshot", "cancelExport", "pickExport", "saveResult", "saveBoardResults"} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("生成的客户端里没有导出/保存方法 %q：\n%s", want, src)
 		}
 	}
 	// 结局的键名来自 Go 的 json tag：页面按 ok / kind / message / bytes 读。
@@ -96,5 +113,15 @@ func TestRegisterAssetProtocol(t *testing.T) {
 	}
 	if !mygo.Protocol.IsHandled(assetScheme) {
 		t.Fatalf("协议 %q 没注册上：页面读不到数据根里的图片", assetScheme)
+	}
+}
+// 桌面壳的能力开关：画板包导出（#160）与本机用量（#159）都已接通，生成仍未实现。
+func TestDesktopFeaturesEnableUsageAndPackExport(t *testing.T) {
+	features := shellapp.DesktopFeatures()
+	if !features.Usage || !features.PackExport {
+		t.Fatalf("本机用量与画板包导出都已实现，features.usage / features.pack_export 必须打开：%+v", features)
+	}
+	if features.Generation {
+		t.Fatalf("生成仍未接通，features.generation 必须关闭：%+v", features)
 	}
 }

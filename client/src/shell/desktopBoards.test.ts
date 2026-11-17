@@ -10,17 +10,23 @@ const INFO: DesktopInfo = {
   version: "0.1.0",
   user_data_root: "C:/Users/me/AppData/Roaming/Kacha/data",
   board_root: "C:/Users/me/AppData/Roaming/Kacha/data/画板",
-  features: { generation: false, usage: false, pack_export: false },
+  features: { generation: false, usage: false, pack_export: false, archive: true },
 };
 
 interface BridgeStub {
   bridge: DesktopBridge;
-  calls: { rename: { from: string; to: string; version?: string }[]; remove: { path: string; version?: string }[]; write: { path: string; text: string; options?: { version?: string; create_only?: boolean } }[] };
+  calls: {
+    rename: { from: string; to: string; version?: string }[];
+    remove: { path: string; version?: string }[];
+    write: { path: string; text: string; options?: { version?: string; create_only?: boolean } }[];
+    archive: { from: string; to: string; version?: string }[];
+    unarchive: { from: string; to: string }[];
+  };
 }
 
 /** 假桥：只记下画板方法的调用，结局由脚本给出。 */
-function stubBridge(outcomes: { rename?: DesktopOutcome; remove?: DesktopOutcome; write?: DesktopOutcome } = {}): BridgeStub {
-  const calls: BridgeStub["calls"] = { rename: [], remove: [], write: [] };
+function stubBridge(outcomes: { rename?: DesktopOutcome; remove?: DesktopOutcome; write?: DesktopOutcome; archive?: DesktopOutcome; unarchive?: DesktopOutcome } = {}): BridgeStub {
+  const calls: BridgeStub["calls"] = { rename: [], remove: [], write: [], archive: [], unarchive: [] };
   const local: DesktopLocalBridge = {
     readBoard: async () => ({ main: "{}", bak: null, version: "v1" }),
     writeBoard: async (path, text, options) => {
@@ -37,10 +43,20 @@ function stubBridge(outcomes: { rename?: DesktopOutcome; remove?: DesktopOutcome
       calls.remove.push({ path, version });
       return outcomes.remove ?? { ok: true, kind: "", message: "", version: "" };
     },
+    archiveBoard: async (from, to, version) => {
+      calls.archive.push({ from, to, version });
+      return outcomes.archive ?? { ok: true, kind: "", message: "", version: "" };
+    },
+    unarchiveBoard: async (from, to) => {
+      calls.unarchive.push({ from, to });
+      return outcomes.unarchive ?? { ok: true, kind: "", message: "", version: "" };
+    },
     readFile: async () => "",
     writeNewFile: async () => ({ ok: true, kind: "", message: "", version: "" }),
     writeNewFileBase64: async () => ({ ok: true, kind: "", message: "", version: "" }),
     saveCopyAs: async () => ({ ok: true, kind: "", message: "", version: "" }),
+    saveResult: async () => ({ ok: true, kind: "", message: "", version: "" }),
+    saveBoardResults: async () => ({ ok: true, kind: "", message: "", version: "" }),
     isFile: async () => true,
     listDir: async () => [],
     fileSha256: async () => "a".repeat(64),
@@ -174,7 +190,38 @@ describe("桌面壳的画板方法", () => {
     const listing = await port.board.list();
     const path = listing.boards[0].path;
     expect(isArchivedPath(port.userRoot, path)).toBe(true);
-    // 归档能力本切片没有：不假装成功，界面据此知道归档入口尚不可用。
-    await expect(port.board.archive(path, path)).rejects.toMatchObject({ kind: "unavailable", feature: "archive" });
+    expect(port.features.archive).toBe(true);
+  });
+
+  it("归档把路径与内容版本交给本地服务，取消归档把归档路径搬回画板目录", async () => {
+    const stub = stubBridge();
+    const { port } = await createDesktopPort(stub.bridge);
+    const from = joinPath(INFO.user_data_root, "画板/甲.ugcboard.json");
+    const to = joinPath(INFO.user_data_root, "画板/归档/甲.ugcboard.json");
+
+    await port.board.archive(from, to, "v1");
+    await port.board.unarchive(to, from);
+
+    expect(stub.calls.archive[0]).toEqual({ from, to, version: "v1" });
+    expect(stub.calls.unarchive[0]).toEqual({ from: to, to: from });
+  });
+
+  it("满位 / 已归档 / 版本冲突：Go 的类别原样传给界面", async () => {
+    for (const kind of ["slotsFull", "archived", "conflict"] as const) {
+      const stub = stubBridge({ archive: { ok: false, kind, message: kind, version: "" } });
+      const { port } = await createDesktopPort(stub.bridge);
+      const failure = await port.board.archive("/~/a", "/~/归档/a").then(() => null, (e: unknown) => portFailureOf(e));
+      expect(failure?.kind).toBe(kind);
+      expect(failure?.message).toBe(kind);
+    }
+  });
+
+  it("取消归档满位：slotsFull 不伪装成成功或 failed", async () => {
+    const stub = stubBridge({ unarchive: { ok: false, kind: "slotsFull", message: "画板位已满", version: "" } });
+    const { port } = await createDesktopPort(stub.bridge);
+
+    const failure = await port.board.unarchive("/~/归档/a", "/~/a").then(() => null, (e: unknown) => portFailureOf(e));
+    expect(failure?.kind).toBe("slotsFull");
+    expect(failure?.message).toContain("画板位已满");
   });
 });
