@@ -8,6 +8,7 @@ import { PortError, type CorePorts, type FeatureId, type PortFailureKind, type S
 import type { FakeBoard, FakeCalls, FakePortOptions } from "./fakePortTypes";
 import {
   fakeBoardStore,
+  fakeDataRootStore,
   fakeFileStore,
   fakeMediaStore,
   fakeMetaStore,
@@ -103,6 +104,7 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
   const pack = fakePackStore(imports, calls);
   const ui = fakeUiStore(calls, options);
   const usage = fakeUsageStore(new Set<string>(missing));
+  const dataRoot = fakeDataRootStore(calls, options);
   const core = fakeCorePorts(files, meta);
 
   return {
@@ -115,6 +117,8 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
       packImport: !missing.has("packImport"),
       diagnostics: !missing.has("diagnostics"),
       archive: !missing.has("archive"),
+      // 数据位置迁移（#161）：替身默认有；-- 缺这个能力时入口消失。
+      dataRoot: !missing.has("dataRoot"),
     },
     board,
     files,
@@ -123,6 +127,7 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
     pack,
     ui,
     usage,
+    dataRoot,
     core,
     calls,
   };

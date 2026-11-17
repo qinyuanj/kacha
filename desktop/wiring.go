@@ -1,18 +1,21 @@
 package main
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 
 	"github.com/egoist/mygo"
 
 	"github.com/qinyuanj/kacha/desktop/internal/clipboard"
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/diagnostics"
 	"github.com/qinyuanj/kacha/desktop/internal/gateway"
 	"github.com/qinyuanj/kacha/desktop/internal/localservice"
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 	"github.com/qinyuanj/kacha/desktop/internal/packservice"
 	"github.com/qinyuanj/kacha/desktop/internal/shellapp"
+	"github.com/qinyuanj/kacha/desktop/internal/storage"
 	"github.com/qinyuanj/kacha/desktop/internal/usageservice"
 )
 
@@ -20,8 +23,10 @@ import (
 //
 // 单独成函数是为了能在没有窗口的测试里验「该绑的都绑了」：少绑一个服务时页面调用会
 // 落到 notBound，前端只会静默退回 paste 事件——原生粘贴那条路就白做了（#129）。
-func bindServices(shell *shellapp.Shell, root string) {
-	store := localstore.New(root)
+//
+// 服务拿的是可切换的共享数据根（#161）：迁移成功后它们自动读写新位置，不必重建或重启。
+func bindServices(shell *shellapp.Shell, roots *dataroot.Roots) {
+	store := localstore.NewFollowing(roots)
 	mygo.BindAs("Shell", shellService{shell: shell})
 	mygo.BindAs("Local", localservice.New(store))
 	// Usage 是本机用量、未引用清理与回收恢复（#159）：真实数据根扫描，不用前端替身。
@@ -30,20 +35,43 @@ func bindServices(shell *shellapp.Shell, root string) {
 	// 复制按路径读数据根里的字节（localstore 自带越界拒绝），界面不把整张图搬过 IPC。
 	mygo.BindAs("Clipboard", clipboard.NewBound(store.ReadFile))
 	// Pack 选包并导入（#131）：包在本机解压合并，全程不出数据根。
-	mygo.BindAs("Pack", packservice.New(root))
+	pack := packservice.NewFollowing(roots)
+	mygo.BindAs("Pack", pack)
 	// Gateway 在本机发网关请求并把密钥交给 Windows 系统保护（#152）：
-	// 密钥文件落在同一份数据根，不按凭据分身份。
-	gw := gateway.New(filepath.Join(root, "api-key.protected"))
+	// 密钥文件落在同一份数据根，不按凭据分身份；迁移时和别的数据一起复制过去。
+	gw := gateway.NewFollowing(roots)
 	mygo.BindAs("Gateway", gw)
 	// Diagnostics 只从 Gateway 读「当前有没有密钥」用于脱敏（#162）：
 	// 它拿到的只是临时字符串，用于把同值从日志与包里替换掉，不缓存、不写出。
-	mygo.BindAs("Diagnostics", diagnostics.New(shell.Version(), root, func() []string {
+	mygo.BindAs("Diagnostics", diagnostics.NewFollowing(shell.Version(), roots, func() []string {
 		key, err := gw.ReadApiKey()
 		if err != nil || key == "" {
 			return nil
 		}
 		return []string{key}
 	}))
+	// Storage 迁移本机数据位置（#161）：复制校验后原子切换数据根记录与共享数据根。
+	// 迁移前先问一遍在途操作：打包 / 导入期间两边都在搬同一份文件，必须等它们结束。
+	storageSvc := storage.NewWithBusy(roots, statePath(), func() string {
+		if pack.Snapshot().Running {
+			return "正在导入画板包，请等它结束再迁移数据位置"
+		}
+		if pack.ExportSnapshot().Running {
+			return "正在导出画板包，请等它结束再迁移数据位置"
+		}
+		return ""
+	})
+	mygo.BindAs("Storage", storageSvc)
+}
+
+// statePath 返回数据根记录（shell-state.json）的位置：它在应用数据目录里，不在数据根里——
+// 正是这份记录指出数据根在哪。
+func statePath() string {
+	userData, err := mygo.App.Path(mygo.PathUserData)
+	if err != nil {
+		return ""
+	}
+	return dataroot.StatePath(userData)
 }
 
 // assetScheme 是页面读数据根里本机文件（图片）用的自定义协议。
@@ -55,6 +83,14 @@ func bindServices(shell *shellapp.Shell, root string) {
 const assetScheme = "kacha"
 
 // registerAssetProtocol 把数据根挂到 assetScheme 下，供页面读图片等本机文件。
-func registerAssetProtocol(root string) error {
-	return mygo.Protocol.Handle(assetScheme, mygo.FileServer(os.DirFS(root)))
+//
+// 每次都按当前数据根取文件：迁移切换后同一批图片地址立刻指向新位置（#161），
+// 页面不用改地址，也不必重启。
+func registerAssetProtocol(roots *dataroot.Roots) error {
+	return mygo.Protocol.Handle(assetScheme, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mygo.FileServer(os.DirFS(roots.Current())).ServeHTTP(w, r)
+	}))
 }
+
+// defaultRoot 返回默认数据根：应用数据目录下的 data。
+func defaultRoot(userData string) string { return filepath.Join(userData, "data") }

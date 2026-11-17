@@ -79,8 +79,8 @@ interface Setup {
   generated: Record<string, unknown>[];
   resultDownloads: number;
   target: RunTarget;
-  /** 推进假时钟并触发到点的退避定时（429 用）。 */
-  advance(ms: number): void;
+  /** 推进假时钟并触发到点的退避定时（429 用）；先等退避定时登记好，别抢在它前面。 */
+  advance(ms: number): Promise<void>;
 }
 
 async function setup(mode: Mode): Promise<Setup> {
@@ -221,7 +221,10 @@ async function setup(mode: Mode): Promise<Setup> {
   return {
     root, port, get board() { return current; }, runner, changes, writes,
     generated, get resultDownloads() { return resultDownloads; }, target,
-    advance(ms: number) {
+    async advance(ms: number) {
+      // 429 的退避定时是响应处理完才登记的：先等它出现再推进时钟，否则会「推了空档、下一档才触发」。
+      const deadline = Date.now() + 5000;
+      while (timers.length === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
       clock += ms;
       const due = timers.filter((t) => t.at <= clock);
       timers = timers.filter((t) => t.at > clock);
@@ -384,11 +387,11 @@ describe("桌面端口的单份文生图闭环（#153）", () => {
     await s.runner.submit(s.target, s.board, ["t"], { t: 1 });
     await until(() => s.generated.length >= 1);
     expect(s.generated).toHaveLength(1);
-    s.advance(30_000);
+    await s.advance(30_000);
     await until(() => s.generated.length >= 2);
-    s.advance(60_000);
+    await s.advance(60_000);
     await until(() => s.generated.length >= 3);
-    s.advance(120_000);
+    await s.advance(120_000);
     const { record: outcome } = await outcomeOf(s);
     expect(outcome).toMatchObject({ outcome: "failed", label: "网关限流" });
     expect(s.generated).toHaveLength(4);

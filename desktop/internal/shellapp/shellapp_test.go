@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
@@ -63,5 +64,37 @@ func TestInfoCreatesMissingUserDataRoot(t *testing.T) {
 	}
 	if stat, err := os.Stat(root); err != nil || !stat.IsDir() {
 		t.Fatalf("user data root not created: %v", err)
+	}
+}
+
+// 迁移切换数据根之后，壳信息报的是新位置，画板目录也建在新位置：重启后页面读到同一份。
+func TestShellFollowsSwitchedRoot(t *testing.T) {
+	base := t.TempDir()
+	first := filepath.Join(base, "旧")
+	second := filepath.Join(base, "新")
+	roots := dataroot.NewRoots(first)
+	shell := NewFollowing("0.1.0", roots)
+
+	info, err := shell.Info()
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if info.UserDataRoot != first {
+		t.Fatalf("数据根 = %q, want %q", info.UserDataRoot, first)
+	}
+
+	roots.Switch(second)
+	info, err = shell.Info()
+	if err != nil {
+		t.Fatalf("切换后 Info: %v", err)
+	}
+	if info.UserDataRoot != second {
+		t.Fatalf("切换后数据根 = %q, want %q", info.UserDataRoot, second)
+	}
+	if want := filepath.Join(second, localstore.BoardsDir); info.BoardRoot != want {
+		t.Fatalf("切换后画板根 = %q, want %q", info.BoardRoot, want)
+	}
+	if stat, err := os.Stat(info.BoardRoot); err != nil || !stat.IsDir() {
+		t.Fatalf("切换后画板根没建出来: %v", err)
 	}
 }

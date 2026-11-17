@@ -7,7 +7,7 @@
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
 // 各组实现（画板、文件、元数据、媒体、画板包、用量）在 shell/desktopStores.ts（#137），这里只做接线。
-import { PortError, portFailureOf, type ClipboardContent, type DiagnosticsOutcome, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort } from "./port";
+import { PortError, portFailureOf, type ClipboardContent, type DataRootStore, type DiagnosticsOutcome, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort } from "./port";
 import type { PackEntryFact, PackExportSpec } from "../core/boardPack";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
 import type { BrowserOptions, ImageInfo, RecycleEntry, UsageCandidate, UsagePort } from "./types";
@@ -17,7 +17,7 @@ import { clipboardContentOf, extensionOf } from "./desktopClipboard";
 import { sha256Hex } from "../core/sha256";
 import { IMPORTED_REFERENCES_DIR } from "../core/boardPack";
 import { joinPath, toRootRelative } from "../core/paths";
-import { checked, desktopBoardStore, desktopFileStore, desktopMediaStore, desktopMetaStore, desktopUsageStore, localRun, unavailable, unavailableUsageStore } from "./desktopStores";
+import { checked, desktopBoardStore, desktopDataRootStore, desktopFileStore, desktopMediaStore, desktopMetaStore, desktopUsageStore, localRun, unavailable, unavailableUsageStore } from "./desktopStores";
 import { createDesktopPack } from "./desktopPack";
 import { imageCodec } from "./imageCodec";
 import { composeOverlay } from "./overlay";
@@ -258,6 +258,29 @@ export interface DesktopDiagnosticsBridge {
   export(): Promise<DesktopDiagnosticsOutcome>;
 }
 
+/** 数据位置（Storage 服务，Go 侧 internal/storage）：键名与 Go 的 json tag 对齐。 */
+export interface DesktopDataRootStatus {
+  root: string;
+  moving: boolean;
+  done: number;
+  total: number;
+}
+
+export interface DesktopDataRootOutcome {
+  ok: boolean;
+  kind: string;
+  message: string;
+  root: string;
+  files: number;
+  bytes: number;
+}
+
+export interface DesktopDataRootBridge {
+  status(): Promise<DesktopDataRootStatus>;
+  pick(): Promise<string>;
+  move(target: string): Promise<DesktopDataRootOutcome>;
+}
+
 /** MyGo 桥：Go 侧绑定与测试替身都满足它。 */
 export interface DesktopBridge {
   info(): Promise<DesktopInfo>;
@@ -272,6 +295,8 @@ export interface DesktopBridge {
   diagnostics?: DesktopDiagnosticsBridge;
   /** 本机用量与回收（#159）；没有这一项的替身按「尚不可用」处理。 */
   usage?: DesktopUsageBridge;
+  /** 本机数据位置迁移（#161）；没有这一项时能力关闭、入口不出现。 */
+  dataRoot?: DesktopDataRootBridge;
 }
 
 /** 本切片还没有的能力：以 kind: "unavailable" 拒绝。 */
@@ -409,6 +434,8 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     tidy: false,
     // 诊断包导出（#162）：桥上有真实 Diagnostics 服务才开放。
     diagnostics: bridge.diagnostics !== undefined,
+    // 数据位置迁移（#161）：桥上有真实 Storage 服务才开放，否则入口不出现。
+    dataRoot: bridge.dataRoot !== undefined,
   };
 
   const board = desktopBoardStore(local, info.user_data_root);
@@ -462,6 +489,13 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
 
   const usage: UsagePort = info.features.usage && bridge.usage ? desktopUsageStore(bridge.usage) : unavailableUsageStore();
 
+  // 数据位置迁移（#161）：没有 Storage 绑定时调用以 unavailable 拒绝，界面按能力开关不显示入口。
+  const dataRoot: DataRootStore = bridge.dataRoot ? desktopDataRootStore(bridge.dataRoot) : {
+    status: async (): Promise<never> => unavailable("dataRoot"),
+    pick: async (): Promise<never> => unavailable("dataRoot"),
+    move: async (): Promise<never> => unavailable("dataRoot"),
+  };
+
   // 网关配置、系统保护的密钥与模型发现（#152）：经 Gateway 绑定走 Go 服务。
   const gatewayPorts = createGatewayPorts(bridge);
 
@@ -475,6 +509,7 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     pack,
     ui,
     usage,
+    dataRoot,
     core: {
       taskFs: { writeNewFile: files.writeNewFile, readFile: files.readFile },
       runDeps: {

@@ -16,6 +16,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 )
 
 const (
@@ -158,8 +160,11 @@ type DirEntry struct {
 type Store struct {
 	// mu 串行化画板的创建 / 归档 / 取消归档：画板位与文件搬移都是一个原子决定，
 	// 并发抢位时不能各看到 19 位然后都写进去。
-	mu   sync.Mutex
-	root string
+	mu sync.Mutex
+	// roots 是可切换的数据根（迁移 #161）：每次读写都现取，切一次就落到新位置。
+	// 用 New 造的 Store 没有它，位置固定。
+	roots *dataroot.Roots
+	root  string
 }
 
 // New 造一个以 root 为数据根的 Store。
@@ -167,14 +172,24 @@ func New(root string) *Store {
 	return &Store{root: root}
 }
 
-// Root 返回数据根。
-func (s *Store) Root() string { return s.root }
+// NewFollowing 造一个跟着共享数据根走的 Store：迁移切换后读写自动落到新位置。
+func NewFollowing(roots *dataroot.Roots) *Store {
+	return &Store{roots: roots}
+}
+
+// Root 返回当前数据根。
+func (s *Store) Root() string {
+	if s.roots != nil {
+		return s.roots.Current()
+	}
+	return s.root
+}
 
 // BoardDir 返回画板目录的绝对路径。
-func (s *Store) BoardDir() string { return filepath.Join(s.root, BoardsDir) }
+func (s *Store) BoardDir() string { return filepath.Join(s.Root(), BoardsDir) }
 
 // MetaPath 返回元数据文件（settings.json、ui-state.json 等）的绝对路径。
-func (s *Store) MetaPath(name string) string { return filepath.Join(s.root, MetaDir, name) }
+func (s *Store) MetaPath(name string) string { return filepath.Join(s.Root(), MetaDir, name) }
 
 // Resolve 把界面给的路径解析成绝对路径：绝对路径照用，相对路径按数据根拼。
 // 越出数据根的路径一律拒绝（导入与外部引用都不能跑出去）。
@@ -184,10 +199,10 @@ func (s *Store) Resolve(path string) (string, error) {
 	}
 	abs := path
 	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(s.root, filepath.FromSlash(path))
+		abs = filepath.Join(s.Root(), filepath.FromSlash(path))
 	}
 	abs = filepath.Clean(abs)
-	root := filepath.Clean(s.root)
+	root := filepath.Clean(s.Root())
 	if !withinRoot(root, abs) {
 		return "", fmt.Errorf("路径越出数据根：%s", path)
 	}
@@ -534,7 +549,7 @@ func (s *Store) RemoveBoard(path string, version string) Result {
 			return got
 		}
 	}
-	recycle := filepath.Join(s.root, RecycleDir)
+	recycle := filepath.Join(s.Root(), RecycleDir)
 	if err := os.MkdirAll(recycle, 0o755); err != nil {
 		return fail(KindFailed, err.Error())
 	}
@@ -728,7 +743,7 @@ func dedupe(names []string) []string {
 
 // rel 把绝对路径写成相对数据根的正斜杠路径；根目录外的保留绝对路径。
 func (s *Store) rel(abs string) string {
-	root := filepath.Clean(s.root)
+	root := filepath.Clean(s.Root())
 	if strings.HasPrefix(strings.ToLower(abs), strings.ToLower(root)+string(os.PathSeparator)) {
 		return filepath.ToSlash(strings.TrimPrefix(abs, root+string(os.PathSeparator)))
 	}

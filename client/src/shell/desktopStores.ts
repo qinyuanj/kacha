@@ -1,12 +1,12 @@
 // 桌面壳端口的各个分组（#137）：从 shell/desktop.ts 拆出，一组一个函数。
 // 拆开之后每个函数的复杂度单独看得到，门禁也按函数计。
-import { FEATURE_LABELS, PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore } from "./port";
+import { FEATURE_LABELS, PortError, type BoardStore, type DataRootMoveResult, type DataRootStatus, type DataRootStore, type FeatureId, type FileStore, type MediaStore, type MetaStore } from "./port";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
 import type { BoardListing, BoardTexts, BoardWriteOptions, ImageInfo, RecycleEntry, Usage, UsagePort } from "./types";
 import { base64Of, base64ToBytes } from "../core/base64";
 import { joinPath } from "../core/paths";
 import type { DirEntry } from "../core/relocate";
-import type { DesktopLocalBridge, DesktopOutcome, DesktopUsageBridge } from "./desktop";
+import type { DesktopDataRootBridge, DesktopLocalBridge, DesktopOutcome, DesktopUsageBridge } from "./desktop";
 
 /** Go 侧的失败类别 → 端口失败类别；未列出的按 failed 处理（消息保持原文）。 */
 const KIND_BY_GO: Record<string, "conflict" | "missing" | "alreadyExists" | "slotsFull" | "archived" | "invalid" | "failed"> = {
@@ -199,4 +199,37 @@ export function desktopUsageStore(usage: DesktopUsageBridge): UsagePort {
     restore: (id: string): Promise<void> => localRun(async () => checked(await usage.restore(id))),
     purgeExpired: (): Promise<void> => localRun(async () => checked(await usage.purgeExpired())),
   };
+}
+
+/** 迁移的 Go 类别 → 端口类别：目标冲突与路径越界都是「这个目标不行」，取消不算失败。 */
+const DATA_ROOT_KINDS: Record<string, "conflict" | "invalid" | "cancelled" | "failed"> = {
+	notEmpty: "conflict",
+	sameRoot: "invalid",
+	nested: "invalid",
+	invalid: "invalid",
+	busy: "conflict",
+	cancelled: "cancelled",
+};
+
+/** 数据位置那一组（#161）：状态、选目标与迁移都落到 Go 的 Storage 服务。 */
+export function desktopDataRootStore(bridge: DesktopDataRootBridge): DataRootStore {
+	return {
+		status: (): Promise<DataRootStatus> => localRun(async () => {
+			const status = await bridge.status();
+			return { root: status.root, moving: status.moving, done: status.done, total: status.total };
+		}),
+		pick: (): Promise<string> => localRun(() => bridge.pick()),
+		move: (target: string): Promise<DataRootMoveResult> => localRun(async () => {
+			const outcome = await bridge.move(target);
+			if (!outcome.ok) {
+				throw new PortError({
+					kind: DATA_ROOT_KINDS[outcome.kind] ?? "failed",
+					code: outcome.kind || "failed",
+					message: outcome.message,
+					status: 0,
+				});
+			}
+			return { root: outcome.root, files: outcome.files, bytes: outcome.bytes };
+		}),
+	};
 }

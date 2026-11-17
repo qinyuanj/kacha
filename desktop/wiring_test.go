@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/shellapp"
 )
 
@@ -15,7 +16,7 @@ import (
 // 用 GenerateTypeScript 验：它列出的就是页面能调到的全部服务与方法，不起窗口、不读真剪贴板。
 func TestBindServicesExposeClipboardRead(t *testing.T) {
 	shell := shellapp.New("test", t.TempDir())
-	bindServices(shell, t.TempDir())
+	bindServices(shell, dataroot.NewRoots(t.TempDir()))
 
 	client, err := mygo.GenerateTypeScript()
 	if err != nil {
@@ -91,6 +92,28 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 	if !strings.Contains(src, "body_base64") {
 		t.Fatalf("生成的客户端里没有 body_base64（网关二进制响应没绑上）：\n%s", src)
 	}
+
+	// 数据位置迁移（#161）：页面按 Storage.Status / Pick / Move 调用；少绑一个，
+	// 设置里的入口只能标「尚不可用」，本机数据就永远搬不了家。
+	start = strings.Index(src, "export const Storage")
+	if start < 0 {
+		t.Fatalf("生成的客户端里没有 Storage 服务：\n%s", src)
+	}
+	section = src[start:]
+	if end := strings.Index(section, "} as const;"); end > 0 {
+		section = section[:end]
+	}
+	for _, want := range []string{"Storage.Status", "Storage.Pick", "Storage.Move", "Promise<StorageOutcome>"} {
+		if !strings.Contains(section, want) {
+			t.Fatalf("Storage 服务里没有 %q：\n%s", want, section)
+		}
+	}
+	// 结局与状态的键名是页面约定（client/src/shell/desktop.ts）：改了前端就静默读不到。
+	for _, key := range []string{"moving", "done", "total", "files"} {
+		if !strings.Contains(src, key) {
+			t.Fatalf("Storage 的类型里没有 %q 字段：\n%s", key, src)
+		}
+	}
 }
 
 // 剪贴板服务的快照字段是页面的约定（client/src/shell/desktop.ts 的 DesktopClipboardSnapshot）：
@@ -112,13 +135,14 @@ func TestClipboardSnapshotJSONKeys(t *testing.T) {
 // 本机图片协议（#132 真机验收发现）：页面来自 http://mygo.localhost，不能加载 file://，
 // 必须把数据根注册成自定义协议，否则画板里的图片一律显示「图片缺失」。
 func TestRegisterAssetProtocol(t *testing.T) {
-	if err := registerAssetProtocol(t.TempDir()); err != nil {
+	if err := registerAssetProtocol(dataroot.NewRoots(t.TempDir())); err != nil {
 		t.Fatalf("registerAssetProtocol: %v", err)
 	}
 	if !mygo.Protocol.IsHandled(assetScheme) {
 		t.Fatalf("协议 %q 没注册上：页面读不到数据根里的图片", assetScheme)
 	}
 }
+
 // 桌面壳的能力开关：画板包导出（#160）、本机用量（#159）与单份生成（#153）都已接通。
 func TestDesktopFeaturesEnableUsagePackExportAndGeneration(t *testing.T) {
 	features := shellapp.DesktopFeatures()

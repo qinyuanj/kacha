@@ -15,6 +15,7 @@ import { errorText } from "./core/errors";
 import { useShell } from "./ui/shell";
 import { modalOpenOf, noticesAfterMove, uiStateOf, uiStateText } from "./ui/appUiState";
 import { AppOverlays } from "./ui/appDialogs";
+import type { DataRootActions } from "./ui/dataRootMove";
 import { downloadBoardResults } from "./ui/packMenu";
 import { AppShell } from "./ui/appShell";
 import { useAppState, useRestoreTabs, useStartupReads, useToastTimer, useUiStateWriter, useVersionNotice } from "./ui/useAppState";
@@ -106,6 +107,35 @@ export function App({ version }: AppProps) {
 
   // 导入与导出是两项能力（#131）：桌面壳能导入、还不能导出。
   const pack = useBoardPack(userRoot, boards, toast);
+
+  // 数据位置迁移（#161）：准备期先落盘并拦下新的生成提交，结束后（成败都）解除；成功才重新载入。
+  const [movingRoot, setMovingRoot] = useState(false);
+  const movingRootRef = useRef(false);
+  useEffect(() => {
+    runner.setSubmissionGuard(movingRoot ? () => toast("正在迁移数据位置，请等它结束") : null);
+  }, [movingRoot, runner, toast]);
+  const dataRootActions = useMemo<DataRootActions>(
+    () => ({
+      prepare: async () => {
+        movingRootRef.current = true;
+        setMovingRoot(true);
+        await boards.flushAll();
+      },
+      finish: (moved: boolean) => {
+        movingRootRef.current = false;
+        setMovingRoot(false);
+        // 数据根换了：页面启动时读的地址是快照，必须重新读一次（服务与图片协议已跟着换）。
+        if (moved) window.location.reload();
+      },
+      guard: () => ({
+        pending: runnerRef.current?.getSnapshot().pending() ?? 0,
+        // 进度模态开着就是导入 / 导出在跑；Go 侧也会拒绝并发迁移。
+        packBusy: pack.dialog?.state.stage === "progress",
+        moving: movingRootRef.current,
+      }),
+    }),
+    [boards, pack.dialog],
+  );
 
   useToastTimer(state.toastText, store.setToastText);
   useStartupReads(
@@ -393,6 +423,7 @@ export function App({ version }: AppProps) {
         onSendTextClose={() => store.setSendText(null)}
         packDialog={pack.dialog}
         toastText={state.toastText}
+        dataRoot={dataRootActions}
       />
     </>
 

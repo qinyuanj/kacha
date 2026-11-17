@@ -2,7 +2,7 @@
 // 拆开之后每个函数的复杂度单独看得到，门禁也按函数计。
 import type { ImportOptions, ImportResult } from "../../core/boardPack";
 import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, UsagePort } from "../types";
-import { PortError, type BoardStore, type FeatureId, type FileStore, type MediaStore, type MetaStore, type PackStore, type PortFailureKind, type UiStore } from "../port";
+import { PortError, type BoardStore, type DataRootMoveResult, type DataRootStatus, type DataRootStore, type FeatureId, type FileStore, type MediaStore, type MetaStore, type PackStore, type PortFailureKind, type UiStore } from "../port";
 import type { DiagnosticsOutcome } from "../port";
 import type { FakeBoard, FakeCalls, FakeImportOutcome, FakePortOptions } from "./fakePortTypes";
 
@@ -296,4 +296,25 @@ export function fakeUsageStore(missing: Set<string>): UsagePort {
     purgeExpired: async () => undefined,
     cleanupUnreferenced: async () => ({ ok: true, kind: "", message: "", moved: [], skipped: [], failed: [] }),
   };
+}
+
+/** 数据位置那一组（#161）：状态与迁移结局都由 options / calls 脚本化。 */
+export function fakeDataRootStore(calls: FakeCalls, options: FakePortOptions): DataRootStore {
+	return {
+		status: async (): Promise<DataRootStatus> => ({
+			root: calls.dataRootRoot ?? options.userRoot ?? "/~",
+			moving: false,
+			done: 0,
+			total: 0,
+		}),
+		pick: async (): Promise<string> => options.pickTargets?.shift() ?? "",
+		move: async (target: string): Promise<DataRootMoveResult> => {
+			calls.moveTargets = [...(calls.moveTargets ?? []), target];
+			const failure = options.moveFailure;
+			if (failure) throw fakeFailureOf(failure, "迁移失败：" + failure, "dataRoot");
+			const root = target;
+			calls.dataRootRoot = root;
+			return { root, files: options.moveFiles ?? 0, bytes: 0 };
+		},
+	};
 }

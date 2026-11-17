@@ -4,7 +4,7 @@
 // 源码与单测在没有它时也要能编译。调用名与 Go 侧绑定名一致（Shell.Info / Local.WriteBoard）。
 import { call } from "mygo-runtime";
 
-import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopDiagnosticsBridge, DesktopDiagnosticsOutcome, DesktopExportOutcome, DesktopExportSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy, DesktopUsageBridge } from "./desktop";
+import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopDataRootBridge, DesktopDataRootOutcome, DesktopDataRootStatus, DesktopDiagnosticsBridge, DesktopDiagnosticsOutcome, DesktopExportOutcome, DesktopExportSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy, DesktopUsageBridge } from "./desktop";
 import type { PackEntryFact } from "../core/boardPack";
 
 /** camelCase 的页面侧方法名 → Go 侧的 PascalCase 绑定名。 */
@@ -59,8 +59,16 @@ export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promi
     },
     export: () => callFn("Diagnostics.Export") as Promise<DesktopDiagnosticsOutcome>,
   };
+  // 本机数据位置（#161）：与 Go 侧 BindAs("Storage", storage.NewWithBusy(...)) 对齐。
+  // 少这一项时 features.dataRoot 为 false，设置里不会出现迁移入口。
+  const dataRoot: DesktopDataRootBridge = {
+    status: () => callFn("Storage.Status") as Promise<DesktopDataRootStatus>,
+    pick: () => callFn("Storage.Pick") as Promise<string>,
+    move: (target) => callFn("Storage.Move", target) as Promise<DesktopDataRootOutcome>,
+  };
   return {
     info: () => callFn("Shell.Info") as Promise<DesktopInfo>,
+    dataRoot,
     local,
     clipboard,
     pack,

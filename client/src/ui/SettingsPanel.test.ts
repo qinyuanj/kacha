@@ -46,8 +46,8 @@ function settings(overrides: Partial<SettingsState> = {}): PanelSettings {
   } as unknown as PanelSettings;
 }
 
-async function show(port: FakePort, state = settings()): Promise<void> {
-  await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: state, onClose: vi.fn() }) })));
+async function show(port: FakePort, state = settings(), dataRoot?: Parameters<typeof SettingsPanel>[0]["dataRoot"]): Promise<void> {
+  await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: state, onClose: vi.fn(), ...(dataRoot ? { dataRoot } : {}) }) })));
 }
 
 /** 密钥输入框（密码框，不把密钥显示成普通文本）。 */
@@ -198,4 +198,23 @@ describe("诊断包导出（#162）", () => {
     await act(async () => undefined);
     expect(container.textContent).toContain("写入诊断包失败：拒绝访问");
   });
+
+  // 数据位置迁移（#161）：工作台把接线交进来时这一段才出现，独立于用量与排障。
+  it("给了数据位置接线时出现迁移入口", async () => {
+    const port = createFakePort({ userRoot: "C:\\data" });
+    await show(port, settings(), { prepare: async () => undefined, finish: () => undefined, guard: () => ({ pending: 0, packBusy: false, moving: false }) });
+    expect([...container.querySelectorAll("button")].some((b) => (b.textContent ?? "").includes("迁移"))).toBe(true);
+  });
+
+
+  // 点遮罩关闭：不是点弹窗里的控件，避免误关。
+  it("点弹窗外面的遮罩会关闭设置", async () => {
+    const close = vi.fn();
+    const port = createFakePort();
+    await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: settings(), onClose: close }) })));
+    const backdrop = container.querySelector(".modal-backdrop")!;
+    await act(async () => backdrop.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
 });

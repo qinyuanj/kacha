@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
@@ -39,10 +40,12 @@ type Info struct {
 	Features Features `json:"features"`
 }
 
-// Shell 是桌面壳的应用信息源；并发调用安全（只读字段）。
+// Shell 是桌面壳的应用信息源；并发调用安全。
 type Shell struct {
 	version string
 	root    string
+	// roots 是可切换的数据根（迁移 #161）：装了它就跟它走，没装就是固定的 root。
+	roots *dataroot.Roots
 }
 
 // New 用应用版本与已定好的数据根造一个 Shell。
@@ -50,23 +53,34 @@ func New(version, userDataRoot string) *Shell {
 	return &Shell{version: version, root: userDataRoot}
 }
 
-// UserDataRoot 返回数据根。
-func (s *Shell) UserDataRoot() string { return s.root }
+// NewFollowing 造一个跟着共享数据根走的 Shell：迁移切换后报的是新位置。
+func NewFollowing(version string, roots *dataroot.Roots) *Shell {
+	return &Shell{version: version, roots: roots}
+}
+
+// UserDataRoot 返回当前数据根。
+func (s *Shell) UserDataRoot() string {
+	if s.roots != nil {
+		return s.roots.Current()
+	}
+	return s.root
+}
 
 // Version 返回应用版本，供诊断服务等绑定使用；不建目录、不读磁盘。
 func (s *Shell) Version() string { return s.version }
 
 // Info 返回壳信息，并确保数据根与画板目录存在（首次启动就是在这里建出来的）。
 func (s *Shell) Info() (Info, error) {
-	boardRoot := filepath.Join(s.root, localstore.BoardsDir)
-	for _, dir := range []string{s.root, boardRoot} {
+	root := s.UserDataRoot()
+	boardRoot := filepath.Join(root, localstore.BoardsDir)
+	for _, dir := range []string{root, boardRoot} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return Info{}, err
 		}
 	}
 	return Info{
 		Version:      s.version,
-		UserDataRoot: s.root,
+		UserDataRoot: root,
 		BoardRoot:    boardRoot,
 		Features:     DesktopFeatures(),
 	}, nil

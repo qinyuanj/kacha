@@ -4,12 +4,13 @@ import { BoardPackDialog, type BoardPackDialogProps } from "./BoardPackDialog";
 import { ChangelogDialog } from "./ChangelogDialog";
 import { RunConfirmDialog } from "./RunConfirmDialog";
 import { SendTextDialog } from "./SendTextDialog";
+import type { DataRootActions } from "./dataRootMove";
 import { SettingsPanel } from "./SettingsPanel";
 import type { useSettings } from "./useSettings";
 
 /** 设置面板。 */
-export function AppSettingsPanel({ settings, onClose }: { settings: ReturnType<typeof useSettings>; onClose(): void }) {
-  return <SettingsPanel settings={settings} onClose={onClose} />;
+export function AppSettingsPanel({ settings, onClose, dataRoot }: { settings: ReturnType<typeof useSettings>; onClose(): void; dataRoot?: DataRootActions }) {
+  return <SettingsPanel settings={settings} onClose={onClose} dataRoot={dataRoot} />;
 }
 
 /** 更新说明。 */
@@ -63,6 +64,7 @@ export function AppOverlays({
   onSendTextClose,
   packDialog,
   toastText,
+  dataRoot,
 }: {
   settings: ReturnType<typeof useSettings>;
   settingsOpen: boolean;
@@ -78,10 +80,11 @@ export function AppOverlays({
   onSendTextClose(): void;
   packDialog: BoardPackDialogProps | null;
   toastText: string | null;
+  dataRoot?: DataRootActions;
 }) {
   return (
     <>
-      {settingsOpen && <AppSettingsPanel settings={settings} onClose={onSettingsClose} />}
+      {settingsOpen && <AppSettingsPanel settings={settings} onClose={onSettingsClose} dataRoot={dataRoot} />}
       {changelogOpen && <AppChangelogDialog version={version} onClose={onChangelogClose} />}
       {confirm && (
         <AppRunConfirm
