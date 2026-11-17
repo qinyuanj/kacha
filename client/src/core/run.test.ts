@@ -369,22 +369,34 @@ describe("单任务端到端", () => {
 });
 
 describe("Seedream：执行", () => {
-  function seedreamBoard(): Board {
+  function seedreamBoard(withSecondReference = false): Board {
     const b = board(true);
     b.nodes = b.nodes.map((n) =>
-      n.type === "task" ? { ...n, model: "doubao-seedream-5-0-pro-260628", size_spec: { tier: "2K", ratio: "1:1", width: null, height: null }, transparent_background: true } : n,
+      n.type === "task" ? { ...n, model: "doubao-seedream-5-0-pro-260628", size_spec: { tier: "2K", ratio: "1:1", width: null, height: null }, image_ports: withSecondReference ? 2 : 1, transparent_background: true } : n,
     );
+    if (withSecondReference) {
+      b.nodes.push({ id: "r2", type: "reference", pos: [0, 400], size: [100, 100], extra: {}, path: "refs/second.png", sha256: "b".repeat(64), display_name: "second.png" });
+      b.edges.push({ from: ["r2", "out"], to: ["t", "image:1"], source_layer: null, region: null, system: false, extra: {} });
+    }
     return b;
   }
   const respond = (url: string) =>
     url.startsWith("https://oss/") ? { status: 200, body: "" } : { status: 200, body: JSON.stringify({ data: [{ url: "https://oss/r.png", size: "2048x2048" }] }) };
+  /** 壳层 canvas 替身：透明度按字节区分，便于同一份依赖里给参考图与结果不同的答案。 */
+  const alphaCodec = (alphaOf: (bytes: Uint8Array) => boolean): NonNullable<RunDeps["imageCodec"]> => ({
+    decode: async (bytes) => ({ width: 1024, height: 1024, hasAlpha: () => alphaOf(bytes), encode: async () => PNG, close: () => undefined }),
+  });
+  const downloadAs = (bytes: Uint8Array) => (d: RunDeps) => {
+    d.fetch = ((inner) => async (url, init) => {
+      const r = await inner(url, init);
+      return url.startsWith("https://oss/") ? { ...r, arrayBuffer: async () => bytes.slice().buffer } : r;
+    })(d.fetch);
+  };
 
   it("走 generations 顶层 image，透明背景开关带 background；下载 data[].url 落盘；重新生成沿用开关", async () => {
     const { d, files, requests } = deps(respond);
-    d.fetch = ((inner) => async (url, init) => {
-      const r = await inner(url, init);
-      return url.startsWith("https://oss/") ? { ...r, arrayBuffer: async () => PNG.slice().buffer } : r;
-    })(d.fetch);
+    d.imageCodec = alphaCodec(() => true);
+    downloadAs(PNG)(d);
     const { job: prepared, board: b1 } = await prepare(d, { board: seedreamBoard(), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
     const job = await writeJob(d, "/root", prepared);
     await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" });
@@ -395,6 +407,51 @@ describe("Seedream：执行", () => {
 
     const { job: again } = await regen(d, { board: b1, table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
     expect(again.input.transparentBackground).toBe(true);
+  });
+
+  it("透明背景提交前按实际快照确认 alpha：未知、不带 alpha 与多张参考图都不发请求", async () => {
+    const unknown = deps(respond);
+    await expect(prepareJob(unknown.d, { board: seedreamBoard(), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" })).rejects.toThrow(/参考图透明通道尚未确认/);
+    expect(unknown.requests).toEqual([]);
+
+    const opaque = deps(respond);
+    opaque.d.imageCodec = alphaCodec(() => false);
+    await expect(prepareJob(opaque.d, { board: seedreamBoard(), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" })).rejects.toThrow(/透明背景需要已确认带透明通道的参考图快照/);
+    expect(opaque.requests).toEqual([]);
+
+    const two = deps(respond);
+    const read = two.d.readFile;
+    two.d.imageCodec = alphaCodec(() => true);
+    two.d.readFile = async (path) => (path === "/root/refs/cat.png" || path === "/root/refs/second.png" ? PNG : read(path));
+    await expect(prepareJob(two.d, { board: seedreamBoard(true), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" })).rejects.toThrow(/透明背景需要恰好一张实际参考图/);
+    expect(two.requests).toEqual([]);
+
+    const broken = deps(respond);
+    broken.d.imageCodec = { decode: async () => { throw new Error("canvas decode failed"); } };
+    await expect(prepareJob(broken.d, { board: seedreamBoard(), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" })).rejects.toThrow(/参考图透明通道尚未确认/);
+    expect(broken.requests).toEqual([]);
+  });
+
+  it("透明背景结果不带 alpha 或不是 PNG：明确失败，不把不透明结果落成成功", async () => {
+    const opaque = Uint8Array.from([...PNG, 9]);
+    const notAlpha = deps(respond);
+    notAlpha.d.imageCodec = alphaCodec((bytes) => bytes.length === PNG.length);
+    downloadAs(opaque)(notAlpha.d);
+    const { job: prepared } = await prepare(notAlpha.d, { board: seedreamBoard(), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
+    const job = await writeJob(notAlpha.d, "/root", prepared);
+    const err = await executeJob(notAlpha.d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
+    expect(failureLabel(err)).toBe("响应无效");
+    expect(String(err.message)).toContain("透明背景结果未包含透明像素");
+    expect([...notAlpha.files.keys()].some((key) => key.endsWith("result.png"))).toBe(false);
+
+    const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46]);
+    const wrongFormat = deps(respond);
+    wrongFormat.d.imageCodec = alphaCodec(() => true);
+    downloadAs(jpeg)(wrongFormat.d);
+    const { job: prepared2 } = await prepare(wrongFormat.d, { board: seedreamBoard(), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
+    const err2 = await executeJob(wrongFormat.d, { job: await writeJob(wrongFormat.d, "/root", prepared2), userRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
+    expect(String(err2.message)).toContain("透明背景结果必须为带透明通道的 PNG");
+    expect([...wrongFormat.files.keys()].some((key) => key.endsWith("result.png"))).toBe(false);
   });
 });
 

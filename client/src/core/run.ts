@@ -1,7 +1,7 @@
 // 单个任务从提交到出结果的内部件：读参考图（提交）→ 写任务目录（派发，不可变）→ 调网关 → 存结果图。
 // 副作用全部由调用方注入；调用顺序与状态由任务运行器（runner.ts）负责，界面不直接调用。
 import type { Board, ResultRecord, TaskNode } from "./board";
-import { findModel, isRetiredModel, LITE_RETIRED_HINT, type CapabilityTable, type InputImageRule, type ModelCapability } from "./capabilities";
+import { findModel, isRetiredModel, isSupported, LITE_RETIRED_HINT, type CapabilityTable, type InputImageRule, type ModelCapability } from "./capabilities";
 import { fitImage, type FittedBytes, type ImageCodec } from "./fitImage";
 import { ERROR_CATEGORY_LABELS, fetchResultImage, GatewayError, generate, isFlashShape, type FetchLike, type GenerationInput, type LayerMetadata, validLayerBox } from "./gateway";
 import { imagePortSlots, imageSources, imageRuleViolations, workflowOf } from "./graph";
@@ -243,16 +243,22 @@ export async function prepareJob(
     capabilityTableSha256: args.tableSha256,
     references,
   };
-  await validateFlashTransparency(deps, plan, model);
+  await validateTransparency(deps, plan, model);
   return { job: jobOf(taskNodeId, plan, model), lastSubmitted: { task_id: taskId, ...snapshot } };
 }
 
-async function validateFlashTransparency(deps: RunDeps, plan: SubmissionPlan, model: ModelCapability): Promise<void> {
-  if (!isFlashShape(model) || !plan.transparentBackground) return;
+/** 透明背景只对能力表支持它的模型生效；提交前按实际快照确认 alpha，不拿界面探测当事实。 */
+async function validateTransparency(deps: RunDeps, plan: SubmissionPlan, model: ModelCapability): Promise<void> {
+  if (!plan.transparentBackground) return;
+  if (!isSupported(model.transparent_background)) throw new LocalError("模型不支持透明背景");
   if (plan.references.length !== 1) throw new LocalError("透明背景需要恰好一张实际参考图");
-  if (plan.outputOptions?.output_format === "jpeg") throw new LocalError("透明背景输出必须为 PNG");
+  const fixed = model.fixed_params["output_format"];
+  const format = plan.outputOptions?.output_format ?? (typeof fixed === "string" ? fixed : "png");
+  if (format !== "png") throw new LocalError("透明背景输出必须为 PNG");
   if (!deps.imageCodec) throw new LocalError("参考图透明通道尚未确认");
-  const decoded = await deps.imageCodec.decode(plan.references[0].bytes);
+  let decoded;
+  try { decoded = await deps.imageCodec.decode(plan.references[0].bytes); }
+  catch { throw new LocalError("参考图透明通道尚未确认"); }
   try {
     if (decoded.hasAlpha() !== true) throw new LocalError("透明背景需要已确认带透明通道的参考图快照");
   } finally { decoded.close(); }
@@ -352,7 +358,7 @@ export async function prepareRegenerate(
     capabilityTableSha256: args.tableSha256,
     references,
   };
-  await validateFlashTransparency(deps, plan, model);
+  await validateTransparency(deps, plan, model);
   const lastSubmitted = args.fromTaskId !== undefined ? undefined : { ...last, task_id: taskId, size_spec: sized.sizeSpec };
   return { job: jobOf(taskNodeId, plan, model), lastSubmitted };
 }
@@ -361,7 +367,7 @@ export async function prepareRegenerate(
 export async function writeJob(deps: RunDeps, userRoot: string, job: PreparedJob): Promise<WrittenJob> {
   try {
     const { relDir, references } = await writeSubmission(deps, userRoot, job.plan);
-    return { ...job, relDir, input: { ...job.input, references: references.map(ref => ({ ...ref, ...(job.plan.transparentBackground && isFlashShape(job.input.model) ? { hasAlpha: true } : {}) })) } };
+    return { ...job, relDir, input: { ...job.input, references: references.map(ref => ({ ...ref, ...(job.plan.transparentBackground ? { hasAlpha: true } : {}) })) } };
   } catch (e) {
     throw new LocalError(`写任务目录失败：${errorText(e)}`);
   }
@@ -407,7 +413,7 @@ async function validateDownloadedImage(deps: RunDeps, job: WrittenJob, image: { 
   const flashLayers = isFlashShape(job.input.model) && job.plan.layerDecomposition;
   if (!sniffImage(bytes)) throw new GatewayError("invalid_response", "结果不是可识别的图片");
   if (flashLayers) baseSize = await validateResultLayer(deps, job, image, bytes, baseSize);
-  if (isFlashShape(job.input.model) && job.plan.transparentBackground) await validateTransparentResult(deps, bytes);
+  if (job.plan.transparentBackground) await validateTransparentResult(deps, bytes);
   if (isFlashShape(job.input.model) && !job.plan.layerDecomposition && !job.plan.transparentBackground) await validateFlashOrdinaryOutput(deps, bytes);
   return baseSize;
 }
