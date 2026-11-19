@@ -432,7 +432,11 @@ describe("桌面端口的参考图编辑闭环（#154）", () => {
     expect(await s.runner.regenerate(s.target, s.board, "t")).toBeNull();
     expect(await until(() => s.changes.filter((c) => c.kind === "runResult").length > before)).toBe(true);
     expect(s.generated).toHaveLength(sent + 2);
-  });
+    // 这个用例走真实文件系统：提交、等 task.json 落盘、取消后再真实等 200ms、
+    // 两次 regenerate 各要读任务目录并写结果。CI runner 的磁盘比本机慢得多，
+    // 默认 5s 曾在 PR #185 上稳定超时（本地 2573 项全过也拦不住）。
+    // 与 desktopGeneration.test.ts 里那条长用例同一处理：显式给足时间。
+  }, 30000);
 
   it("生成变体固定一份、进同一结果列不覆盖已有结果；失败后重新生成按当前能力重算发送文本", async () => {
     const s = await setup();

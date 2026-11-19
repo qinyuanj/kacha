@@ -112,6 +112,8 @@ export interface GenerationInput {
   references: ReferenceImage[];
   /** 透明背景开关；只对能力表支持透明背景的模型生效。 */
   transparentBackground?: boolean;
+  /** 链式编辑：本轮的输入来自上一轮输出（画板判定见 graph.chainedEdit）。 */
+  chainedEdit?: boolean;
   outputOptions?: OutputOptions;
   layerDecomposition?: boolean;
   layerSize?: LayerSize;
@@ -120,6 +122,19 @@ export interface GenerationInput {
 export type GeneratedImage = ({ kind: "url"; url: string } | { kind: "bytes"; bytes: Uint8Array }) & {
   layer?: LayerMetadata;
 };
+
+/** 请求体 background 的取值；null = 不发该字段，交给服务端默认 auto。 */
+export type BackgroundMode = "transparent" | "opaque";
+
+/**
+ * 多轮链式编辑（#177）的背景默认值：用户显式开透明背景优先——那是用户对本轮的选择，
+ * 由任务视图提示「之后的一致性可能下降」，不在这里静默改回；否则链式轮默认 opaque
+ * （官方建议多轮编辑用不带透明通道的 RGB 图）。单轮生成不发 background，行为不变。
+ */
+export function backgroundMode(input: Pick<GenerationInput, "transparentBackground" | "chainedEdit">): BackgroundMode | null {
+  if (input.transparentBackground) return "transparent";
+  return input.chainedEdit ? "opaque" : null;
+}
 
 // ---- 请求构造 ----
 
@@ -161,32 +176,61 @@ const buildSeedreamImagesGenerations: RequestShape["build"] = (input) => {
     response_format: "url",
     ...model.fixed_params,
   };
-  if (input.transparentBackground && isSupported(model.transparent_background)) body.background = "transparent";
+  const background = backgroundMode(input);
+  // 透明背景只对能力表支持的模型发；opaque 是本形状的常规字段，链式编辑按需带上。
+  if (background === "opaque" || (background === "transparent" && isSupported(model.transparent_background))) body.background = background;
   if (references.length) body.image = references.map(dataUrl);
   return { path: TEXT_TO_IMAGE_PATH, body };
 };
 
-const buildFlashImagesGenerations: RequestShape["build"] = (input) => {
-  if (input.references.length > 10) throw new GatewayError("config", "Flash 参考图最多 10 张");
-  if (!input.layerDecomposition && !withinPixelRange({ min_total_pixels: 921600, max_total_pixels: 4624220, min_aspect_ratio: 1 / 16, max_aspect_ratio: 16 }, input.size.width, input.size.height)) throw new GatewayError("config", "Flash 生成尺寸超出范围");
-  if (input.layerDecomposition && (input.references.length !== 1 || !["image/png", "image/jpeg"].includes(input.references[0].mediaType) || input.references[0].bytes.length > 30000000)) throw new GatewayError("config", "Flash 图层拆分需要一张 PNG/JPEG 参考图（不超过 30MB）");
-  if (input.layerDecomposition && !isLayerSize(input.layerSize ?? "auto")) throw new GatewayError("config", "Flash 图层尺寸无效");
-  const options = outputOptions(input.outputOptions);
-  if (input.transparentBackground) {
-    if (input.references.length !== 1) throw new GatewayError("config", "透明背景需要恰好一张实际参考图");
-    if (options.output_format !== "png") throw new GatewayError("config", "透明背景输出必须为 PNG");
-    if (input.references[0].hasAlpha !== true) throw new GatewayError("config", "透明背景需要已确认带透明通道的参考图快照");
-  }
-  return { path: TEXT_TO_IMAGE_PATH, body: {
+/** 非拆分场景的生成尺寸必须在 921600–4624220 像素、宽高比 1/16–16 之间。 */
+function flashGenerationSizeInvalid(input: GenerationInput): boolean {
+  if (input.layerDecomposition) return false;
+  return !withinPixelRange({ min_total_pixels: 921600, max_total_pixels: 4624220, min_aspect_ratio: 1 / 16, max_aspect_ratio: 16 }, input.size.width, input.size.height);
+}
+
+/** 图层拆分只吃一张 PNG/JPEG，且不超过 30MB。 */
+function flashSplitReferencesInvalid(input: GenerationInput): boolean {
+  if (!input.layerDecomposition) return false;
+  if (input.references.length !== 1) return true;
+  const reference = input.references[0];
+  if (!["image/png", "image/jpeg"].includes(reference.mediaType)) return true;
+  return reference.bytes.length > 30000000;
+}
+
+function flashLayerSizeInvalid(input: GenerationInput): boolean {
+  return input.layerDecomposition === true && !isLayerSize(input.layerSize ?? "auto");
+}
+
+/** 透明背景需要恰好一张已确认带 alpha 的参考图，且输出必须是 PNG。 */
+function assertFlashTransparent(input: GenerationInput, options: ReturnType<typeof outputOptions>): void {
+  if (input.references.length !== 1) throw new GatewayError("config", "透明背景需要恰好一张实际参考图");
+  if (options.output_format !== "png") throw new GatewayError("config", "透明背景输出必须为 PNG");
+  if (input.references[0].hasAlpha !== true) throw new GatewayError("config", "透明背景需要已确认带透明通道的参考图快照");
+}
+
+/** Flash 请求体：拆分时 size 走图层尺寸，其余按像素尺寸拼；prompt 在拆分且为空时省略。 */
+function flashRequestBody(input: GenerationInput, options: ReturnType<typeof outputOptions>, background: BackgroundMode | null) {
+  return {
     model: input.model.model_id,
     ...(input.text.trim() || !input.layerDecomposition ? { prompt: input.text } : {}),
     size: input.layerDecomposition ? input.layerSize ?? "auto" : `${input.size.width}x${input.size.height}`,
     ...(input.layerDecomposition ? { layer_decomposition: true } : {}),
     ...options,
     optimize_prompt_options: { mode: "standard" },
-    ...(input.transparentBackground ? { background: "transparent" } : {}),
+    ...(background ? { background } : {}),
     ...(input.references.length ? { image: input.references.map(dataUrl) } : {}),
-  } };
+  };
+}
+
+const buildFlashImagesGenerations: RequestShape["build"] = (input) => {
+  if (input.references.length > 10) throw new GatewayError("config", "Flash 参考图最多 10 张");
+  if (flashGenerationSizeInvalid(input)) throw new GatewayError("config", "Flash 生成尺寸超出范围");
+  if (flashSplitReferencesInvalid(input)) throw new GatewayError("config", "Flash 图层拆分需要一张 PNG/JPEG 参考图（不超过 30MB）");
+  if (flashLayerSizeInvalid(input)) throw new GatewayError("config", "Flash 图层尺寸无效");
+  const options = outputOptions(input.outputOptions);
+  if (input.transparentBackground) assertFlashTransparent(input, options);
+  return { path: TEXT_TO_IMAGE_PATH, body: flashRequestBody(input, options, backgroundMode(input)) };
 };
 
 const FLASH_SHAPE = "seedream_flash_images_generations";
@@ -227,11 +271,37 @@ function redact(text: string, apiKey: string): string {
   return apiKey ? text.split(apiKey).join("[REDACTED]") : text;
 }
 
-async function send(config: GatewayConfig, method: string, path: string, body?: unknown): Promise<{ body: object; requestId: string | null }> {
+/** 未配置时直接给出可执行的提示，不必等网络层报错。 */
+function requireGatewayConfig(config: GatewayConfig): void {
   if (!config.baseUrl.trim()) throw new GatewayError("config", "未配置网关基础地址，请在高级设置中填写");
   if (!config.apiKey) throw new GatewayError("config", "未配置 API 密钥，请在高级设置中填写");
+}
+
+function requestHeaders(config: GatewayConfig, body: unknown): Record<string, string> {
   const headers: Record<string, string> = { Accept: "application/json", Authorization: `Bearer ${config.apiKey}` };
   if (body !== undefined) headers["Content-Type"] = "application/json";
+  return headers;
+}
+
+/** 错误响应可能不是 JSON；解析失败留给状态码处理。 */
+function parseResponseText(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** 网关原文可能回显请求内容：截短，只留定位问题所需的开头。 */
+function httpFailure(response: FetchResponse, parsed: unknown, config: GatewayConfig, requestId: string | null): GatewayError {
+  const message = (parsed as { error?: { message?: unknown } } | undefined)?.error?.message;
+  const detail = typeof message === "string" && message ? `HTTP ${response.status}：${message.slice(0, 120)}` : `HTTP ${response.status}`;
+  return new GatewayError(categoryForStatus(response.status), redact(detail, config.apiKey), response.status, requestId);
+}
+
+async function send(config: GatewayConfig, method: string, path: string, body?: unknown): Promise<{ body: object; requestId: string | null }> {
+  requireGatewayConfig(config);
+  const headers = requestHeaders(config, body);
   let response: FetchResponse;
   try {
     response = await config.fetch(endpoint(config.baseUrl, path), { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -240,18 +310,8 @@ async function send(config: GatewayConfig, method: string, path: string, body?: 
   }
   const requestId = response.headers.get("X-Oneapi-Request-Id");
   const text = await response.text().catch(() => "");
-  let parsed: unknown = undefined;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    // 错误响应可能不是 JSON，下面按状态码处理。
-  }
-  if (response.status >= 400) {
-    const message = (parsed as { error?: { message?: unknown } } | undefined)?.error?.message;
-    // 网关原文可能回显请求内容：截短，只留定位问题所需的开头。
-    const detail = typeof message === "string" && message ? `HTTP ${response.status}：${message.slice(0, 120)}` : `HTTP ${response.status}`;
-    throw new GatewayError(categoryForStatus(response.status), redact(detail, config.apiKey), response.status, requestId);
-  }
+  const parsed = parseResponseText(text);
+  if (response.status >= 400) throw httpFailure(response, parsed, config, requestId);
   if (typeof parsed !== "object" || parsed === null) {
     throw new GatewayError("invalid_response", "网关返回了无法解析的响应", response.status, requestId);
   }
@@ -277,28 +337,37 @@ function decodeBase64(value: string): Uint8Array | null {
 }
 
 /** 出图真源 metadata.output.choices[].message.content[].image，兼容临时 URL 与 base64（契约「当前结论」）。 */
+/** 图层字段的合成形状待 #83 确认：z_index 数字、bounding_box 数字数组，缺一不算图层。 */
+function generatedLayerOf(item: any) {
+  const zIndex = typeof item?.z_index === "number" ? item.z_index : null;
+  const box = Array.isArray(item?.bounding_box) && item.bounding_box.every((n: unknown) => typeof n === "number") ? (item.bounding_box as number[]) : null;
+  return zIndex !== null && box !== null ? { z_index: zIndex, bounding_box: box } : undefined;
+}
+
+/** 一条 content 项 → 一张图；没有可用的 image 字段时返回 null。 */
+function generatedImageOf(item: any): GeneratedImage | null {
+  const image = item?.image;
+  if (typeof image !== "string" || !image) return null;
+  const layer = generatedLayerOf(item);
+  if (/^https?:\/\//i.test(image)) return { kind: "url", url: image, ...(layer ? { layer } : {}) };
+  const bytes = decodeBase64(image);
+  return bytes ? { kind: "bytes", bytes, ...(layer ? { layer } : {}) } : null;
+}
+
+/** 一条 choice 展开成它包含的图；content 不是数组时为空。 */
+function generatedChoiceImages(choice: any): GeneratedImage[] {
+  const content = choice?.message?.content;
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((item: any) => {
+    const image = generatedImageOf(item);
+    return image ? [image] : [];
+  });
+}
+
 export function parseGeneratedImages(body: unknown): GeneratedImage[] {
   const choices = (body as { metadata?: { output?: { choices?: unknown } } })?.metadata?.output?.choices;
   if (!Array.isArray(choices)) return [];
-  const out: GeneratedImage[] = [];
-  for (const choice of choices) {
-    const content = choice?.message?.content;
-    if (!Array.isArray(content)) continue;
-    for (const item of content) {
-      const image = item?.image;
-      if (typeof image !== "string" || !image) continue;
-      // 图层字段的合成形状待 #83 确认：z_index 数字、bounding_box 数字数组，缺一不算图层。
-      const zIndex = typeof item?.z_index === "number" ? item.z_index : null;
-      const box = Array.isArray(item?.bounding_box) && item.bounding_box.every((n: unknown) => typeof n === "number") ? (item.bounding_box as number[]) : null;
-      const layer = zIndex !== null && box !== null ? { z_index: zIndex, bounding_box: box } : undefined;
-      if (/^https?:\/\//i.test(image)) out.push({ kind: "url", url: image, ...(layer ? { layer } : {}) });
-      else {
-        const bytes = decodeBase64(image);
-        if (bytes) out.push({ kind: "bytes", bytes, ...(layer ? { layer } : {}) });
-      }
-    }
-  }
-  return out;
+  return choices.flatMap(generatedChoiceImages);
 }
 
 /** OpenAI 形态出图：顶层 data[].url（Seedream，契约 2026-09-17）。 */
@@ -308,30 +377,80 @@ export function parseImageUrls(body: unknown): GeneratedImage[] {
   return data.flatMap((item): GeneratedImage[] => (typeof item?.url === "string" && /^https?:\/\//i.test(item.url) ? [{ kind: "url", url: item.url }] : []));
 }
 
+/** 一张 Flash 图片项：既没有合格 url 也没有合格 b64_json，或同时给了两者，都不算有效响应。 */
+function flashItemInvalid(item: any): boolean {
+  if (!item || typeof item !== "object" || item.error) return true;
+  return item.url !== undefined && item.b64_json !== undefined;
+}
+
+/** 一张 Flash 图片项的载荷：优先 http(s) 地址，其次 base64；都没有时返回 null。 */
+function flashItemPayload(item: any): GeneratedImage | null {
+  if (typeof item.url === "string" && /^https?:\/\//i.test(item.url)) return { kind: "url", url: item.url };
+  const bytes = typeof item.b64_json === "string" ? decodeBase64(item.b64_json) : null;
+  return bytes?.length ? { kind: "bytes", bytes } : null;
+}
+
 function parseFlashImage(body: unknown): GeneratedImage[] {
   const data = (body as { data?: unknown })?.data;
   if (!Array.isArray(data) || data.length !== 1) throw new GatewayError("invalid_response", "Flash 普通生成必须返回恰好一张图片");
   const item = data[0];
-  if (!item || typeof item !== "object" || item.error || (item.url !== undefined && item.b64_json !== undefined)) throw new GatewayError("invalid_response", "Flash 图片响应无效");
-  if (typeof item.url === "string" && /^https?:\/\//i.test(item.url)) return [{ kind: "url", url: item.url }];
-  const bytes = typeof item.b64_json === "string" ? decodeBase64(item.b64_json) : null;
-  if (bytes?.length) return [{ kind: "bytes", bytes }];
-  throw new GatewayError("invalid_response", "Flash 图片响应无效");
+  if (flashItemInvalid(item)) throw new GatewayError("invalid_response", "Flash 图片响应无效");
+  const image = flashItemPayload(item);
+  if (!image) throw new GatewayError("invalid_response", "Flash 图片响应无效");
+  return [image];
+}
+
+/** 图层响应最多容纳 base + 16 层；不合法的形状统一抛同一句错误。 */
+function flashLayerFailure(): never {
+  throw new GatewayError("invalid_response", "Flash 图层身份、层序或定位信息无效");
+}
+
+function flashLayerCountValid(data: unknown): data is any[] {
+  return Array.isArray(data) && data.length >= 1 && data.length <= 17;
+}
+
+/** 单个图层的身份、层号与定位是否合法；层号重复也算不合法。 */
+function flashLayerIdentityInvalid(item: any, seen: Set<number>): boolean {
+  if (!item || !Number.isInteger(item.z_index)) return true;
+  if (item.z_index < 0 || item.z_index > 16 || seen.has(item.z_index)) return true;
+  return item.z_index > 0 && !validLayerBox(item.bounding_box);
+}
+
+function flashLayerLabelInvalid(item: any): boolean {
+  const nameBad = item.name !== undefined && typeof item.name !== "string";
+  const descriptionBad = item.description !== undefined && typeof item.description !== "string";
+  return nameBad || descriptionBad;
+}
+
+/** 图层的附加身份字段：只带上响应里真正给了的字段，缺省的不留空值。 */
+function flashLayerMeta(item: any) {
+  return {
+    z_index: item.z_index,
+    ...(item.bounding_box !== undefined ? { bounding_box: item.bounding_box } : {}),
+    ...(item.name !== undefined ? { name: item.name } : {}),
+    ...(item.description !== undefined ? { description: item.description } : {}),
+  };
+}
+
+function flashLayerOf(item: any, seen: Set<number>): GeneratedImage {
+  if (flashLayerIdentityInvalid(item, seen)) flashLayerFailure();
+  seen.add(item.z_index);
+  if (flashLayerLabelInvalid(item)) flashLayerFailure();
+  return { ...parseFlashImage({ data: [item] })[0], layer: flashLayerMeta(item) };
+}
+
+/** 层号必须从 0 起连续：有 0，且每个大于 0 的层号都有前一层。 */
+function flashLayersContiguous(seen: Set<number>): boolean {
+  if (!seen.has(0)) return false;
+  return [...seen].every((n) => n === 0 || seen.has(n - 1));
 }
 
 function parseFlashLayers(body: unknown): GeneratedImage[] {
   const data = (body as { data?: unknown })?.data;
-  const fail = () => new GatewayError("invalid_response", "Flash 图层身份、层序或定位信息无效");
-  if (!Array.isArray(data) || data.length < 1 || data.length > 17) throw fail();
+  if (!flashLayerCountValid(data)) flashLayerFailure();
   const seen = new Set<number>();
-  const images = data.map((item): GeneratedImage => {
-    if (!item || !Number.isInteger(item.z_index) || item.z_index < 0 || item.z_index > 16 || seen.has(item.z_index) || (item.z_index > 0 && !validLayerBox(item.bounding_box))) throw fail();
-    seen.add(item.z_index);
-    if ((item.name !== undefined && typeof item.name !== "string") || (item.description !== undefined && typeof item.description !== "string")) throw fail();
-    const image = parseFlashImage({ data: [item] })[0];
-    return { ...image, layer: { z_index: item.z_index, ...(item.bounding_box !== undefined ? { bounding_box: item.bounding_box } : {}), ...(item.name !== undefined ? { name: item.name } : {}), ...(item.description !== undefined ? { description: item.description } : {}) } };
-  });
-  if (!seen.has(0) || [...seen].some((n) => n > 0 && !seen.has(n - 1))) throw fail();
+  const images = data.map((item): GeneratedImage => flashLayerOf(item, seen));
+  if (!flashLayersContiguous(seen)) flashLayerFailure();
   return images.sort((a, b) => a.layer!.z_index - b.layer!.z_index);
 }
 

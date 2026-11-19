@@ -4,7 +4,7 @@ import type { Board, ResultRecord, TaskNode } from "./board";
 import { findModel, isRetiredModel, isSupported, LITE_RETIRED_HINT, type CapabilityTable, type InputImageRule, type ModelCapability } from "./capabilities";
 import { fitImage, type FittedBytes, type ImageCodec } from "./fitImage";
 import { ERROR_CATEGORY_LABELS, fetchResultImage, GatewayError, generate, isFlashShape, type FetchLike, type GenerationInput, type LayerMetadata, validLayerBox } from "./gateway";
-import { imagePortSlots, imageSources, imageRuleViolations, workflowOf } from "./graph";
+import { chainedEdit, chainedSubmission, imagePortSlots, imageSources, imageRuleViolations, workflowOf } from "./graph";
 import type { RunResult } from "./layout";
 import { firstRegionOf, slotsFromReferences } from "./region";
 import { planSend } from "./sendPlan";
@@ -219,7 +219,9 @@ export async function prepareJob(
 
   const sources = imageSources(board, taskNodeId, userRoot);
   const slots = imagePortSlots(board, table, taskNodeId);
-  const send = planSend(model, slots, snapshot.prompt, snapshot.negative_prompt);
+  // 链式编辑：本轮的输入里有上一轮结果时，背景默认不透明，发送文本自动要求保持未编辑区域不变（#177）。
+  const chained = chainedEdit(board, taskNodeId);
+  const send = planSend(model, slots, snapshot.prompt, snapshot.negative_prompt, { chained });
   validateSubmissionInputs(board, table, taskNodeId, sources.length, slots.length, flashLayers);
   const sourceBytes = await readSourceImages(deps, sources, model, flashLayers);
   const references = await prepareReferences(deps, slots, snapshot, sourceBytes, model);
@@ -244,7 +246,7 @@ export async function prepareJob(
     references,
   };
   await validateTransparency(deps, plan, model);
-  return { job: jobOf(taskNodeId, plan, model), lastSubmitted: { task_id: taskId, ...snapshot } };
+  return { job: jobOf(taskNodeId, plan, model, chained), lastSubmitted: { task_id: taskId, ...snapshot } };
 }
 
 /** 透明背景只对能力表支持它的模型生效；提交前按实际快照确认 alpha，不拿界面探测当事实。 */
@@ -264,12 +266,12 @@ async function validateTransparency(deps: RunDeps, plan: SubmissionPlan, model: 
   } finally { decoded.close(); }
 }
 
-function jobOf(taskNodeId: string, plan: SubmissionPlan, model: ModelCapability): PreparedJob {
+function jobOf(taskNodeId: string, plan: SubmissionPlan, model: ModelCapability, chained: boolean): PreparedJob {
   return {
     taskNodeId,
     taskId: plan.taskId,
     plan,
-    input: { model, text: plan.send.text, nativeNegativePrompt: plan.send.nativeNegativePrompt, size: plan.size, references: [], outputOptions: plan.outputOptions, transparentBackground: plan.transparentBackground, layerDecomposition: plan.layerDecomposition, layerSize: plan.layerSize },
+    input: { model, text: plan.send.text, nativeNegativePrompt: plan.send.nativeNegativePrompt, size: plan.size, references: [], outputOptions: plan.outputOptions, transparentBackground: plan.transparentBackground, chainedEdit: chained, layerDecomposition: plan.layerDecomposition, layerSize: plan.layerSize },
     record: {
       model: plan.model,
       prompt: plan.prompt,
@@ -334,7 +336,9 @@ export async function prepareRegenerate(
   await validateRegeneratedReferences(deps, model, references, previous.layer_decomposition);
   // 按当前规则重算发送计划，不重放 task.json 里的 send_text：旧任务可能按「叠加图占用户序号」的旧口径存（#113），
   // 固定句也要按当前能力表模板重建。
-  const send = layerSend(planSend(model, slotsFromReferences(previous.references), previous.prompt, previous.negative_prompt), previous.layer_decomposition, previous.prompt, previous.negative_prompt);
+  // 链式与否按那次提交的参考图来源判断：重新生成不看画板当前内容。
+  const chained = chainedSubmission(previous.references);
+  const send = layerSend(planSend(model, slotsFromReferences(previous.references), previous.prompt, previous.negative_prompt, { chained }), previous.layer_decomposition, previous.prompt, previous.negative_prompt);
   if (isFlashShape(model) && send.referenceProblems.issues.length) throw new LocalError(send.referenceProblems.issues.join("；"));
 
   // 自动宽高比（仅重新生成，生成变体始终按那次提交）：按节点当前的分辨率档与算出的宽高比；换算不出时仍按上次提交。
@@ -360,7 +364,7 @@ export async function prepareRegenerate(
   };
   await validateTransparency(deps, plan, model);
   const lastSubmitted = args.fromTaskId !== undefined ? undefined : { ...last, task_id: taskId, size_spec: sized.sizeSpec };
-  return { job: jobOf(taskNodeId, plan, model), lastSubmitted };
+  return { job: jobOf(taskNodeId, plan, model, chained), lastSubmitted };
 }
 
 /** 派发时写任务目录（不可变）；返回带任务目录与参考图的任务。429 重试不重写。 */

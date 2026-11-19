@@ -214,7 +214,8 @@ describe("二次确认清单", () => {
       firstLine: "把图2的帽子戴到图1头上",
       reasons: [],
     });
-    expect(item.send?.text).toBe("本次提供 2 张参考图，按顺序为图1、图2。\n把图2的帽子戴到图1头上\n第二行");
+    // 图2 接的是结果节点（editBoard 的 x）→ 链式轮：#177 起发送文本末尾自动带多轮一致性固定句。
+    expect(item.send?.text).toBe("本次提供 2 张参考图，按顺序为图1、图2。\n把图2的帽子戴到图1头上\n第二行\n保持未编辑区域完全不变。");
     expect(item.send?.negativeInlined).toBe(false);
     expect(item.send?.nativeNegativePrompt).toBe("模糊");
   });

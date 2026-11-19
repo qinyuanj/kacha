@@ -30,18 +30,48 @@ export interface SendPlan {
   referenceProblems: ReferenceProblems;
 }
 
+export interface PlanOptions {
+  /** 链式编辑：本轮输入来自上一轮输出（画板判定见 graph.chainedEdit），发送文本自动带上多轮一致性固定句。 */
+  chained?: boolean;
+}
+
+/**
+ * 多轮一致性的固定句（#177）：模型多轮编辑时会顺手重绘背景，因此每一轮都明说只改用户要求的地方。
+ * 与区域固定句同一套措辞体系，作为末尾固定句追加。
+ */
+function chainPhrase(language: PromptLanguage): string {
+  return language === "zh" ? "保持未编辑区域完全不变。" : "Keep all unedited areas completely unchanged.";
+}
+
 /** 按提示词决定发什么：发送文本、负向去向与引用问题。 */
-export function planSend(model: ModelCapability, slots: SlotRef[], prompt: string, negativePrompt: string): SendPlan {
+/** 固定句：区域标注、坐标、以及链式编辑的一致性句（#177）。 */
+function planPhrases(model: ModelCapability, slots: SlotRef[], language: ReturnType<typeof promptLanguage>, chained: boolean): string[] {
+  const base = [...overlayPhrases(model, slots, language), ...coordinatePhrases(slots, language)];
+  return chained ? [...base, chainPhrase(language)] : base;
+}
+
+/** 参考图说明：只有一张图时用单图说明，多图（或 Flash 拆分的叠加图）用编号说明。 */
+function planNote(model: ModelCapability, slots: SlotRef[], language: ReturnType<typeof promptLanguage>): string {
+  const single = imageRefMap(slots).length === 1 && !(isFlashShape(model) && slots.length > 1);
+  return single ? singleImageNote(language) : referenceNote(slots.length, language);
+}
+
+/** 负向提示词内联到正文的尾巴；服务端支持原生负向时不内联。 */
+function negativeSuffix(negativeInlined: boolean, negativePrompt: string, language: ReturnType<typeof promptLanguage>): string {
+  if (!negativeInlined || !negativePrompt) return "";
+  return `\n${language === "en" ? "Avoid: " : "避免出现："}${negativePrompt}`;
+}
+
+export function planSend(model: ModelCapability, slots: SlotRef[], prompt: string, negativePrompt: string, options: PlanOptions = {}): SendPlan {
   const language = promptLanguage(prompt);
   const workflow = workflowFor(slots.length);
   const negativeInlined = !isSupported(model.workflows[workflow].supports_negative_prompt);
-  const phrases = [...overlayPhrases(model, slots, language), ...coordinatePhrases(slots, language)];
   const rewritten = rewriteRegionRefs(rewriteImageRefs(prompt, imageRefMap(slots)), regionNames(slots, language));
-  const note = imageRefMap(slots).length === 1 && !(isFlashShape(model) && slots.length > 1) ? singleImageNote(language) : referenceNote(slots.length, language);
-  const withNote = slots.length === 0 ? rewritten : `${note}\n${rewritten}`;
-  const negative = negativeInlined && negativePrompt ? `\n${language === "en" ? "Avoid: " : "避免出现："}${negativePrompt}` : "";
+  const withNote = slots.length === 0 ? rewritten : `${planNote(model, slots, language)}\n${rewritten}`;
+  const phrases = planPhrases(model, slots, language, options.chained === true);
+  const text = `${withNote}${negativeSuffix(negativeInlined, negativePrompt, language)}${phrases.length ? `\n${phrases.join("\n")}` : ""}`;
   return {
-    text: officialReferences(`${withNote}${negative}${phrases.length ? `\n${phrases.join("\n")}` : ""}`, model),
+    text: officialReferences(text, model),
     nativeNegativePrompt: !negativeInlined && negativePrompt ? negativePrompt : null,
     workflow,
     negativeInlined,
@@ -54,28 +84,58 @@ export function planSend(model: ModelCapability, slots: SlotRef[], prompt: strin
  * 引用问题；模型缺失时（没有发送计划）也要给任务节点角标用，此时没有固定句。
  * 全部按用户序号判断：区域叠加图没有用户序号，不参与黄检查，也不能被用户引用；固定句按发送序号书写，换回用户序号再算引用。
  */
-export function referenceProblemsOf(model: ModelCapability | undefined, slots: SlotRef[], prompt: string): ReferenceProblems {
-  const language = promptLanguage(prompt);
+/** 固定句按发送序号书写，换回用户序号再算引用；没有用户序号（区域叠加图）的不算。 */
+function injectedReferences(model: ModelCapability | undefined, slots: SlotRef[], language: ReturnType<typeof promptLanguage>): number[] {
   const map = imageRefMap(slots);
-  const count = map.length;
-  const injected = [...referencedIndexes(model ? overlayPhrases(model, slots, language) : [])].flatMap((s) => {
+  const phrases = model ? overlayPhrases(model, slots, language) : [];
+  return [...referencedIndexes(phrases)].flatMap((s) => {
     const user = map.indexOf(s);
     return user < 0 ? [] : [user + 1];
   });
-  const referenced = new Set([...referencedIndexes([prompt]), ...injected]);
-  // 红是硬阻断，只认用户明确写的 @图N；「地图5」之类的普通文字不拦。
-  const tagged = new Set([...prompt.matchAll(isFlashShape(model) ? REFERENCE : TAG)].map((m) => Number(m.groups ? m.groups.tagged ?? m.groups.zhN ?? m.groups.enN : m[1])));
-  const outOfRange = [...tagged].filter((n) => n < 1 || n > count).sort((a, b) => a - b);
-  const unreferenced = count === 1 ? [] : Array.from({ length: count }, (_, i) => i + 1).filter((n) => !referenced.has(n));
-  // 只有区域真的生效（叠加槽存在）时才校验「区域N」；没有框选时这两个字是普通文字。
+}
+
+/** 红是硬阻断，只认用户明确写的 @图N；「地图5」之类的普通文字不拦。 */
+function taggedIndexes(model: ModelCapability | undefined, prompt: string): number[] {
+  const pattern = isFlashShape(model) ? REFERENCE : TAG;
+  return [...prompt.matchAll(pattern)].map((m) => Number(m.groups ? m.groups.tagged ?? m.groups.zhN ?? m.groups.enN : m[1]));
+}
+
+function outOfRangeTexts(model: ModelCapability | undefined, prompt: string, count: number): string[] {
+  return [...new Set(taggedIndexes(model, prompt))]
+    .filter((n) => n < 1 || n > count)
+    .sort((a, b) => a - b)
+    .map((n) => `提示词引用了图${n}，但只接了 ${count} 张参考图`);
+}
+
+/** 只有区域真的生效（叠加槽存在）时才校验「区域N」；没有框选时这两个字是普通文字。 */
+function regionIssuesOf(slots: SlotRef[], prompt: string, language: ReturnType<typeof promptLanguage>): string[] {
   const regions = regionNames(slots, language).length;
-  const regionIssues = regions > 0 ? referencedRegions(prompt).filter((n) => n < 1 || n > regions).map((n) => `提示词引用了区域${n}，但只框选了 ${regions} 个区域`) : [];
+  if (regions === 0) return [];
+  return referencedRegions(prompt).filter((n) => n < 1 || n > regions).map((n) => `提示词引用了区域${n}，但只框选了 ${regions} 个区域`);
+}
+
+/** 区域矩形必须是 0–1 内的非空矩形；坐标类型只接受 point 与 bbox。 */
+function regionRectInvalid(region: any): boolean {
+  if (region.coordinate_kind !== undefined && !["point", "bbox"].includes(region.coordinate_kind)) return true;
+  return region.rects.some((r: any) => !Array.isArray(r) || r.length !== 4 || r.some((n: any) => !Number.isFinite(n) || n < 0 || n > 1) || r[0] >= r[2] || r[1] >= r[3]);
+}
+
+function invalidRegionTexts(slots: SlotRef[]): string[] {
+  return slots
+    .filter((s) => {
+      const region = s.regionData ?? s.coordinateRegion;
+      return region ? regionRectInvalid(region) : false;
+    })
+    .map((s) => `图${s.userPort} 的区域坐标无效，需要0–1范围内的非空矩形`);
+}
+
+export function referenceProblemsOf(model: ModelCapability | undefined, slots: SlotRef[], prompt: string): ReferenceProblems {
+  const language = promptLanguage(prompt);
+  const count = imageRefMap(slots).length;
+  const referenced = new Set([...referencedIndexes([prompt]), ...injectedReferences(model, slots, language)]);
+  const unreferenced = count === 1 ? [] : Array.from({ length: count }, (_, i) => i + 1).filter((n) => !referenced.has(n));
   return {
-    issues: [...outOfRange.map((n) => `提示词引用了图${n}，但只接了 ${count} 张参考图`), ...regionIssues,
-      ...slots.filter((s) => {
-        const region = s.regionData ?? s.coordinateRegion;
-        return region && (region.coordinate_kind !== undefined && !["point", "bbox"].includes(region.coordinate_kind) || region.rects.some((r) => !Array.isArray(r) || r.length !== 4 || r.some((n) => !Number.isFinite(n) || n < 0 || n > 1) || r[0] >= r[2] || r[1] >= r[3]));
-      }).map((s) => `图${s.userPort} 的区域坐标无效，需要0–1范围内的非空矩形`)],
+    issues: [...outOfRangeTexts(model, prompt, count), ...regionIssuesOf(slots, prompt, language), ...invalidRegionTexts(slots)],
     warnings: unreferenced.map((n) => `图${n} 已连接，尚未说明它的用途。可在提示词中点击参考图插入引用，并描述如何使用它。`),
     unreferenced,
   };

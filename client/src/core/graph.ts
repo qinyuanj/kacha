@@ -10,6 +10,7 @@ import {
   type WorkflowName,
 } from "./capabilities";
 import { resolveFromRoot } from "./paths";
+import type { ReferenceSource } from "./taskDir";
 import { expandImageEdges, type PortSlot } from "./region";
 
 export const IMAGE_PORT_PREFIX = "image:";
@@ -56,6 +57,22 @@ export function imagePortSlots(board: Board, table: CapabilityTable, taskId: str
   const task = findTask(board, taskId);
   const model = task && findModel(table, task.model);
   return expandImageEdges(imageEdges(board, taskId), model);
+}
+
+/**
+ * 链式编辑（#177）：本任务的图片输入里有结果节点的输出，即这一轮的输入是上一轮的结果。
+ * 多轮一致性的默认值按它判断：请求体默认 background: opaque，发送文本自动带上「保持未编辑区域完全不变」。
+ */
+export function chainedEdit(board: Board, taskId: string): boolean {
+  return imageEdges(board, taskId).some((e) => board.nodes.find((n) => n.id === e.from[0])?.type === "result");
+}
+
+/**
+ * 同一判定的任务记录来源：重新生成 / 生成变体不看画板当前内容，改看那次提交的参考图来源。
+ * 叠加图由它的原图代表（task.json 里两个来源各记一条），所以只看有没有结果是充分的。
+ */
+export function chainedSubmission(references: readonly { source: ReferenceSource }[]): boolean {
+  return references.some((ref) => ref.source.kind === "result");
 }
 
 /** 接到任务某提示词端口的提示词文本；未接为空串。 */

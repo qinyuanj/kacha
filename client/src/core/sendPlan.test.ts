@@ -297,3 +297,30 @@ describe("发送计划：引用问题", () => {
     expect(referenceProblemsOf(qwenPro, [image(1, 1), image(2, 2)], "@图1")).toEqual(problems("@图1", images(2)));
   });
 });
+
+describe("多轮一致性的固定句（#177）", () => {
+  const CHAIN_ZH = "保持未编辑区域完全不变。";
+  const CHAIN_EN = "Keep all unedited areas completely unchanged.";
+
+  it("链式轮在发送文本末尾追加固定句，单轮不加", () => {
+    const slots = [image(1, 1)];
+    expect(planSend(flash, slots, "把背景改成蓝色", "").text).not.toContain(CHAIN_ZH);
+    expect(planSend(flash, slots, "把背景改成蓝色", "", { chained: false }).text).not.toContain(CHAIN_ZH);
+    expect(planSend(flash, slots, "把背景改成蓝色", "", { chained: true }).text.endsWith(`
+${CHAIN_ZH}`)).toBe(true);
+  });
+
+  it("固定句跟随提示词语言：中文文本发中文句，英文文本发英文句", () => {
+    expect(planSend(flash, [image(1, 1)], "make the sky blue", "", { chained: true }).text.endsWith(`
+${CHAIN_EN}`)).toBe(true);
+  });
+
+  it("固定句排在区域固定句之后：只改用户要求的地方，其余全部不动", () => {
+    const plan = planSend(flash, [image(1, 1), overlay(2, 1, 1, 1)], "把区域1改成红色", "", { chained: true });
+    expect(plan.text.endsWith(`
+${CHAIN_ZH}`)).toBe(true);
+    expect(plan.text.indexOf("高亮区域之外的所有内容保持完全不变")).toBeLessThan(plan.text.indexOf(CHAIN_ZH));
+  });
+});
+
+
