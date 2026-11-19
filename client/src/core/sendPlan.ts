@@ -30,12 +30,25 @@ export interface SendPlan {
   referenceProblems: ReferenceProblems;
 }
 
+export interface PlanOptions {
+  /** 链式编辑：本轮输入来自上一轮输出（画板判定见 graph.chainedEdit），发送文本自动带上多轮一致性固定句。 */
+  chained?: boolean;
+}
+
+/**
+ * 多轮一致性的固定句（#177）：模型多轮编辑时会顺手重绘背景，因此每一轮都明说只改用户要求的地方。
+ * 与区域固定句同一套措辞体系，作为末尾固定句追加。
+ */
+function chainPhrase(language: PromptLanguage): string {
+  return language === "zh" ? "保持未编辑区域完全不变。" : "Keep all unedited areas completely unchanged.";
+}
+
 /** 按提示词决定发什么：发送文本、负向去向与引用问题。 */
-export function planSend(model: ModelCapability, slots: SlotRef[], prompt: string, negativePrompt: string): SendPlan {
+export function planSend(model: ModelCapability, slots: SlotRef[], prompt: string, negativePrompt: string, options: PlanOptions = {}): SendPlan {
   const language = promptLanguage(prompt);
   const workflow = workflowFor(slots.length);
   const negativeInlined = !isSupported(model.workflows[workflow].supports_negative_prompt);
-  const phrases = [...overlayPhrases(model, slots, language), ...coordinatePhrases(slots, language)];
+  const phrases = [...overlayPhrases(model, slots, language), ...coordinatePhrases(slots, language), ...(options.chained ? [chainPhrase(language)] : [])];
   const rewritten = rewriteRegionRefs(rewriteImageRefs(prompt, imageRefMap(slots)), regionNames(slots, language));
   const note = imageRefMap(slots).length === 1 && !(isFlashShape(model) && slots.length > 1) ? singleImageNote(language) : referenceNote(slots.length, language);
   const withNote = slots.length === 0 ? rewritten : `${note}\n${rewritten}`;

@@ -4,6 +4,7 @@ import { BUILTIN_TABLE, findModel } from "./capabilities";
 import { resolveSize } from "./size";
 import { PNG_1X1 as PNG_BYTES, PNG_1X1_BASE64 as PNG_BASE64 } from "./testing/png";
 import {
+  backgroundMode,
   buildGenerationRequest,
   fetchResultImage,
   generate,
@@ -363,6 +364,37 @@ describe("网关适配器：请求载荷对照夹具", () => {
     expectMatchesFixture(calls[0].headers, fixture.request.headers, "headers");
     expect(ids).toContain("qwen-image-3.0-pro");
     expect(ids).toHaveLength(10);
+  });
+});
+
+describe("多轮链式的背景默认值（#177）", () => {
+  // 三态：单轮不发字段（服务端默认 auto）、链式轮默认 opaque、用户显式开透明背景优先于链式默认值。
+  it.each([
+    ["单轮", {}, null],
+    ["链式轮", { chainedEdit: true }, "opaque"],
+    ["单轮且用户开透明背景", { transparentBackground: true }, "transparent"],
+    ["链式轮且用户开透明背景", { chainedEdit: true, transparentBackground: true }, "transparent"],
+  ] as const)("backgroundMode：%s", (_name, input, expected) => {
+    expect(backgroundMode(input)).toBe(expected);
+  });
+
+  it("链式轮请求体带 background: opaque；单轮不带该字段", () => {
+    const chained = (model: NonNullable<Parameters<typeof textInput>[0]>["model"]) =>
+      buildGenerationRequest(textInput({ model, references: [png], chainedEdit: true, size: { width: 2048, height: 2048 } })).body;
+    const single = (model: NonNullable<Parameters<typeof textInput>[0]>["model"]) =>
+      buildGenerationRequest(textInput({ model, references: [png], size: { width: 2048, height: 2048 } })).body;
+    expect(chained(seedreamPro).background).toBe("opaque");
+    expect(chained(seedreamFlash).background).toBe("opaque");
+    expect(single(seedreamPro)).not.toHaveProperty("background");
+    expect(single(seedreamFlash)).not.toHaveProperty("background");
+  });
+
+  it("链式轮用户显式开透明背景：发 transparent，不被链式默认值覆盖", () => {
+    const alpha = { mediaType: "image/png", bytes: PNG_BYTES, hasAlpha: true };
+    const chainedTransparent = (model: NonNullable<Parameters<typeof textInput>[0]>["model"]) =>
+      buildGenerationRequest(textInput({ model, references: [alpha], transparentBackground: true, chainedEdit: true })).body;
+    expect(chainedTransparent(seedreamPro).background).toBe("transparent");
+    expect(chainedTransparent(seedreamFlash).background).toBe("transparent");
   });
 });
 

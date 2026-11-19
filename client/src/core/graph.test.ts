@@ -3,6 +3,8 @@ import type { Board, BoardEdge, BoardNode, TaskNode } from "./board";
 import { BUILTIN_TABLE, type CapabilityTable, type ModelCapability } from "./capabilities";
 import {
   canConnect,
+  chainedEdit,
+  chainedSubmission,
   connect,
   removeNodes,
   syncImagePorts,
@@ -376,6 +378,28 @@ describe("连线失败原因优先级", () => {
   it("提示词端口已有连线时优先报告占用，即使新增连线也会成环", () => {
     const g = board([node("p", "prompt"), task("t")], [edge("p", "out", "t", "positive"), edge("t", "result", "p", "in", true)]);
     expect(canConnect(g, table, conn("p", "out", "t", "positive"))).toEqual({ ok: false, reason: "该端口已有连线" });
+  });
+});
+
+describe("链式编辑判定（#177）", () => {
+  it("图片输入来自结果节点即链式：接参考图、没有输入、只有提示词都不算", () => {
+    expect(chainedEdit(board([task("t"), node("x", "result")], [edge("x", "result", "t", "image:0")]), "t")).toBe(true);
+    expect(chainedEdit(board([task("t"), node("r", "reference")], [edge("r", "out", "t", "image:0")]), "t")).toBe(false);
+    expect(chainedEdit(board([node("p", "prompt"), task("t")], [edge("p", "out", "t", "positive")]), "t")).toBe(false);
+    expect(chainedEdit(board([task("t")]), "t")).toBe(false);
+  });
+
+  it("结果接在第几张都算：链式是「这一轮的输入里有上一轮的输出」，与序号无关", () => {
+    const later = board([task("t"), node("r", "reference"), node("x", "result")], [edge("r", "out", "t", "image:0"), edge("x", "result", "t", "image:1")]);
+    expect(chainedEdit(later, "t")).toBe(true);
+    // 同一个结果节点接到别的任务不影响本任务
+    expect(chainedEdit(later, "t2")).toBe(false);
+  });
+
+  it("重新生成按那次提交的参考图来源判定：结果算链式，参考图与叠加图都不算", () => {
+    expect(chainedSubmission([{ source: { kind: "reference", path: "refs/a.png", sha256: "a".repeat(64) } }])).toBe(false);
+    expect(chainedSubmission([{ source: { kind: "overlay", of: 1 } }])).toBe(false);
+    expect(chainedSubmission([{ source: { kind: "reference", path: "refs/a.png", sha256: "a".repeat(64) } }, { source: { kind: "result", task_id: "x", file: "result.png" } }])).toBe(true);
   });
 });
 

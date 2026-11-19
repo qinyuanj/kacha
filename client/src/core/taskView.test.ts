@@ -3,7 +3,7 @@ import type { Board, BoardEdge, BoardNode, TaskNode } from "./board";
 import { BUILTIN_TABLE, type CapabilityTable } from "./capabilities";
 import { imagePortSlots } from "./graph";
 import { buildConfirmItems } from "./submission";
-import { sendPlanOf, taskView, type TaskFacts } from "./taskView";
+import { CHAIN_TRANSPARENT_WARNING, sendPlanOf, taskView, type TaskFacts } from "./taskView";
 
 const QWEN_PRO = "qwen-image-3.0-pro";
 
@@ -398,6 +398,43 @@ describe("生成尺寸与宽高比", () => {
 
   it("模型缺失：没有生成尺寸", () => {
     expect(view(ready({ model: "nope" }, [], "猫")).size).toBeNull();
+  });
+});
+
+describe("链式编辑的一致性默认值（#177）", () => {
+  const CHAIN_PHRASE = "保持未编辑区域完全不变。";
+  const seedreamPro = "doubao-seedream-5-0-pro-260628";
+  const resultNode = (id: string): BoardNode => ({
+    id,
+    type: "result",
+    pos: [0, 200],
+    size: [100, 100],
+    extra: {},
+    task_id: `task-${id}`,
+    file: "result.png",
+    path: `2026-09-16/task-${id}/result.png`,
+    layer_count: 0,
+    record: { model: "m", prompt: "", negative_prompt: "", size_spec: { tier: "1K", ratio: "1:1", width: null, height: null }, submitted_at: "" },
+  });
+  /** 上一轮的结果接到本任务的图1：链式轮。 */
+  const chained = (patch: Partial<TaskNode> = {}, text = "@图1 改成红色") =>
+    board([prompt("p", text), resultNode("x"), task("t", patch)], [edge("p", "t", "positive"), edge("x", "t", "image:0")]);
+  const alphaOfResult = { ...UNKNOWN, alphaByNode: new Map([["x", true]]) };
+
+  it("链式轮发送文本自动带「保持未编辑区域完全不变」，单轮不带", () => {
+    expect(sendPlanOf(chained(), BUILTIN_TABLE, "t")!.text).toContain(CHAIN_PHRASE);
+    expect(sendPlanOf(ready({}, [], "把背景改成蓝色"), BUILTIN_TABLE, "t")!.text).not.toContain(CHAIN_PHRASE);
+  });
+
+  it("链式轮显式开透明背景：就地打断不透明默认值，提示一致性可能下降，且不阻断", () => {
+    const v = view(chained({ model: seedreamPro, transparent_background: true }), BUILTIN_TABLE, alphaOfResult);
+    expect(v.warnings).toContain(CHAIN_TRANSPARENT_WARNING);
+    expect(v.reasons).toEqual([]);
+  });
+
+  it("没开透明背景的链式轮、或单轮开透明背景：都不提示一致性下降", () => {
+    expect(view(chained({ model: seedreamPro }), BUILTIN_TABLE).warnings).not.toContain(CHAIN_TRANSPARENT_WARNING);
+    expect(view(ready({ model: seedreamPro, transparent_background: true }, ["r1"]), BUILTIN_TABLE, { ...UNKNOWN, alphaByNode: new Map([["r1", true]]) }).warnings).not.toContain(CHAIN_TRANSPARENT_WARNING);
   });
 });
 

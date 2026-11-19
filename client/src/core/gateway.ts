@@ -112,6 +112,8 @@ export interface GenerationInput {
   references: ReferenceImage[];
   /** 透明背景开关；只对能力表支持透明背景的模型生效。 */
   transparentBackground?: boolean;
+  /** 链式编辑：本轮的输入来自上一轮输出（画板判定见 graph.chainedEdit）。 */
+  chainedEdit?: boolean;
   outputOptions?: OutputOptions;
   layerDecomposition?: boolean;
   layerSize?: LayerSize;
@@ -120,6 +122,19 @@ export interface GenerationInput {
 export type GeneratedImage = ({ kind: "url"; url: string } | { kind: "bytes"; bytes: Uint8Array }) & {
   layer?: LayerMetadata;
 };
+
+/** 请求体 background 的取值；null = 不发该字段，交给服务端默认 auto。 */
+export type BackgroundMode = "transparent" | "opaque";
+
+/**
+ * 多轮链式编辑（#177）的背景默认值：用户显式开透明背景优先——那是用户对本轮的选择，
+ * 由任务视图提示「之后的一致性可能下降」，不在这里静默改回；否则链式轮默认 opaque
+ * （官方建议多轮编辑用不带透明通道的 RGB 图）。单轮生成不发 background，行为不变。
+ */
+export function backgroundMode(input: Pick<GenerationInput, "transparentBackground" | "chainedEdit">): BackgroundMode | null {
+  if (input.transparentBackground) return "transparent";
+  return input.chainedEdit ? "opaque" : null;
+}
 
 // ---- 请求构造 ----
 
@@ -161,7 +176,9 @@ const buildSeedreamImagesGenerations: RequestShape["build"] = (input) => {
     response_format: "url",
     ...model.fixed_params,
   };
-  if (input.transparentBackground && isSupported(model.transparent_background)) body.background = "transparent";
+  const background = backgroundMode(input);
+  // 透明背景只对能力表支持的模型发；opaque 是本形状的常规字段，链式编辑按需带上。
+  if (background === "opaque" || (background === "transparent" && isSupported(model.transparent_background))) body.background = background;
   if (references.length) body.image = references.map(dataUrl);
   return { path: TEXT_TO_IMAGE_PATH, body };
 };
@@ -177,6 +194,7 @@ const buildFlashImagesGenerations: RequestShape["build"] = (input) => {
     if (options.output_format !== "png") throw new GatewayError("config", "透明背景输出必须为 PNG");
     if (input.references[0].hasAlpha !== true) throw new GatewayError("config", "透明背景需要已确认带透明通道的参考图快照");
   }
+  const background = backgroundMode(input);
   return { path: TEXT_TO_IMAGE_PATH, body: {
     model: input.model.model_id,
     ...(input.text.trim() || !input.layerDecomposition ? { prompt: input.text } : {}),
@@ -184,7 +202,7 @@ const buildFlashImagesGenerations: RequestShape["build"] = (input) => {
     ...(input.layerDecomposition ? { layer_decomposition: true } : {}),
     ...options,
     optimize_prompt_options: { mode: "standard" },
-    ...(input.transparentBackground ? { background: "transparent" } : {}),
+    ...(background ? { background } : {}),
     ...(input.references.length ? { image: input.references.map(dataUrl) } : {}),
   } };
 };

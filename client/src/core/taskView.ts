@@ -4,7 +4,7 @@
 import { findTask, runCopies, type Board, type BoardEdge, type TaskNode } from "./board";
 import { findModel, isRetiredModel, isSupported, LITE_RETIRED_HINT, type CapabilityTable, type ModelCapability, type SizeRule } from "./capabilities";
 import { isFlashShape, isLayerSize, isRequestShapeImplemented, LAYER_SIZES_TEXT } from "./gateway";
-import { imageEdges, imageKey, imagePortSlots, imageSources, promptText, workflowOf } from "./graph";
+import { chainedEdit, imageEdges, imageKey, imagePortSlots, imageSources, promptText, workflowOf } from "./graph";
 import { MAX_REGIONS } from "./overlay";
 import { effectiveRegionRender, expandImageEdges } from "./region";
 import { planSend, promptLanguage, referenceProblemsOf, type ReferenceProblems, type SendPlan } from "./sendPlan";
@@ -163,12 +163,22 @@ function imageSourceReasons(board: Board, taskId: string, facts: TaskFacts): Unr
   });
 }
 
+/**
+ * 链式编辑改用透明背景（#177）：用户显式选择优先，链式默认的不透明背景在这一轮被就地打断，
+ * 只提示后果，不悄悄地改回去。
+ */
+export const CHAIN_TRANSPARENT_WARNING = "本轮改用透明背景，已打断链式编辑的不透明默认值；本轮之后的一致性可能下降";
+
 function taskWarnings(board: Board, task: TaskNode, model: ModelCapability | undefined, concurrency: number): string[] {
   const taskId = task.id;
   const edgeCount = imageEdges(board, taskId).length;
   const englishUnverified = !!model && edgeCount > 0 && promptLanguage(promptText(board, taskId, "positive")) === "en" && model.reference_phrasing.en_verified === "untested";
   const copies = runCopies(task, concurrency);
-  return [...(englishUnverified ? ["该模型英文序号未验证"] : []), ...(copies.actual < copies.set ? [`份数 ${copies.set}，本次按 ${copies.actual}`] : [])];
+  return [
+    ...(englishUnverified ? ["该模型英文序号未验证"] : []),
+    ...(copies.actual < copies.set ? [`份数 ${copies.set}，本次按 ${copies.actual}`] : []),
+    ...(task.transparent_background && chainedEdit(board, taskId) ? [CHAIN_TRANSPARENT_WARNING] : []),
+  ];
 }
 
 function taskSizeView(board: Board, task: TaskNode, model: ModelCapability | undefined): Pick<TaskView, "size" | "ratioUnsupported"> {
@@ -218,7 +228,7 @@ export function sendPlanOf(board: Board, table: CapabilityTable, taskId: string)
   const task = findTask(board, taskId);
   const model = task && findModel(table, task.model);
   if (!model) return null;
-  const plan = planSend(model, imagePortSlots(board, table, taskId), promptText(board, taskId, "positive"), promptText(board, taskId, "negative"));
+  const plan = planSend(model, imagePortSlots(board, table, taskId), promptText(board, taskId, "positive"), promptText(board, taskId, "negative"), { chained: chainedEdit(board, taskId) });
   return isFlashShape(model) && task.layer_decomposition && !promptText(board, taskId, "positive").trim() && !promptText(board, taskId, "negative").trim() ? { ...plan, text: "" } : plan;
 }
 
