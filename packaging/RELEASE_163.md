@@ -22,6 +22,20 @@ MyGo 固定在 `go.mod` 的 v0.9.0（ADR 0023）。已用该版本 CLI 核实：
 
 复用或核验历史发布私钥前，必须在受限发布环境验证密钥可用且公钥匹配；验证失败即停止发布。未取得可用性证据时记为外部阻塞，不宣称可发布。
 
+## 构建前先核对私钥（发布第一步）
+
+发布链的**第一步不是构建**，而是核对这次要用的发布私钥与客户端内置的发布者公钥是不是一对：
+
+~~~powershell
+$env:MYGO_UPDATER_PRIVATE_KEY = "***"
+go run ./desktop/cmd/verifyrelease -check-private-key
+~~~
+
+- 配对：退出码 0，打印配对的公钥，可以开始构建。
+- 未设置私钥、私钥不是 `go tool mygo keygen` 的格式、内置公钥为空、两者不配对：退出码非 0，stderr 写清**下一步该做什么**，而不是只说 mismatch。内置公钥为空或配错时，文案直接给出私钥推导出的公钥（base64）与要写的文件 `desktop/internal/updateservice/publisher_key.txt`，并可照做。
+- 本命令只读：不改 `publisher_key.txt`，也不打印私钥。写不写公钥、换成哪一对密钥属于发布者身份决策（[ACCEPTANCE-165](../docs/release/ACCEPTANCE-165.md) 的 B2，由 owner 拍板），这里只负责把错配挡在构建之前——同样的错配在发布阶段才被发现，等于白跑一整次构建。
+- 这一条与发布阶段的 `verifyrelease -installer / -descriptor` 用同一个内置公钥、同一条 Ed25519 规则，只是问得更早。
+
 ## 发布门禁
 
 `packaging/release_gate.py` 的 `validate_release_assets()` 在上传前核对：
@@ -47,6 +61,8 @@ MyGo 固定在 `go.mod` 的 v0.9.0（ADR 0023）。已用该版本 CLI 核实：
 用法（受限发布机，私钥/令牌只从环境提供）：
 
 ~~~powershell
+# 第一步：核对私钥与内置公钥（见上一节）。非零退出就先停下，不要开始构建。
+go run ./desktop/cmd/verifyrelease -check-private-key
 python packaging\build_desktop.py
 # 确认 build/windows-amd64 下安装器、签名、update-windows-amd64.json 与 SHA256SUMS 齐全
 $env:GITEA_TOKEN = "***"
