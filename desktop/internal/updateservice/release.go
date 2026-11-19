@@ -18,9 +18,14 @@ var ErrNoUpdate = errors.New("updateservice: no newer formal version with comple
 const ManifestName = "update-windows-amd64.json"
 
 // Asset 是发行里的一件附件。
+//
+// URL 取 browser_download_url，不是 url：Gitea 的发行列表里附件根本没有 url 字段
+// （Gitea 28.3 实测，2026-11-19），只有浏览器下载地址。映射错字段时 URL 全是空串，
+// fetchDescriptor 拿空地址发请求、validateDescriptor 又比不过描述里的地址，
+// 结果是「永远显示已是最新」——1.6.0 的更新入口就是这样失效的（见 issue）。
 type Asset struct {
 	Name string `json:"name"`
-	URL  string `json:"url"`
+	URL  string `json:"browser_download_url"`
 }
 
 // Release 是一份发行（只保留选版要用的字段）。
