@@ -420,7 +420,10 @@ describe("桌面端口的参考图编辑闭环（#154）", () => {
     // 中断：任务目录在、没有结局（应用重启后），节点记着这个任务编号，同样可主动重新生成。
     const interruptedId = "20261117T000000Z-99999999";
     const from = dirname(taskJson);
-    const to = join(dirname(from), interruptedId);
+    // 任务目录由编号里的日期反推（taskDirOfTaskId），副本必须落在那一层；
+    // 放在"今天"的日期目录只有运行当天恰好是 2026-11-17 时才找得到。
+    const to = join(s.root, "2026-11-17", interruptedId);
+    await mkdir(dirname(to), { recursive: true });
     await cp(from, to, { recursive: true });
     const raw = JSON.parse(await readFile(join(to, "task.json"), "utf8"));
     await writeFile(join(to, "task.json"), JSON.stringify({ ...raw, task_id: interruptedId }));
