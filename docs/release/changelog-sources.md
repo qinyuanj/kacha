@@ -2,10 +2,11 @@
 
 `docs/release/changelog.md` 是当前与历史更新说明的唯一展示源；产品版本仍只由仓库根 `mygo.config.ts` 声明。本文件只记录恢复来源与核对结果，不参与构建取版本，也不另设产品版本线。
 
-历史条目保留发布当时的语境；旧说明中关于网页版、旧桌面壳、归档、整理、自动更新和生成能力的描述，不构成当前 MyGo / Go 桌面已经交付这些能力的证据。当前能力只看 `changelog.md` 的 1.5.0 节和桌面端口测试。
+历史条目保留发布当时的语境；旧说明中关于网页版、旧桌面壳、归档、整理、自动更新和生成能力的描述，不构成当前 MyGo / Go 桌面已经交付这些能力的证据。当前能力只看 `changelog.md` 的 1.6.0 节和桌面端口测试。
 
 | 版本 | 恢复来源 | 核对结果 |
 | --- | --- | --- |
+| 1.6.0 | 当前桌面说明；内置发布者公钥（`desktop/internal/updateservice/publisher_key.txt`）与 `packaging/RELEASE_164.md` | 只记更新通道变化；功能条目沿用 1.5.0 节，不重复转写历史能力。 |
 | 1.5.0 | 当前桌面说明；迁移前同号旧稿：commit `7a8e8fe` 的 `docs/release/web-changelog.md` | 同号合并为一节；按当前桌面实际能力改写并标注尚不可用能力，旧稿不复制为当前证据。 |
 | 1.4.0 | commit `7a8e8fe` 的 `docs/release/web-changelog.md`；tag `v1.4.0` | 已逐条转写为新增 / 改进分组，标题与版本一致。 |
 | 1.3.1 | commit `7a8e8fe` 的 `docs/release/web-changelog.md`；tag `v1.3.1` | 已逐条转写，修复条目保留。 |
