@@ -3,7 +3,6 @@
 // 形状与真实适配器一致：失败一律是 PortError，类别（conflict / missing / slotsFull / alreadyExists, ...）与
 // 壳端口使用同一套类别，界面按类别分支的分支点因此在替身下也走得到。
 // 各分组的替身在 shell/testing/fakePortStores.ts（#137），这里只把它们拼起来。
-import { buildZip, type FixtureEntry } from "../../core/testing/zipFixture";
 import { PortError, type CorePorts, type FeatureId, type PortFailureKind, type ShellPort } from "../port";
 import type { FakeBoard, FakeCalls, FakePortOptions } from "./fakePortTypes";
 import {
@@ -23,12 +22,6 @@ export type { FakeCalls, FakePortOptions } from "./fakePortTypes";
 /** 造一个端口失败（界面按 kind 分支）。 */
 export const fakeFailure = (kind: PortFailureKind, message: string = kind, feature?: FeatureId): PortError =>
   new PortError({ kind, code: kind, message, status: kind === "conflict" ? 409 : 0, ...(feature ? { feature } : {}) });
-
-/** 画板包 fixture：manifest + 一块画板（导入用例用来验「选中的包文件被交给端口」）。 */
-export function fakePackFile(entries: FixtureEntry[] = []): File {
-  const bytes = buildZip(entries);
-  return new File([bytes as unknown as BlobPart], "包.ugcpack", { type: "application/zip" });
-}
 
 /** 内存壳端口：所有分组都是可断言的替身，行为按选项脚本化。 */
 export type FakePort = ShellPort & { calls: FakeCalls };
