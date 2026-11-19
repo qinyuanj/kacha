@@ -76,11 +76,23 @@
 
 ### 仓库里没有私钥
 
-- `publisher_key.txt` 只有注释：`grep -v "^#" | grep -c "[^[:space:]]"` 为 `0`。
+**2026-11-19 之前**：`publisher_key.txt` 只有注释（`grep -v "^#" | grep -c "[^[:space:]]"` 为 `0`），
+所以每次构建都是「没有可信公钥」的状态，更新入口关闭。
+
+**2026-11-19 起**：仓库内置了真实发布者公钥 —— `publisher_key.txt` 末尾多一行 base64 公钥，
+说明用注释行保留（`PublisherKey()` 跳过空行与 `#` 开头的行，见 `service.go`）。
+
+私钥的位置没有变，也不会变：
+
+- 私钥在本机 `~/.kacha/updater/mygo-update.key`，**在仓库之外**，不受版本控制；
+  发布时用 `MYGO_UPDATER_PRIVATE_KEY` 注入。
 - 受版本控制的文件里没有任何 `*.key` / `*.pem`；提交历史里也从未加入过密钥文件。
-- 已核对：仓库中**没有**任何文件的 SHA-256 与本机 `signing.key` / `signing.key.pub` 相同；
-  本次提交的 45 个文件里也没有出现私钥形状的 base64 串。
 - 测试里的密钥全部在运行时用 `ed25519.GenerateKey` 生成，没有任何硬编码密钥常量。
+- 公钥进仓库是安全的：它本来就要编进客户端，是公开材料。把**私钥**提交进来才是事故。
+
+内置公钥之后，发布门禁守的是另一半：签名私钥必须与内置公钥配对，否则发布被拒
+（`packaging/tests/test_publish_release.py` 的 `BuiltInKeyGateTest`）；
+配对性可以在构建之前用 `verifyrelease -check-private-key` 提前判定。
 
 ### 没有公钥时的行为（已用测试固定）
 

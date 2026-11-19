@@ -316,9 +316,14 @@ class PublishCoordinatorTest(RepoFixture):
 
 @unittest.skipUnless(shutil.which("go"), "需要 Go 工具链才能跑发布验签")
 class BuiltInKeyGateTest(unittest.TestCase):
-    """这次构建没有内置发布者公钥时，发布必须拒绝：客户端装不上没有可信签名的包。"""
+    """签名私钥与内置发布者公钥不是一对时，发布必须拒绝：客户端装不上不是发布者签的包。
 
-    def test_publishing_is_refused_without_a_built_in_key(self):
+    仓库现在内置了真实发布者公钥，所以「完全没有内置公钥」这种状态在装配层不再出现；
+    那一种拒绝由 Go 侧的 TestWithoutPublisherKeyUpdatesAreUnavailable 与 verifyrelease
+    的空公钥预检用例覆盖，这里只守内置了公钥之后仍必须挡住错配签名。
+    """
+
+    def test_publishing_is_refused_when_the_signature_is_not_from_the_built_in_publisher(self):
         with tempfile.TemporaryDirectory() as tmp:
             installer = Path(tmp) / INSTALLER
             desc = Path(tmp) / "update-windows-amd64.json"
@@ -326,7 +331,7 @@ class BuiltInKeyGateTest(unittest.TestCase):
             desc.write_text(json.dumps(descriptor()), encoding="utf-8")
             with self.assertRaises(SystemExit) as caught:
                 publish_release.verify_release_signature(installer, desc)
-            self.assertIn("公钥", str(caught.exception))
+            self.assertIn("发布者签名", str(caught.exception))
 
 
 if __name__ == "__main__":
