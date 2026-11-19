@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { BUILTIN_TABLE, findModel } from "./capabilities";
+import { resolveSize } from "./size";
 import { PNG_1X1 as PNG_BYTES, PNG_1X1_BASE64 as PNG_BASE64 } from "./testing/png";
 import {
   buildGenerationRequest,
@@ -103,6 +104,66 @@ describe("Flash 普通请求", () => {
     expect(body).toMatchObject({ model: "doubao-seedream-5-0-flash-260915", prompt: "一只橘猫", size: "2048x2048", response_format: "url" });
     expect(body).not.toHaveProperty("sequential_image_generation");
     expect(body).not.toHaveProperty("image");
+  });
+});
+
+describe("Seedream 5.5 请求体（复用 Flash 请求形状，只换 model）", () => {
+  const five = findModel(BUILTIN_TABLE, "doubao-seedream-5-5-261028")!;
+  const ref = (i: number, mediaType = "image/png") => ({ mediaType, bytes: new Uint8Array([i]) });
+  const input = (patch: Partial<GenerationInput> = {}): GenerationInput => ({ model: five, text: "一只橘猫", nativeNegativePrompt: null, size: { width: 2048, height: 2048 }, references: [], ...patch });
+
+  it("文生图：顶层 model / prompt / size(WxH) / output_format / watermark，不发 image 与图层字段", () => {
+    const request = buildGenerationRequest(input());
+    expect(request).toEqual({
+      path: "/v1/images/generations",
+      body: { model: "doubao-seedream-5-5-261028", prompt: "一只橘猫", size: "2048x2048", response_format: "url", output_format: "png", watermark: false, optimize_prompt_options: { mode: "standard" } },
+    });
+    expect(request.body).not.toHaveProperty("image");
+    expect(request.body).not.toHaveProperty("layer_decomposition_options");
+    expect(request.body).not.toHaveProperty("sequential_image_generation");
+  });
+
+  it("单图编辑：一张参考图按序进顶层 image", () => {
+    const { body } = buildGenerationRequest(input({ size: { width: 1024, height: 1024 }, references: [ref(1)] }));
+    expect(body).toEqual({
+      model: "doubao-seedream-5-5-261028",
+      prompt: "一只橘猫",
+      size: "1024x1024",
+      response_format: "url",
+      output_format: "png",
+      watermark: false,
+      optimize_prompt_options: { mode: "standard" },
+      image: ["data:image/png;base64,AQ=="],
+    });
+  });
+
+  it("多参考图 10 张按序进 image；第 11 张在本地拦下", () => {
+    const ten = Array.from({ length: 10 }, (_, i) => ref(i + 1));
+    const { body } = buildGenerationRequest(input({ references: ten }));
+    expect(body.image).toEqual(["data:image/png;base64,AQ==", "data:image/png;base64,Ag==", "data:image/png;base64,Aw==", "data:image/png;base64,BA==", "data:image/png;base64,BQ==", "data:image/png;base64,Bg==", "data:image/png;base64,Bw==", "data:image/png;base64,CA==", "data:image/png;base64,CQ==", "data:image/png;base64,Cg=="]);
+    expect(() => buildGenerationRequest(input({ references: [...ten, ref(11)] }))).toThrow(/10/);
+  });
+
+  it("尺寸档 1K / 1.5K / 2K 换算成精确 WxH", () => {
+    const rule = five.workflows.text_to_image.size_rule;
+    for (const [tier, ratio] of [["1K", "1:1"], ["1.5K", "16:9"], ["2K", "4:3"]] as const) {
+      const px = resolveSize(rule, { tier, ratio, width: null, height: null })!;
+      expect(buildGenerationRequest(input({ size: px })).body.size).toBe(`${px.width}x${px.height}`);
+    }
+  });
+
+  it("自定义像素越界在本地拦下：低于 921600、高于 4624220、宽高比超出 1/16–16", () => {
+    for (const size of [{ width: 959, height: 960 }, { width: 2152, height: 2152 }, { width: 240, height: 3845 }]) expect(() => buildGenerationRequest(input({ size }))).toThrow(/尺寸/);
+    for (const size of [{ width: 960, height: 960 }, { width: 240, height: 3840 }, { width: 2816, height: 1584 }]) expect(buildGenerationRequest(input({ size })).body.size).toBe(`${size.width}x${size.height}`);
+  });
+
+  it("透明背景：单张带透明通道的 PNG 参考图附带 background:transparent，JPEG 输出在本地拦下", () => {
+    const alpha = { mediaType: "image/png", bytes: PNG_BYTES, hasAlpha: true };
+    const { body } = buildGenerationRequest(input({ references: [alpha], transparentBackground: true }));
+    expect(body.background).toBe("transparent");
+    expect(body.output_format).toBe("png");
+    expect(buildGenerationRequest(input({ references: [alpha] })).body).not.toHaveProperty("background");
+    expect(() => buildGenerationRequest(input({ references: [alpha], transparentBackground: true, outputOptions: { output_format: "jpeg", response_format: "url", watermark: false } }))).toThrow(/PNG/);
   });
 });
 
