@@ -3,6 +3,7 @@ import type { Board } from "../core/board";
 import type { SizeTier } from "../core/boardSize";
 import { ARCHIVE_TEXT, BACKUP_HINT_TEXT, MANAGE_BOARDS_TEXT, sizeNoticeText, usageLimitText } from "./boardText";
 import { saveFailureNotice } from "./appUiState";
+import type { UpdateStatusView } from "./updateStatusView";
 
 /** 保存失败的画板：说明与操作按钮。 */
 export function SaveFailureBar({
@@ -105,6 +106,19 @@ export function ArchivedBar({ onUnarchive, onCopy }: { onUnarchive(): void; onCo
       <span>{ARCHIVE_TEXT.banner}</span>
       <button onClick={onUnarchive}>{ARCHIVE_TEXT.unarchive}</button>
       <button onClick={onCopy}>{ARCHIVE_TEXT.copy}</button>
+    </div>
+  );
+}
+
+/**
+ * 更新状态提示条（#180）：发现新版本、下载进度与自动安装倒计时都在主界面看得见，
+ * 不必打开高级设置。位置与观感跟其它提示条一致，不另起一套视觉。
+ */
+export function UpdateStatusBar({ view, onDefer }: { view: UpdateStatusView; onDefer(): void }) {
+  return (
+    <div className="bar bar-info update-status" role="status" data-update-phase={view.phase}>
+      <span>{view.text}</span>
+      {view.canDefer && <button onClick={onDefer}>稍后</button>}
     </div>
   );
 }

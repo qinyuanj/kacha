@@ -7,6 +7,9 @@ import { UNAVAILABLE_TEXT } from "../core/uiText";
 import type { Board } from "../core/board";
 import { emptyHistory } from "../core/history";
 import { AppNotices, type AppNoticesProps } from "./appNotices";
+import { emptySnapshot, type UpdateSnapshot } from "../core/update";
+import { IDLE_AUTO_VIEW, type AutoInstallView } from "../core/updateAutoInstall";
+import { updateStatusView } from "./updateStatusView";
 import { AppPackMenu, AppToolbar, AppTopBar } from "./appPanels";
 import type { Session } from "./useBoardSessions";
 
@@ -32,6 +35,8 @@ const session = (): Session =>
   ({ key: "k1", path: "/~/a.ugcboard.json", status: "ok", board, history: emptyHistory(), notice: null, saveError: null, version: null, conflicted: false, missing: false }) as Session;
 
 const notices = (patch: Partial<AppNoticesProps> = {}): AppNoticesProps => ({
+  updateStatus: updateStatusView({ snapshot: emptySnapshot(), auto: IDLE_AUTO_VIEW }),
+  onDeferUpdate: vi.fn(),
   failures: [],
   tableError: null,
   settingsFileProblem: null,
@@ -55,6 +60,16 @@ const notices = (patch: Partial<AppNoticesProps> = {}): AppNoticesProps => ({
   onCloseMissing: vi.fn(),
   ...patch,
 });
+
+/** 已经下载并验签的快照：主界面提示条「已就绪」用。 */
+const ready = (): UpdateSnapshot => ({ ...emptySnapshot(), phase: "ready", version: "1.6.2", verified: true, installable: true, downloaded: 100, total: 100 });
+
+/** 倒计时中的样子：30 秒后自动装。 */
+const COUNTING: AutoInstallView = { counting: true, seconds: 30, waiting: "", deferred: false, installing: false };
+
+/** 更新提示条：按阶段与自动安装的样子渲染。 */
+const updateCase = (patch: Partial<UpdateSnapshot>, auto: AutoInstallView = IDLE_AUTO_VIEW): AppNoticesProps =>
+  notices({ updateStatus: updateStatusView({ snapshot: { ...emptySnapshot(), ...patch }, auto }) });
 
 describe("提示条", () => {
   it("没有提示：什么都不显示", async () => {
@@ -95,6 +110,35 @@ describe("提示条", () => {
   it("画板自己的提示：显示出来", async () => {
     await act(async () => dom.render(createElement(AppNotices, notices({ boardNotice: "重命名失败" }))));
     expect(container.textContent).toContain("重命名失败");
+  });
+
+  it("发现新版本：主界面就能看见，不用进高级设置（#180）", async () => {
+    await act(async () => dom.render(createElement(AppNotices, updateCase({ phase: "available", version: "1.6.2" }))));
+    expect(container.textContent).toContain("发现新版本 1.6.2");
+    // 没有可推迟的事，就没有「稍后」。
+    expect(container.querySelector("button")).toBeNull();
+  });
+
+  it("下载中：提示条带着百分比", async () => {
+    await act(async () => dom.render(createElement(AppNotices, updateCase({ phase: "downloading", version: "1.6.2", downloaded: 50, total: 100 }))));
+    expect(container.textContent).toContain("正在下载 1.6.2（50%）");
+  });
+
+  it("已就绪：倒计时与「稍后」都在主界面", async () => {
+    const defer = vi.fn();
+    await act(async () => dom.render(createElement(AppNotices, notices({ updateStatus: updateStatusView({ snapshot: ready(), auto: COUNTING }), onDeferUpdate: defer }))));
+    expect(container.textContent).toContain("30 秒后自动保存并重启安装");
+    const later = [...container.querySelectorAll("button")].find((b) => b.textContent === "稍后");
+    if (!later) throw new Error("没有找到「稍后」按钮");
+    await act(async () => later.click());
+    expect(defer).toHaveBeenCalledTimes(1);
+  });
+
+  it("点了稍后：说清本次不再自动装", async () => {
+    await act(async () =>
+      dom.render(createElement(AppNotices, notices({ updateStatus: updateStatusView({ snapshot: ready(), auto: { ...IDLE_AUTO_VIEW, deferred: true } }) }))),
+    );
+    expect(container.textContent).toContain("本次不再自动安装");
   });
 });
 

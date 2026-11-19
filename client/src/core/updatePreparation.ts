@@ -6,6 +6,9 @@
 /** 有未完成任务时的拒绝说法（与旧版一致）。 */
 export const BUSY_MESSAGE = "任务结束后可更新";
 
+/** 落盘之后仍有改动没保存成功时的拒绝说法（#180）：自动安装也照这条不装。 */
+export const UNSAVED_MESSAGE = "改动保存后再更新";
+
 export type PreparationResult = { ok: true } | { ok: false; reason: string };
 
 /** 生成任务队列：只要有没结束的份就不能装。 */
@@ -28,6 +31,13 @@ export interface UpdatePreparationPorts {
   saveBoards(): Promise<void>;
   /** 落盘界面状态（打开的画板、当前画板、设置草稿等）。 */
   saveUi(): Promise<void>;
+  /**
+   * 落盘之后仍没保存成功的改动（#180）。
+   *
+   * 自动保存把失败记在会话上、不抛出，所以只看 saveBoards / saveUi 的结局不够；
+   * 这里与「空闲判定」用的是同一个来源（updateAutoInstall.idleBlocker）。
+   */
+  unsavedChanges(): boolean;
   /** 保护开关变化：界面据此禁用入口。 */
   onProtectionChange?(active: boolean): void;
 }
@@ -70,6 +80,8 @@ async function saveAll(ports: UpdatePreparationPorts): Promise<PreparationResult
   ]);
   if (boards.status === "rejected") return { ok: false, reason: `保存画板失败：${text(boards.reason)}` };
   if (ui.status === "rejected") return { ok: false, reason: `保存界面状态失败：${text(ui.reason)}` };
+  // 写盘调用没抛错不代表写成了：自动保存会把失败记在会话上（不抛出），这里再核一次（#180）。
+  if (ports.unsavedChanges()) return { ok: false, reason: UNSAVED_MESSAGE };
   return { ok: true };
 }
 

@@ -5,6 +5,7 @@ import { AppBoardList, AppPackMenu, AppToolbar, AppTopBar, AppWorkspace } from "
 import { AppNotices } from "./appNotices";
 import { BackupHint } from "./appBars";
 import type { AppView } from "./appView";
+import type { UpdateStatusView } from "./updateStatusView";
 import type { Session } from "./useBoardSessions";
 
 /** 工作台的外壳：顶栏、画板列表、工具栏、提示条与工作区。 */
@@ -21,6 +22,9 @@ export function AppShell(props: {
   manageBoards: boolean;
   settingsLoaded: boolean;
   runIndicator: ComponentProps<typeof AppToolbar>["runIndicator"];
+  /** 更新状态提示条（#180）。 */
+  updateStatus: UpdateStatusView;
+  onDeferUpdate(): void;
   /** 提示条要的参数。 */
   tableError: string | null;
   settingsFileProblem: string | null;
@@ -125,6 +129,8 @@ export function AppShell(props: {
         sizeNotice={view.sizeNotice}
         activeArchived={view.activeArchived}
         boardNotice={view.boardNotice}
+        updateStatus={props.updateStatus}
+        onDeferUpdate={props.onDeferUpdate}
         onDismissTableError={props.onDismissTableError}
         onOpenSettings={props.onOpenSettings}
         onManageBoards={props.onManageBoards}

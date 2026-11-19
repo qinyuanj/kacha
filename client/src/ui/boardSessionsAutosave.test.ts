@@ -1,7 +1,7 @@
 // 多画板会话的去抖自动保存（#137）：落盘时机、写入条件与写失败。
 import { describe, expect, it, vi } from "vitest";
-import { flushPending, noteSaveFailure, writableNow, writeSession, type Saver } from "./boardSessionsAutosave";
-import type { OkSession } from "./useBoardSessions";
+import { flushPending, noteSaveFailure, unsavedChanges, writableNow, writeSession, type Saver } from "./boardSessionsAutosave";
+import type { OkSession, Session } from "./useBoardSessions";
 
 const session = (patch: Partial<OkSession> = {}): OkSession =>
   ({
@@ -17,6 +17,34 @@ const session = (patch: Partial<OkSession> = {}): OkSession =>
     missing: false,
     ...patch,
   }) as unknown as OkSession;
+
+/** 有计时器/没有计时器的保存器：只看判定，不真写盘。 */
+const saverWith = (timer: Saver["timer"]): Saver => ({ timer, chain: Promise.resolve() });
+
+describe("有没有未保存的改动（#180）", () => {
+  it("没有失败也没有待写计时器：算保存好了", () => {
+    expect(unsavedChanges([session()], new Map())).toBe(false);
+  });
+
+  it("上一次写盘失败：算没保存", () => {
+    expect(unsavedChanges([session({ saveError: "写不进去" })], new Map())).toBe(true);
+  });
+
+  it("还在等去抖计时器：算没保存", () => {
+    const savers = new Map<string, Saver>([["k1", saverWith(1 as unknown as ReturnType<typeof setTimeout>)]]);
+    expect(unsavedChanges([session()], savers)).toBe(true);
+  });
+
+  it("计时器已经跑过（null）：算保存好了", () => {
+    const savers = new Map<string, Saver>([["k1", saverWith(null)]]);
+    expect(unsavedChanges([session()], savers)).toBe(false);
+  });
+
+  it("打不开的会话（太新 / 损坏）：不算未保存", () => {
+    const newer = { key: "k2", path: "/~/b.ugcboard.json", status: "newer", version: 9 } as unknown as Session;
+    expect(unsavedChanges([newer], new Map())).toBe(false);
+  });
+});
 
 describe("落盘待写的改动", () => {
   it("有待写计时器：立刻落盘", async () => {

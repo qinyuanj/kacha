@@ -9,7 +9,7 @@ import { basename, resolveFromRoot } from "../core/paths";
 import { knownImageInfo } from "./context";
 import { useShell } from "./shell";
 import { isReadOnly, samePath } from "./boardSessions";
-import { flushPending, useAutosave, type Saver } from "./boardSessionsAutosave";
+import { flushPending, unsavedChanges, useAutosave, type Saver } from "./boardSessionsAutosave";
 import {
   applyChange,
   archiveBoardSession,
@@ -274,7 +274,9 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource, 
   const userRootRef = useRef(userRoot);
   userRootRef.current = userRoot;
   const readOnlyPath = useCallback((path: string) => isReadOnly(userRootRef.current, path), []);
-  const { flush, scheduleSave, flushAll, cancelTimer, saverOf } = useAutosave(store.patch, store.sessionOf, readOnlyPath, port);
+  const { flush, scheduleSave, flushAll, cancelTimer, saverOf, savers } = useAutosave(store.patch, store.sessionOf, readOnlyPath, port);
+  /** 有改动没落盘（#180）：自动安装要等到没有它。 */
+  const hasUnsavedChanges = useCallback(() => unsavedChanges(store.sessionsRef.current, savers.current), [store, savers]);
   const ports: SessionPorts = port;
   const editing = useSessionEditing({ userRoot, envSource, store, scheduleSave, readOnlyPath, movingSessions });
   const life = useSessionLifecycle({
@@ -333,6 +335,7 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource, 
     closeAll,
     flushAll,
     flushNow: flush,
+    hasUnsavedChanges,
     retrySave,
     reload,
     dismissNotice,

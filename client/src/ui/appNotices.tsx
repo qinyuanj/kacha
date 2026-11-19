@@ -1,7 +1,8 @@
 // 工作台的提示条（#137）：从 src/App.tsx 拆出的子组件，让 App 只留接线。
 import type { Board } from "../core/board";
 import type { SizeTier } from "../core/boardSize";
-import { ArchivedBar, SaveFailureBar, SizeNoticeBar, UsageLimitBar } from "./appBars";
+import { ArchivedBar, SaveFailureBar, SizeNoticeBar, UpdateStatusBar, UsageLimitBar } from "./appBars";
+import type { UpdateStatusView } from "./updateStatusView";
 
 /** 保存失败的画板：说明与操作按钮。 */
 export interface SaveFailure {
@@ -30,6 +31,8 @@ export interface AppNoticesProps {
   activeArchived: boolean;
   /** 当前画板自己的提示（重命名失败、重新载入失败等）。 */
   boardNotice: string | null;
+  /** 更新状态提示条（#180）：发现 / 下载中 / 已就绪都在主界面看得见。 */
+  updateStatus: UpdateStatusView;
   onDismissTableError(): void;
   onOpenSettings(): void;
   onManageBoards(): void;
@@ -39,6 +42,8 @@ export interface AppNoticesProps {
   onUnarchive(): void;
   onCopyArchived(): void;
   onDismissBoardNotice(): void;
+  /** 更新倒计时里的「稍后」：本轮不再自动装。 */
+  onDeferUpdate(): void;
   onReload(key: string): void;
   onRetrySave(key: string): void;
   onExportPack(key: string): void;
@@ -117,6 +122,7 @@ export function AppNotices(props: AppNoticesProps) {
   const { failures, tableError, settingsFileProblem, settingsOpen, usageNotice, sizeNotice, activeArchived, boardNotice } = props;
   return (
     <>
+      {props.updateStatus.visible && <UpdateStatusBar view={props.updateStatus} onDefer={props.onDeferUpdate} />}
       <SaveFailures
         failures={failures}
         onReload={props.onReload}

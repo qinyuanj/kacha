@@ -7,10 +7,10 @@ import { SendTextDialog } from "./SendTextDialog";
 import type { DataRootActions } from "./dataRootMove";
 import { SettingsPanel } from "./SettingsPanel";
 import type { useSettings } from "./useSettings";
-import type { UpdatePreparationPorts } from "../core/updatePreparation";
+import type { UpdateSectionProps } from "./UpdateSection";
 
 /** 设置面板。 */
-export function AppSettingsPanel({ settings, onClose, update, dataRoot }: { settings: ReturnType<typeof useSettings>; onClose(): void; update: UpdatePreparationPorts; dataRoot?: DataRootActions }) {
+export function AppSettingsPanel({ settings, onClose, update, dataRoot }: { settings: ReturnType<typeof useSettings>; onClose(): void; update: UpdateSectionProps; dataRoot?: DataRootActions }) {
   return <SettingsPanel settings={settings} onClose={onClose} update={update} dataRoot={dataRoot} />;
 }
 
@@ -82,8 +82,8 @@ export function AppOverlays({
   onSendTextClose(): void;
   packDialog: BoardPackDialogProps | null;
   toastText: string | null;
-  /** 更新安装前的准备依赖（#164）：任务队列与严格落盘。 */
-  update: UpdatePreparationPorts;
+  /** 更新那一段的快照与动作（#164、#180）。 */
+  update: UpdateSectionProps;
   /** 数据位置迁移的接线（#161）。 */
   dataRoot?: DataRootActions;
 }) {

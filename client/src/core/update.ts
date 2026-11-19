@@ -53,6 +53,18 @@ export function emptySnapshot(): UpdateSnapshot {
   };
 }
 
+/**
+ * 两次快照的内容是否一样（#180）。
+ *
+ * 工作台这一层每半秒到五秒读一次状态；内容没变就不该重绘——画布很重，
+ * 别让轮询带着整个工作台重排。
+ */
+export function sameUpdateSnapshot(a: UpdateSnapshot, b: UpdateSnapshot): boolean {
+  // 按序列化结果比：字段少、形状固定，比逐字段写一遍更不容易漏掉新加的字段。
+  // 字段顺序不同只会多一次重绘，不会把「变了」误判成「没变」。
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 /** 下一次自动检查该在多久之后：只在检查结束后计时，不在启动时固定计时。 */
 export function nextCheckDelay(snapshot: UpdateSnapshot, now: number): number | null {
   if (snapshot.phase === "disabled" || snapshot.phase === "installing") return null;
@@ -88,7 +100,10 @@ const PHASE_TEXT: Record<UpdatePhase, (snapshot: UpdateSnapshot) => string> = {
   error: (s) => s.error || "检查更新失败",
 };
 
-/** 状态一句话：界面顶栏与设置页共用。 */
+/**
+ * 状态一句话：高级设置里的更新面板与主界面的更新提示条共用（#180 起顶栏那一句才真的接上，
+ * 此前注释先说共用、实际只有设置页在用）。
+ */
 export function updateText(snapshot: UpdateSnapshot): string {
   const text = PHASE_TEXT[snapshot.phase];
   return text ? text(snapshot) : PHASE_TEXT.error(snapshot);

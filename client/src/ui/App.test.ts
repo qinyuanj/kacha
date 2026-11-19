@@ -5,6 +5,7 @@ import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardListing } from "../shell/types";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
+import { emptySnapshot, type UpdateSnapshot } from "../core/update";
 import { ShellProvider } from "./shell";
 import { App } from "../App";
 
@@ -31,6 +32,17 @@ afterEach(async () => {
 function listing(boards: BoardListing["boards"] = []): BoardListing {
   return { boards, slots: { used: 0, total: 10 }, size_lines: { warn: 100, alert: 200 } };
 }
+
+/** 更新快照（#180）：默认是已下载并验签的 1.6.2。 */
+const updateSnapshot = (patch: Partial<UpdateSnapshot>): UpdateSnapshot => ({
+  ...emptySnapshot(),
+  version: "1.6.2",
+  verified: true,
+  installable: true,
+  downloaded: 100,
+  total: 100,
+  ...patch,
+});
 
 async function show(port: FakePort, props: { version?: string | null } = {}): Promise<void> {
   await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(App, { ...props }) })));
@@ -122,5 +134,37 @@ describe("工作台", () => {
     const listButton = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("画板"));
     await act(async () => listButton?.click());
     await vi.waitFor(() => expect(container.textContent).toContain("a"));
+  });
+
+  it("更新已就绪：主界面提示条就看得见，不用进高级设置（#180）", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    port.update.status = async () => updateSnapshot({ phase: "ready" });
+    await show(port);
+    await vi.waitFor(() => expect(container.querySelector(".update-status")?.getAttribute("data-update-phase")).toBe("ready"));
+  });
+
+  it("下载中：提示条带着进度", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    port.update.status = async () => updateSnapshot({ phase: "downloading", downloaded: 40, total: 100 });
+    await show(port);
+    await vi.waitFor(() => expect(container.querySelector(".update-status")?.textContent).toContain("正在下载 1.6.2（40%）"));
+  });
+
+  it("点「稍后」：本轮不再自动装", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    let snapshot = updateSnapshot({ phase: "downloading", downloaded: 0 });
+    port.update.status = async () => snapshot;
+    await show(port);
+    await vi.waitFor(() => expect(container.textContent).toContain("正在下载"));
+    // 下载完成：倒计时开始，主界面出现「稍后」。
+    snapshot = updateSnapshot({ phase: "ready" });
+    await vi.waitFor(() => expect(container.textContent).toContain("稍后"));
+    const later = [...container.querySelectorAll("button")].find((b) => b.textContent === "稍后");
+    await act(async () => later?.click());
+    expect(container.textContent).toContain("本次不再自动安装");
+    expect(port.calls.updateInstall).toBe(0);
   });
 });
