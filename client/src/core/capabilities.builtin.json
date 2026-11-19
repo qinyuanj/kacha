@@ -276,7 +276,8 @@
             },
             "custom": { "min_total_pixels": 921600, "max_total_pixels": 4624220, "min_aspect_ratio": 0.0625, "max_aspect_ratio": 16 }
           },
-          "layer_decomposition": "untested"
+          "layer_decomposition": "untested",
+          "transparent_rule": "native"
         },
         "image_edit": {
           "supports_negative_prompt": "unsupported",

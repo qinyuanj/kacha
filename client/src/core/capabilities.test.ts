@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { imageRuleViolations } from "./graph";
 import {
   BUILTIN_TABLE,
+  effectiveTable,
   isSupported,
   mergeOverride,
   modelsByTier,
@@ -138,5 +139,33 @@ describe("覆盖文件按模型合并", () => {
     expect(merged.models.find((m) => m.model_id === "qwen-image-3.0")!.workflows.image_edit.max_references).toBe(3);
     expect(merged.models.at(-1)!.model_id).toBe("new-model");
     expect(BUILTIN_TABLE.models[0].workflows.image_edit.max_references).toBe(3);
+  });
+});
+
+describe("生效能力表：覆盖文件的四种结局", () => {
+  it("没有覆盖文件：直接用内置表，无错误", () => {
+    const result = effectiveTable(null);
+    expect(result.error).toBeNull();
+    expect(result.table).toBe(BUILTIN_TABLE);
+  });
+
+  it("覆盖文件不是 JSON：忽略覆盖并给出原因", () => {
+    const result = effectiveTable("{ 不是 json");
+    expect(result.table).toBe(BUILTIN_TABLE);
+    expect(result.error).toContain("不是有效 JSON");
+  });
+
+  it("覆盖文件不合法：忽略覆盖并带上校验原因", () => {
+    const result = effectiveTable(JSON.stringify({ format_version: 0, models: [] }));
+    expect(result.table).toBe(BUILTIN_TABLE);
+    expect(result.error).toContain("format_version");
+  });
+
+  it("覆盖文件合法：与内置表合并后生效", () => {
+    const override = { format_version: 1, models: [{ ...structuredClone(qwenPro()), model_id: "override-only", tier: null }] };
+    const result = effectiveTable(JSON.stringify(override));
+    expect(result.error).toBeNull();
+    expect(result.table.models.some((m) => m.model_id === "override-only")).toBe(true);
+    expect(result.table.models.length).toBe(BUILTIN_TABLE.models.length + 1);
   });
 });

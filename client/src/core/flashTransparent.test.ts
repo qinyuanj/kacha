@@ -134,3 +134,50 @@ describe("透明背景控件和运行规则一致", () => {
     expect(taskView(b, BUILTIN_TABLE, "t1", facts)!.reasons.map(r => r.kind)).toContain("transparentNeedsOneImage");
   });
 });
+
+const model55 = findModel(BUILTIN_TABLE, "doubao-seedream-5-5-261028")!;
+const t2iInput = { model: model55, text: "一只橘猫贴纸", nativeNegativePrompt: null, size: { width: 1024, height: 1024 }, references: [], transparentBackground: true };
+const jpegOptions = { output_format: "jpeg" as const, response_format: "url" as const, watermark: false };
+
+/** 5.5 文生图没有连线（工作流由参考图张数推导，0 张 = text_to_image）。 */
+function textToImageBoard(modelId: string) {
+  const b = board(["t1"], true);
+  const t = b.nodes.find(n => n.type === "task") as TaskNode;
+  t.model = modelId;
+  t.transparent_background = true;
+  b.edges = [];
+  b.nodes = b.nodes.filter(n => n.type === "task");
+  return b;
+}
+
+const t2iFacts = { discovery: { source: "none" as const }, missingNodes: new Set<string>(), alphaByNode: new Map<string, boolean>(), concurrency: 4 };
+
+describe("透明背景按工作流的能力声明判定（#182）", () => {
+  it("5.5 文生图 + 透明提交：background=transparent、output_format=png，不需要参考图", () => {
+    expect(buildGenerationRequest(t2iInput).body).toMatchObject({ background: "transparent", output_format: "png" });
+    expect(buildGenerationRequest(t2iInput).body).not.toHaveProperty("image");
+  });
+
+  it("5.5 文生图 + 透明 + jpeg 输出仍被拦：官方该组合非法", () => {
+    expect(() => buildGenerationRequest({ ...t2iInput, outputOptions: jpegOptions })).toThrow("透明背景输出必须为 PNG");
+  });
+
+  it("5.0 Flash 行为不变：文生图（零参考图）+ 透明仍被拦", () => {
+    expect(() => buildGenerationRequest({ ...t2iInput, model })).toThrow("透明背景需要恰好一张实际参考图");
+  });
+
+  it("界面开关与运行规则同步：5.5 文生图可开，5.0 Flash 不可开", () => {
+    expect(taskView(textToImageBoard(model55.model_id), BUILTIN_TABLE, "t1", t2iFacts)!.toggles.transparentBackground.canEnable).toBe(true);
+    const flashView = taskView(textToImageBoard(model.model_id), BUILTIN_TABLE, "t1", t2iFacts)!;
+    expect(flashView.toggles.transparentBackground.canEnable).toBe(false);
+    expect(flashView.reasons.map(r => r.kind)).toContain("transparentNeedsOneImage");
+  });
+
+  it("5.5 文生图开启透明后没有阻断原因；改成 jpeg 才出现 transparentNeedsPng", () => {
+    const b = textToImageBoard(model55.model_id);
+    // 只锁透明相关的阻断；其他原因（如未测能力提示）不属于本票范围。
+    expect(taskView(b, BUILTIN_TABLE, "t1", t2iFacts)!.reasons.map(r => r.kind).filter(k => k.startsWith("transparent"))).toEqual([]);
+    (b.nodes.find(n => n.type === "task") as TaskNode).output_options = jpegOptions;
+    expect(taskView(b, BUILTIN_TABLE, "t1", t2iFacts)!.reasons.map(r => r.kind)).toContain("transparentNeedsPng");
+  });
+});
