@@ -61,6 +61,9 @@ type Options struct {
 	BaseURL string
 	// PublicKey 是发布者公钥（base64）；空则用内置的 publisherKey。
 	PublicKey string
+	// NoBuiltinKey 让 PublicKey 为空时不再回退到内置公钥，用来显式表达
+	// 「这次构建没有可信公钥」。测试与发布预检用它，正式装配不设。
+	NoBuiltinKey bool
 	// Client 是 HTTP 客户端；空则用带超时的默认客户端。
 	Client *http.Client
 	// Launch 启动安装器；空则真起进程。
@@ -109,7 +112,7 @@ func New(opts Options) *Service {
 		base = DefaultBaseURL
 	}
 	keyText := strings.TrimSpace(opts.PublicKey)
-	if keyText == "" {
+	if keyText == "" && !opts.NoBuiltinKey {
 		keyText = PublisherKey()
 	}
 	now := opts.Now

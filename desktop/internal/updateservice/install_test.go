@@ -83,7 +83,7 @@ func TestInstallFailureKeepsAppRunnable(t *testing.T) {
 func TestWithoutPublisherKeyUpdatesAreUnavailable(t *testing.T) {
 	pub := newPublisher(t)
 	f := buildFixture(t, pub, releaseSpec{Version: "1.6.0"})
-	svc := New(Options{Current: "1.5.0", Root: t.TempDir(), BaseURL: f.base, Client: f.server.Client()})
+	svc := New(Options{Current: "1.5.0", Root: t.TempDir(), BaseURL: f.base, Client: f.server.Client(), NoBuiltinKey: true})
 	if svc.Enabled() {
 		t.Fatalf("a build without a publisher key must not be enabled")
 	}
