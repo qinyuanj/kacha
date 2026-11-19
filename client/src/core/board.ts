@@ -54,6 +54,8 @@ export interface TaskNode extends NodeBase {
   /** 缺省沿用 url/png/false；仅适用于 Flash。 */
   output_options?: OutputOptions;
   layer_size?: import("./gateway").LayerSize;
+  /** 拆分图层的输出张数（正整数）；范围由能力表该工作流决定，画板不按模型改写。 */
+  layer_max_images?: number;
   /** 份数：一次运行 / 重新生成展开出的生成任务个数（正整数）；缺省 = 1。不进脏判据，不随页面并发上限改写。 */
   count?: number;
   /** 脏判据快照；未提交过为 null。本切片只读写不解释。 */
@@ -234,13 +236,18 @@ function autoRatio(raw: unknown): AutoRatio | null {
 const NODE_KEYS = {
   prompt: ["id", "type", "pos", "size", "text"],
   reference: ["id", "type", "pos", "size", "path", "sha256", "display_name", "source_board"],
-  task: ["id", "type", "pos", "size", "model", "size_spec", "image_ports", "layer_decomposition", "transparent_background", "output_options", "layer_size", "count", "last_submitted"],
+  task: ["id", "type", "pos", "size", "model", "size_spec", "image_ports", "layer_decomposition", "transparent_background", "output_options", "layer_size", "layer_max_images", "count", "last_submitted"],
   result: ["id", "type", "pos", "size", "task_id", "file", "path", "layer_count", "record", "final"],
 } as const;
 
 /** 图层尺寸的封闭取值；画板里出现别的值视为损坏，不静默断言。 */
 function layerSizeOf(raw: unknown): LayerSize {
   return need<LayerSize>(isLayerSize(raw), raw, `layer_size 必须是 ${LAYER_SIZES_TEXT}`);
+}
+
+/** 拆分图层的输出张数：画板只要求正整数，范围由能力表该工作流决定（越界在 taskView 里标明）。 */
+function layerMaxImagesOf(raw: unknown): number {
+  return need<number>(Number.isInteger(raw) && (raw as number) >= 1, raw, "layer_max_images 必须是正整数");
 }
 
 /** 画板里的输出选项做结构化校验；取值越界即损坏（与 gateway.outputOptions 同口径，但损坏归画板格式）。 */
@@ -285,6 +292,7 @@ function parseTaskNode(o: Json, base: NodeBase): TaskNode {
     image_ports: num(o, "image_ports"),
     layer_decomposition: bool(o, "layer_decomposition"),
     ...(o.layer_size === undefined ? {} : { layer_size: layerSizeOf(o.layer_size) }),
+    ...(o.layer_max_images === undefined ? {} : { layer_max_images: layerMaxImagesOf(o.layer_max_images) }),
     transparent_background: bool(o, "transparent_background"),
     ...(o.output_options === undefined ? {} : { output_options: outputOptionsOf(o.output_options) }),
     ...(o.count === undefined ? {} : { count: need<number>(Number.isInteger(o.count) && (o.count as number) >= 1, o.count, "count 必须是正整数") }),

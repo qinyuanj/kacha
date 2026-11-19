@@ -2,7 +2,7 @@
 // 生成任务节点与二次确认（buildConfirmItems）消费同一份，「节点标红 ≡ 运行被拦」由构造保证。
 // 换模型绝不自动删线或改设置，只报告原因。
 import { findTask, runCopies, type Board, type BoardEdge, type TaskNode } from "./board";
-import { findModel, isRetiredModel, isSupported, LITE_RETIRED_HINT, transparentRuleOf, workflowFor, type CapabilityTable, type ModelCapability, type SizeRule, type WorkflowName } from "./capabilities";
+import { findModel, isRetiredModel, isSupported, layerMaxImagesRuleOf, LITE_RETIRED_HINT, transparentRuleOf, workflowFor, type CapabilityTable, type LayerMaxImagesRule, type ModelCapability, type SizeRule, type WorkflowName } from "./capabilities";
 import { isFlashShape, isLayerSize, isRequestShapeImplemented, LAYER_SIZES_TEXT } from "./gateway";
 import { chainedEdit, imageEdges, imageKey, imagePortSlots, imageSources, promptText, workflowOf } from "./graph";
 import { MAX_REGIONS } from "./overlay";
@@ -28,6 +28,8 @@ export type ReasonKind =
   | "sizeUnsupported"
   | "layerNeedsOneImage"
   | "layerUnsupported"
+  /** 拆分图层的张数越出能力表该工作流的范围（#175）。 */
+  | "layerMaxImagesRange"
   | "transparentUnsupported"
   | "transparentNeedsOneImage"
   | "transparentNoAlpha"
@@ -131,7 +133,21 @@ function inputReasons(board: Board, table: CapabilityTable, task: TaskNode, mode
     ...(flashLayers ? [] : promptReasons(board, taskId)),
     ...(flashLayers && imagePortSlots(board, table, taskId).length !== 1 ? [reason("layerNeedsOneImage", "图层拆分需要恰好一张 PNG/JPEG 参考图，不支持区域派生图")] : []),
     ...(flashLayers && !isLayerSize(task.layer_size ?? "auto") ? [reason("sizeUnsupported", `图层尺寸只支持 ${LAYER_SIZES_TEXT}`)] : []),
+    ...layerCountReasons(board, model, task, flashLayers),
   ];
+}
+
+/** 该工作流没声明张数约束（5.0 Flash / Pro）时不检查，请求里也不会带这个字段。 */
+function maxImagesInRange(rule: LayerMaxImagesRule, task: TaskNode): boolean {
+  const value = task.layer_max_images ?? rule.default;
+  return Number.isInteger(value) && value >= rule.min && value <= rule.max;
+}
+
+function layerCountReasons(board: Board, model: ModelCapability | undefined, task: TaskNode, flashLayers: boolean): UnrunnableReason[] {
+  if (!flashLayers || !model) return [];
+  const rule = layerMaxImagesRuleOf(model, workflowOf(board, task.id));
+  if (!rule || maxImagesInRange(rule, task)) return [];
+  return [reason("layerMaxImagesRange", `图层数量必须在 ${rule.min}–${rule.max} 之间`)];
 }
 
 function taskModelReasons(board: Board, table: CapabilityTable, task: TaskNode, model: ModelCapability | undefined, discovery: Discovery): UnrunnableReason[] {

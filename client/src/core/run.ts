@@ -140,8 +140,9 @@ function layerSend(send: ReturnType<typeof planSend>, layers: boolean, prompt: s
   return layers && !prompt.trim() && !negative.trim() ? { ...send, text: "" } : send;
 }
 
-function layerOptions(enabled: boolean, layerSize: SubmissionPlan["layerSize"]): Pick<SubmissionPlan, "layerSize"> {
-  return enabled ? { layerSize: layerSize ?? "auto" } : {};
+function layerOptions(enabled: boolean, layerSize: SubmissionPlan["layerSize"], layerMaxImages: SubmissionPlan["layerMaxImages"]): Pick<SubmissionPlan, "layerSize" | "layerMaxImages"> {
+  if (!enabled) return {};
+  return { layerSize: layerSize ?? "auto", ...(layerMaxImages === undefined ? {} : { layerMaxImages }) };
 }
 
 /**
@@ -238,7 +239,7 @@ export async function prepareJob(
     sizeSpec: snapshot.size_spec,
     size,
     layerDecomposition: snapshot.layer_decomposition,
-    ...layerOptions(flashLayers, task.layer_size),
+    ...layerOptions(flashLayers, task.layer_size, task.layer_max_images),
     ...(snapshot.output_options ? { outputOptions: snapshot.output_options } : {}),
     transparentBackground: snapshot.transparent_background,
     capabilityFormatVersion: table.format_version,
@@ -271,7 +272,7 @@ function jobOf(taskNodeId: string, plan: SubmissionPlan, model: ModelCapability,
     taskNodeId,
     taskId: plan.taskId,
     plan,
-    input: { model, text: plan.send.text, nativeNegativePrompt: plan.send.nativeNegativePrompt, size: plan.size, references: [], outputOptions: plan.outputOptions, transparentBackground: plan.transparentBackground, chainedEdit: chained, layerDecomposition: plan.layerDecomposition, layerSize: plan.layerSize },
+    input: { model, text: plan.send.text, nativeNegativePrompt: plan.send.nativeNegativePrompt, size: plan.size, references: [], outputOptions: plan.outputOptions, transparentBackground: plan.transparentBackground, chainedEdit: chained, layerDecomposition: plan.layerDecomposition, layerSize: plan.layerSize, layerMaxImages: plan.layerMaxImages },
     record: {
       model: plan.model,
       prompt: plan.prompt,
@@ -355,7 +356,7 @@ export async function prepareRegenerate(
     send,
     ...sized,
     layerDecomposition: previous.layer_decomposition,
-    ...layerOptions(previous.layer_decomposition, previous.layer_size),
+    ...layerOptions(previous.layer_decomposition, previous.layer_size, previous.layer_max_images),
     ...(previous.output_options ? { outputOptions: previous.output_options } : {}),
     transparentBackground: previous.transparent_background,
     capabilityFormatVersion: args.table.format_version,

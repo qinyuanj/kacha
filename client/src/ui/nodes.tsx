@@ -14,6 +14,7 @@ import { taskCount } from "../core/board";
 import { FINAL_BADGE_TEXT, SUGGEST_KEEP_TEXT } from "./boardText";
 import {
   findModel,
+  layerMaxImagesRuleOf,
   modelsByTier,
   TIER_LABELS,
   untestedCapabilities,
@@ -724,6 +725,8 @@ export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskF
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const updateInternals = useUpdateNodeInternals();
   const model = findModel(table, node.model);
+  // 拆分图层的张数范围由能力表该工作流声明；没声明就不给输入框（5.0 Flash / Pro）。
+  const layerMaxImages = node.layer_decomposition && model ? layerMaxImagesRuleOf(model, workflow) : null;
   const rule = model?.workflows[workflow].size_rule;
   const modelLabel = view.model.label;
   const listed = view.model.state === "ok";
@@ -861,6 +864,19 @@ export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskF
             {LAYER_SIZES.map((s) => <option key={s} value={s}>{s === "auto" ? "自动" : s}</option>)}
           </select>
           <span className="muted small" title="auto：921600–4624220 像素保持原尺寸，较小放到 1K，较大缩到 2K">底图跟随输入，图层跟随元素</span>
+          {layerMaxImages && (
+            <input
+              type="number"
+              aria-label="图层数量"
+              className="layer-count"
+              min={layerMaxImages.min}
+              max={layerMaxImages.max}
+              value={node.layer_max_images ?? layerMaxImages.default}
+              title={`拆分出的图层张数，${layerMaxImages.min}–${layerMaxImages.max}，缺省 ${layerMaxImages.default}`}
+              disabled={locked}
+              onChange={(e) => apply({ kind: "setLayerMaxImages", taskId: node.id, count: Number(e.target.value) })}
+            />
+          )}
         </div>
       ) : <div className="field size-field nodrag">
         <select value={tier ?? ""} onChange={(e) => setTier(e.target.value)} aria-label="分辨率档" disabled={locked}>
