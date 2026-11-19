@@ -52,6 +52,16 @@ function isMissingError(e: unknown): boolean {
   return kind === "missing";
 }
 
+/**
+ * 有没有未保存的改动（#180）：上一次写盘失败，或还在等去抖计时器。
+ *
+ * 自动安装与「严格保存」都用这一条判定，不各自去看会话上的字段。
+ */
+export function unsavedChanges(sessions: readonly Session[], savers: ReadonlyMap<string, Saver>): boolean {
+  if (sessions.some((s) => s.status === "ok" && s.saveError !== null)) return true;
+  return [...savers.values()].some((s) => s.timer !== null);
+}
+
 /** 落盘待写的改动：有时计时器就直接写，有时等之前的写完。 */
 export async function flushPending(key: string, saverOf: (key: string) => Saver, flush: (key: string) => Promise<void>): Promise<void> {
   const saver = saverOf(key);

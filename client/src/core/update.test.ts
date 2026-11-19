@@ -7,6 +7,7 @@ import {
   emptySnapshot,
   nextCheckDelay,
   progressText,
+  sameUpdateSnapshot,
   updateText,
   type UpdateSnapshot,
 } from "./update";
@@ -15,6 +16,34 @@ import {
 function snap(patch: Partial<UpdateSnapshot>): UpdateSnapshot {
   return { ...emptySnapshot(), ...patch };
 }
+
+describe("快照内容比较（#180）", () => {
+  const base = (): UpdateSnapshot => ({
+    phase: "downloading",
+    current: "1.6.1",
+    version: "1.6.2",
+    notes: "更新说明",
+    page_url: "https://example.invalid/1.6.2",
+    downloaded: 10,
+    total: 100,
+    verified: true,
+    installable: false,
+    error: "",
+    checked_at: "2026-01-01T00:00:00Z",
+  });
+
+  it("逐字段相同的两份快照算一样", () => {
+    expect(sameUpdateSnapshot(base(), { ...base() })).toBe(true);
+  });
+
+  it("任何一个字段变了都算不一样", () => {
+    for (const key of Object.keys(base()) as (keyof UpdateSnapshot)[]) {
+      const value = base()[key];
+      const flipped = typeof value === "string" ? `${value}x` : typeof value === "number" ? value + 1 : !value;
+      expect(sameUpdateSnapshot(base(), { ...base(), [key]: flipped })).toBe(false);
+    }
+  });
+});
 
 describe("更新排程", () => {
   it("启动约 3 秒后检查第一次", () => {

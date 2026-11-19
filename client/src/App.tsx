@@ -14,6 +14,9 @@ import { useRunCallbacks } from "./ui/appRunHooks";
 import { useBoardSessions } from "./ui/useBoardSessions";
 import { errorText } from "./core/errors";
 import { useShell } from "./ui/shell";
+import { useUpdate } from "./ui/useUpdate";
+import { useUpdateAutoInstall } from "./ui/useUpdateAutoInstall";
+import { updateStatusView } from "./ui/updateStatusView";
 import { modalOpenOf, noticesAfterMove, uiStateOf, uiStateText } from "./ui/appUiState";
 import { AppOverlays } from "./ui/appDialogs";
 import type { DataRootActions } from "./ui/dataRootMove";
@@ -296,9 +299,27 @@ export function App({ version }: AppProps) {
       saveUi: async () => {
         await persistUi();
       },
+      unsavedChanges: () => boards.hasUnsavedChanges(),
     }),
     [runner, boards, persistUi],
   );
+  // 更新的接线（#180）：一份快照、一份动作、一处空闲判定；高级设置、主界面提示条与
+  // 空闲自动安装共用它们，所以只有一个轮询、一个排程与一个准备协调器。
+  const update = useUpdate(updateDeps);
+  // 画板列表与设置读出来没有也交给空闲判定（#180）：启动时快照往往先到，
+  // 这时自动安装会把半载入的界面状态写回去。判定只在 core/updateAutoInstall 一处。
+  const updateIdle = useCallback(
+    () => ({
+      boardsReady: state.ready,
+      settingsLoaded: settings.loaded,
+      pendingTasks: runner.getSnapshot().pending(),
+      unsavedChanges: boards.hasUnsavedChanges(),
+    }),
+    [state.ready, settings.loaded, runner, boards],
+  );
+  const autoInstall = useUpdateAutoInstall({ snapshot: update.snapshot, loaded: update.loaded, idle: updateIdle, install: update.install });
+  const updateStatus = updateStatusView({ snapshot: update.snapshot, auto: autoInstall.view });
+
   const uiSignature = JSON.stringify([sessions.map((s) => s.path), sessions.find((s) => s.key === activeKey)?.path, state.lastSeenVersion, state.sizeNotices]);
   const persistRef = useRef(persistUi);
   persistRef.current = persistUi;
@@ -351,6 +372,8 @@ export function App({ version }: AppProps) {
         settingsFileProblem={settings.fileProblem}
         settingsOpen={state.settingsOpen}
         usageNotice={usageNotice}
+        updateStatus={updateStatus}
+        onDeferUpdate={autoInstall.defer}
         runIndicator={{
           active: runState.active,
           activity: runState.activity,
@@ -441,7 +464,7 @@ export function App({ version }: AppProps) {
         onSendTextClose={() => store.setSendText(null)}
         packDialog={pack.dialog}
         toastText={state.toastText}
-        update={updateDeps}
+        update={update}
         dataRoot={dataRootActions}
       />
     </>

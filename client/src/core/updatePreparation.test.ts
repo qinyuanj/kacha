@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { BUSY_MESSAGE, createUpdatePreparation, type UpdatePreparationPorts } from "./updatePreparation";
+import { BUSY_MESSAGE, UNSAVED_MESSAGE, createUpdatePreparation, type UpdatePreparationPorts } from "./updatePreparation";
 
 /** 一个可编排的队列与保存器：测试要控制「有没有任务」「保存成不成功」。 */
 function harness(overrides: Partial<UpdatePreparationPorts> = {}) {
   let pending = 0;
+  let unsaved = false;
   let guard: (() => void) | null = null;
   const blocked: string[] = [];
   const saves = { boards: 0, ui: 0 };
@@ -21,6 +22,7 @@ function harness(overrides: Partial<UpdatePreparationPorts> = {}) {
     async saveUi() {
       saves.ui++;
     },
+    unsavedChanges: () => unsaved,
     onProtectionChange: (active) => protection.push(active),
     ...overrides,
   };
@@ -32,6 +34,10 @@ function harness(overrides: Partial<UpdatePreparationPorts> = {}) {
     protection,
     setPending(n: number) {
       pending = n;
+    },
+    /** 模拟「写盘调用没抛错，但会话上还留着没保存的改动」。 */
+    setUnsaved(next: boolean) {
+      unsaved = next;
     },
     /** 模拟一次新提交：被守护时记一笔。 */
     submit() {
@@ -100,6 +106,17 @@ describe("更新准备：保护范围", () => {
     expect(h.preparation.active()).toBe(false);
     expect(h.guarded()).toBe(false);
     expect(h.submit()).toBe(true);
+  });
+
+  it("写盘没抛错但仍有改动没保存成功：拒绝，不说成已保存（#180）", async () => {
+    const h = harness();
+    h.setUnsaved(true);
+    const result = await h.preparation.prepare();
+    expect(result).toEqual({ ok: false, reason: UNSAVED_MESSAGE });
+    expect(h.preparation.active()).toBe(false);
+    // 改动落盘之后又恢复：准备回到通过。
+    h.setUnsaved(false);
+    expect(await h.preparation.prepare()).toEqual({ ok: true });
   });
 
   it("保存界面状态失败也拒绝，且不改口说成功", async () => {

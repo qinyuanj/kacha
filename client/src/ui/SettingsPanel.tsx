@@ -6,8 +6,7 @@ import { DataRootSection } from "./DataRootSection";
 import type { DataRootActions } from "./dataRootMove";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 import { DEFAULT_SETTINGS, MAX_CONCURRENCY, MIN_CONCURRENCY, normalizeBaseUrl } from "../core/settings";
-import { UpdateSection } from "./UpdateSection";
-import type { UpdatePreparationPorts } from "../core/updatePreparation";
+import { UpdateSection, type UpdateSectionProps } from "./UpdateSection";
 import { UsageSection } from "./UsageSection";
 import type { ConnectionResult, useSettings } from "./useSettings";
 import { concurrencyOnBlur, connectionText, discoveryText, settingsPanelView, settingsToSave } from "./settingsPanelView";
@@ -15,8 +14,8 @@ import { concurrencyOnBlur, connectionText, discoveryText, settingsPanelView, se
 interface Props {
   settings: ReturnType<typeof useSettings>;
   onClose: () => void;
-  /** 更新安装前的准备依赖：任务队列与严格落盘（#164）。 */
-  update: UpdatePreparationPorts;
+  /** 更新那一段的快照与动作（#164、#180）：由工作台统一接线，主界面与本段共用。 */
+  update: UpdateSectionProps;
   /** 数据位置迁移的接线（#161）；工作台没给就不显示这一段。 */
   dataRoot?: DataRootActions;
 }
@@ -172,7 +171,7 @@ export function SettingsPanel({ settings, onClose, update, dataRoot }: Props) {
           onBlur={() => setConcurrencyDraft(concurrencyOnBlur(concurrencyDraft, settings.settings.concurrency))}
         />
 
-        <UpdateSection queue={update.queue} saveBoards={update.saveBoards} saveUi={update.saveUi} />
+        <UpdateSection {...update} />
 
         {dataRoot && <DataRootSection actions={dataRoot} />}
 
