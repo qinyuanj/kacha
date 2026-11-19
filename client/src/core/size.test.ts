@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BUILTIN_TABLE } from "./capabilities";
+import { imageRuleViolations } from "./graph";
 import { autoRatioLabel, autoSizeSpec, commitRatioInput, inferRatio, isAutoRatio, ratioRangeText, ratiosForSizeTier, resolveSize, sizeTiersOf, withinPixelRange, withSizeTier } from "./size";
 
 const rule = BUILTIN_TABLE.models[0].workflows.text_to_image.size_rule;
@@ -12,6 +13,32 @@ describe("Flash 生成尺寸边界", () => {
     for (const [width, height] of [[960, 960], [2330, 1984], [3840, 240], [240, 3840]]) expect(resolveSize(flash, { tier: null, ratio: null, width, height })).toEqual({ width, height });
     for (const [width, height] of [[959, 960], [2331, 1984], [3841, 240], [0, 1024], [1024.5, 1024]]) expect(resolveSize(flash, { tier: null, ratio: null, width, height })).toBeNull();
     expect(resolveSize(flash, { tier: "3K", ratio: "1:1", width: null, height: null })).toBeNull();
+  });
+});
+
+describe("Seedream 5.5 尺寸：档位照抄 Flash，输入像素与输出像素是两套数", () => {
+  const five = () => BUILTIN_TABLE.models.find((m) => m.model_id === "doubao-seedream-5-5-261028")!;
+  const rule = () => five().workflows.text_to_image.size_rule;
+
+  it("三档 × 八种宽高比，默认 2K", () => {
+    expect(sizeTiersOf(rule())).toEqual(["2K", "1K", "1.5K"]);
+    expect(ratiosForSizeTier(rule(), "2K")).toEqual(["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"]);
+    for (const tier of sizeTiersOf(rule())) expect(ratiosForSizeTier(rule(), tier)).toHaveLength(8);
+    expect(resolveSize(rule(), { tier: "2K", ratio: "16:9", width: null, height: null })).toEqual({ width: 2816, height: 1584 });
+    expect(resolveSize(rule(), { tier: "1K", ratio: "21:9", width: null, height: null })).toEqual({ width: 1568, height: 672 });
+    expect(resolveSize(rule(), { tier: "3K", ratio: "1:1", width: null, height: null })).toBeNull();
+  });
+
+  it("自定义输出像素 921600–4624220、宽高比 1/16–16", () => {
+    for (const [width, height] of [[960, 960], [1280, 720], [2048, 2048], [240, 3840], [3840, 240]]) expect(resolveSize(rule(), { tier: null, ratio: null, width, height })).toEqual({ width, height });
+    // 低于 921600、高于 4624220、宽高比低于 1/16
+    for (const [width, height] of [[959, 960], [2152, 2152], [240, 3845]]) expect(resolveSize(rule(), { tier: null, ratio: null, width, height })).toBeNull();
+    expect(withinPixelRange(rule().custom!, 240, 3845)).toBe(false);
+  });
+
+  it("512x512 在生成场景是合法输入图，在 size 的 custom 里非法（262144 < 921600）", () => {
+    expect(imageRuleViolations({ format: "png", bytes: 1024, width: 512, height: 512 }, five().input_image_rule)).toEqual([]);
+    expect(resolveSize(rule(), { tier: null, ratio: null, width: 512, height: 512 })).toBeNull();
   });
 });
 
@@ -171,7 +198,7 @@ describe("手填宽高比", () => {
   const pro = model("doubao-seedream-5-0-pro-260628");
   const manual = (tier: string, ratio: string) => ({ tier, ratio, width: null, height: null });
 
-  it("四个上架模型都能手填非预设的 5:2：像素按该分辨率档 1:1 的面积、16 的倍数", () => {
+  it("五个上架模型都能手填非预设的 5:2：像素按该分辨率档 1:1 的面积、16 的倍数", () => {
     for (const m of BUILTIN_TABLE.models.filter((m) => m.tier !== null)) {
       const r = m.workflows.image_edit.size_rule;
       const tier = sizeTiersOf(r)[0];
