@@ -2,7 +2,7 @@
 // 生成任务节点与二次确认（buildConfirmItems）消费同一份，「节点标红 ≡ 运行被拦」由构造保证。
 // 换模型绝不自动删线或改设置，只报告原因。
 import { findTask, runCopies, type Board, type BoardEdge, type TaskNode } from "./board";
-import { findModel, isRetiredModel, isSupported, LITE_RETIRED_HINT, type CapabilityTable, type ModelCapability, type SizeRule } from "./capabilities";
+import { findModel, isRetiredModel, isSupported, LITE_RETIRED_HINT, transparentRuleOf, workflowFor, type CapabilityTable, type ModelCapability, type SizeRule, type WorkflowName } from "./capabilities";
 import { isFlashShape, isLayerSize, isRequestShapeImplemented, LAYER_SIZES_TEXT } from "./gateway";
 import { chainedEdit, imageEdges, imageKey, imagePortSlots, imageSources, promptText, workflowOf } from "./graph";
 import { MAX_REGIONS } from "./overlay";
@@ -212,15 +212,27 @@ function transparentBlock(board: Board, model: ModelCapability | undefined, task
   if (!model) return null;
   if (!isSupported(model.transparent_background)) return { kind: "transparentUnsupported", text: "模型不支持透明背景", hint: "模型不支持透明背景" };
   const edges = imageEdges(board, taskId);
-  if (expandImageEdges(edges, model).length !== 1) {
+  const count = expandImageEdges(edges, model).length;
+  const workflow = workflowFor(count);
+  const task = findTask(board, taskId)!;
+  const needsPng = transparentNeedsPng(model, task, workflow);
+  // 原生 RGBA 的工作流（#182：Seedream 5.5 文生图）只要求 PNG 输出，不要参考图、不查 alpha。
+  if (transparentRuleOf(model, workflow) === "native") return needsPng;
+  if (count !== 1) {
     const text = isFlashShape(model) ? "需要恰好一张实际参考图" : "需要恰好一条图片线";
     return { kind: "transparentNeedsOneImage", text: `透明背景${text}`, hint: text };
   }
-  const task = findTask(board, taskId)!;
-  if (isFlashShape(model) && task.output_options?.output_format === "jpeg") return { kind: "transparentNeedsPng", text: "透明背景输出必须为 PNG", hint: "输出必须为 PNG" };
+  if (needsPng) return needsPng;
   const edge = edges[0];
   const alpha = facts.alphaByNode.get(imageKey(edge.from[0], edge.source_layer));
   return alpha === true ? null : { kind: "transparentNoAlpha", text: alpha === false ? "该图不带透明通道" : "参考图透明通道尚未确认", hint: alpha === false ? "该图不带透明通道" : "透明通道尚未确认" };
+}
+
+/** 透明背景输出必须为 PNG：Flash 形态与原生 RGBA 形态都只出 PNG，其余形态沿用既有行为。 */
+function transparentNeedsPng(model: ModelCapability, task: TaskNode, workflow: WorkflowName): { kind: ReasonKind; text: string; hint: string } | null {
+  const pngOnly = isFlashShape(model) || transparentRuleOf(model, workflow) === "native";
+  if (!pngOnly || task.output_options?.output_format !== "jpeg") return null;
+  return { kind: "transparentNeedsPng", text: "透明背景输出必须为 PNG", hint: "输出必须为 PNG" };
 }
 
 /** 按画板当前内容的发送计划；模型不在能力表内时没有发送计划。 */

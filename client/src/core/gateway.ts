@@ -3,7 +3,7 @@
 // HTTP 由调用方注入（壳里是浏览器原生 fetch，测试里是夹具回放）。
 // 发什么由发送计划（sendPlan.ts）决定；这里只把发送文本与原生负向放进请求体。
 import { withinPixelRange } from "./size";
-import { isSupported, type ModelCapability } from "./capabilities";
+import { isSupported, transparentRuleOf, workflowFor, type ModelCapability } from "./capabilities";
 import { errorText } from "./errors";
 
 /** Flash 图层拆分的尺寸档，顺序即界面下拉顺序。 */
@@ -202,11 +202,24 @@ function flashLayerSizeInvalid(input: GenerationInput): boolean {
   return input.layerDecomposition === true && !isLayerSize(input.layerSize ?? "auto");
 }
 
-/** 透明背景需要恰好一张已确认带 alpha 的参考图，且输出必须是 PNG。 */
-function assertFlashTransparent(input: GenerationInput, options: ReturnType<typeof outputOptions>): void {
+/** 透明背景需要恰好一张已确认带 alpha 的参考图，且输出必须是 PNG（5.0 Flash 与 5.5 的编辑工作流）。 */
+function assertAlphaReferenceTransparent(input: GenerationInput, options: ReturnType<typeof outputOptions>): void {
   if (input.references.length !== 1) throw new GatewayError("config", "透明背景需要恰好一张实际参考图");
   if (options.output_format !== "png") throw new GatewayError("config", "透明背景输出必须为 PNG");
   if (input.references[0].hasAlpha !== true) throw new GatewayError("config", "透明背景需要已确认带透明通道的参考图快照");
+}
+
+/**
+ * 透明背景按能力表该工作流的 transparent_rule 判定（#182）：
+ * native 的模型（Seedream 5.5 文生图）原生出 RGBA，不需要参考图，仍要求 PNG；
+ * 其余沿用 5.0 Flash 的「恰好一张带 alpha 的参考图」。
+ */
+function assertTransparentBackground(input: GenerationInput, options: ReturnType<typeof outputOptions>): void {
+  if (transparentRuleOf(input.model, workflowFor(input.references.length)) === "native") {
+    if (options.output_format !== "png") throw new GatewayError("config", "透明背景输出必须为 PNG");
+    return;
+  }
+  assertAlphaReferenceTransparent(input, options);
 }
 
 /** Flash 请求体：拆分时 size 走图层尺寸，其余按像素尺寸拼；prompt 在拆分且为空时省略。 */
@@ -229,7 +242,7 @@ const buildFlashImagesGenerations: RequestShape["build"] = (input) => {
   if (flashSplitReferencesInvalid(input)) throw new GatewayError("config", "Flash 图层拆分需要一张 PNG/JPEG 参考图（不超过 30MB）");
   if (flashLayerSizeInvalid(input)) throw new GatewayError("config", "Flash 图层尺寸无效");
   const options = outputOptions(input.outputOptions);
-  if (input.transparentBackground) assertFlashTransparent(input, options);
+  if (input.transparentBackground) assertTransparentBackground(input, options);
   return { path: TEXT_TO_IMAGE_PATH, body: flashRequestBody(input, options, backgroundMode(input)) };
 };
 

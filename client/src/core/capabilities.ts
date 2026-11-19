@@ -14,6 +14,14 @@ export type TriState = "supported" | "unsupported" | "untested";
 export type Tier = "flagship" | "economy";
 export type WorkflowName = "text_to_image" | "image_edit";
 
+/**
+ * 透明背景怎么落地（#182）：按**工作流**声明，不再写死在请求构造里。
+ * - native：模型原生出 RGBA，不需要参考图（Seedream 5.5 文生图）
+ * - alpha_reference：必须恰好一张已确认带透明通道的参考图（Seedream 5.0 Flash 的全部工作流）
+ * 未声明时按 alpha_reference 处理——那是既有行为，也是更严格的一侧。
+ */
+export type TransparentRule = "native" | "alpha_reference";
+
 export const TIER_LABELS: Record<Tier, string> = { flagship: "旗舰", economy: "经济" };
 
 export interface InputImageRule {
@@ -45,6 +53,8 @@ export interface WorkflowCapability {
   max_references: number;
   size_rule: SizeRule;
   layer_decomposition: TriState;
+  /** 透明背景怎么落地；缺省 alpha_reference（见 TransparentRule）。只在模型支持透明背景时有意义。 */
+  transparent_rule?: TransparentRule;
 }
 
 export interface ModelCapability {
@@ -77,6 +87,11 @@ export function isSupported(value: TriState): boolean {
 /** 工作流由参考图张数决定：0 张 = 文生图，≥1 张 = 图片编辑。 */
 export function workflowFor(referenceCount: number): WorkflowName {
   return referenceCount > 0 ? "image_edit" : "text_to_image";
+}
+
+/** 该工作流下透明背景怎么落地；未声明按 alpha_reference（既有行为）。 */
+export function transparentRuleOf(model: ModelCapability, workflow: WorkflowName): TransparentRule {
+  return model.workflows[workflow].transparent_rule ?? "alpha_reference";
 }
 
 export function findModel(table: CapabilityTable, modelId: string): ModelCapability | undefined {
@@ -147,55 +162,88 @@ function checkPixelRange(value: unknown, path: string, errors: string[]): void {
   }
 }
 
-function checkWorkflow(value: unknown, path: string, errors: string[]): void {
-  if (!isObject(value)) return void errors.push(`${path} 必须是对象`);
-  checkTri(value.supports_negative_prompt, `${path}.supports_negative_prompt`, errors);
-  checkTri(value.layer_decomposition, `${path}.layer_decomposition`, errors);
+/** 透明背景的落地方式只能取 native / alpha_reference；缺省表示沿用 alpha_reference。 */
+function checkTransparentRule(value: unknown, path: string, errors: string[]): void {
+  if (value !== undefined && value !== "native" && value !== "alpha_reference") errors.push(`${path} 必须是 native 或 alpha_reference`);
+}
+
+function checkReferenceRange(value: Record<string, unknown>, path: string, errors: string[]): void {
   const min = value.min_references;
   const max = value.max_references;
   if (!Number.isInteger(min) || (min as number) < 0) errors.push(`${path}.min_references 必须是非负整数`);
   if (!Number.isInteger(max) || (max as number) < (min as number)) errors.push(`${path}.max_references 必须是不小于 min 的整数`);
-  const size = value.size_rule;
-  if (!isObject(size) || !isObject(size.tiers)) return void errors.push(`${path}.size_rule.tiers 必须是对象`);
-  for (const [tier, ratios] of Object.entries(size.tiers)) {
-    if (!isObject(ratios)) {
-      errors.push(`${path}.size_rule.tiers.${tier} 必须是对象`);
-      continue;
-    }
-    for (const [ratio, px] of Object.entries(ratios)) {
-      if (!Array.isArray(px) || px.length !== 2 || !px.every((n) => Number.isInteger(n) && n > 0)) {
-        errors.push(`${path}.size_rule.tiers.${tier}.${ratio} 必须是两个正整数`);
-      }
-    }
-  }
-  if (size.custom != null) checkPixelRange(size.custom, `${path}.size_rule.custom`, errors);
 }
 
-function checkModel(value: unknown, path: string, errors: string[]): void {
+function checkRatioTable(ratios: Record<string, unknown>, path: string, errors: string[]): void {
+  for (const [ratio, px] of Object.entries(ratios)) {
+    if (!Array.isArray(px) || px.length !== 2 || !px.every((n) => Number.isInteger(n) && n > 0)) errors.push(`${path}.${ratio} 必须是两个正整数`);
+  }
+}
+
+function checkSizeRule(value: unknown, path: string, errors: string[]): void {
+  if (!isObject(value) || !isObject(value.tiers)) return void errors.push(`${path}.size_rule.tiers 必须是对象`);
+  for (const [tier, ratios] of Object.entries(value.tiers)) {
+    if (isObject(ratios)) checkRatioTable(ratios, `${path}.size_rule.tiers.${tier}`, errors);
+    else errors.push(`${path}.size_rule.tiers.${tier} 必须是对象`);
+  }
+  if (value.custom != null) checkPixelRange(value.custom, `${path}.size_rule.custom`, errors);
+}
+
+function checkWorkflow(value: unknown, path: string, errors: string[]): void {
   if (!isObject(value)) return void errors.push(`${path} 必须是对象`);
+  checkTri(value.supports_negative_prompt, `${path}.supports_negative_prompt`, errors);
+  checkTri(value.layer_decomposition, `${path}.layer_decomposition`, errors);
+  checkTransparentRule(value.transparent_rule, `${path}.transparent_rule`, errors);
+  checkReferenceRange(value, path, errors);
+  checkSizeRule(value.size_rule, path, errors);
+}
+
+/** 身份与展示字段。 */
+function checkModelIdentity(value: Record<string, unknown>, path: string, errors: string[]): void {
   if (typeof value.model_id !== "string" || !value.model_id) errors.push(`${path}.model_id 必须是非空字符串`);
   if (typeof value.display_name !== "string") errors.push(`${path}.display_name 必须是字符串`);
   if (value.tier !== null && value.tier !== "flagship" && value.tier !== "economy") errors.push(`${path}.tier 必须是 flagship / economy / null`);
   if (value.help_url !== null && typeof value.help_url !== "string") errors.push(`${path}.help_url 必须是字符串或 null`);
+}
+
+/** 请求形态与固定参数。 */
+function checkModelShape(value: Record<string, unknown>, path: string, errors: string[]): void {
   if (typeof value.request_shape !== "string") errors.push(`${path}.request_shape 必须是字符串`);
   if (!isObject(value.fixed_params)) errors.push(`${path}.fixed_params 必须是对象`);
-  const rule = value.input_image_rule;
-  if (!isObject(rule) || !Array.isArray(rule.formats)) {
-    errors.push(`${path}.input_image_rule.formats 必须是数组`);
-  } else {
-    for (const key of ["max_bytes", "min_total_pixels", "max_total_pixels", "min_short_edge", "min_aspect_ratio", "max_aspect_ratio"]) {
-      checkNullableNumber(rule[key] ?? null, `${path}.input_image_rule.${key}`, errors);
-    }
+}
+
+/** 参考图输入约束。 */
+function checkInputImageRule(rule: unknown, path: string, errors: string[]): void {
+  if (!isObject(rule) || !Array.isArray(rule.formats)) return void errors.push(`${path}.formats 必须是数组`);
+  for (const key of ["max_bytes", "min_total_pixels", "max_total_pixels", "min_short_edge", "min_aspect_ratio", "max_aspect_ratio"]) {
+    checkNullableNumber(rule[key] ?? null, `${path}.${key}`, errors);
   }
+}
+
+/** 区域渲染提示、原生蒙版与透明背景三项能力声明。 */
+function checkModelHints(value: Record<string, unknown>, path: string, errors: string[]): void {
   checkTri(isObject(value.reference_phrasing) ? value.reference_phrasing.en_verified : undefined, `${path}.reference_phrasing.en_verified`, errors);
   const hint = isObject(value.region_hint) ? value.region_hint : {};
   for (const kind of ["highlight_overlay", "marked_image", "bbox_tag"]) checkTri(hint[kind], `${path}.region_hint.${kind}`, errors);
   if (!isObject(value.region_hint_phrasing)) errors.push(`${path}.region_hint_phrasing 必须是对象`);
   checkTri(value.native_mask, `${path}.native_mask`, errors);
   checkTri(value.transparent_background, `${path}.transparent_background`, errors);
-  const workflows = isObject(value.workflows) ? value.workflows : {};
+}
+
+/** 两个工作流各自的约束。 */
+function checkModelWorkflows(value: unknown, path: string, errors: string[]): void {
+  const workflows = isObject(value) ? value : {};
   checkWorkflow(workflows.text_to_image, `${path}.workflows.text_to_image`, errors);
   checkWorkflow(workflows.image_edit, `${path}.workflows.image_edit`, errors);
+}
+
+function checkModel(value: unknown, path: string, errors: string[]): void {
+  if (!isObject(value)) return void errors.push(`${path} 必须是对象`);
+  checkModelIdentity(value, path, errors);
+  checkModelShape(value, path, errors);
+  checkInputImageRule(value.input_image_rule, `${path}.input_image_rule`, errors);
+  checkModelHints(value, path, errors);
+  checkModelWorkflows(value.workflows, path, errors);
 }
 
 export function parseCapabilityTable(raw: unknown): ParseResult {
