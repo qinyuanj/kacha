@@ -31,6 +31,9 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
+          # 缓存 npm 下载目录，省掉每次重下依赖的二十来秒；node_modules 仍由 npm ci 按 lockfile 装。
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
 
       - name: Set up Python 3.12
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
