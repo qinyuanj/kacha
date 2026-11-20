@@ -26,7 +26,7 @@ from release_gate import desktop_version, release_notes_section, validate_releas
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BASE_URL = "http://lzxsvn:3000"
-OWNER_REPO = "qinyuanj/kacha"
+OWNER_REPO = "qinyuanj/kacha-cd"
 INSTALLER = "kacha-setup-{version}-amd64.exe"
 DESCRIPTOR = "update-windows-amd64.json"
 CHECKSUMS = "SHA256SUMS"

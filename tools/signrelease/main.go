@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	ownerRepo = "qinyuanj/kacha"
+	ownerRepo = "qinyuanj/kacha-cd"
 	// platform 是本项目的唯一发布目标。
 	platform = "windows-amd64"
 )

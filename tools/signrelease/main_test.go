@@ -49,7 +49,7 @@ func TestRunWritesVerifiableAssets(t *testing.T) {
 	if m.Version != "1.6.0" || m.Platform != "windows-amd64" {
 		t.Fatalf("描述字段不对：%+v", m)
 	}
-	if m.URL != "http://lzxsvn:3000/qinyuanj/kacha/releases/download/v1.6.0/kacha-setup-1.6.0-amd64.exe" {
+	if m.URL != "http://lzxsvn:3000/qinyuanj/kacha-cd/releases/download/v1.6.0/kacha-setup-1.6.0-amd64.exe" {
 		t.Fatalf("包地址 = %q", m.URL)
 	}
 	// .sig 与描述里的签名必须是同一个，且能用公钥验过。

@@ -16,33 +16,33 @@ const giteaReleaseListPayload = `[
     "tag_name": "v1.6.1",
     "draft": false,
     "prerelease": false,
-    "html_url": "http://lzxsvn:3000/qinyuanj/kacha/releases/tag/v1.6.1",
+    "html_url": "http://lzxsvn:3000/qinyuanj/kacha-cd/releases/tag/v1.6.1",
     "assets": [
       {
         "id": 1,
         "name": "SHA256SUMS",
-        "browser_download_url": "http://lzxsvn:3000/qinyuanj/kacha/releases/download/v1.6.1/SHA256SUMS"
+        "browser_download_url": "http://lzxsvn:3000/qinyuanj/kacha-cd/releases/download/v1.6.1/SHA256SUMS"
       },
       {
         "id": 2,
         "name": "kacha-setup-1.6.1-amd64.exe",
-        "browser_download_url": "http://lzxsvn:3000/qinyuanj/kacha/releases/download/v1.6.1/kacha-setup-1.6.1-amd64.exe"
+        "browser_download_url": "http://lzxsvn:3000/qinyuanj/kacha-cd/releases/download/v1.6.1/kacha-setup-1.6.1-amd64.exe"
       },
       {
         "id": 3,
         "name": "kacha-setup-1.6.1-amd64.exe.sig",
-        "browser_download_url": "http://lzxsvn:3000/qinyuanj/kacha/releases/download/v1.6.1/kacha-setup-1.6.1-amd64.exe.sig"
+        "browser_download_url": "http://lzxsvn:3000/qinyuanj/kacha-cd/releases/download/v1.6.1/kacha-setup-1.6.1-amd64.exe.sig"
       },
       {
         "id": 4,
         "name": "update-windows-amd64.json",
-        "browser_download_url": "http://lzxsvn:3000/qinyuanj/kacha/releases/download/v1.6.1/update-windows-amd64.json"
+        "browser_download_url": "http://lzxsvn:3000/qinyuanj/kacha-cd/releases/download/v1.6.1/update-windows-amd64.json"
       }
     ]
   }
 ]`
 
-const downloadBase = "http://lzxsvn:3000/qinyuanj/kacha/releases/download/v1.6.1/"
+const downloadBase = "http://lzxsvn:3000/qinyuanj/kacha-cd/releases/download/v1.6.1/"
 
 // TestAssetURLComesFromBrowserDownloadURL 锁住真实报文契约：附件的下载地址来自
 // browser_download_url。退回 json:"url" 时这条会红，因为真实报文里没有那个字段。

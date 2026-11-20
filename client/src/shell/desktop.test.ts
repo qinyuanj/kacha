@@ -63,7 +63,7 @@ describe("桌面壳端口", () => {
           current: "1.5.0",
           version: "1.6.0",
           notes: "# 1.6.0",
-          page_url: "http://lzxsvn:3000/qinyuanj/kacha/releases/tag/v1.6.0",
+          page_url: "http://lzxsvn:3000/qinyuanj/kacha-cd/releases/tag/v1.6.0",
           downloaded: 200,
           total: 200,
           verified: true,

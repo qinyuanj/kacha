@@ -23,7 +23,7 @@ const (
 	// DefaultBaseURL 是团队 Gitea 的地址（可信内网或 VPN）。
 	DefaultBaseURL = "http://lzxsvn:3000"
 	// OwnerRepo 是发行所在的仓库。
-	OwnerRepo = "qinyuanj/kacha"
+	OwnerRepo = "qinyuanj/kacha-cd"
 	// MaxPackageBytes 是安装器字节上限：描述说多大都不能超过它。
 	MaxPackageBytes = 512 << 20
 	// MaxDescriptorBytes 是更新描述字节上限。
