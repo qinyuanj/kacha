@@ -121,6 +121,8 @@ export interface SubmissionPlan {
   size: { width: number; height: number };
   layerDecomposition: boolean;
   layerSize?: import("./gateway").LayerSize;
+  /** 拆分图层的输出张数；缺省用能力表该工作流的 default。 */
+  layerMaxImages?: number;
   transparentBackground: boolean;
   outputOptions?: OutputOptions;
   capabilityFormatVersion: number;
@@ -161,6 +163,7 @@ export interface TaskRecord {
   size: { width: number; height: number };
   layer_decomposition: boolean;
   layer_size?: import("./gateway").LayerSize;
+  layer_max_images?: number;
   transparent_background: boolean;
   output_options?: OutputOptions;
   /** 按发送序号排列。 */
@@ -195,6 +198,7 @@ export async function writeSubmission(fs: Pick<TaskFs, "writeNewFile">, userRoot
     size: plan.size,
     layer_decomposition: plan.layerDecomposition,
     ...(plan.layerSize ? { layer_size: plan.layerSize } : {}),
+    ...(plan.layerMaxImages === undefined ? {} : { layer_max_images: plan.layerMaxImages }),
     ...(plan.outputOptions ? { output_options: plan.outputOptions } : {}),
     transparent_background: plan.transparentBackground,
     references,

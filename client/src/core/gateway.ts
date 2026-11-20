@@ -3,7 +3,7 @@
 // HTTP 由调用方注入（壳里是浏览器原生 fetch，测试里是夹具回放）。
 // 发什么由发送计划（sendPlan.ts）决定；这里只把发送文本与原生负向放进请求体。
 import { withinPixelRange } from "./size";
-import { isSupported, transparentRuleOf, workflowFor, type ModelCapability } from "./capabilities";
+import { isSupported, layerMaxImagesRuleOf, transparentRuleOf, workflowFor, type ModelCapability } from "./capabilities";
 import { errorText } from "./errors";
 
 /** Flash 图层拆分的尺寸档，顺序即界面下拉顺序。 */
@@ -117,6 +117,8 @@ export interface GenerationInput {
   outputOptions?: OutputOptions;
   layerDecomposition?: boolean;
   layerSize?: LayerSize;
+  /** 拆分图层的输出张数；缺省用能力表该工作流的 default。未声明范围的工作流忽略它。 */
+  layerMaxImages?: number;
 }
 
 export type GeneratedImage = ({ kind: "url"; url: string } | { kind: "bytes"; bytes: Uint8Array }) & {
@@ -222,13 +224,27 @@ function assertTransparentBackground(input: GenerationInput, options: ReturnType
   assertAlphaReferenceTransparent(input, options);
 }
 
+/**
+ * 拆分图层的输出张数（#175）：只有能力表为该工作流声明了范围才发。
+ * 未声明的工作流（5.0 Flash / 5.0 Pro）请求体里不出现 max_images，行为与改动前一致。
+ */
+function layerMaxImagesOf(input: GenerationInput): number | undefined {
+  if (!input.layerDecomposition) return undefined;
+  const rule = layerMaxImagesRuleOf(input.model, workflowFor(input.references.length));
+  if (!rule) return undefined;
+  const value = input.layerMaxImages ?? rule.default;
+  if (!Number.isInteger(value) || value < rule.min || value > rule.max) throw new GatewayError("config", `图层输出数量必须在 ${rule.min}–${rule.max} 之间`);
+  return value;
+}
+
 /** Flash 请求体：拆分时 size 走图层尺寸，其余按像素尺寸拼；prompt 在拆分且为空时省略。 */
-function flashRequestBody(input: GenerationInput, options: ReturnType<typeof outputOptions>, background: BackgroundMode | null) {
+function flashRequestBody(input: GenerationInput, options: ReturnType<typeof outputOptions>, background: BackgroundMode | null, maxImages: number | undefined) {
   return {
     model: input.model.model_id,
     ...(input.text.trim() || !input.layerDecomposition ? { prompt: input.text } : {}),
     size: input.layerDecomposition ? input.layerSize ?? "auto" : `${input.size.width}x${input.size.height}`,
     ...(input.layerDecomposition ? { layer_decomposition: true } : {}),
+    ...(maxImages === undefined ? {} : { max_images: maxImages }),
     ...options,
     optimize_prompt_options: { mode: "standard" },
     ...(background ? { background } : {}),
@@ -243,7 +259,7 @@ const buildFlashImagesGenerations: RequestShape["build"] = (input) => {
   if (flashLayerSizeInvalid(input)) throw new GatewayError("config", "Flash 图层尺寸无效");
   const options = outputOptions(input.outputOptions);
   if (input.transparentBackground) assertTransparentBackground(input, options);
-  return { path: TEXT_TO_IMAGE_PATH, body: flashRequestBody(input, options, backgroundMode(input)) };
+  return { path: TEXT_TO_IMAGE_PATH, body: flashRequestBody(input, options, backgroundMode(input), layerMaxImagesOf(input)) };
 };
 
 const FLASH_SHAPE = "seedream_flash_images_generations";

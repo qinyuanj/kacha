@@ -84,6 +84,8 @@ export type BoardChange =
   /** ratio = null 为自动（跟随参考图，同一次变更里算好），否则为手动的具体值。 */
   | { kind: "setRatio"; taskId: string; ratio: string | null }
   | { kind: "setLayerSize"; taskId: string; size: import("./gateway").LayerSize }
+  /** 拆分图层的输出张数；范围由能力表该工作流约束，这里只挡非正整数。 */
+  | { kind: "setLayerMaxImages"; taskId: string; count: number }
   | { kind: "setOutputOptions"; taskId: string; options: OutputOptions }
   /** 份数：正整数；可选范围（不超过并发上限）由控件约束，核心不按页面设置改写。 */
   | { kind: "setCount"; taskId: string; count: number }
@@ -374,11 +376,14 @@ function sizeDraft(board: Board, change: ChangeOf<"setTier" | "setRatio">, env: 
   }
 }
 
-function layerDraft(board: Board, change: ChangeOf<"setLayerSize" | "setOutputOptions">): Draft {
+function layerDraft(board: Board, change: ChangeOf<"setLayerSize" | "setOutputOptions" | "setLayerMaxImages">): Draft {
   switch (change.kind) {
     case "setLayerSize":
       if (!isLayerSize(change.size)) return { board };
       return { board: mapTask(board, change.taskId, (t) => ({ ...t, layer_size: change.size })), step: { label: "修改图层尺寸" } };
+    case "setLayerMaxImages":
+      if (!Number.isInteger(change.count) || change.count < 1) return { board };
+      return { board: mapTask(board, change.taskId, (t) => (t.layer_max_images === change.count ? t : { ...t, layer_max_images: change.count })), step: { label: "修改图层数量" } };
     case "setOutputOptions":
       return { board: mapTask(board, change.taskId, (t) => ({ ...t, output_options: outputOptions(change.options) })), step: { label: "修改输出选项" } };
   }
@@ -505,6 +510,7 @@ const HANDLERS: DraftHandlers = {
   setTier: sizeDraft,
   setRatio: sizeDraft,
   setLayerSize: layerDraft,
+  setLayerMaxImages: layerDraft,
   setOutputOptions: layerDraft,
   setCount: countDraft,
   setTaskFlag: countDraft,
