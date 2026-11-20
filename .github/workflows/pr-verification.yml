@@ -51,6 +51,14 @@ jobs:
       - name: Install locked client dependencies
         run: npm --prefix client ci
 
+      - name: Install Playwright Chromium
+        working-directory: client
+        shell: pwsh
+        run: npx playwright install chromium
+
+      - name: Run browser end-to-end tests
+        run: npm --prefix client run e2e
+
       - name: Install the integrity-checked quality tool
         shell: python
         env:
