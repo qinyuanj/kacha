@@ -38,7 +38,11 @@ python packaging\build_desktop.py
 
 ## 验证
 
-先安装锁定的前端依赖，然后运行：
+### 验证前的依赖准备
+
+`verify.py` 启动时先比对 `client/package-lock.json` 与 `client/node_modules/.package-lock.json`：`node_modules` 缺失、lockfile 声明了但没装、已装版本与 lockfile 不同，都判定为依赖未准备就绪。此时只打印原因与修复命令 `npm --prefix client ci`，并在跑任何命令前退出，不把环境问题报成类型错误或死代码。`optional` 的平台专属二进制（如各平台的 `@oxc-parser/binding-*`）按平台选择性安装，缺失不算不一致。
+
+检查只读这两个文件、不调用 npm，通常十几毫秒；依赖完整时验证行为不变。`node_modules` 是空目录或安装被中断时不会有安装记录，同样按未准备就绪处理，重新 `npm ci` 即可。
 
 ~~~powershell
 npm --prefix client ci
@@ -58,7 +62,7 @@ Go 单测覆盖本地存储、路径边界、导入、剪贴板契约与服务�
 
 ### Windows 完整性标签
 
-输出目录若继承 Low 完整性标签，程序可能无法写临时文件或创建符号链接。`--preflight` 只检查 build 与 `client/target`，发现问题只报告命令，不修改目录。在确认目标目录后用 PowerShell 修复：
+输出目录若继承 Low 完整性标签，程序可能无法写临时文件或创建符号链接。`--preflight` 只检查 build、`client/target` 与前端依赖，发现问题只报告命令，不修改目录。在确认目标目录后用 PowerShell 修复：
 
 ~~~powershell
 icacls build /setintegritylevel '(OI)(CI)M'

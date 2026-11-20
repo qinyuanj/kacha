@@ -5,6 +5,7 @@
 """
 
 import argparse
+import json
 import os
 from pathlib import Path
 import shutil
@@ -13,6 +14,11 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 BUILD_OUTPUTS = (Path("build"), Path("client") / "target")
+CLIENT = Path("client")
+LOCKFILE = CLIENT / "package-lock.json"
+INSTALL_RECORD = CLIENT / "node_modules" / ".package-lock.json"
+INSTALL_HINT = "npm --prefix client ci"
+REPORTED_PACKAGES = 3
 QUALITY = [sys.executable, "packaging/quality.py"]
 COMMANDS = (
     [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"],
@@ -52,6 +58,55 @@ def integrity_problems(root: Path) -> list[Path]:
     return problems
 
 
+def _locked_packages(path: Path) -> dict[str, dict]:
+    return json.loads(path.read_text(encoding="utf-8")).get("packages") or {}
+
+
+def dependency_problems(root: Path) -> list[str]:
+    """返回前端依赖与 lockfile 不一致的原因；为空表示可以开始验证。
+
+    只读两个 lockfile，不调用 npm，通常几毫秒。optional 条目按平台选择性安装，
+    缺失属于正常，不作为问题。缺少安装记录时一律判定为未安装。
+    """
+    lockfile = root / LOCKFILE
+    if not lockfile.is_file():
+        return []
+    record = root / INSTALL_RECORD
+    if not record.is_file():
+        return [f"{CLIENT.as_posix()}/node_modules 未按 lockfile 安装"]
+    try:
+        locked = _locked_packages(lockfile)
+        installed = _locked_packages(record)
+    except (OSError, ValueError):
+        return [f"{INSTALL_RECORD.as_posix()} 无法解析，安装记录已损坏"]
+    problems = []
+    for relative, entry in locked.items():
+        if not relative or entry.get("optional"):
+            continue
+        name = relative.removeprefix("node_modules/")
+        found = installed.get(relative)
+        if found is None or not (root / CLIENT / relative / "package.json").is_file():
+            problems.append(f"缺少 {name}")
+        elif entry.get("version") and found.get("version") and entry["version"] != found["version"]:
+            problems.append(f"{name} 是 {found['version']}，lockfile 要 {entry['version']}")
+    return problems
+
+
+def dependencies_preflight(root: Path) -> int:
+    """依赖没装全时只报原因与修复命令：继续跑 npm 会把环境问题报成源码错误。"""
+    problems = dependency_problems(root)
+    if not problems:
+        return 0
+    shown = "、".join(problems[:REPORTED_PACKAGES])
+    more = f" 等 {len(problems)} 个包" if len(problems) > REPORTED_PACKAGES else ""
+    print(
+        f"前端依赖与 {LOCKFILE.as_posix()} 不一致（{shown}{more}），已跳过 npm 测试、typecheck、knip 与构建：",
+        file=sys.stderr,
+    )
+    print(f"  {INSTALL_HINT}（在仓库根执行；见 packaging/README.md「验证前的依赖准备」）", file=sys.stderr)
+    return 2
+
+
 def preflight(root: Path) -> int:
     """只报告完整性问题与修复命令，不创建或修改目录。"""
     problems = integrity_problems(root)
@@ -66,7 +121,7 @@ def preflight(root: Path) -> int:
 
 def main(argv: list[str]) -> int:
     selected = commands(argv)
-    code = preflight(ROOT)
+    code = preflight(ROOT) or dependencies_preflight(ROOT)
     if code or "--preflight" in argv:
         return code
     failed = []
