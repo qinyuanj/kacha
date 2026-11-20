@@ -2,7 +2,7 @@
 // 生成任务节点与二次确认（buildConfirmItems）消费同一份，「节点标红 ≡ 运行被拦」由构造保证。
 // 换模型绝不自动删线或改设置，只报告原因。
 import { findTask, runCopies, type Board, type BoardEdge, type TaskNode } from "./board";
-import { findModel, isRetiredModel, isSupported, layerMaxImagesRuleOf, LITE_RETIRED_HINT, transparentRuleOf, workflowFor, type CapabilityTable, type LayerMaxImagesRule, type ModelCapability, type SizeRule, type WorkflowName } from "./capabilities";
+import { findModel, isRetiredModel, isSupported, layerMaxImagesRuleOf, LITE_RETIRED_HINT, textRecognitionSupported, transparentRuleOf, workflowFor, type CapabilityTable, type LayerMaxImagesRule, type ModelCapability, type SizeRule, type WorkflowName } from "./capabilities";
 import { isFlashShape, isLayerSize, isRequestShapeImplemented, LAYER_SIZES_TEXT } from "./gateway";
 import { chainedEdit, imageEdges, imageKey, imagePortSlots, imageSources, promptText, referencePolicy, workflowOf } from "./graph";
 import { MAX_REGIONS } from "./overlay";
@@ -30,6 +30,8 @@ export type ReasonKind =
   | "layerUnsupported"
   /** 拆分图层的张数越出能力表该工作流的范围（#175）。 */
   | "layerMaxImagesRange"
+  /** 打开了文字识别，但该模型的拆分场景没声明支持（#178）。 */
+  | "layerTextRecognitionUnsupported"
   | "transparentUnsupported"
   | "transparentNeedsOneImage"
   | "transparentNoAlpha"
@@ -140,7 +142,15 @@ function inputReasons(board: Board, table: CapabilityTable, task: TaskNode, mode
       : []),
     ...(flashLayers && !isLayerSize(task.layer_size ?? "auto") ? [reason("sizeUnsupported", `图层尺寸只支持 ${LAYER_SIZES_TEXT}`)] : []),
     ...layerCountReasons(board, model, task, flashLayers),
+    ...layerOcrReasons(board, model, task, flashLayers),
   ];
+}
+
+/** 文字识别只在拆分场景声明支持的工作流上可用；换模型不自动关开关，只报告原因（#178）。 */
+function layerOcrReasons(board: Board, model: ModelCapability | undefined, task: TaskNode, flashLayers: boolean): UnrunnableReason[] {
+  if (!flashLayers || !model || !task.layer_text_recognition) return [];
+  if (textRecognitionSupported(model, workflowOf(board, task.id))) return [];
+  return [reason("layerTextRecognitionUnsupported", "该模型的图层拆分不支持文字识别")];
 }
 
 /** 该工作流没声明张数约束（5.0 Flash / Pro）时不检查，请求里也不会带这个字段。 */

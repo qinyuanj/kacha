@@ -21,6 +21,12 @@
 
 图层拆分使用 `layer_decomposition:true`，单张 PNG/JPEG 输入，尺寸仅 `1K` / `1.5K` / `2K` / `auto`，不发普通精确像素。输出按 `z_index` 识别底图与排序，位置来自 `bounding_box.absolute`，`normalized` 范围 0 至 1000。名称和描述可选，关键定位或任一图层无效则整体失败。没有真实 Flash 图层夹具，不把合成回放当网关实测。
 
+## 富文本 OCR（5.5 拆分专属）
+
+官方文档口径，尚无网关夹具与真机证据：#178 客户端实现与合成回放验证齐备，网关是否正确透传待整体验收。
+
+拆分时在 `layer_decomposition_options` 里发 `{"text_recognition":true}`，关掉开关时请求体里不出现这个键。返回里文字图层的 `text_recognition` 带整段 `text`、逐行 `bounding_box` 与 `runs[].style`（`similar_font_family`、`foreground_color`、`bold`、`italic`、`underline`、`strikethrough`、`shadow`、`translucent`）。非文字层、艺术字、手写体不返回；形状不完整或空结果按「没拿到」处理，不影响已经出好的图。识别结果随图层元数据写入 `layers.json`，只在预览侧栏展示。
+
 ## 证据与限制
 
 - `contracts/fixtures/2026-08-17-team-gateway/`：模型发现、Qwen 文生图和错误响应。

@@ -91,7 +91,7 @@ export type BoardChange =
   | { kind: "setOutputOptions"; taskId: string; options: OutputOptions }
   /** 份数：正整数；可选范围（不超过并发上限）由控件约束，核心不按页面设置改写。 */
   | { kind: "setCount"; taskId: string; count: number }
-  | { kind: "setTaskFlag"; taskId: string; flag: "layer_decomposition" | "transparent_background"; value: boolean }
+  | { kind: "setTaskFlag"; taskId: string; flag: "layer_decomposition" | "transparent_background" | "layer_text_recognition"; value: boolean }
   /** 切换任务节点的模型，并记为画板最近选择。 */
   | { kind: "setModel"; taskId: string; model: string }
   | { kind: "moveImagePort"; taskId: string; from: number; to: number }
@@ -394,6 +394,13 @@ function layerDraft(board: Board, change: ChangeOf<"setLayerSize" | "setOutputOp
   }
 }
 
+/** 画板开关的中文说法：撤销步与界面同一个词。 */
+const TASK_FLAG_LABELS: Record<"layer_decomposition" | "transparent_background" | "layer_text_recognition", string> = {
+  layer_decomposition: "切换图层拆分",
+  transparent_background: "切换透明背景",
+  layer_text_recognition: "切换文字识别",
+};
+
 function countDraft(board: Board, change: ChangeOf<"setCount" | "setTaskFlag">): Draft {
   switch (change.kind) {
     case "setCount":
@@ -402,7 +409,7 @@ function countDraft(board: Board, change: ChangeOf<"setCount" | "setTaskFlag">):
     case "setTaskFlag":
       return {
         board: mapTask(board, change.taskId, (t) => (t[change.flag] === change.value ? t : { ...t, [change.flag]: change.value })),
-        step: { label: change.flag === "layer_decomposition" ? "切换图层拆分" : "切换透明背景" },
+        step: { label: TASK_FLAG_LABELS[change.flag] },
       };
   }
 }

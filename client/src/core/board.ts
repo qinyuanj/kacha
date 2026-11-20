@@ -56,6 +56,8 @@ export interface TaskNode extends NodeBase {
   layer_size?: import("./gateway").LayerSize;
   /** 拆分图层的输出张数（正整数）；范围由能力表该工作流决定，画板不按模型改写。 */
   layer_max_images?: number;
+  /** 拆分图层时顺带要回富文本 OCR（#178）；缺省关闭，没声明 OCR 的模型不落这个键。 */
+  layer_text_recognition?: boolean;
   /** 份数：一次运行 / 重新生成展开出的生成任务个数（正整数）；缺省 = 1。不进脏判据，不随页面并发上限改写。 */
   count?: number;
   /** 脏判据快照；未提交过为 null。本切片只读写不解释。 */
@@ -71,6 +73,8 @@ export interface LayerRecord {
   /** 可选元数据（官方按可选返回，不臆造）。 */
   name?: string;
   description?: string;
+  /** 文字图层的富文本 OCR（#178）；非文字层、艺术字、手写体没有这一项。 */
+  text_recognition?: import("./gateway").TextRecognition;
 }
 
 export interface ResultRecord {
@@ -236,7 +240,7 @@ function autoRatio(raw: unknown): AutoRatio | null {
 const NODE_KEYS = {
   prompt: ["id", "type", "pos", "size", "text"],
   reference: ["id", "type", "pos", "size", "path", "sha256", "display_name", "source_board"],
-  task: ["id", "type", "pos", "size", "model", "size_spec", "image_ports", "layer_decomposition", "transparent_background", "output_options", "layer_size", "layer_max_images", "count", "last_submitted"],
+  task: ["id", "type", "pos", "size", "model", "size_spec", "image_ports", "layer_decomposition", "transparent_background", "output_options", "layer_size", "layer_max_images", "layer_text_recognition", "count", "last_submitted"],
   result: ["id", "type", "pos", "size", "task_id", "file", "path", "layer_count", "record", "final"],
 } as const;
 
@@ -293,6 +297,7 @@ function parseTaskNode(o: Json, base: NodeBase): TaskNode {
     layer_decomposition: bool(o, "layer_decomposition"),
     ...(o.layer_size === undefined ? {} : { layer_size: layerSizeOf(o.layer_size) }),
     ...(o.layer_max_images === undefined ? {} : { layer_max_images: layerMaxImagesOf(o.layer_max_images) }),
+    ...(o.layer_text_recognition === undefined ? {} : { layer_text_recognition: bool(o, "layer_text_recognition") }),
     transparent_background: bool(o, "transparent_background"),
     ...(o.output_options === undefined ? {} : { output_options: outputOptionsOf(o.output_options) }),
     ...(o.count === undefined ? {} : { count: need<number>(Number.isInteger(o.count) && (o.count as number) >= 1, o.count, "count 必须是正整数") }),

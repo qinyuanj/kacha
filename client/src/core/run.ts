@@ -139,9 +139,13 @@ function layerSend(send: ReturnType<typeof planSend>, layers: boolean, prompt: s
   return layers && !prompt.trim() && !negative.trim() ? { ...send, text: "" } : send;
 }
 
-function layerOptions(enabled: boolean, layerSize: SubmissionPlan["layerSize"], layerMaxImages: SubmissionPlan["layerMaxImages"]): Pick<SubmissionPlan, "layerSize" | "layerMaxImages"> {
+function layerOptions(enabled: boolean, layerSize: SubmissionPlan["layerSize"], layerMaxImages: SubmissionPlan["layerMaxImages"], textRecognition: SubmissionPlan["layerTextRecognition"]): Pick<SubmissionPlan, "layerSize" | "layerMaxImages" | "layerTextRecognition"> {
   if (!enabled) return {};
-  return { layerSize: layerSize ?? "auto", ...(layerMaxImages === undefined ? {} : { layerMaxImages }) };
+  return {
+    layerSize: layerSize ?? "auto",
+    ...(layerMaxImages === undefined ? {} : { layerMaxImages }),
+    ...(textRecognition ? { layerTextRecognition: true } : {}),
+  };
 }
 
 /**
@@ -240,7 +244,7 @@ export async function prepareJob(
     sizeSpec: snapshot.size_spec,
     size,
     layerDecomposition: snapshot.layer_decomposition,
-    ...layerOptions(flashLayers, task.layer_size, task.layer_max_images),
+    ...layerOptions(flashLayers, task.layer_size, task.layer_max_images, task.layer_text_recognition),
     ...(snapshot.output_options ? { outputOptions: snapshot.output_options } : {}),
     transparentBackground: snapshot.transparent_background,
     capabilityFormatVersion: table.format_version,
@@ -273,7 +277,7 @@ function jobOf(taskNodeId: string, plan: SubmissionPlan, model: ModelCapability,
     taskNodeId,
     taskId: plan.taskId,
     plan,
-    input: { model, text: plan.send.text, nativeNegativePrompt: plan.send.nativeNegativePrompt, size: plan.size, references: [], outputOptions: plan.outputOptions, transparentBackground: plan.transparentBackground, chainedEdit: chained, layerDecomposition: plan.layerDecomposition, layerSize: plan.layerSize, layerMaxImages: plan.layerMaxImages },
+    input: { model, text: plan.send.text, nativeNegativePrompt: plan.send.nativeNegativePrompt, size: plan.size, references: [], outputOptions: plan.outputOptions, transparentBackground: plan.transparentBackground, chainedEdit: chained, layerDecomposition: plan.layerDecomposition, layerSize: plan.layerSize, layerMaxImages: plan.layerMaxImages, textRecognition: plan.layerTextRecognition },
     record: {
       model: plan.model,
       prompt: plan.prompt,
@@ -358,7 +362,7 @@ export async function prepareRegenerate(
     send,
     ...sized,
     layerDecomposition: previous.layer_decomposition,
-    ...layerOptions(previous.layer_decomposition, previous.layer_size, previous.layer_max_images),
+    ...layerOptions(previous.layer_decomposition, previous.layer_size, previous.layer_max_images, previous.layer_text_recognition),
     ...(previous.output_options ? { outputOptions: previous.output_options } : {}),
     transparentBackground: previous.transparent_background,
     capabilityFormatVersion: args.table.format_version,
@@ -448,7 +452,13 @@ function layerDescription(layer: LayerMetadata | undefined): { name?: string; de
 }
 
 function layerToSave(image: FetchedImage, index: number): Parameters<typeof saveLayers>[3][number] {
-  return { bytes: image.bytes, zIndex: image.layer?.z_index ?? index + 1, boundingBox: image.layer?.bounding_box ?? [], ...layerDescription(image.layer) };
+  return {
+    bytes: image.bytes,
+    zIndex: image.layer?.z_index ?? index + 1,
+    boundingBox: image.layer?.bounding_box ?? [],
+    ...layerDescription(image.layer),
+    ...(image.layer?.text_recognition === undefined ? {} : { textRecognition: image.layer.text_recognition }),
+  };
 }
 
 async function saveResultLayers(deps: RunDeps, userRoot: string, job: WrittenJob, fetched: FetchedImage[]): Promise<LayerRecord[] | undefined> {

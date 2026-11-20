@@ -2,7 +2,23 @@
 import type { LayerRecord } from "../core/taskDir";
 
 import { alphaBadgeText, exportOneLabel, pickedLayerIndex } from "./previewHandlers";
-import { layerName } from "./previewLayers";
+import { layerName, layerOcrStyles, layerOcrText } from "./previewLayers";
+
+/** 图层的识别文字与近似样式；没拿到 OCR 的文字层不渲染任何东西（不留空行）。 */
+function LayerOcr({ record }: { record: LayerRecord }) {
+  const text = layerOcrText(record);
+  if (text === null) return null;
+  return (
+    <div className="ocr-text muted small" title="拆分时识别到的文字与近似样式">
+      「{text}」
+      {layerOcrStyles(record).map((style) => (
+        <span key={style} className="badge">
+          {style}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 /** 一层预览图。 */
 export interface PreviewLayer {
@@ -53,6 +69,7 @@ export function LayerSidebar(props: {
                 {layerName(layer.record, i)}
                 {layerInfos.get(layer.absPath)?.has_alpha && <span className="badge">{alphaBadgeText}</span>}
               </span>
+              <LayerOcr record={layer.record} />
             </label>
             <button className="link small" disabled={busy} onClick={() => props.onExportOne(layer.absPath)}>
               {exportOneLabel}
