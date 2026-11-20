@@ -4,7 +4,7 @@
 import { findTask, runCopies, type Board, type BoardEdge, type TaskNode } from "./board";
 import { findModel, isRetiredModel, isSupported, layerMaxImagesRuleOf, LITE_RETIRED_HINT, transparentRuleOf, workflowFor, type CapabilityTable, type LayerMaxImagesRule, type ModelCapability, type SizeRule, type WorkflowName } from "./capabilities";
 import { isFlashShape, isLayerSize, isRequestShapeImplemented, LAYER_SIZES_TEXT } from "./gateway";
-import { chainedEdit, imageEdges, imageKey, imagePortSlots, imageSources, promptText, workflowOf } from "./graph";
+import { chainedEdit, imageEdges, imageKey, imagePortSlots, imageSources, promptText, referencePolicy, workflowOf } from "./graph";
 import { MAX_REGIONS } from "./overlay";
 import { effectiveRegionRender, expandImageEdges } from "./region";
 import { planSend, promptLanguage, referenceProblemsOf, type ReferenceProblems, type SendPlan } from "./sendPlan";
@@ -129,9 +129,15 @@ export function taskView(board: Board, table: CapabilityTable, taskId: string, f
 function inputReasons(board: Board, table: CapabilityTable, task: TaskNode, model: ModelCapability | undefined): UnrunnableReason[] {
   const taskId = task.id;
   const flashLayers = isFlashShape(model) && task.layer_decomposition;
+  // 张数与格式取拆分声明（#176）：文案里不再写死"一张 PNG/JPEG"，表格改了这里跟着改。
+  const layerPolicy = flashLayers ? referencePolicy(board, table, taskId) : null;
+  const layerMax = layerPolicy?.maxReferences ?? 1;
+  const layerFormats = (layerPolicy?.rule.formats ?? ["png", "jpeg"]).map((format) => format.toUpperCase()).join(" / ");
   return [
     ...(flashLayers ? [] : promptReasons(board, taskId)),
-    ...(flashLayers && imagePortSlots(board, table, taskId).length !== 1 ? [reason("layerNeedsOneImage", "图层拆分需要恰好一张 PNG/JPEG 参考图，不支持区域派生图")] : []),
+    ...(flashLayers && imagePortSlots(board, table, taskId).length !== layerMax
+      ? [reason("layerNeedsOneImage", `图层拆分需要恰好 ${layerMax} 张 ${layerFormats} 参考图，不支持区域派生图`)]
+      : []),
     ...(flashLayers && !isLayerSize(task.layer_size ?? "auto") ? [reason("sizeUnsupported", `图层尺寸只支持 ${LAYER_SIZES_TEXT}`)] : []),
     ...layerCountReasons(board, model, task, flashLayers),
   ];

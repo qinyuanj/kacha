@@ -53,6 +53,8 @@ export interface ImportedImage {
   display_name: string;
   width: number;
   height: number;
+  /** 文件字节数：选图当下就能按声明的 max_bytes 拦截（#176）；缺省 = 未知，留给派发前按快照验。 */
+  bytes?: number;
 }
 
 /**

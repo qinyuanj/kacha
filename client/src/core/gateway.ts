@@ -5,6 +5,7 @@
 import { withinPixelRange } from "./size";
 import { inputImageRuleOf, isSupported, layerMaxImagesRuleOf, maxReferencesOf, transparentRuleOf, workflowFor, type ModelCapability } from "./capabilities";
 import { errorText } from "./errors";
+import { imageRuleViolations } from "./imageRule";
 
 /** Flash 图层拆分的尺寸档，顺序即界面下拉顺序。 */
 export const LAYER_SIZES = ["auto", "1K", "1.5K", "2K"] as const;
@@ -208,9 +209,11 @@ function assertLayerSplitReferences(input: GenerationInput): void {
   const max = maxReferencesOf(input.model, workflow, "layer_split");
   if (input.references.length < 1) throw new GatewayError("config", "图层拆分需要一张参考图");
   if (input.references.length > max) throw new GatewayError("config", max === 1 ? "图层拆分只接受 1 张参考图" : `图层拆分最多 ${max} 张参考图`);
-  const formats = rule.formats.map((format) => format.toUpperCase()).join(" / ");
-  const bad = input.references.some((reference) => !rule.formats.includes(mediaFormatOf(reference.mediaType)) || (rule.max_bytes !== null && reference.bytes.length > rule.max_bytes));
-  if (bad) throw new GatewayError("config", `图层拆分参考图只接受 ${formats}${rule.max_bytes === null ? "" : `，单张不超过 ${Math.round(rule.max_bytes / 1000000)}MB`}`);
+  // 判定与界面标黄、提交前快照同一个函数（imageRule.ts）；这里只知道 MIME 与字节，像素留给快照阶段。
+  const violations = input.references.flatMap((reference) =>
+    imageRuleViolations({ format: mediaFormatOf(reference.mediaType), bytes: reference.bytes.length, width: 0, height: 0 }, rule),
+  );
+  if (violations.length) throw new GatewayError("config", `图层拆分参考图不合规：${violations.join("；")}`);
 }
 
 function flashLayerSizeInvalid(input: GenerationInput): boolean {

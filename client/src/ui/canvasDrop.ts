@@ -49,20 +49,20 @@ export async function importImages(
   },
 ): Promise<ImportedImage[]> {
   // 先收集成功的，再整批算显示名：同一分钟粘多张时，要等整批落盘路径都出来才排得开 -2、-3。
-  const done: { file: File; path: string; sha256: string; width: number; height: number }[] = [];
+  const done: { file: File; path: string; sha256: string; width: number; height: number; bytes: number }[] = [];
   for (const file of files) {
     try {
       const uploaded = await deps.ports.upload(file);
       const abs = resolveFromRoot(deps.userRoot, uploaded.path);
       const info = await deps.ports.inspect(abs);
       deps.ports.prime(abs, info);
-      done.push({ file, path: uploaded.path, sha256: info.sha256, width: info.width, height: info.height });
+      done.push({ file, path: uploaded.path, sha256: info.sha256, width: info.width, height: info.height, bytes: info.bytes });
     } catch (e) {
       deps.toast(IMPORT_TEXT.failed(file.name, errorText(e)));
     }
   }
   const names = deps.displayNames?.(done.map((u) => u.path));
-  return done.map((u, i) => ({ path: u.path, sha256: u.sha256, display_name: names?.[i] ?? u.file.name, width: u.width, height: u.height }));
+  return done.map((u, i) => ({ path: u.path, sha256: u.sha256, display_name: names?.[i] ?? u.file.name, width: u.width, height: u.height, bytes: u.bytes }));
 }
 
 /** 导入完成后落成参考图节点（attach = 同时接到任务卡片的空图片端口）；一张都没成功就不产生撤销步。 */

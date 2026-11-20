@@ -1,10 +1,10 @@
 // 单个任务从提交到出结果的内部件：读参考图（提交）→ 写任务目录（派发，不可变）→ 调网关 → 存结果图。
 // 副作用全部由调用方注入；调用顺序与状态由任务运行器（runner.ts）负责，界面不直接调用。
 import type { Board, ResultRecord, TaskNode } from "./board";
-import { findModel, inputImageRuleOf, isRetiredModel, isSupported, LITE_RETIRED_HINT, workflowFor, type CapabilityTable, type InputImageRule, type ModelCapability } from "./capabilities";
+import { findModel, inputImageRuleOf, isRetiredModel, isSupported, LITE_RETIRED_HINT, maxReferencesOf, workflowFor, type CapabilityTable, type InputImageRule, type ModelCapability } from "./capabilities";
 import { fitImage, type FittedBytes, type ImageCodec } from "./fitImage";
 import { ERROR_CATEGORY_LABELS, fetchResultImage, GatewayError, generate, isFlashShape, type FetchLike, type GenerationInput, type LayerMetadata, validLayerBox } from "./gateway";
-import { chainedEdit, chainedSubmission, imagePortSlots, imageSources, imageRuleViolations, workflowOf } from "./graph";
+import { chainedEdit, chainedSubmission, imagePortSlots, imageSources, imageRuleViolations, referencePolicy, workflowOf } from "./graph";
 import type { RunResult } from "./layout";
 import { firstRegionOf, slotsFromReferences } from "./region";
 import { planSend } from "./sendPlan";
@@ -153,7 +153,9 @@ function validateSubmissionInputs(board: Board, table: CapabilityTable, taskNode
   if (blockers.length) throw new LocalError(blockers.map((b) => b.text).join("；"));
   // 先按用户连线读全部源图，再按展开槽组装：叠加槽由其原图合成。
   // 读到即按该任务模型的输入规则处理成参考图快照；叠加图从处理后的快照合成，两者尺寸一致。
-  if (flashLayers && (sourceCount !== 1 || slotCount !== 1)) throw new LocalError("图层拆分需要恰好一张参考图，不支持区域派生图");
+  // 张数取拆分声明（#176），不再在这里写死一张。
+  const max = referencePolicy(board, table, taskNodeId)?.maxReferences ?? 1;
+  if (flashLayers && (sourceCount !== max || slotCount !== 1)) throw new LocalError(`图层拆分需要恰好 ${max} 张参考图，不支持区域派生图`);
 }
 
 /** 读取并固化用户接入的源图，图层任务先校验原图，其余按模型处理。 */
@@ -286,7 +288,8 @@ function jobOf(taskNodeId: string, plan: SubmissionPlan, model: ModelCapability,
 async function validateRegeneratedReferences(deps: RunDeps, model: ModelCapability, references: SubmissionPlan["references"], layerDecomposition: boolean): Promise<void> {
   if (isFlashShape(model)) {
     if (references.length > 10) throw new LocalError("Flash 参考图最多 10 张");
-    if (layerDecomposition && references.length !== 1) throw new LocalError("图层拆分需要恰好一张参考图");
+    const layerMax = maxReferencesOf(model, workflowFor(references.length), "layer_split");
+    if (layerDecomposition && references.length !== layerMax) throw new LocalError(`图层拆分需要恰好 ${layerMax} 张参考图`);
     for (const ref of references) {
       if (layerDecomposition) await validateLayerReference(deps, ref.bytes, inputImageRuleOf(model, workflowFor(references.length), "layer_split"));
       else await validateFlashReference(deps, ref.bytes, model.input_image_rule);

@@ -502,7 +502,7 @@ describe("工具栏（portal 进 toolbarSlot）", () => {
     expect(port.media.uploadReference).toHaveBeenCalledWith(file);
     expect(apply).toHaveBeenCalledWith({
       kind: "addReferences",
-      images: [{ path: "reference/ref.png", sha256: SHA_A, display_name: "ref.png", width: 240, height: 160 }],
+      images: [{ path: "reference/ref.png", sha256: SHA_A, display_name: "ref.png", width: 240, height: 160, bytes: IMAGE_INFO.bytes }],
       at: [-120, -80],
       attach: null,
     });
@@ -734,7 +734,7 @@ describe("页面级粘贴（#96：从系统剪贴板粘图片 / 节点）", () =
     expect(port.files.inspectImage).toHaveBeenCalled();
     expect(apply).toHaveBeenCalledWith({
       kind: "addReferences",
-      images: [{ path: "reference/shot.png", sha256: SHA_A, display_name: expect.stringMatching(new RegExp(`^${PASTE_NAME_PREFIX}-`)), width: 240, height: 160 }],
+      images: [{ path: "reference/shot.png", sha256: SHA_A, display_name: expect.stringMatching(new RegExp(`^${PASTE_NAME_PREFIX}-`)), width: 240, height: 160, bytes: IMAGE_INFO.bytes }],
       at: [50, 60],
       attach: null,
     });
@@ -935,7 +935,7 @@ describe("HTML5 拖放", () => {
     expect(port.media.uploadReference).toHaveBeenCalledWith(file);
     expect(apply).toHaveBeenCalledWith({
       kind: "addReferences",
-      images: [{ path: "reference/cat.png", sha256: SHA_A, display_name: "cat.png", width: 240, height: 160 }],
+      images: [{ path: "reference/cat.png", sha256: SHA_A, display_name: "cat.png", width: 240, height: 160, bytes: IMAGE_INFO.bytes }],
       at: [10, 20],
       attach: null,
     });

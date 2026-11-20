@@ -5,7 +5,7 @@ import type { Board, BoardEdge, BoardNode, ReferenceNode, TaskNode } from "./boa
 import { BUILTIN_TABLE, findModel, inputImageRuleOf, maxReferencesOf, parseCapabilityTable, type CapabilityTable, type ModelCapability } from "./capabilities";
 import { editBoard, type EditEnv, type ImportedImage } from "./edit";
 import { buildGenerationRequest, type GenerationInput } from "./gateway";
-import { canConnect, imageRuleViolations, referencePolicy, splitReferenceRefusal, taskPorts } from "./graph";
+import { canConnect, imageRuleViolations, inputRulesFor, referencePolicy, splitReferenceRefusal, taskPorts } from "./graph";
 import { withinPixelRange } from "./size";
 
 const FLASH = "doubao-seedream-5-0-flash-260915";
@@ -29,7 +29,7 @@ function splitBoard(attached = false): Board {
   return { format_version: 1, title: "t", viewport: { zoom: 1, x: 0, y: 0 }, nodes, edges, extra: {} };
 }
 
-const imported = (path: string, width = 1024, height = 1024): ImportedImage => ({ path, sha256: "0".repeat(64), display_name: path, width, height });
+const imported = (path: string, width = 1024, height = 1024, bytes?: number): ImportedImage => ({ path, sha256: "0".repeat(64), display_name: path, width, height, bytes });
 const facts = (format: string, width: number, height: number, bytes = 1024) => ({ format, bytes, width, height });
 
 describe("#176 拆分场景：参考图只能一张", () => {
@@ -157,6 +157,83 @@ describe("#176 请求层不再写死拆分约束", () => {
   });
   it("生成场景照旧放行 webp", () => {
     expect(() => buildGenerationRequest({ ...generation("image/webp", 1), layerDecomposition: false })).not.toThrow();
+  });
+});
+
+describe("#176 拖线时就地拦格式（复审第 1 条）", () => {
+  /** 把 r2 的路径换成指定图片，再试着连到拆分任务上。 */
+  const connect = (path: string) => {
+    const board = splitBoard();
+    const nodes = board.nodes.map((n) => (n.id === "r2" && n.type === "reference" ? { ...n, path } : n));
+    return canConnect({ ...board, nodes }, BUILTIN_TABLE, { source: "r2", sourceHandle: "out", target: "t1", targetHandle: "image:0" });
+  };
+
+  it("webp 参考图连不上拆分任务，png / jpeg 连得上", () => {
+    expect(connect("r2.webp")).toEqual({ ok: false, reason: "图层拆分参考图只接受 PNG / JPEG" });
+    expect(connect("r2.png")).toEqual({ ok: true });
+    expect(connect("r2.JPG")).toEqual({ ok: true });
+  });
+
+  it("生成场景的同一张 webp 照旧连得上", () => {
+    const board = splitBoard();
+    const nodes = board.nodes.map((n) => (n.type === "task" ? { ...n, layer_decomposition: false } : n.id === "r2" && n.type === "reference" ? { ...n, path: "r2.webp" } : n));
+    expect(canConnect({ ...board, nodes }, BUILTIN_TABLE, { source: "r2", sourceHandle: "out", target: "t1", targetHandle: "image:0" })).toEqual({ ok: true });
+  });
+});
+
+describe("#176 标黄按场景规则算（复审第 1 条的另一半）", () => {
+  const splitRule = modelOf(FLASH).workflows.image_edit.layer_split!.input_image_rule;
+
+  it("接了拆分任务就按拆分声明提示，接了生成任务按模型级", () => {
+    expect(inputRulesFor(splitBoard(true), BUILTIN_TABLE, "r1", null)).toEqual([splitRule]);
+    const board = splitBoard(true);
+    const nodes = board.nodes.map((n) => (n.type === "task" ? { ...n, layer_decomposition: false } : n));
+    expect(inputRulesFor({ ...board, nodes }, BUILTIN_TABLE, "r1", null)).toEqual([modelOf(FLASH).input_image_rule]);
+  });
+
+  it("未接线的参考图按回退模型", () => {
+    expect(inputRulesFor({ ...splitBoard(), edges: [] }, BUILTIN_TABLE, "r2", FLASH)).toEqual([modelOf(FLASH).input_image_rule]);
+  });
+});
+
+describe("#176 拆分场景的字节上限也当场判（复审「顺带」）", () => {
+  it("30.0 MB 以内放行，超一个字节当场拦下", () => {
+    expect(splitReferenceRefusal(splitBoard(), BUILTIN_TABLE, "t1", [imported("a.png", 512, 512, 30000000)])).toBeNull();
+    expect(splitReferenceRefusal(splitBoard(), BUILTIN_TABLE, "t1", [imported("a.png", 512, 512, 30000001)])).toContain("超过上限");
+  });
+
+  it("没带字节数（未知）时放行，留给派发前按快照验", () => {
+    expect(splitReferenceRefusal(splitBoard(), BUILTIN_TABLE, "t1", [imported("a.png", 512, 512)])).toBeNull();
+  });
+});
+
+describe("#176 两级同时声明时的优先级（复审第 5 条）", () => {
+  /** 工作流级说只收 png 且下限 400000；拆分场景另说一套。 */
+  const both = (): ModelCapability => {
+    const table = structuredClone(BUILTIN_TABLE);
+    const model = findModel(table, FLASH)!;
+    model.workflows.image_edit.input_image_rule = { ...model.input_image_rule, formats: ["png"], min_total_pixels: 400000 };
+    model.workflows.image_edit.layer_split = { max_references: 1, input_image_rule: { ...model.input_image_rule, formats: ["jpeg"], min_total_pixels: 100000 } };
+    return model;
+  };
+
+  it("拆分场景用拆分声明，生成场景用工作流级，两者互不覆盖", () => {
+    const model = both();
+    expect(inputImageRuleOf(model, "image_edit", "layer_split").formats).toEqual(["jpeg"]);
+    expect(inputImageRuleOf(model, "image_edit", "generate").formats).toEqual(["png"]);
+    expect(maxReferencesOf(model, "image_edit", "layer_split")).toBe(1);
+  });
+
+  it("兜底没有第三处实现：请求层用的就是拆分声明", () => {
+    const table = structuredClone(BUILTIN_TABLE);
+    findModel(table, FLASH)!.workflows.image_edit.layer_split!.input_image_rule.max_bytes = 3;
+    const model = findModel(table, FLASH)!;
+    const input: GenerationInput = {
+      model, text: "", nativeNegativePrompt: null, size: { width: 1024, height: 1024 },
+      references: [{ mediaType: "image/png", bytes: new Uint8Array([1, 2, 3, 4]), hasAlpha: true }],
+      layerDecomposition: true, layerSize: "auto",
+    };
+    expect(() => buildGenerationRequest(input)).toThrow(/不合规/);
   });
 });
 

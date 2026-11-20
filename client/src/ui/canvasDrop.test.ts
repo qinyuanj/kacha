@@ -94,9 +94,10 @@ describe("importImages", () => {
 
     const images = await importImages([fileOf("a.png"), fileOf("b.png")], { userRoot: USER_ROOT, toast, ports: { upload, inspect, prime } });
 
+    // bytes 取读到的元信息（不是 File.size）：选图当下就能按声明的 max_bytes 拦（#176）。
     expect(images).toEqual([
-      { path: "导入参考图/a.png", sha256: "sha-a", display_name: "a.png", width: 64, height: 48 },
-      { path: "导入参考图/b.png", sha256: "sha-a", display_name: "b.png", width: 64, height: 48 },
+      { path: "导入参考图/a.png", sha256: "sha-a", display_name: "a.png", width: 64, height: 48, bytes: 10 },
+      { path: "导入参考图/b.png", sha256: "sha-a", display_name: "b.png", width: 64, height: 48, bytes: 10 },
     ]);
     expect(upload.mock.calls.map(([file]) => file.name)).toEqual(["a.png", "b.png"]);
     // 绝对路径 = 数据根 + 存储端口给的相对路径。

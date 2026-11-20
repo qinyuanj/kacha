@@ -78,7 +78,10 @@ export interface WorkflowCapability {
   transparent_rule?: TransparentRule;
   /** 拆分图层的输出张数约束；缺省 = 该工作流不发 max_images（见 LayerMaxImagesRule）。 */
   layer_max_images?: LayerMaxImagesRule | null;
-  /** 本工作流的参考图规则；声明了整条覆盖模型级，缺省回落模型级（#176）。 */
+  /**
+   * 本工作流的参考图规则（生成场景）：声明了整条覆盖模型级，缺省回落模型级（#176）。
+   * 键名按工作流而不是场景 —— 拆分场景见下面的 layer_split，两者并列、互不覆盖。
+   */
   input_image_rule?: InputImageRule | null;
   /** 拆分场景的参考图规则与张数；缺省回落本工作流、再回落模型级（#176）。 */
   layer_split?: LayerSplitRule | null;

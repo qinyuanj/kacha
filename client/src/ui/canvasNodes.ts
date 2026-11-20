@@ -10,7 +10,7 @@ import {
   imageEdges,
   imagePortIndex,
   imagePortSlots,
-  inputRuleModels,
+  inputRulesFor,
   taskPorts,
   workflowOf,
 } from "../core/graph";
@@ -111,10 +111,10 @@ function promptGuidesOf(input: CanvasNodeInput, promptId: string): PromptReferen
   return groups;
 }
 
-/** 图片节点的输入规则提示：接了任务按下游任务的模型，未接线的参考图按新建任务会用的默认模型。 */
+/** 图片节点的输入规则提示：接了任务按下游任务的场景与模型（拆分任务用拆分声明），未接线的按新建任务会用的默认模型。 */
 function rulesOf(input: CanvasNodeInput, id: string): InputImageRule[] {
   const fallbackModel = defaultTaskModel(input.table, input.discovery, input.board.last_model);
-  return inputRuleModels(input.board, id, fallbackModel).flatMap((m) => findModel(input.table, m)?.input_image_rule ?? []);
+  return inputRulesFor(input.board, input.table, id, fallbackModel);
 }
 
 /** 图片节点按存的宽度与图片比例显示（不回写 size）；缺图时高度随占位内容。 */
