@@ -1,7 +1,7 @@
 // 单个任务从提交到出结果的内部件：读参考图（提交）→ 写任务目录（派发，不可变）→ 调网关 → 存结果图。
 // 副作用全部由调用方注入；调用顺序与状态由任务运行器（runner.ts）负责，界面不直接调用。
 import type { Board, ResultRecord, TaskNode } from "./board";
-import { findModel, isRetiredModel, isSupported, LITE_RETIRED_HINT, type CapabilityTable, type InputImageRule, type ModelCapability } from "./capabilities";
+import { findModel, inputImageRuleOf, isRetiredModel, isSupported, LITE_RETIRED_HINT, workflowFor, type CapabilityTable, type InputImageRule, type ModelCapability } from "./capabilities";
 import { fitImage, type FittedBytes, type ImageCodec } from "./fitImage";
 import { ERROR_CATEGORY_LABELS, fetchResultImage, GatewayError, generate, isFlashShape, type FetchLike, type GenerationInput, type LayerMetadata, validLayerBox } from "./gateway";
 import { chainedEdit, chainedSubmission, imagePortSlots, imageSources, imageRuleViolations, workflowOf } from "./graph";
@@ -90,20 +90,19 @@ function validImageDimensions(image: { width: number; height: number }): boolean
   return Number.isInteger(image.width) && Number.isInteger(image.height) && image.width > 0 && image.height > 0;
 }
 
-function validLayerDimensions(width: number, height: number): boolean {
-  const pixels = width * height;
-  const ratio = width / height;
-  return pixels >= 262144 && pixels <= 36000000 && ratio >= 1 / 16 && ratio <= 16;
-}
-
-async function validateLayerReference(deps: RunDeps, bytes: Uint8Array): Promise<void> {
+/** 拆分场景的参考图：格式 / 字节 / 像素下限全按能力表的拆分声明验（#176），不在这里写死 262144。 */
+async function validateLayerReference(deps: RunDeps, bytes: Uint8Array, rule: InputImageRule): Promise<void> {
   if (!deps.imageCodec) throw new LocalError("Flash 图层参考图需要实际图片解码校验");
   const kind = sniffImage(bytes);
-  if (!kind || !["png", "jpg"].includes(kind.ext) || bytes.length > 30000000) throw new LocalError("图层拆分需要 PNG/JPEG，不超过 30MB");
+  const format = kind ? (kind.ext === "jpg" ? "jpeg" : kind.ext) : "";
+  if (!kind || !rule.formats.includes(format) || (rule.max_bytes !== null && bytes.length > rule.max_bytes)) {
+    throw new LocalError(`图层拆分参考图只接受 ${rule.formats.map((f) => f.toUpperCase()).join(" / ")}`);
+  }
   const decoded = await deps.imageCodec.decode(bytes);
   try {
-    const w = decoded.width, h = decoded.height;
-    if (!validImageDimensions(decoded) || !validLayerDimensions(w, h)) throw new LocalError("图层参考图尺寸超出范围");
+    if (!validImageDimensions(decoded)) throw new LocalError("图层参考图尺寸无效");
+    const violations = imageRuleViolations({ format, bytes: bytes.length, width: decoded.width, height: decoded.height }, rule);
+    if (violations.length) throw new LocalError(`图层参考图不合规：${violations.join("；")}`);
   } finally { decoded.close(); }
 }
 
@@ -171,7 +170,7 @@ async function readSourceImages(deps: RunDeps, sources: ReturnType<typeof imageS
     } catch (e) {
       throw readError(`图${i + 1}（${src.label}）`, e);
     }
-    if (flashLayers) { await validateLayerReference(deps, bytes); sourceBytes.push({ bytes }); }
+    if (flashLayers) { await validateLayerReference(deps, bytes, inputImageRuleOf(model, "image_edit", "layer_split")); sourceBytes.push({ bytes }); }
     else sourceBytes.push(await fitForModel(deps, bytes, model));
   }
   return sourceBytes;
@@ -289,7 +288,7 @@ async function validateRegeneratedReferences(deps: RunDeps, model: ModelCapabili
     if (references.length > 10) throw new LocalError("Flash 参考图最多 10 张");
     if (layerDecomposition && references.length !== 1) throw new LocalError("图层拆分需要恰好一张参考图");
     for (const ref of references) {
-      if (layerDecomposition) await validateLayerReference(deps, ref.bytes);
+      if (layerDecomposition) await validateLayerReference(deps, ref.bytes, inputImageRuleOf(model, workflowFor(references.length), "layer_split"));
       else await validateFlashReference(deps, ref.bytes, model.input_image_rule);
     }
   }
