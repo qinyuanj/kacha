@@ -36,8 +36,11 @@ const REGION = [0.1, 0.2, 0.3, 0.4] as [number, number, number, number];
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const servers: Server[] = [];
 const roots: string[] = [];
+const gates: (() => void)[] = [];
 
 afterEach(async () => {
+  // 先放行还停在闸门上的请求，否则 server.close 会一直等这个连接。
+  gates.splice(0).forEach((release) => release());
   await Promise.all(servers.splice(0).map((s) => new Promise<void>((done) => s.close(() => done()))));
   await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })));
 });
@@ -93,7 +96,28 @@ async function until<T>(check: () => T | undefined | null | false, timeoutMs = 4
   throw new Error("等待桌面参考图编辑闭环超时");
 }
 
+// 事件驱动等待的兜底上限：撑时间窗的不是它，它只把「卡住了」变成带现场的失败。
+// 比用例自身超时短，所以真挂死时先看到的是下面的具体原因，而不是一句 vitest 超时。
+const WAIT_MS = 4000;
+
+/** 等落盘信号超时时的现场：在等哪个文件、等了多久、已经写完哪些、数据根与任务目录里现在有什么。 */
+async function sceneOf(root: string, match: string, waitedMs: number, flushed: readonly string[]): Promise<string> {
+  const top = await readdir(root).catch(() => [] as string[]);
+  const lines = [
+    `等待「${match}」落盘超时：已等 ${waitedMs}ms`,
+    `数据根：${root}`,
+    `数据根内容：${top.join("、") || "（空）"}`,
+    `已写完的文件：${flushed.join("、") || "（无）"}`,
+  ];
+  for (const name of top) {
+    const nested = await readdir(join(root, name), { recursive: true }).catch(() => [] as string[]);
+    if (nested.length) lines.push(`${name}/：${nested.join("、")}`);
+  }
+  return lines.join("\n");
+}
+
 type Mode = "success" | "auth";
+type RunResultChange = Extract<RunnerChange, { kind: "runResult" }>;
 
 interface Setup {
   root: string;
@@ -109,6 +133,16 @@ interface Setup {
   setMode(mode: Mode): void;
   picked: { multiple: boolean[] };
   setBoard(next: Board): void;
+  /** 等某个文件真正写完（writeFile 返回之后才算），返回它的绝对路径；超时带现场。 */
+  written(match: string): Promise<string>;
+  /** 等下一次运行结果落到画板上（已经到的先算）。 */
+  nextResult(): Promise<RunResultChange>;
+  /** 闸门：让下一个生成请求停在服务端，直到 releaseGeneration。 */
+  holdGeneration(): void;
+  /** 等网关真的收到生成请求——此刻任务目录已写好、任务确实在执行中。 */
+  generationEntered(): Promise<void>;
+  /** 放行停住的生成请求。 */
+  releaseGeneration(): void;
 }
 
 async function setup(options: { mode?: Mode; refPath?: string; refs?: number; prompt?: string; regions?: boolean } = {}): Promise<Setup> {
@@ -118,10 +152,38 @@ async function setup(options: { mode?: Mode; refPath?: string; refs?: number; pr
   let mode: Mode = options.mode ?? "success";
   let baseUrl = "";
   const generated: Record<string, unknown>[] = [];
+  // 写完的通知：writeFile 返回之后才记一笔，等到的就是「文件已经在」，不是「准备写」。
+  const flushed: string[] = [];
+  const flushWaiters: { match: string; done: (path: string) => void }[] = [];
+  const notifyFlushed = (path: string) => {
+    flushed.push(path);
+    for (const w of flushWaiters.filter((w) => path.endsWith(w.match))) {
+      flushWaiters.splice(flushWaiters.indexOf(w), 1);
+      w.done(path);
+    }
+  };
+  // 闸门：hold 之后到达的生成请求停在服务端，直到 release。取消因此能确定落在
+  // 「任务目录已写好、请求已发出」的那一刻，而不是和运行器赛跑（早到记不了结局，晚到任务已成功、成功不写结局）。
+  let holdNext = false;
+  let releaseHeld: (() => void) | null = null;
+  const enteredWaiters: (() => void)[] = [];
+  gates.push(() => releaseHeld?.());
   const server = createServer(async (req, res) => {
     const body = await bodyOf(req);
     if (req.method === "POST" && req.url === "/v1/images/generations") {
       generated.push(JSON.parse(body));
+      if (holdNext) {
+        holdNext = false;
+        await new Promise<void>((released) => {
+          releaseHeld = () => {
+            releaseHeld = null;
+            released();
+          };
+          enteredWaiters.splice(0).forEach((wake) => wake());
+        });
+      }
+      // 取消会中止请求：服务端已经没人收这条响应了。
+      if (res.destroyed) return;
       if (mode === "auth") {
         res.writeHead(401, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: { message: "bad key" } }));
@@ -168,9 +230,14 @@ async function setup(options: { mode?: Mode; refPath?: string; refs?: number; pr
         try {
           await writeFile(target, Buffer.from(data, "base64"), { flag: "wx" });
         } catch (e) {
-          if ((e as NodeJS.ErrnoException).code === "EEXIST") return { ok: false, kind: "alreadyExists", message: "只新建不覆盖", version: "" };
+          if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+            // 文件本来就在盘上：对等待者来说同样是「已经有了」。
+            notifyFlushed(target);
+            return { ok: false, kind: "alreadyExists", message: "只新建不覆盖", version: "" };
+          }
           throw e;
         }
+        notifyFlushed(target);
         return { ok: true, kind: "", message: "", version: "" };
       };
       if (prop === "readFile") return async (abs: string) => base64Of(await readFile(resolve(abs)));
@@ -218,12 +285,19 @@ async function setup(options: { mode?: Mode; refPath?: string; refs?: number; pr
 
   let current = boardOf(options.refPath ?? "导入参考图/seed.png", options);
   const changes: RunnerChange[] = [];
+  // 运行结果的通知：apply 是被测代码把结果推到画板上的那一步，等到它就是等到结果。
+  const results: RunResultChange[] = [];
+  const resultWaiters: ((change: RunResultChange) => void)[] = [];
   const apply = (_key: string, change: RunnerChange) => {
     changes.push(change);
     if (change.kind === "submitted")
       current = { ...current, nodes: current.nodes.map((n) => n.id === change.taskId && n.type === "task" ? { ...n, last_submitted: change.lastSubmitted } : n) };
-    if (change.kind === "runResult")
+    if (change.kind === "runResult") {
       current = addResultNode(current, { ...change.result, id: "result-" + change.result.submittedTaskId });
+      const waiter = resultWaiters.shift();
+      if (waiter) waiter(change);
+      else results.push(change);
+    }
   };
   // 画布替身：解码尺寸由 SOURCE 给，编码字节带上尺寸与源长度，便于断言「发出去的就是落盘的那份」。
   const codec = {
@@ -253,6 +327,62 @@ async function setup(options: { mode?: Mode; refPath?: string; refs?: number; pr
     get board() { return current; },
     setBoard(next: Board) { current = next; },
     setMode(next: Mode) { mode = next; },
+    written(match: string): Promise<string> {
+      const ready = flushed.find((p) => p.endsWith(match));
+      if (ready) return Promise.resolve(ready);
+      return new Promise<string>((ok, fail) => {
+        const started = Date.now();
+        const waiter = (path: string) => {
+          clearTimeout(timer);
+          ok(path);
+        };
+        const timer = setTimeout(() => {
+          const i = flushWaiters.findIndex((w) => w.done === waiter);
+          if (i >= 0) flushWaiters.splice(i, 1);
+          void sceneOf(root, match, Date.now() - started, flushed).then((scene) => fail(new Error(scene)));
+        }, WAIT_MS);
+        flushWaiters.push({ match, done: waiter });
+      });
+    },
+    nextResult(): Promise<RunResultChange> {
+      const ready = results.shift();
+      if (ready) return Promise.resolve(ready);
+      return new Promise<RunResultChange>((ok, fail) => {
+        const started = Date.now();
+        const waiter = (change: RunResultChange) => {
+          clearTimeout(timer);
+          ok(change);
+        };
+        const timer = setTimeout(() => {
+          const i = resultWaiters.indexOf(waiter);
+          if (i >= 0) resultWaiters.splice(i, 1);
+          fail(new Error(`等待运行结果超时：已等 ${Date.now() - started}ms；已收到的变更：${changes.map((c) => c.kind).join("、") || "（无）"}；已发出生成请求 ${generated.length} 个；运行指示 pending=${runner.getSnapshot().pending("A")}`));
+        }, WAIT_MS);
+        resultWaiters.push(waiter);
+      });
+    },
+    holdGeneration() {
+      holdNext = true;
+    },
+    generationEntered(): Promise<void> {
+      if (releaseHeld) return Promise.resolve();
+      return new Promise<void>((ok, fail) => {
+        const started = Date.now();
+        const wake = () => {
+          clearTimeout(timer);
+          ok();
+        };
+        const timer = setTimeout(() => {
+          const i = enteredWaiters.indexOf(wake);
+          if (i >= 0) enteredWaiters.splice(i, 1);
+          fail(new Error(`等待网关收到生成请求超时：已等 ${Date.now() - started}ms；已收到 ${generated.length} 个请求；运行指示 pending=${runner.getSnapshot().pending("A")}`));
+        }, WAIT_MS);
+        enteredWaiters.push(wake);
+      });
+    },
+    releaseGeneration() {
+      releaseHeld?.();
+    },
   };
 }
 
@@ -260,15 +390,10 @@ async function factsOf(s: Setup) {
   return { ...await collectRunFacts(s.port.core.imageProbe, s.board, ["t"], s.root), discovery: { source: "live" as const, ids: [MODEL], fetchedAt: new Date().toISOString() }, concurrency: 1 };
 }
 
-/** 读一份结局：写到盘上再读，写到一半会读空，按重试等它写完。 */
+/** 读一份结局：等 outcome.json 真正写完再读（写完才通知，所以不会读到写了一半的空文件）。 */
 async function outcomeOf(s: Setup): Promise<{ path: string; record: Record<string, unknown> }> {
-  const path = await until(() => s.writes.find((p) => p.endsWith("outcome.json")));
-  let raw = "";
-  for (let i = 0; i < 500 && !raw; i++) {
-    try { raw = await readFile(path, "utf8"); } catch { await new Promise((r) => setTimeout(r, 10)); }
-  }
-  expect(raw).not.toBe("");
-  return { path, record: JSON.parse(raw) as Record<string, unknown> };
+  const path = await s.written("outcome.json");
+  return { path, record: JSON.parse(await readFile(path, "utf8")) as Record<string, unknown> };
 }
 
 async function storedTask(absPath: string): Promise<{ dir: string; record: Record<string, unknown> }> {
@@ -404,20 +529,25 @@ describe("桌面端口的参考图编辑闭环（#154）", () => {
     const uploaded = await s.port.media.uploadReference(file);
     s.setBoard(boardOf(uploaded.path, { regions: false }));
 
-    // 取消：派发后取消，落已取消结局，不产结果，也不自动再来一次。
+    // 取消：等请求真的发出去（网关那头已经收到、任务目录已经写好）再取消。
+    // 闸门把取消钉在「执行中」这一刻：早了任务目录还没写、结局无处可记；晚了任务已经成功，而成功不写结局。
+    // 等的是事件，不是时间窗：generationEntered 由服务端收到请求时兑现。
+    s.holdGeneration();
     await s.runner.submit(s.target, s.board, ["t"], { t: 1 });
-    const taskJson = await until(() => s.writes.find((p) => p.endsWith("task.json")));
+    await s.generationEntered();
+    const taskJson = await s.written("task.json");
     s.runner.cancel({ kind: "task", boardKey: "A", taskNodeId: "t" });
     expect((await outcomeOf(s)).record).toMatchObject({ outcome: "cancelled" });
+    // 取消之后队列里不再有这一份，也没有第二次请求：不会自动续算。
+    // 末尾的「共 sent + 2 个请求」同样在兜这件事——多出一次自动续算会让它失败。
+    expect(s.runner.getSnapshot().pending("A")).toBe(0);
     const sent = s.generated.length;
-    await new Promise((r) => setTimeout(r, 200));
-    expect(s.generated).toHaveLength(sent);
     expect(s.changes.some((c) => c.kind === "runResult")).toBe(false);
+    s.releaseGeneration();
 
     // 主动重新生成：读上次的任务目录重算发送计划，出新结果。
     expect(await s.runner.regenerate(s.target, s.board, "t")).toBeNull();
-    const first = await until(() => s.changes.find((c) => c.kind === "runResult"));
-    if (first.kind !== "runResult") return;
+    const first = await s.nextResult();
     expect(s.generated.at(-1)!.prompt).toContain("背景改成蓝色");
 
     // 中断：任务目录在、没有结局（应用重启后），节点记着这个任务编号，同样可主动重新生成。
@@ -431,16 +561,14 @@ describe("桌面端口的参考图编辑闭环（#154）", () => {
     const raw = JSON.parse(await readFile(join(to, "task.json"), "utf8"));
     await writeFile(join(to, "task.json"), JSON.stringify({ ...raw, task_id: interruptedId }));
     s.setBoard({ ...s.board, nodes: s.board.nodes.map((n) => n.id === "t" && n.type === "task" ? { ...n, last_submitted: { ...n.last_submitted!, task_id: interruptedId } } : n) });
-    const before = s.changes.filter((c) => c.kind === "runResult").length;
     expect(await s.runner.regenerate(s.target, s.board, "t")).toBeNull();
-    expect(await until(() => s.changes.filter((c) => c.kind === "runResult").length > before)).toBe(true);
+    const second = await s.nextResult();
+    expect(second.result.submittedTaskId).not.toBe(first.result.submittedTaskId);
     expect(s.generated).toHaveLength(sent + 2);
-    // 这个用例走真实文件系统：提交、等 task.json 落盘、取消后再真实等 200ms、
-    // 两次 regenerate 各要读任务目录并写结果。CI runner 的磁盘比本机慢得多，
-    // 默认 5s 曾在 PR #185 上稳定超时（本地 2573 项全过也拦不住）。
-    // 与 desktopGeneration.test.ts 里那条长用例同一处理：显式给足时间。
-    // 60s 比 until 的 45s 内部期限长，失败时先看到上面那句具体原因。
-  }, 60000);
+    // 这条用例走真实文件系统与真实 HTTP，但每个等待都等事件：写入落盘的通知、运行结果落到画板上、
+    // 网关真正收到请求。撑时间窗的不是期限，所以这里只要比单次等待的兜底上限（WAIT_MS）宽就够；
+    // 真挂死时先报的是那句带上「等什么 / 等到哪一步」的具体原因，而不是 vitest 的笼统超时。
+  }, 20_000);
 
   it("生成变体固定一份、进同一结果列不覆盖已有结果；失败后重新生成按当前能力重算发送文本", async () => {
     const s = await setup();
