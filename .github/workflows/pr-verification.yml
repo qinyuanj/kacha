@@ -21,6 +21,8 @@ jobs:
       PYTHONUTF8: '1'
       PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
       PR_BASE: origin/${{ github.event.pull_request.base.ref }}
+      # 浏览器装在这里，缓存键跟着 @playwright/test 的版本（也就是 lockfile）走。
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
     steps:
       - name: Check out PR and full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,6 +33,9 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
+          # 缓存 npm 下载目录，省掉每次重下依赖的二十来秒；node_modules 仍由 npm ci 按 lockfile 装。
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
 
       - name: Set up Python 3.12
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -50,6 +55,12 @@ jobs:
 
       - name: Install locked client dependencies
         run: npm --prefix client ci
+
+      - name: Restore the Playwright browser cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          key: ${{ runner.os }}-playwright-${{ hashFiles('client/package-lock.json') }}
 
       - name: Install Playwright Chromium
         working-directory: client
