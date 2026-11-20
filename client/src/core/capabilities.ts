@@ -179,6 +179,13 @@ const REGION_LABELS: Record<RegionRender, string> = {
 };
 const WORKFLOW_LABELS: Record<WorkflowName, string> = { text_to_image: "文生图", image_edit: "图片编辑" };
 
+const WORKFLOWS = Object.keys(WORKFLOW_LABELS) as WorkflowName[];
+
+/** 某个按工作流声明的能力里，哪些工作流还是待测；按工作流固定顺序拼成人能读的一项。 */
+function untestedPerWorkflow(model: ModelCapability, pick: (workflow: WorkflowCapability) => TriState | undefined, label: (workflow: string) => string): string[] {
+  return WORKFLOWS.filter((wf) => pick(model.workflows[wf]) === "untested").map((wf) => label(WORKFLOW_LABELS[wf]));
+}
+
 /** 模型说明浮层列出的「待测」能力。 */
 export function untestedCapabilities(model: ModelCapability): string[] {
   const out: string[] = [];
@@ -188,15 +195,9 @@ export function untestedCapabilities(model: ModelCapability): string[] {
   }
   if (model.native_mask === "untested") out.push("原生蒙版");
   if (model.transparent_background === "untested") out.push("透明背景");
-  for (const wf of Object.keys(WORKFLOW_LABELS) as WorkflowName[]) {
-    if (model.workflows[wf].supports_negative_prompt === "untested") out.push(`负向提示词（${WORKFLOW_LABELS[wf]}）`);
-  }
-  for (const wf of Object.keys(WORKFLOW_LABELS) as WorkflowName[]) {
-    if (model.workflows[wf].layer_decomposition === "untested") out.push(`拆分图层（${WORKFLOW_LABELS[wf]}）`);
-  }
-  for (const wf of Object.keys(WORKFLOW_LABELS) as WorkflowName[]) {
-    if (model.workflows[wf].text_recognition === "untested") out.push(`文字识别（${WORKFLOW_LABELS[wf]}）`);
-  }
+  out.push(...untestedPerWorkflow(model, (wf) => wf.supports_negative_prompt, (name) => `负向提示词（${name}）`));
+  out.push(...untestedPerWorkflow(model, (wf) => wf.layer_decomposition, (name) => `拆分图层（${name}）`));
+  out.push(...untestedPerWorkflow(model, (wf) => wf.text_recognition, (name) => `文字识别（${name}）`));
   return out;
 }
 
