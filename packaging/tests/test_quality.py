@@ -257,7 +257,17 @@ class QualityBaseTest(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertIn("自 origin/main", output.getvalue())
         self.assertIn("Go 当前只由 go test ./... 验证", output.getvalue())
-        self.assertIn("未接入这三项质量指标", output.getvalue())
+        self.assertIn("未接入这两项质量指标", output.getvalue())
+
+    def test_mutation_is_announced_as_disabled_with_its_reason(self):
+        """#193：不跑变异测试必须明说，静默跳过会让人以为跑过了。"""
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(quality.main([]), 0)
+        printed = output.getvalue()
+        self.assertIn("变异测试未启用", printed)
+        self.assertIn("docs/adr/0020", printed)
+        self.assertIn("CRAP 与重复检查", printed)
 
     def test_an_explicit_pr_base_is_used_for_the_comparison(self):
         output = io.StringIO()
