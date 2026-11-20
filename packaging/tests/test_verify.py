@@ -47,13 +47,19 @@ class VerificationCommandsTest(unittest.TestCase):
         self.assertIn(QUALITY, commands([]))
         self.assertNotIn([*QUALITY, "--mutate"], commands([]))
 
-    def test_quality_flag_adds_mutation_to_the_gate(self):
-        self.assertIn([*QUALITY, "--mutate"], commands(["--quality"]))
-        self.assertNotIn(QUALITY, commands(["--quality"]))
+    def test_quality_flag_keeps_the_gate_free_of_mutation(self):
+        """#193：2026-11-20 决定不做变异测试，--quality 只跑 CRAP 与重复检查。"""
+        self.assertIn(QUALITY, commands(["--quality"]))
+        self.assertFalse([command for command in commands(["--quality"]) if "--mutate" in command])
+
+    def test_no_argument_can_bring_mutation_back_into_the_gate(self):
+        """任何参数组合都不许再拼出 --mutate：本机 commit limit 只有 23,060 MB，跑它会整机崩溃。"""
+        for argv in ([], ["--quality"], ["--base", "origin/main"], ["--quality", "--base", "origin/main"]):
+            self.assertFalse([command for command in commands(argv) if "--mutate" in command], argv)
 
     def test_an_explicit_base_is_forwarded_to_the_gate(self):
         selected = commands(["--quality", "--base", "origin/pr-base"])
-        self.assertIn([*QUALITY, "--mutate", "--base", "origin/pr-base"], selected)
+        self.assertIn([*QUALITY, "--base", "origin/pr-base"], selected)
 
     def test_retired_e2e_flag_is_rejected(self):
         with mock.patch("sys.stderr"), self.assertRaises(SystemExit) as caught:

@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """质量门禁：对本次改动的业务源码跑 crapper、dryer，带 --mutate 时再跑 mutator（见 docs/adr/0020、0022）。
 
+2026-11-20 决定不做变异测试：默认只跑 CRAP 与重复检查，并明确打印「变异测试未启用」及原因，
+不静默跳过。mutator 的代码保留在这里，但当前没有调用方（verify.py 不再传 --mutate）；
+恢复条件见 docs/adr/0020。
+
 改动集 = merge-base(HEAD, --base 指定引用)..HEAD 的新增 / 修改 / 重命名文件，加上未提交与未跟踪的文件；默认基线为 origin/main。
 范围（源码根与排除）只在 uml-quality.json 一处声明；三个工具都是 dsh-uml-viewer 那个单一二进制的
 子命令（uml-viewer crap / dry / mutate），二进制从哪儿来找看 viewer_binary()。
@@ -32,7 +36,14 @@ VIEWER_BINARY_NAME = "uml-viewer.exe" if os.name == "nt" else "uml-viewer"
 # 前端变异工作副本需要读取包外的契约夹具、更新说明与唯一版本清单。
 MUTATION_COPIES = ("../contracts", "../docs/release", "../mygo.config.ts")
 
-GO_COVERAGE_NOTICE = "质量范围：前端 TypeScript 的 CRAP / DRY / mutation；Go 当前只由 go test ./... 验证，未接入这三项质量指标。"
+GO_COVERAGE_NOTICE = "质量范围：前端 TypeScript 的 CRAP / DRY；Go 当前只由 go test ./... 验证，未接入这两项质量指标。"
+
+# 2026-11-20 owner 决定不做变异测试。门禁必须明说没跑：静默跳过会让人以为跑过了（见 docs/adr/0020）。
+MUTATION_DISABLED_NOTICE = (
+    "变异测试未启用：2026-11-20 决定不做变异测试（--mutate 的变异工作副本会让本机整机崩溃，"
+    "mutator 也产不出覆盖率产物、所有变异体都被算成未覆盖），门禁只跑 CRAP 与重复检查；"
+    "恢复条件见 docs/adr/0020，临时手动跑一次用 --mutate。"
+)
 
 
 class BaseRefError(RuntimeError):
@@ -148,7 +159,9 @@ def tool_command(binary: Path, subcommand: str, args: list[str]) -> list[str]:
 
 
 def mutation_command(binary: Path, package: Package, changed: list[str]) -> list[str]:
-    """mutator 的命令行：先是范围参数，再逐个 --copy（只有 mutator 有这个开关），最后是改动的文件。"""
+    """mutator 的命令行：先是范围参数，再逐个 --copy（只有 mutator 有这个开关），最后是改动的文件。
+
+    当前没有调用方：verify.py 不再传 --mutate（2026-11-20 决定不做变异测试），只有显式 --mutate 才走到这里。"""
     copies = [argument for directory in MUTATION_COPIES for argument in ("--copy", directory)]
     return tool_command(binary, "mutate", [*package.tool_args(), *copies, *changed])
 
@@ -271,10 +284,12 @@ def _check_package(binary: Path, package: Package, changed: list[str], mutate: b
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default=BASE_REF, help="比较基线引用（默认：origin/main）")
-    parser.add_argument("--mutate", action="store_true", help="同时运行 mutator")
+    parser.add_argument("--mutate", action="store_true",
+                        help="同时运行 mutator（默认不跑：2026-11-20 决定不做变异测试，当前没有调用方；见 docs/adr/0020）")
     args = parser.parse_args(argv)
     scope = Scope.load(ROOT)
     print(GO_COVERAGE_NOTICE, flush=True)
+    print("变异测试：按 --mutate 显式运行" if args.mutate else MUTATION_DISABLED_NOTICE, flush=True)
     try:
         base = merge_base(ROOT, args.base)
     except BaseRefError as error:

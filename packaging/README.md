@@ -48,17 +48,17 @@ python packaging\build_desktop.py
 npm --prefix client ci
 python packaging\verify.py --preflight
 python packaging\verify.py
-# 合入集成分支前加前端变异测试：
+# 合入集成分支前的发版门禁（CRAP + 重复检查，不含变异测试）：
 python packaging\verify.py --quality
 # 显式指定质量比较基线：
 python packaging\verify.py --base origin/main
 ~~~
 
-默认按顺序运行打包脚本单测、前端单测、类型检查、knip（普通与 production）、`go test ./...`、桌面 debug 构建和前端质量门禁。各项跑完再汇总，任一失败即返回非零。不会安装 Chromium，也不运行 e2e。旧的 --e2e 参数会被拒绝。
+默认按顺序运行打包脚本单测、前端单测、类型检查、knip（普通与 production）、`go test ./...`、桌面 debug 构建和前端质量门禁。各项跑完再汇总，任一失败即返回非零。不会安装 Chromium，也不运行 e2e。旧的 --e2e 参数会被拒绝。`--quality` 只标注「这是发版门禁用例」：它跑的质量步骤与默认验证相同，不再追加变异测试（见下文「变异测试未启用」）。
 
 Go 单测覆盖本地存储、路径边界、导入、剪贴板契约与服务绑定；前端单测使用壳端口替身。它们不能替代 Windows 已解锁交互会话里的真实剪贴板、外部软件粘贴、窗口激活与打包产物检查。debug 构建只证明程序可构建，不宣称这些交互验收通过。
 
-非 Draft PR 的 Windows CI 使用同一 `verify.py` 入口，质量基线为 PR 的实际目标分支；目标引用缺失、历史不足或没有共同祖先会失败。PR 更新取消过期运行，直接 push 不触发该 workflow。CI 不运行 mutator，合入前仍需手动 `--quality`。
+非 Draft PR 的 Windows CI 使用同一 `verify.py` 入口（不带 `--quality`，但质量步骤相同），质量基线为 PR 的实际目标分支；目标引用缺失、历史不足或没有共同祖先会失败。PR 更新取消过期运行，直接 push 不触发该 workflow。CI 与本机门禁都不运行 mutator。
 
 ### Windows 完整性标签
 
@@ -73,13 +73,26 @@ icacls client\target /setintegritylevel '(OI)(CI)M'
 
 ## 前端质量门禁
 
-`packaging/quality.py` 只测 `uml-quality.json` 中声明的 `client/src` TypeScript / TSX。默认比较 `origin/main` 的 merge-base 以来的改动（含未提交与未跟踪源码），`--base` 可换基线。CRAP 超过 10、CRAP 覆盖率缺失、改动文件涉及相似度至少 0.8 的重复配对都会失败；`--mutate` 额外拒绝存活与未覆盖变异点。
+`packaging/quality.py` 只测 `uml-quality.json` 中声明的 `client/src` TypeScript / TSX。默认比较 `origin/main` 的 merge-base 以来的改动（含未提交与未跟踪源码），`--base` 可换基线。CRAP 超过 10、CRAP 覆盖率缺失、改动文件涉及相似度至少 0.8 的重复配对都会失败。`--mutate` 仍是可选开关，会额外拒绝存活与未覆盖变异点，但 `verify.py` 不再传它，当前没有调用方（见下文「变异测试未启用」）。
 
 **Go 的 CRAP、DRY 与 mutation 尚未接入。** 当前 Go 验证为 `go test ./...`，不能声称整个桌面客户端通过这三项质量指标。架构图示例也只声明前端 TypeScript，不伪造 Go 图或覆盖率。
 
 工具是单一 uml-viewer 二进制的 crap / dry / mutate 子命令。先查 `UML_VIEWER_BIN` 指向的文件，再查 DSH 插件 `%USERPROFILE%\.dsh\dsh-uml-viewer\current.json` 记录的版本目录；找不到即失败。前端覆盖率、变异副本与指标落在 `client/target`、`client/.metrics`。变异副本补复制 `../contracts`、`../docs/release` 与 `../mygo.config.ts`；工具必须支持 `--copy`。
 
 PR CI 从 npm 官方 registry 取得固定 `@dsh-uml-viewer/win32-x64@1.0.0`，核对 SHA-512 后只解出可执行文件，通过 `UML_VIEWER_BIN` 传入。该固定版本不支持 mutator 的 `--copy`，仅用于默认 CRAP 与 DRY。
+
+### 变异测试未启用
+
+2026-11-20 owner 决定不做变异测试，发版门禁因此**不含变异测试**：`verify.py --quality` 与默认验证都只跑 CRAP 与重复检查。`packaging/quality.py` 每次运行都打印一行「变异测试未启用」并给出原因，不静默跳过——静默会让人以为跑过了。
+
+两条原因各自都足以让这条路走不通：
+
+- 本机 Windows commit limit 只有 23,060 MB（物理内存 16 GB 加 6.8 GB pagefile），`--mutate` 的变异工作副本会把整机拖崩。
+- uml-viewer 当前构建的 mutator 产不出覆盖率产物，所有变异体都被算成未覆盖，判定没有区分度（#184 因此关闭）。
+
+后果 owner 已知情并接受：改了逻辑却没补测试，此后只能靠人和复审兜。
+
+能力没有删。`packaging/quality.py` 的 mutator 代码（`mutation_command`、`mutation_uncovered`、`--mutate` 与 `--copy` 前置检查）与相应单测都保留，只是当前没有调用方。要重新启用，至少同时满足：本机内存与 commit limit 够跑变异工作副本、mutator 能产出可信的覆盖率产物、owner 重新确认这两条前提；届时在 `verify.py` 的 `commands()` 里重新拼上 `--mutate`，并把本节与 ADR 0020、0022 改回一致。判定逻辑（存活变异体、未覆盖变异点）不需要改。
 
 ## 首日验收记录
 

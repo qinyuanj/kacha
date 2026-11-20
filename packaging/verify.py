@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """桌面验证：预检、打包脚本单测、前端单测/类型/死代码、Go 测试、debug 构建与前端质量门禁。
 
-不运行 e2e。--quality 额外运行前端变异测试；--base 显式指定质量比较基线。
+不运行 e2e。--quality 表示合入集成分支前的发版门禁（CRAP 与重复检查，不含变异测试）；
+--base 显式指定质量比较基线。
 """
 
 import argparse
@@ -35,10 +36,13 @@ def commands(argv: list[str]) -> list[list[str]]:
     """只接受当前验证入口的参数，避免旧参数被静默忽略。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preflight", action="store_true")
-    parser.add_argument("--quality", action="store_true")
+    parser.add_argument("--quality", action="store_true",
+                        help="发版门禁：CRAP 与重复检查（与默认验证同一组步骤，不跑变异测试）")
     parser.add_argument("--base")
     args = parser.parse_args(argv)
-    quality = [*QUALITY, *(["--mutate"] if args.quality else [])]
+    # 2026-11-20 决定不做变异测试，--quality 不再追加 --mutate：本机 commit limit 只有 23,060 MB，
+    # 变异工作副本会把整机拖崩（见 docs/adr/0020）。参数保留，旧习惯不会被当成未知参数拒绝。
+    quality = list(QUALITY)
     if args.base:
         quality += ["--base", args.base]
     return [quality if command is QUALITY else command for command in COMMANDS]
