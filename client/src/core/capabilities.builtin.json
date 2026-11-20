@@ -304,7 +304,8 @@
             "custom": { "min_total_pixels": 921600, "max_total_pixels": 4624220, "min_aspect_ratio": 0.0625, "max_aspect_ratio": 16 }
           },
           "layer_decomposition": "untested",
-          "layer_max_images": { "min": 2, "max": 100, "default": 30 }
+          "layer_max_images": { "min": 2, "max": 100, "default": 30 },
+          "text_recognition": "untested"
         }
       }
     }

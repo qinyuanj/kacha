@@ -79,6 +79,12 @@ export interface WorkflowCapability {
   /** 拆分图层的输出张数约束；缺省 = 该工作流不发 max_images（见 LayerMaxImagesRule）。 */
   layer_max_images?: LayerMaxImagesRule | null;
   /**
+   * 拆分图层的富文本 OCR（#178）：声明 supported 才在画板上露出开关、请求里发 layer_decomposition_options。
+   * 缺省 = 拆分不要 OCR（5.0 Flash / Pro 保持原样，请求体里不出现这个键）。
+   * 与 layer_max_images 同层：都是「拆分输出」的声明，不是参考图规则（见 LayerSplitRule）。
+   */
+  text_recognition?: TriState;
+  /**
    * 本工作流的参考图规则（生成场景）：声明了整条覆盖模型级，缺省回落模型级（#176）。
    * 键名按工作流而不是场景 —— 拆分场景见下面的 layer_split，两者并列、互不覆盖。
    */
@@ -145,6 +151,11 @@ export function layerMaxImagesRuleOf(model: ModelCapability, workflow: WorkflowN
   return model.workflows[workflow].layer_max_images ?? null;
 }
 
+/** 该工作流拆分图层时能否要回富文本 OCR；没声明 = 不支持（#178）。 */
+export function textRecognitionSupported(model: ModelCapability, workflow: WorkflowName): boolean {
+  return isSupported(model.workflows[workflow].text_recognition ?? "unsupported");
+}
+
 /** 该工作流下透明背景怎么落地；未声明按 alpha_reference（既有行为）。 */
 export function transparentRuleOf(model: ModelCapability, workflow: WorkflowName): TransparentRule {
   return model.workflows[workflow].transparent_rule ?? "alpha_reference";
@@ -168,6 +179,13 @@ const REGION_LABELS: Record<RegionRender, string> = {
 };
 const WORKFLOW_LABELS: Record<WorkflowName, string> = { text_to_image: "文生图", image_edit: "图片编辑" };
 
+const WORKFLOWS = Object.keys(WORKFLOW_LABELS) as WorkflowName[];
+
+/** 某个按工作流声明的能力里，哪些工作流还是待测；按工作流固定顺序拼成人能读的一项。 */
+function untestedPerWorkflow(model: ModelCapability, pick: (workflow: WorkflowCapability) => TriState | undefined, label: (workflow: string) => string): string[] {
+  return WORKFLOWS.filter((wf) => pick(model.workflows[wf]) === "untested").map((wf) => label(WORKFLOW_LABELS[wf]));
+}
+
 /** 模型说明浮层列出的「待测」能力。 */
 export function untestedCapabilities(model: ModelCapability): string[] {
   const out: string[] = [];
@@ -177,12 +195,9 @@ export function untestedCapabilities(model: ModelCapability): string[] {
   }
   if (model.native_mask === "untested") out.push("原生蒙版");
   if (model.transparent_background === "untested") out.push("透明背景");
-  for (const wf of Object.keys(WORKFLOW_LABELS) as WorkflowName[]) {
-    if (model.workflows[wf].supports_negative_prompt === "untested") out.push(`负向提示词（${WORKFLOW_LABELS[wf]}）`);
-  }
-  for (const wf of Object.keys(WORKFLOW_LABELS) as WorkflowName[]) {
-    if (model.workflows[wf].layer_decomposition === "untested") out.push(`拆分图层（${WORKFLOW_LABELS[wf]}）`);
-  }
+  out.push(...untestedPerWorkflow(model, (wf) => wf.supports_negative_prompt, (name) => `负向提示词（${name}）`));
+  out.push(...untestedPerWorkflow(model, (wf) => wf.layer_decomposition, (name) => `拆分图层（${name}）`));
+  out.push(...untestedPerWorkflow(model, (wf) => wf.text_recognition, (name) => `文字识别（${name}）`));
   return out;
 }
 
@@ -286,6 +301,7 @@ function checkWorkflow(value: unknown, path: string, errors: string[]): void {
   checkTri(value.layer_decomposition, `${path}.layer_decomposition`, errors);
   checkTransparentRule(value.transparent_rule, `${path}.transparent_rule`, errors);
   checkLayerMaxImages(value.layer_max_images, `${path}.layer_max_images`, errors);
+  if (value.text_recognition !== undefined) checkTri(value.text_recognition, `${path}.text_recognition`, errors);
   if (value.input_image_rule != null) checkInputImageRule(value.input_image_rule, `${path}.input_image_rule`, errors);
   checkLayerSplit(value.layer_split, `${path}.layer_split`, errors);
   checkReferenceRange(value, path, errors);

@@ -15,6 +15,7 @@ import { FINAL_BADGE_TEXT, SUGGEST_KEEP_TEXT } from "./boardText";
 import {
   findModel,
   layerMaxImagesRuleOf,
+  textRecognitionSupported,
   modelsByTier,
   TIER_LABELS,
   untestedCapabilities,
@@ -727,6 +728,8 @@ export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskF
   const model = findModel(table, node.model);
   // 拆分图层的张数范围由能力表该工作流声明；没声明就不给输入框（5.0 Flash / Pro）。
   const layerMaxImages = node.layer_decomposition && model ? layerMaxImagesRuleOf(model, workflow) : null;
+  // 文字识别按拆分场景的声明露出（#178）；开关只在拆分打开时有意义，模型没声明就整条不出现。
+  const ocrSupported = model !== undefined && textRecognitionSupported(model, workflow);
   const rule = model?.workflows[workflow].size_rule;
   const modelLabel = view.model.label;
   const listed = view.model.state === "ok";
@@ -835,6 +838,18 @@ export const TaskNodeView = memo(function TaskNodeView({ data }: NodeProps<TaskF
                     onChange={(e) => apply({ kind: "setTaskFlag", taskId: node.id, flag: "layer_decomposition", value: e.target.checked })}
                   />
                   拆分图层
+                </label>
+              )}
+              {ocrSupported && (
+                <label className={node.layer_decomposition ? "" : "disabled"}>
+                  <input
+                    type="checkbox"
+                    checked={node.layer_text_recognition === true}
+                    disabled={locked || !node.layer_decomposition}
+                    onChange={(e) => apply({ kind: "setTaskFlag", taskId: node.id, flag: "layer_text_recognition", value: e.target.checked })}
+                  />
+                  文字识别
+                  {!node.layer_decomposition && <span className="muted">（{ports.layerDecomposition ? "需先打开拆分图层" : "等拆分图层验证后可用"}）</span>}
                 </label>
               )}
               {ports.transparentBackground && (

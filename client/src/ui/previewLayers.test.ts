@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { LayerRecord } from "../core/taskDir";
 import type { ImageInfo } from "../shell/port";
-import { baseImageAlt, baseImagePath, layerName, layerStyleOf } from "./previewLayers";
+import { baseImageAlt, baseImagePath, layerName, layerOcrStyles, layerOcrText, layerStyleOf } from "./previewLayers";
 
 const INFO: ImageInfo = { sha256: "a", bytes: 10, width: 100, height: 50, format: "png", has_alpha: false };
 
@@ -32,6 +32,22 @@ describe("预览图层", () => {
   it("图层名字：没有名字时按序号写「图层N」", () => {
     expect(layerName(layer(), 0)).toBe("层");
     expect(layerName({ ...layer(), name: undefined } as unknown as LayerRecord, 2)).toBe("图层3");
+  });
+
+  it("文字识别：没拿到就不显示，空串与全空白同样算没拿到", () => {
+    expect(layerOcrText(layer())).toBeNull();
+    expect(layerOcrText({ ...layer(), text_recognition: { text: "", lines: [] } } as unknown as LayerRecord)).toBeNull();
+    expect(layerOcrText({ ...layer(), text_recognition: { text: " \n ", lines: [] } } as unknown as LayerRecord)).toBeNull();
+    expect(layerOcrText({ ...layer(), text_recognition: { text: " SUMMER ", lines: [] } } as unknown as LayerRecord)).toBe("SUMMER");
+  });
+
+  it("文字识别：近似样式按固定顺序去重，没给的样式不出现", () => {
+    const ocr = { text: "SALE", lines: [] };
+    const withStyle = (style: Record<string, unknown>) => ({ ...layer(), text_recognition: { ...ocr, lines: [{ runs: [{ text: "SALE", style }] }] } }) as unknown as LayerRecord;
+    expect(layerOcrStyles(withStyle({ bold: true, italic: true }))).toEqual(["粗体", "斜体"]);
+    expect(layerOcrStyles(withStyle({ italic: false, bold: true }))).toEqual(["粗体"]);
+    expect(layerOcrStyles(withStyle({ bold: true, strikethrough: true }))).toEqual(["粗体", "删除线"]);
+    expect(layerOcrStyles(layer())).toEqual([]);
   });
 
   it("单层模式：底图换成那一层，alt 用它的文件名", () => {

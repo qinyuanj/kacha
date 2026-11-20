@@ -3,7 +3,7 @@
 // HTTP 由调用方注入（壳里是浏览器原生 fetch，测试里是夹具回放）。
 // 发什么由发送计划（sendPlan.ts）决定；这里只把发送文本与原生负向放进请求体。
 import { withinPixelRange } from "./size";
-import { inputImageRuleOf, isSupported, layerMaxImagesRuleOf, maxReferencesOf, transparentRuleOf, workflowFor, type ModelCapability } from "./capabilities";
+import { inputImageRuleOf, isSupported, layerMaxImagesRuleOf, maxReferencesOf, textRecognitionSupported, transparentRuleOf, workflowFor, type ModelCapability } from "./capabilities";
 import { errorText } from "./errors";
 import { imageRuleViolations } from "./imageRule";
 
@@ -17,7 +17,7 @@ export const LAYER_SIZES_TEXT = [...LAYER_SIZES.filter((s) => s !== "auto"), "au
 export function isLayerSize(value: unknown): value is LayerSize {
   return (LAYER_SIZES as readonly unknown[]).includes(value);
 }
-export interface LayerMetadata { z_index: number; bounding_box?: LayerBoundingBox | number[]; name?: string; description?: string }
+export interface LayerMetadata { z_index: number; bounding_box?: LayerBoundingBox | number[]; name?: string; description?: string; text_recognition?: TextRecognition }
 
 /** 图层定位：absolute 为底图像素坐标 [left,top,right,bottom]，normalized 为 0–1000（与提示坐标 0–999 互不相干）。 */
 export interface LayerBoundingBox {
@@ -30,6 +30,109 @@ export function validLayerBox(value: unknown): value is LayerBoundingBox {
   const b = value as LayerBoundingBox | undefined;
   const rect = (v: unknown, max: number) => Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= max) && v[2] > v[0] && v[3] > v[1];
   return !!b && rect(b.absolute, Number.MAX_SAFE_INTEGER) && rect(b.normalized, 1000);
+}
+
+// ---- 富文本 OCR（#178）----
+
+/** 近似样式：官方按可选返回，只搬运给到的键，不补默认值。 */
+export interface TextRunStyle {
+  similar_font_family?: string;
+  foreground_color?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+  shadow?: boolean;
+  translucent?: boolean;
+}
+
+/** 一段同样式的文字。 */
+export interface TextRun {
+  text: string;
+  style?: TextRunStyle;
+}
+
+/**
+ * 一行文字；位置与图层 bounding_box 同口径 —— 既有 {absolute, normalized}，也接受旧的四元数组（只有 absolute）。
+ */
+export interface TextLine {
+  bounding_box?: LayerBoundingBox | number[];
+  runs: TextRun[];
+}
+
+/** 一个文字图层的 OCR 结果：整段文字 + 逐行的位置与样式分段。 */
+export interface TextRecognition {
+  text: string;
+  lines: TextLine[];
+}
+
+const TEXT_STYLE_STRINGS = ["similar_font_family", "foreground_color"] as const;
+const TEXT_STYLE_FLAGS = ["bold", "italic", "underline", "strikethrough", "shadow", "translucent"] as const;
+
+function plainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function textRunStyleOf(raw: unknown): TextRunStyle | null {
+  if (raw === undefined) return {};
+  if (!plainObject(raw)) return null;
+  const out: Record<string, unknown> = {};
+  for (const key of TEXT_STYLE_STRINGS) if (typeof raw[key] === "string") out[key] = raw[key];
+  for (const key of TEXT_STYLE_FLAGS) if (typeof raw[key] === "boolean") out[key] = raw[key];
+  return out as TextRunStyle;
+}
+
+function textRunOf(raw: unknown): TextRun | null {
+  if (!plainObject(raw) || typeof raw.text !== "string") return null;
+  const style = textRunStyleOf(raw.style);
+  if (style === null) return null;
+  return { text: raw.text, ...(Object.keys(style).length ? { style } : {}) };
+}
+
+const isFiniteQuad = (value: unknown): value is number[] =>
+  Array.isArray(value) && value.length === 4 && value.every((n) => typeof n === "number" && Number.isFinite(n));
+
+/**
+ * 行框：完整形状（absolute + normalized）直接用；只给 absolute、或直接给四元数组时按旧的四元数组口径收下
+ * （与图层级 bounding_box 允许的两种形状一致）。认不出来返回 null，调用方只丢这一行。
+ */
+function textLineBoxOf(raw: unknown): LayerBoundingBox | number[] | undefined | null {
+  if (raw === undefined) return undefined;
+  if (validLayerBox(raw)) return raw;
+  if (isFiniteQuad(raw)) return raw;
+  const absolute = plainObject(raw) ? raw.absolute : undefined;
+  return isFiniteQuad(absolute) ? absolute : null;
+}
+
+/** 一行文字；段落或行框认不出来返回 null —— 只丢这一行，不连累整段 OCR。 */
+function textLineOf(raw: unknown): TextLine | null {
+  if (!plainObject(raw) || !Array.isArray(raw.runs)) return null;
+  const runs = raw.runs.map(textRunOf);
+  if (runs.some((run) => run === null)) return null;
+  const box = textLineBoxOf(raw.bounding_box);
+  if (box === null) return null;
+  return { ...(box === undefined ? {} : { bounding_box: box }), runs: runs as TextRun[] };
+}
+
+/**
+ * 一个图层的 OCR 结果。非文字层、艺术字、手写体本来就不返回（undefined 即「没拿到」）；
+ * 形状不完整时同样丢弃，而不是让整次生成失败 —— OCR 是附带信息，没道理为它丢掉已经出好的图。
+ */
+function textRecognitionOf(raw: unknown): TextRecognition | undefined {
+  if (!plainObject(raw) || typeof raw.text !== "string") return undefined;
+  // 没有 lines、或某行 / 某段认不出来时逐行丢，不把整段 OCR 一起丢掉：文字本身仍然有用。
+  const rawLines = Array.isArray(raw.lines) ? raw.lines : [];
+  const lines = rawLines.flatMap((line) => {
+    const parsed = textLineOf(line);
+    return parsed === null ? [] : [parsed];
+  });
+  if (!raw.text.trim() && lines.length === 0) return undefined;
+  return { text: raw.text, lines };
+}
+
+/** layers.json 里 text_recognition 的合法性：缺省合法，给了就必须是完整形状。 */
+export function validTextRecognition(raw: unknown): boolean {
+  return raw === undefined || textRecognitionOf(raw) !== undefined;
 }
 
 export const MODELS_PATH = "/v1/models";
@@ -120,6 +223,8 @@ export interface GenerationInput {
   layerSize?: LayerSize;
   /** 拆分图层的输出张数；缺省用能力表该工作流的 default。未声明范围的工作流忽略它。 */
   layerMaxImages?: number;
+  /** 拆分图层时顺带要回富文本 OCR（#178）；只对能力表声明 supported 的工作流生效。 */
+  textRecognition?: boolean;
 }
 
 export type GeneratedImage = ({ kind: "url"; url: string } | { kind: "bytes"; bytes: Uint8Array }) & {
@@ -253,13 +358,25 @@ function layerMaxImagesOf(input: GenerationInput): number | undefined {
   return value;
 }
 
+/**
+ * 拆分时的富文本 OCR（#178）：能力表该工作流声明 supported 才发；关掉时请求体里不出现
+ * layer_decomposition_options。打开了却没声明的模型直接拦下 —— 与张数越界同口径，
+ * 不静默丢掉用户的开关。
+ */
+function layerTextRecognitionOn(input: GenerationInput): boolean {
+  if (!input.layerDecomposition || !input.textRecognition) return false;
+  if (!textRecognitionSupported(input.model, workflowFor(input.references.length))) throw new GatewayError("config", "该模型的图层拆分不支持文字识别");
+  return true;
+}
+
 /** Flash 请求体：拆分时 size 走图层尺寸，其余按像素尺寸拼；prompt 在拆分且为空时省略。 */
-function flashRequestBody(input: GenerationInput, options: ReturnType<typeof outputOptions>, background: BackgroundMode | null, maxImages: number | undefined) {
+function flashRequestBody(input: GenerationInput, options: ReturnType<typeof outputOptions>, background: BackgroundMode | null, maxImages: number | undefined, textRecognition: boolean) {
   return {
     model: input.model.model_id,
     ...(input.text.trim() || !input.layerDecomposition ? { prompt: input.text } : {}),
     size: input.layerDecomposition ? input.layerSize ?? "auto" : `${input.size.width}x${input.size.height}`,
     ...(input.layerDecomposition ? { layer_decomposition: true } : {}),
+    ...(textRecognition ? { layer_decomposition_options: { text_recognition: true } } : {}),
     ...(maxImages === undefined ? {} : { max_images: maxImages }),
     ...options,
     optimize_prompt_options: { mode: "standard" },
@@ -275,7 +392,7 @@ const buildFlashImagesGenerations: RequestShape["build"] = (input) => {
   if (flashLayerSizeInvalid(input)) throw new GatewayError("config", "Flash 图层尺寸无效");
   const options = outputOptions(input.outputOptions);
   if (input.transparentBackground) assertTransparentBackground(input, options);
-  return { path: TEXT_TO_IMAGE_PATH, body: flashRequestBody(input, options, backgroundMode(input), layerMaxImagesOf(input)) };
+  return { path: TEXT_TO_IMAGE_PATH, body: flashRequestBody(input, options, backgroundMode(input), layerMaxImagesOf(input), layerTextRecognitionOn(input)) };
 };
 
 const FLASH_SHAPE = "seedream_flash_images_generations";
@@ -469,11 +586,13 @@ function flashLayerLabelInvalid(item: any): boolean {
 
 /** 图层的附加身份字段：只带上响应里真正给了的字段，缺省的不留空值。 */
 function flashLayerMeta(item: any) {
+  const text = textRecognitionOf(item.text_recognition);
   return {
     z_index: item.z_index,
     ...(item.bounding_box !== undefined ? { bounding_box: item.bounding_box } : {}),
     ...(item.name !== undefined ? { name: item.name } : {}),
     ...(item.description !== undefined ? { description: item.description } : {}),
+    ...(text === undefined ? {} : { text_recognition: text }),
   };
 }
 

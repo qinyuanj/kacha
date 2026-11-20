@@ -1,5 +1,6 @@
 // 放大预览弹窗的图层判定（#137）：从 ui/PreviewDialog.tsx 拆出的纯逻辑，便于单测。
 import type { LayerRecord } from "../core/taskDir";
+import type { TextRunStyle } from "../core/gateway";
 import type { ImageInfo } from "../shell/port";
 
 /** 图层在预览里的位置（相对底图的百分比）。 */
@@ -36,6 +37,30 @@ export function layerStyleOf(layer: LayerRecord, baseInfo: ImageInfo | null | un
 /** 图层的名字：没有名字时按序号写「图层N」（N 从 1 起）。 */
 export function layerName(layer: LayerRecord, index: number): string {
   return layer.name ?? `图层${index + 1}`;
+}
+
+/**
+ * 图层的 OCR 文本（#178）：没有、空串或全空白都算没拿到 —— 非文字层、艺术字、手写体本来就不返回，
+ * 界面不显示空结果。
+ */
+export function layerOcrText(layer: LayerRecord): string | null {
+  const text = layer.text_recognition?.text.trim();
+  return text ? text : null;
+}
+
+const OCR_STYLE_LABELS: [keyof TextRunStyle, string][] = [
+  ["bold", "粗体"],
+  ["italic", "斜体"],
+  ["underline", "下划线"],
+  ["strikethrough", "删除线"],
+  ["shadow", "阴影"],
+  ["translucent", "半透明"],
+];
+
+/** 该图层的近似样式：只要有一段文字带这个样式就列出来，按固定顺序去重；没给样式时为空。 */
+export function layerOcrStyles(layer: LayerRecord): string[] {
+  const runs = layer.text_recognition?.lines.flatMap((line) => line.runs) ?? [];
+  return OCR_STYLE_LABELS.filter(([key]) => runs.some((run) => run.style?.[key] === true)).map(([, label]) => label);
 }
 
 /** 弹窗的底图：单层模式下显示那一层，否则显示底图。 */

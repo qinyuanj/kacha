@@ -6,7 +6,7 @@ import type { Board, LayerRecord, RegionRender } from "./board";
 
 export type { LayerRecord };
 import type { ReferenceImage, OutputOptions } from "./gateway";
-import { validLayerBox } from "./gateway";
+import { validLayerBox, validTextRecognition } from "./gateway";
 import { joinPath } from "./paths";
 import type { SendPlan } from "./sendPlan";
 import type { SizeSpec } from "./size";
@@ -123,6 +123,8 @@ export interface SubmissionPlan {
   layerSize?: import("./gateway").LayerSize;
   /** 拆分图层的输出张数；缺省用能力表该工作流的 default。 */
   layerMaxImages?: number;
+  /** 拆分时要不要富文本 OCR（#178）；缺省不发。 */
+  layerTextRecognition?: boolean;
   transparentBackground: boolean;
   outputOptions?: OutputOptions;
   capabilityFormatVersion: number;
@@ -164,6 +166,8 @@ export interface TaskRecord {
   layer_decomposition: boolean;
   layer_size?: import("./gateway").LayerSize;
   layer_max_images?: number;
+  /** 这次提交要了富文本 OCR；旧任务没有这个字段，缺省即没要（#178）。 */
+  layer_text_recognition?: boolean;
   transparent_background: boolean;
   output_options?: OutputOptions;
   /** 按发送序号排列。 */
@@ -199,6 +203,7 @@ export async function writeSubmission(fs: Pick<TaskFs, "writeNewFile">, userRoot
     layer_decomposition: plan.layerDecomposition,
     ...(plan.layerSize ? { layer_size: plan.layerSize } : {}),
     ...(plan.layerMaxImages === undefined ? {} : { layer_max_images: plan.layerMaxImages }),
+    ...(plan.layerTextRecognition ? { layer_text_recognition: true } : {}),
     ...(plan.outputOptions ? { output_options: plan.outputOptions } : {}),
     transparent_background: plan.transparentBackground,
     references,
@@ -282,6 +287,8 @@ export interface LayerImage {
   boundingBox: LayerRecord["bounding_box"];
   name?: string;
   description?: string;
+  /** 文字图层的 OCR 结果（#178）；没有就不写进 layers.json。 */
+  textRecognition?: LayerRecord["text_recognition"];
 }
 
 /** 图层文件名（相对任务目录）：layers/<两位序号>.<ext>，序号 1 起、按 z_index 升序。 */
@@ -298,7 +305,14 @@ export async function saveLayers(fs: Pick<TaskFs, "writeNewFile">, userRoot: str
     if (!kind) throw new Error(`图层${i + 1} 不是可识别的图片`);
     const file = layerFileName(i + 1, kind.ext);
     await fs.writeNewFile(taskPath(userRoot, relDir, file), layer.bytes);
-    out.push({ file, z_index: layer.zIndex, bounding_box: layer.boundingBox, ...(layer.name !== undefined ? { name: layer.name } : {}), ...(layer.description !== undefined ? { description: layer.description } : {}) });
+    out.push({
+      file,
+      z_index: layer.zIndex,
+      bounding_box: layer.boundingBox,
+      ...(layer.name !== undefined ? { name: layer.name } : {}),
+      ...(layer.description !== undefined ? { description: layer.description } : {}),
+      ...(layer.textRecognition === undefined ? {} : { text_recognition: layer.textRecognition }),
+    });
   }
   await fs.writeNewFile(taskPath(userRoot, relDir, "layers.json"), new TextEncoder().encode(layersExportJson(out, metadata?.base)));
   return out;
@@ -326,7 +340,16 @@ function validLayersBase(base: unknown): boolean {
 }
 
 function validLayerRecord(layer: unknown, index: number): boolean {
-  return isObject(layer) && layer.z_index === index + 1 && typeof layer.file === "string" && /^layers\/\d{2}\.png$/.test(layer.file) && validLayerBox(layer.bounding_box) && validLayerLabels(layer);
+  return (
+    isObject(layer) &&
+    layer.z_index === index + 1 &&
+    typeof layer.file === "string" &&
+    /^layers\/\d{2}\.png$/.test(layer.file) &&
+    validLayerBox(layer.bounding_box) &&
+    validLayerLabels(layer) &&
+    // OCR 是可选附带信息：没写 = 没拿到；写了就必须是完整形状（#178）。
+    validTextRecognition(layer.text_recognition)
+  );
 }
 
 /** 解析并校验 layers.json：底图身份（可选，z_index 缺省补 0）与图层记录；损坏或关键身份 / 定位无效明确失败。 */
