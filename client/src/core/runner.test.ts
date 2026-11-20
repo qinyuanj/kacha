@@ -500,6 +500,17 @@ describe("任务运行器：按份数展开", () => {
     expect(nodeCopyDetail(node(h, "t1"))).toMatch(/^失败 · [^\n]+$/);
   });
 
+  it("失败日志带上具体说明，不只有分类标签", async () => {
+    const h = harness();
+    h.replies.push({ status: 500, body: "{}" });
+    await h.runner.submit(h.target(), board(), ["t1"]);
+    await settle();
+    const failed = h.logs.find((l) => l.kind === "task" && l.fields.to_status === "failed");
+    expect(failed?.fields.message).toBe("服务错误");
+    // 只有标签时诊断包说不清失败点；detail 必须是那条具体消息。
+    expect(failed?.fields.detail).toContain("HTTP 500");
+  });
+
   it("重新运行前只清除该节点上次的终态一次，展开中的后续份不再清除", async () => {
     const h = harness();
     h.replies.push({ status: 500, body: "{}" });

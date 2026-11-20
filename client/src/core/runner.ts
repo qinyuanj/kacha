@@ -5,7 +5,7 @@ import type { Board, TaskNode } from "./board";
 import type { CapabilityTable } from "./capabilities";
 import type { BoardChange } from "./edit";
 import { GatewayError, isFlashShape } from "./gateway";
-import { CancelledError, executeJob, failureLabel, prepareJob, prepareRegenerate, writeJob, type Prepared, type PreparedJob, type RunDeps, type TaskStatus, type WrittenJob } from "./run";
+import { CancelledError, executeJob, failureDetail, failureLabel, prepareJob, prepareRegenerate, writeJob, type Prepared, type PreparedJob, type RunDeps, type TaskStatus, type WrittenJob } from "./run";
 import { groupCopies, type NodeCopyEntry } from "./nodeCopies";
 import { tableDigest, writeOutcome, type TaskOutcome } from "./taskDir";
 import { errorText } from "./errors";
@@ -228,8 +228,8 @@ const EMPTY_BOARD: BoardRunState = { nodes: new Map(), locked: new Set(), handle
 
 /** 日志里的错误字段：只带类别、状态码、网关请求编号与脱敏说明。 */
 function errorFields(error: unknown): Record<string, unknown> {
-  if (error instanceof GatewayError) return { category: error.category, status_code: error.status, gateway_request_id: error.requestId, message: failureLabel(error) };
-  return { category: "local", message: failureLabel(error) };
+  if (error instanceof GatewayError) return { category: error.category, status_code: error.status, gateway_request_id: error.requestId, message: failureLabel(error), detail: failureDetail(error) };
+  return { category: "local", message: failureLabel(error), detail: failureDetail(error) };
 }
 
 /** 一份的状态：读图中与排队都算排队；退避带上恢复时刻（整条队列共用一个）。 */

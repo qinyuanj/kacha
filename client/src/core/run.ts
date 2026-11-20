@@ -64,6 +64,12 @@ export function failureLabel(error: unknown): string {
   return "本地文件错误";
 }
 
+/** 日志里的具体说明。分类标签会盖住真正的失败点，诊断包必须带上它（截断以免整段回显网关原文）。 */
+export function failureDetail(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  return text.slice(0, 200);
+}
+
 /** 发给模型的那份按规则处理；画板上的原文件不动。 */
 async function fitForModel(deps: RunDeps, bytes: Uint8Array, model: ModelCapability): Promise<FittedBytes> {
   const rule = model.input_image_rule;
@@ -420,9 +426,14 @@ async function validateTransparentResult(deps: RunDeps, bytes: Uint8Array): Prom
   } finally { decoded.close(); }
 }
 
+/** 前几个字节的十六进制：足够分辨 PNG 魔数、HTML 开头或截断，又不回显图片内容。 */
+function headHex(bytes: Uint8Array): string {
+  return Array.from(bytes.slice(0, 8), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 async function validateDownloadedImage(deps: RunDeps, job: WrittenJob, image: { layer?: LayerMetadata }, bytes: Uint8Array, baseSize: ImageDimensions | undefined): Promise<ImageDimensions | undefined> {
   const flashLayers = isFlashShape(job.input.model) && job.plan.layerDecomposition;
-  if (!sniffImage(bytes)) throw new GatewayError("invalid_response", "结果不是可识别的图片");
+  if (!sniffImage(bytes)) throw new GatewayError("invalid_response", `结果不是可识别的图片（${bytes.length} 字节，开头 ${headHex(bytes)}）`);
   if (flashLayers) baseSize = await validateResultLayer(deps, job, image, bytes, baseSize);
   if (job.plan.transparentBackground) await validateTransparentResult(deps, bytes);
   if (isFlashShape(job.input.model) && !job.plan.layerDecomposition && !job.plan.transparentBackground) await validateFlashOrdinaryOutput(deps, bytes);
