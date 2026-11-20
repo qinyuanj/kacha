@@ -4,8 +4,9 @@
 /** 启动后多久检查第一次：约 3 秒，让界面先画出来。 */
 export const STARTUP_DELAY_MS = 3000;
 
-/** 每次检查结束后隔多久再检查：约 6 小时。 */
-export const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/** 每次检查结束后隔多久再检查：15 分钟。 */
+// 15 分钟：用户要求后台自动检查更新更勤（2026-11-20），此前是 6 小时。
+export const CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
 /** 更新此刻的阶段；与 Go 侧 updateservice.Phase 同名同义。 */
 export type UpdatePhase =
@@ -65,20 +66,34 @@ export function sameUpdateSnapshot(a: UpdateSnapshot, b: UpdateSnapshot): boolea
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** 下一次自动检查该在多久之后：只在检查结束后计时，不在启动时固定计时。 */
-export function nextCheckDelay(snapshot: UpdateSnapshot, now: number): number | null {
+/**
+ * 下一次自动检查该在多久之后。
+ *
+ * `first` 是「进程启动后的第一次调度」：不管距上次检查多久都先等 STARTUP_DELAY_MS，
+ * 让界面先画出来（#164 的判据是「启动约 3 秒后检查」）。之后的调度才从上次检查时刻
+ * 按 CHECK_INTERVAL_MS 算剩余，所以启动时不会因为上次检查早已过点而在 0 秒抢跑。
+ */
+export function nextCheckDelay(snapshot: UpdateSnapshot, now: number, first: boolean): number | null {
   if (snapshot.phase === "disabled" || snapshot.phase === "installing") return null;
-  if (snapshot.phase !== "checking" && snapshot.checked_at) {
+  if (snapshot.phase === "checking") return null;
+  if (first) return STARTUP_DELAY_MS;
+  if (snapshot.checked_at) {
     const at = Date.parse(snapshot.checked_at);
     if (!Number.isNaN(at)) return Math.max(0, at + CHECK_INTERVAL_MS - now);
   }
-  // 还没检查过（或正在检查）：按启动延迟算，检查结束后会重新排。
-  return snapshot.phase === "checking" ? null : STARTUP_DELAY_MS;
+  // 还没检查过：按启动延迟算，检查结束后会重新排。
+  return STARTUP_DELAY_MS;
 }
 
-/** 能不能点「检查更新」：正在检查、正在装时不能。 */
+/**
+ * 能不能发起一次检查：正在检查、正在装时不能。
+ *
+ * 下载中也不能：检查一旦开始会把阶段改回 checking 并丢掉这次下载（Go 侧 Check()
+ * 只挡 checking/installing，不挡 downloading）。周期性重排接上之后「下载中恰好
+ * 距上次检查超过 15 分钟」不再是空想，所以要在这里挡住。
+ */
 export function canCheck(snapshot: UpdateSnapshot): boolean {
-  return snapshot.phase !== "disabled" && snapshot.phase !== "checking" && snapshot.phase !== "installing";
+  return snapshot.phase !== "disabled" && snapshot.phase !== "checking" && snapshot.phase !== "installing" && snapshot.phase !== "downloading";
 }
 
 /** 能不能点「安装」：只有已验签且服务说可装。 */

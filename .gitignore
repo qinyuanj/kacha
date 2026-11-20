@@ -46,6 +46,9 @@ test-results/
 desktop/mygo_frontend_gen.go
 desktop/mygo_frontend/
 
+# 从仓库根跑 vitest 会在根留下 node_modules/.vite 缓存（根没有 package.json，纯缓存）。
+node_modules/
+
 # 并行开发的工作树（含各自 node_modules 与指标快照）。目录名是 .agents，不是 .worktrees，
 # 上面那条 `.worktrees/` 匹配不到它 —— 曾经因此让 `.agents/` 以未跟踪状态躺了很久，
 # 任何一次 `git add -A` 都会把别的工作树整个提交进来。

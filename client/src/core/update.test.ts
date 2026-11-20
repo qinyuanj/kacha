@@ -47,33 +47,42 @@ describe("快照内容比较（#180）", () => {
 
 describe("更新排程", () => {
   it("启动约 3 秒后检查第一次", () => {
-    expect(nextCheckDelay(emptySnapshot(), 0)).toBe(STARTUP_DELAY_MS);
+    expect(nextCheckDelay(emptySnapshot(), 0, true)).toBe(STARTUP_DELAY_MS);
     expect(STARTUP_DELAY_MS).toBe(3000);
   });
 
-  it("每次检查结束后约 6 小时再检查", () => {
+  it("启动时距上次检查已过 20 分钟，首次仍是 3 秒而不是 0", () => {
+    // #164 的判据「启动约 3 秒后检查」不受上次检查时刻影响：首次调度一律等 3 秒，
+    // 不会因为上次检查早已过点在启动瞬间抢跑。
+    const checkedAt = "2026-11-17T12:00:00Z";
+    const s = snap({ phase: "up_to_date", checked_at: checkedAt });
+    const at = Date.parse(checkedAt) + 20 * 60 * 1000;
+    expect(nextCheckDelay(s, at, true)).toBe(STARTUP_DELAY_MS);
+  });
+
+  it("每次检查结束后 15 分钟再检查", () => {
     const checkedAt = "2026-11-17T12:00:00Z";
     const at = Date.parse(checkedAt);
     const s = snap({ phase: "up_to_date", checked_at: checkedAt });
-    expect(nextCheckDelay(s, at)).toBe(CHECK_INTERVAL_MS);
-    expect(CHECK_INTERVAL_MS).toBe(6 * 60 * 60 * 1000);
-    // 已经过了 1 小时：再等 5 小时，而不是从启动重新算 6 小时。
-    expect(nextCheckDelay(s, at + 60 * 60 * 1000)).toBe(5 * 60 * 60 * 1000);
+    expect(nextCheckDelay(s, at, false)).toBe(CHECK_INTERVAL_MS);
+    expect(CHECK_INTERVAL_MS).toBe(15 * 60 * 1000);
+    // 已经过了 5 分钟：再等 10 分钟，而不是从启动重新算 15 分钟。
+    expect(nextCheckDelay(s, at + 5 * 60 * 1000, false)).toBe(10 * 60 * 1000);
   });
 
   it("过点了就立刻排（不排负数）", () => {
     const s = snap({ phase: "up_to_date", checked_at: "2026-11-17T12:00:00Z" });
     const at = Date.parse("2026-11-17T12:00:00Z") + CHECK_INTERVAL_MS + 60_000;
-    expect(nextCheckDelay(s, at)).toBe(0);
+    expect(nextCheckDelay(s, at, false)).toBe(0);
   });
 
   it("正在检查时不重复排，装的时候也不再排", () => {
-    expect(nextCheckDelay(snap({ phase: "checking" }), 0)).toBeNull();
-    expect(nextCheckDelay(snap({ phase: "installing" }), 0)).toBeNull();
+    expect(nextCheckDelay(snap({ phase: "checking" }), 0, false)).toBeNull();
+    expect(nextCheckDelay(snap({ phase: "installing" }), 0, false)).toBeNull();
   });
 
   it("更新不可用时根本不排", () => {
-    expect(nextCheckDelay(snap({ phase: "disabled" }), 0)).toBeNull();
+    expect(nextCheckDelay(snap({ phase: "disabled" }), 0, false)).toBeNull();
   });
 });
 
@@ -83,6 +92,8 @@ describe("更新入口的可用性", () => {
     expect(canCheck(snap({ phase: "checking" }))).toBe(false);
     expect(canCheck(snap({ phase: "installing" }))).toBe(false);
     expect(canCheck(snap({ phase: "disabled" }))).toBe(false);
+    // 下载中不能起新检查：检查会把阶段改回 checking 并丢掉这次下载。
+    expect(canCheck(snap({ phase: "downloading" }))).toBe(false);
   });
 
   it("安装：只有已验签且服务说可装才能点", () => {

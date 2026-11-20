@@ -36,8 +36,8 @@ function clock(initial = 0) {
   };
 }
 
-function setup(snapshot: UpdateSnapshot) {
-  const c = clock();
+function setup(snapshot: UpdateSnapshot, startedAt = 0) {
+  const c = clock(startedAt);
   let current = snapshot;
   const check = vi.fn(() => {
     // 真实服务会更新 checked_at：这里模拟「检查结束，记下时间」。
@@ -62,12 +62,24 @@ describe("更新排程", () => {
     expect(check).toHaveBeenCalledTimes(1);
   });
 
-  it("检查结束后才排下一次，且间隔约 6 小时", () => {
+  it("启动时距上次检查已过 20 分钟，首次仍等 3 秒而不是立刻查", () => {
+    // #164 判据的另一半：启动那次固定等 STARTUP_DELAY_MS，不看上次检查多久以前。
+    const checked = Date.parse("2026-11-17T12:00:00Z");
+    const { c, scheduler, check } = setup(
+      { ...emptySnapshot(), phase: "up_to_date", checked_at: new Date(checked).toISOString() },
+      checked + 20 * 60 * 1000,
+    );
+    scheduler.start();
+    expect(c.due()).toBe(STARTUP_DELAY_MS);
+    expect(check).not.toHaveBeenCalled();
+  });
+
+  it("检查结束后才排下一次，且间隔 15 分钟", () => {
     const { c, scheduler, check } = setup(emptySnapshot());
     scheduler.start();
     c.tick();
     expect(check).toHaveBeenCalledTimes(1);
-    // 检查结束后重排：从现在起约 6 小时。
+    // 检查结束后重排：从现在起 15 分钟。
     scheduler.reschedule();
     expect(c.due()).toBe(CHECK_INTERVAL_MS);
     c.tick();

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useShell } from "./shell";
 import { portFailureOf } from "../shell/port";
 import { emptySnapshot, sameUpdateSnapshot, type UpdateSnapshot } from "../core/update";
-import { createUpdateScheduler } from "../core/updateScheduler";
+import { createUpdateScheduler, type UpdateScheduler } from "../core/updateScheduler";
 import type { InstallOutcome } from "../core/updateAutoInstall";
 import { createUpdatePreparation, type UpdatePreparation, type UpdatePreparationPorts } from "../core/updatePreparation";
 
@@ -19,7 +19,7 @@ function isBusy(phase: UpdateSnapshot["phase"]): boolean {
 }
 
 /**
- * 读当前快照，并负责排程：启动约 3 秒检查一次，之后每次检查结束约 6 小时再检查。
+ * 读当前快照，并负责排程：启动约 3 秒检查一次，之后每次检查结束 15 分钟再检查。
  *
  * 轮询在工作台这一层就开着（#180）：主界面的提示条要看得见下载与就绪，
  * 不能等用户打开高级设置才开始读。
@@ -46,6 +46,8 @@ export function useUpdateSnapshot(): { snapshot: UpdateSnapshot; loaded: boolean
   }, [port]);
 
   const enabled = port.features.update === true;
+  // 排程要能重排：快照一变（检查结束、装完了）就得重新计时，所以留一份引用。
+  const schedulerRef = useRef<UpdateScheduler | null>(null);
   useEffect(() => {
     if (!enabled) return;
     void refresh();
@@ -58,8 +60,19 @@ export function useUpdateSnapshot(): { snapshot: UpdateSnapshot; loaded: boolean
       },
       now: () => Date.now(),
     });
-    return scheduler.start();
+    schedulerRef.current = scheduler;
+    const stop = scheduler.start();
+    return () => {
+      schedulerRef.current = null;
+      stop();
+    };
   }, [enabled, port, refresh]);
+
+  // 快照变了就重排（#164）：检查结束后 15 分钟才再检查，靠这条重新计时。
+  // 没有它排程只在启动时排一次，定期检查不会再触发。
+  useEffect(() => {
+    schedulerRef.current?.reschedule();
+  }, [snapshot, enabled]);
 
   const busy = isBusy(snapshot.phase);
   useEffect(() => {

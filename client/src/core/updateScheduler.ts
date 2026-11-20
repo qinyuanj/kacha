@@ -1,4 +1,4 @@
-// 更新排程（#164）：启动约 3 秒后检查一次，之后每次检查结束约 6 小时再检查。
+// 更新排程（#164）：启动约 3 秒后检查一次，之后每次检查结束 15 分钟再检查。
 //
 // 计时器与时钟从外面注入，测试不用等真实时间；手动检查不受排程限制。
 import { canCheck, nextCheckDelay, type UpdateSnapshot } from "./update";
@@ -26,6 +26,8 @@ export interface UpdateScheduler {
 export function createUpdateScheduler(ports: UpdateSchedulerPorts): UpdateScheduler {
   let cancel: (() => void) | null = null;
   let stopped = false;
+  // 启动后那一次还没到点：首次调度一律等 STARTUP_DELAY_MS（#164 判据：启动约 3 秒后检查）。
+  let startup = true;
 
   function clear(): void {
     cancel?.();
@@ -35,10 +37,12 @@ export function createUpdateScheduler(ports: UpdateSchedulerPorts): UpdateSchedu
   function reschedule(): void {
     if (stopped) return;
     clear();
-    const delay = nextCheckDelay(ports.snapshot(), ports.now());
+    const delay = nextCheckDelay(ports.snapshot(), ports.now(), startup);
     if (delay === null) return;
     cancel = ports.schedule(delay, () => {
       cancel = null;
+      // 启动那次到点了（不管这次能不能查）：此后按两次检查之间的间隔算。
+      startup = false;
       // 到点了再判一次：期间可能已经在检查或已经装上了。
       if (!canCheck(ports.snapshot())) return;
       ports.check();

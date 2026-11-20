@@ -201,8 +201,8 @@ func TestIsolatedReleaseAcceptance(t *testing.T) {
 	if len(rec.launched) != 1 || filepath.Base(rec.launched[0]) != InstallerName("1.6.0") {
 		t.Fatalf("交给安装器的不是这份更新：%v", rec.launched)
 	}
-	if args := rec.args[0]; len(args) != 1 || args[0] != "/S" {
-		t.Fatalf("安装器参数 = %v, want [/S]", rec.args)
+	if args := rec.args[0]; len(args) != 2 || args[0] != "/S" || args[1] != "--relaunch" {
+		t.Fatalf("安装器参数 = %v, want [/S --relaunch]", rec.args)
 	}
 	if rec.quits != 1 {
 		t.Fatalf("启动安装器后退出次数 = %d, want 1（退出后由安装器替换正在运行的可执行文件）", rec.quits)

@@ -65,10 +65,11 @@ describe("Seedream 5.5 上架条目", () => {
     expect(five().reference_phrasing.en_verified).toBe(flash().reference_phrasing.en_verified);
   });
 
-  it("拆分图层标待测：真机没验过拆分，不谎报支持", () => {
-    expect(five().workflows.text_to_image.layer_decomposition).toBe("untested");
-    expect(five().workflows.image_edit.layer_decomposition).toBe("untested");
-    expect(untestedCapabilities(five())).toEqual(["拆分图层（文生图）", "拆分图层（图片编辑）", "文字识别（图片编辑）"]);
+  it("拆分图层与文字识别已按 #179 真机验收放开（2026-11-20 owner 确认）", () => {
+    expect(five().workflows.text_to_image.layer_decomposition).toBe("supported");
+    expect(five().workflows.image_edit.layer_decomposition).toBe("supported");
+    expect(five().workflows.image_edit.text_recognition).toBe("supported");
+    expect(untestedCapabilities(five())).toEqual([]);
     expect(untestedCapabilities(flash())).toEqual([]);
   });
 
@@ -93,6 +94,7 @@ describe("三态", () => {
   });
 
   it("列出模型的待测能力供模型说明浮层展示", () => {
+    // 5.0 pro 的拆层没有被 #179 验过（那次只测了 5.5），所以它仍是待测。
     const pro = BUILTIN_TABLE.models.find((m) => m.model_id.startsWith("doubao-seedream-5-0-pro"))!;
     expect(untestedCapabilities(pro)).toEqual([
       "拆分图层（文生图）",

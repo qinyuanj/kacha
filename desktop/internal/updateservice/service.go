@@ -28,6 +28,10 @@ const (
 	MaxPackageBytes = 512 << 20
 	// MaxDescriptorBytes 是更新描述字节上限。
 	MaxDescriptorBytes = 1 << 20
+	// relaunchFlag 是交给安装器的参数：静默装完之后启动新版本。
+	// installer/installer.nsh 的 customInit 读同一个字面量，两端由
+	// packaging/tests/test_installer_include.py 锁住。
+	relaunchFlag = "--relaunch"
 )
 
 //go:embed publisher_key.txt
@@ -458,8 +462,10 @@ func (s *Service) Install() error {
 	s.snap.Phase = PhaseInstalling
 	s.snap.Installable = false
 	s.mu.Unlock()
-	// /S 静默安装：安装器自己会退出正在运行的实例（NSIS CloseApp），装完由用户启动。
-	if err := s.launch(path, []string{"/S"}); err != nil {
+	// /S 静默安装：安装器自己会退出正在运行的实例（NSIS CloseApp）。
+	// relaunchFlag 让安装器装完启动新版本：/S 不显示完成页，安装器自带的
+	// 「运行 Kacha」勾选框（MUI_FINISHPAGE_RUN）在静默安装里根本不出现。
+	if err := s.launch(path, []string{"/S", relaunchFlag}); err != nil {
 		s.mu.Lock()
 		s.snap.Phase = PhaseReady
 		s.snap.Installable = true

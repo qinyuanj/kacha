@@ -14,16 +14,18 @@ const FIVE = "doubao-seedream-5-5-261028";
 const FLASH = "doubao-seedream-5-0-flash-260915";
 
 /**
- * 测试用能力表：把 5.5 的拆分场景按真机验证后的形状声明出来 —— 内置表里
- * layer_decomposition 与 text_recognition 都还是 untested（#178 不替 #179 下结论）。
+ * 测试用能力表：把 5.5 的拆分场景按真机验证后的形状声明出来。内置表在 #179 验收后
+ * 已把 layer_decomposition 与 text_recognition 放开为 supported；这里额外补上
+ * layer_split，用来覆盖「声明了拆分场景规则」的分支。
  * 拆分场景的参考图规则直接取 Flash 已声明的那条，不另编数值。
  */
-function splitOcrTable(over: { textRecognition?: boolean } = {}): CapabilityTable {
+function splitOcrTable(over: { textRecognition?: "untested" } = {}): CapabilityTable {
   const table = structuredClone(BUILTIN_TABLE);
   const workflow = table.models.find((m) => m.model_id === FIVE)!.workflows.image_edit;
   workflow.layer_decomposition = "supported";
   workflow.layer_split = structuredClone(findModel(BUILTIN_TABLE, FLASH)!.workflows.image_edit.layer_split!);
-  if (over.textRecognition !== false) workflow.text_recognition = "supported";
+  // 内置表#179 后已是 supported；要覆盖「待测时拦下」的分支，得显式写成 untested。
+  workflow.text_recognition = over.textRecognition === "untested" ? "untested" : "supported";
   return table;
 }
 
@@ -53,11 +55,11 @@ function fetchLayers(data: unknown[]): FetchLike {
 const facts = (): TaskFacts => ({ missingNodes: new Set<string>(), alphaByNode: new Map<string, boolean>(), discovery: { source: "none" }, concurrency: 4 });
 
 describe("能力表：验证之前不谎报支持（#178）", () => {
-  it("内置表里 5.5 的文字识别仍是待测，和拆分图层一起等 #179", () => {
+  it("内置表里 5.5 的文字识别已随 #179 放开为 supported（2026-11-20 owner 确认）", () => {
     const five = findModel(BUILTIN_TABLE, FIVE)!;
-    expect(five.workflows.image_edit.text_recognition).toBe("untested");
-    expect(textRecognitionSupported(five, "image_edit")).toBe(false);
-    expect(untestedCapabilities(five)).toContain("文字识别（图片编辑）");
+    expect(five.workflows.image_edit.text_recognition).toBe("supported");
+    expect(textRecognitionSupported(five, "image_edit")).toBe(true);
+    expect(untestedCapabilities(five)).not.toContain("文字识别（图片编辑）");
   });
 
   it("没声明 OCR 的模型不列进待测", () => {
@@ -96,7 +98,7 @@ describe("请求体：开关两态", () => {
   });
 
   it("声明存在但不支持（待测）时同样拦下", () => {
-    const pending = splitOcrTable({ textRecognition: false });
+    const pending = splitOcrTable({ textRecognition: "untested" });
     const input = { ...layerInput(FIVE), model: findModel(pending, FIVE)!, textRecognition: true };
     expect(() => buildGenerationRequest(input)).toThrow(/不支持文字识别/);
   });
@@ -221,7 +223,7 @@ describe("端到端：从提交计划到请求体与 task.json", () => {
 
   it("没声明 OCR 的工作流：拼请求时拦下（与张数越界同一道闸）", async () => {
     const { deps } = prepareDeps();
-    const prepared = await prepare(deps, splitBoard(true), splitOcrTable({ textRecognition: false }));
+    const prepared = await prepare(deps, splitBoard(true), splitOcrTable({ textRecognition: "untested" }));
     const written = await writeJob(deps, "/root", prepared.job);
     expect(() => buildGenerationRequest(written.input)).toThrow(/不支持文字识别/);
   });

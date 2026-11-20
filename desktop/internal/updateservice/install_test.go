@@ -24,8 +24,12 @@ func TestInstallRunsTheRealInstallerSilentlyAndQuits(t *testing.T) {
 	if want := InstallerName("1.6.0"); filepath.Base(rec.launched[0]) != want {
 		t.Fatalf("launched %q, want %q", filepath.Base(rec.launched[0]), want)
 	}
-	if len(rec.args[0]) != 1 || rec.args[0][0] != "/S" {
-		t.Fatalf("args = %v, want [/S] (silent install)", rec.args[0])
+	// 参数是跟安装器的约定：/S 静默安装，--relaunch 让安装器装完重新打开 Kacha
+	// （installer/installer.nsh 的 customInit 读这个字面量）。
+	// 这里手写期望值而不引用 relaunchFlag：要钉住的是安装器脚本认的线格式，
+	// 引用常量会让两端一起改、测试仍然绿。
+	if got := rec.args[0]; len(got) != 2 || got[0] != "/S" || got[1] != "--relaunch" {
+		t.Fatalf("args = %v, want [/S --relaunch]（静默安装 + 装完重新打开）", got)
 	}
 	// 装完要退出本应用，让安装器替换正在运行的 exe。
 	if rec.quits != 1 {
