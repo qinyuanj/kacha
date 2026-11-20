@@ -22,7 +22,7 @@ import publish_release  # noqa: E402
 VERSION = "1.5.0"
 TAG = "v" + VERSION
 BASE_URL = "http://gitea.test"
-REPO = "qinyuanj/kacha"
+REPO = "qinyuanj/kacha-cd"
 INSTALLER = f"kacha-setup-{VERSION}-amd64.exe"
 PACKAGE_URL = f"{BASE_URL}/{REPO}/releases/download/{TAG}/{INSTALLER}"
 # 64 字节的签名（Ed25519 的长度）；真正的验签在 Go 侧，这里的值只要形状对。
