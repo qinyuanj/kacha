@@ -68,7 +68,7 @@ describe("Seedream 5.5 上架条目", () => {
   it("拆分图层标待测：真机没验过拆分，不谎报支持", () => {
     expect(five().workflows.text_to_image.layer_decomposition).toBe("untested");
     expect(five().workflows.image_edit.layer_decomposition).toBe("untested");
-    expect(untestedCapabilities(five())).toEqual(["拆分图层（文生图）", "拆分图层（图片编辑）"]);
+    expect(untestedCapabilities(five())).toEqual(["拆分图层（文生图）", "拆分图层（图片编辑）", "文字识别（图片编辑）"]);
     expect(untestedCapabilities(flash())).toEqual([]);
   });
 

@@ -305,7 +305,7 @@
           },
           "layer_decomposition": "untested",
           "layer_max_images": { "min": 2, "max": 100, "default": 30 },
-          "text_recognition": "supported"
+          "text_recognition": "untested"
         }
       }
     }

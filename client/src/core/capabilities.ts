@@ -194,6 +194,9 @@ export function untestedCapabilities(model: ModelCapability): string[] {
   for (const wf of Object.keys(WORKFLOW_LABELS) as WorkflowName[]) {
     if (model.workflows[wf].layer_decomposition === "untested") out.push(`拆分图层（${WORKFLOW_LABELS[wf]}）`);
   }
+  for (const wf of Object.keys(WORKFLOW_LABELS) as WorkflowName[]) {
+    if (model.workflows[wf].text_recognition === "untested") out.push(`文字识别（${WORKFLOW_LABELS[wf]}）`);
+  }
   return out;
 }
 

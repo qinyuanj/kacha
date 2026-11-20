@@ -52,9 +52,11 @@ export interface TextRun {
   style?: TextRunStyle;
 }
 
-/** 一行文字；位置与图层 bounding_box 同口径（absolute 为底图像素、normalized 为 0–1000）。 */
+/**
+ * 一行文字；位置与图层 bounding_box 同口径 —— 既有 {absolute, normalized}，也接受旧的四元数组（只有 absolute）。
+ */
 export interface TextLine {
-  bounding_box?: LayerBoundingBox;
+  bounding_box?: LayerBoundingBox | number[];
   runs: TextRun[];
 }
 
@@ -87,13 +89,29 @@ function textRunOf(raw: unknown): TextRun | null {
   return { text: raw.text, ...(Object.keys(style).length ? { style } : {}) };
 }
 
+const isFiniteQuad = (value: unknown): value is number[] =>
+  Array.isArray(value) && value.length === 4 && value.every((n) => typeof n === "number" && Number.isFinite(n));
+
+/**
+ * 行框：完整形状（absolute + normalized）直接用；只给 absolute、或直接给四元数组时按旧的四元数组口径收下
+ * （与图层级 bounding_box 允许的两种形状一致）。认不出来返回 null，调用方只丢这一行。
+ */
+function textLineBoxOf(raw: unknown): LayerBoundingBox | number[] | undefined | null {
+  if (raw === undefined) return undefined;
+  if (validLayerBox(raw)) return raw;
+  if (isFiniteQuad(raw)) return raw;
+  const absolute = plainObject(raw) ? raw.absolute : undefined;
+  return isFiniteQuad(absolute) ? absolute : null;
+}
+
+/** 一行文字；段落或行框认不出来返回 null —— 只丢这一行，不连累整段 OCR。 */
 function textLineOf(raw: unknown): TextLine | null {
   if (!plainObject(raw) || !Array.isArray(raw.runs)) return null;
   const runs = raw.runs.map(textRunOf);
   if (runs.some((run) => run === null)) return null;
-  const box = raw.bounding_box;
-  if (box !== undefined && !validLayerBox(box)) return null;
-  return { ...(box === undefined ? {} : { bounding_box: box as LayerBoundingBox }), runs: runs as TextRun[] };
+  const box = textLineBoxOf(raw.bounding_box);
+  if (box === null) return null;
+  return { ...(box === undefined ? {} : { bounding_box: box }), runs: runs as TextRun[] };
 }
 
 /**
@@ -101,11 +119,15 @@ function textLineOf(raw: unknown): TextLine | null {
  * 形状不完整时同样丢弃，而不是让整次生成失败 —— OCR 是附带信息，没道理为它丢掉已经出好的图。
  */
 function textRecognitionOf(raw: unknown): TextRecognition | undefined {
-  if (!plainObject(raw) || typeof raw.text !== "string" || !Array.isArray(raw.lines)) return undefined;
-  const lines = raw.lines.map(textLineOf);
-  if (lines.some((line) => line === null)) return undefined;
+  if (!plainObject(raw) || typeof raw.text !== "string") return undefined;
+  // 没有 lines、或某行 / 某段认不出来时逐行丢，不把整段 OCR 一起丢掉：文字本身仍然有用。
+  const rawLines = Array.isArray(raw.lines) ? raw.lines : [];
+  const lines = rawLines.flatMap((line) => {
+    const parsed = textLineOf(line);
+    return parsed === null ? [] : [parsed];
+  });
   if (!raw.text.trim() && lines.length === 0) return undefined;
-  return { text: raw.text, lines: lines as TextLine[] };
+  return { text: raw.text, lines };
 }
 
 /** layers.json 里 text_recognition 的合法性：缺省合法，给了就必须是完整形状。 */
