@@ -42,6 +42,7 @@ func TestGatewayFollowsSwitchedRoot(t *testing.T) {
 		t.Fatalf("切换后读密钥 = %q, %v；应为 %q", key, err, syntheticKey)
 	}
 }
+
 // 迁移复制期间不写密钥：密钥文件是数据根里的一份数据，写进旧位置在切换后就丢了。
 // 拦下时给明确错误（ErrMoving），迁移结束后恢复。
 func TestApiKeyWritesAreRejectedWhileMovingRoot(t *testing.T) {

@@ -78,7 +78,11 @@ func TestGenerationRequestAndBinaryResultThroughGateway(t *testing.T) {
 		t.Fatalf("图片字节不一致：%v, %v", decoded, err)
 	}
 
-	for _, tc := range []struct{ path string; status int; redacted bool }{
+	for _, tc := range []struct {
+		path     string
+		status   int
+		redacted bool
+	}{
 		{"/auth", 401, true},
 		{"/rate", 429, false},
 		{"/server", 500, false},

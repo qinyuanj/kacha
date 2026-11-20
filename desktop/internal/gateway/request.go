@@ -19,7 +19,28 @@ type Response struct {
 }
 
 // requestTimeout 防止网关无响应时把界面卡住；超时按网络错误返回。
+//
+// 查询类请求（模型发现）保持短超时：几秒没响应就该报错，而不是让界面等着。
+// 生成类请求是分钟级操作：5.5 带参考图实测 11 秒起步，慢的时候远超 20 秒，
+// 用查询的超时会把它误报成「网络不可达」（2026-11-20 真机验收踩到）。
 const requestTimeout = 20 * time.Second
+
+// generationTimeout 用于提交生成任务：上传参考图与等待模型出图都在这一次请求里。
+const generationTimeout = 5 * time.Minute
+
+// downloadTimeout 用于取回结果图：单张图通常几 MB，留出网络抖动余量。
+const downloadTimeout = 2 * time.Minute
+
+// timeoutFor 按请求性质选超时；不是查询就是生成，两者差别在数量级。
+func timeoutFor(method string, url string) time.Duration {
+	if method == http.MethodPost && strings.Contains(url, "/images/") {
+		return generationTimeout
+	}
+	if method == http.MethodGet && !strings.Contains(url, "/models") {
+		return downloadTimeout
+	}
+	return requestTimeout
+}
 
 // maxResponseBytes 防止异常大的响应把 IPC 撑爆；模型发现与生成结果都远小于它。
 const maxResponseBytes = 2 << 20
@@ -38,7 +59,7 @@ func (s *Service) Request(url string, method string, headers map[string]string, 
 	for name, value := range headers {
 		req.Header.Set(name, value)
 	}
-	client := &http.Client{Timeout: requestTimeout}
+	client := &http.Client{Timeout: timeoutFor(method, url)}
 	resp, err := client.Do(req)
 	if err != nil {
 		return Response{}, fmt.Errorf("无法连接网关：%s", redact(err.Error(), headers))

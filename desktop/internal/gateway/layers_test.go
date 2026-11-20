@@ -96,7 +96,7 @@ func TestLayeredResultDownloadsThroughGatewayAndLocalService(t *testing.T) {
 
 	taskDir := filepath.Join(root, "2026-11-17", "20261117T000000Z-1234abcd")
 	want := map[string][]byte{
-		filepath.Join(taskDir, "result.png"):        basePNG,
+		filepath.Join(taskDir, "result.png"):       basePNG,
 		filepath.Join(taskDir, "layers", "01.png"): layer1,
 		filepath.Join(taskDir, "layers", "02.png"): layer2,
 	}

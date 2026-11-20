@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // 连接测试与模型发现都经 Go 发真实 HTTP：Authorization、方法与响应原文按网关契约走。
@@ -75,9 +76,35 @@ func TestRequestCarriesPostBody(t *testing.T) {
 	defer server.Close()
 	svc := New(t.TempDir() + "/api-key.protected")
 	if _, err := svc.Request(server.URL+"/v1/images/generations", "POST", map[string]string{}, "{\"prompt\":\"x\"}"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("Request: %v", err)
 	}
 	if got != "{\"prompt\":\"x\"}" {
-		t.Fatalf("请求体 = %q", got)
+		t.Fatalf("POST 正文 = %q", got)
+	}
+}
+
+// 生成是分钟级操作，查询不是：两者共用 20 秒会把慢一点的出图误报成「网络不可达」。
+func TestTimeoutForSeparatesGenerationFromQueries(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		url    string
+		want   time.Duration
+	}{
+		{"模型发现用短超时", http.MethodGet, "http://gateway/v1/models", requestTimeout},
+		{"文生图用生成超时", http.MethodPost, "http://gateway/v1/images/generations", generationTimeout},
+		{"参考图编辑同样用生成超时", http.MethodPost, "http://gateway/v1/images/generations", generationTimeout},
+		{"取结果图用下载超时", http.MethodGet, "https://bucket.example.com/a.png", downloadTimeout},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := timeoutFor(c.method, c.url); got != c.want {
+				t.Fatalf("timeoutFor(%s, %s) = %v, want %v", c.method, c.url, got, c.want)
+			}
+		})
+	}
+	// 生成超时必须比查询宽松一个数量级，否则这次修复等于没做。
+	if generationTimeout < 10*requestTimeout {
+		t.Fatalf("生成超时 %v 与查询超时 %v 太接近", generationTimeout, requestTimeout)
 	}
 }

@@ -468,7 +468,9 @@ async function send(config: GatewayConfig, method: string, path: string, body?: 
   try {
     response = await config.fetch(endpoint(config.baseUrl, path), { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch (e) {
-    throw new GatewayError("network", redact(`无法连接网关：${errorText(e)}`, config.apiKey));
+    // 壳层原文已带「无法连接网关：」前缀，别再叠一次——重复前缀会让人以为有两种错误。
+    const reason = errorText(e).replace(/^无法连接网关：/, "");
+    throw new GatewayError("network", redact(`无法连接网关：${reason}`, config.apiKey));
   }
   const requestId = response.headers.get("X-Oneapi-Request-Id");
   const text = await response.text().catch(() => "");
