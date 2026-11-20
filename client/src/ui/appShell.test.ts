@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // 工作台的界面外壳（#137）：顶栏、提示条、工具栏与画板包菜单。
-import { act, createElement } from "react";
+import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
@@ -11,6 +11,10 @@ import { emptySnapshot, type UpdateSnapshot } from "../core/update";
 import { IDLE_AUTO_VIEW, type AutoInstallView } from "../core/updateAutoInstall";
 import { updateStatusView } from "./updateStatusView";
 import { AppPackMenu, AppToolbar, AppTopBar } from "./appPanels";
+import { AppShell } from "./appShell";
+import type { AppView } from "./appView";
+import { ShellProvider } from "./shell";
+import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import type { Session } from "./useBoardSessions";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -232,5 +236,80 @@ describe("工具栏", () => {
     );
     expect(container.querySelector(".board-toolbar-slot")).not.toBeNull();
     expect(container.textContent).toContain("画板包");
+  });
+});
+
+// #184：AppShell 本体此前从未被渲染，6 个变异点全是 uncovered。下面几条按「外壳把哪个开关
+// 接到哪个子组件」断言，命中 appShell.tsx 里内嵌在 JSX 中的 && / === / !== / !。
+describe("工作台外壳的接线", () => {
+  const viewOf = (patch: Partial<AppView> = {}): AppView => ({
+    active: undefined, openState: "ok", activeArchived: false, archived: null, failures: [],
+    undoLabel: null, redoLabel: null, boardNotice: null, exportDisabled: null,
+    downloadDisabled: null, importDisabled: null, sizeNotice: null, titleOf: () => "a", ...patch,
+  });
+  const indicator = { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() };
+  const shell = (patch: Partial<ComponentProps<typeof AppShell>> = {}): ComponentProps<typeof AppShell> => ({
+    view: viewOf(), sessions: [], activeKey: null, userRoot: "/root", ready: true, version: "1.0",
+    updateNotice: null, packMenu: null, boardListOpen: false, manageBoards: false, settingsLoaded: true,
+    runIndicator: indicator, updateStatus: updateStatusView({ snapshot: emptySnapshot(), auto: IDLE_AUTO_VIEW }),
+    onDeferUpdate: vi.fn(), tableError: null, settingsFileProblem: null, settingsOpen: false,
+    usageNotice: null, canvasProps: {} as never,
+    onActivate: vi.fn(), onCloseTab: vi.fn(), onRename: vi.fn(), onCreate: vi.fn(), onOpenList: vi.fn(),
+    onExportPack: vi.fn(), onOpenChangelog: vi.fn(), onCloseUpdateNotice: vi.fn(), onOpenListItem: vi.fn(),
+    onCloseBoardList: vi.fn(), onDeleteBoard: vi.fn(), onArchiveBoard: vi.fn(), onUnarchiveBoard: vi.fn(),
+    onCopyBoard: vi.fn(), onExportBoard: vi.fn(), onTogglePackMenu: vi.fn(), onPackMenuPick: vi.fn(),
+    onPackMenuClose: vi.fn(), onDismissTableError: vi.fn(), onOpenSettings: vi.fn(), onManageBoards: vi.fn(),
+    onDismissUsage: vi.fn(), onTidy: vi.fn(), onDismissSize: vi.fn(), onUnarchive: vi.fn(),
+    onCopyArchived: vi.fn(), onDismissBoardNotice: vi.fn(), onReload: vi.fn(), onRetrySave: vi.fn(),
+    onExportFailure: vi.fn(), onCloseMissing: vi.fn(), onImportPack: vi.fn(), importDisabled: null,
+    onToolbarSlot: vi.fn(), ...patch,
+  });
+  const show = async (port: FakePort, patch: Partial<ComponentProps<typeof AppShell>> = {}): Promise<void> =>
+    act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(AppShell, shell(patch)) })));
+
+  it("画板列表只在「打开了列表」且「有数据根」时挂载", async () => {
+    const open = createFakePort();
+    const called = vi.spyOn(open.board, "list");
+    await show(open, { boardListOpen: true });
+    expect(called).toHaveBeenCalled();
+    const noRoot = createFakePort();
+    const notCalled = vi.spyOn(noRoot.board, "list");
+    await show(noRoot, { boardListOpen: true, userRoot: null });
+    expect(notCalled).not.toHaveBeenCalled();
+    const closed = createFakePort();
+    const stillNot = vi.spyOn(closed.board, "list");
+    await show(closed, { boardListOpen: false });
+    expect(stillNot).not.toHaveBeenCalled();
+  });
+
+  it("画板包菜单只在有位置时挂载", async () => {
+    await show(createFakePort(), { packMenu: { x: 1, y: 2 } });
+    expect(container.textContent).toContain("导出画板包…");
+    await show(createFakePort(), { packMenu: null });
+    expect(container.textContent).not.toContain("导出画板包…");
+  });
+
+  it("画布就绪与否决定工具栏占位", async () => {
+    const buttons = () => container.querySelectorAll("button").length;
+    await show(createFakePort(), { view: viewOf({ openState: "ok" }) });
+    const readyCount = buttons();
+    await show(createFakePort(), { view: viewOf({ openState: "none" }) });
+    expect(buttons()).toBeGreaterThan(readyCount);
+  });
+
+  it("没有数据根时画板包菜单按钮禁用，有则可用", async () => {
+    const toggle = () => container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    await show(createFakePort(), { userRoot: null });
+    expect(toggle().disabled).toBe(true);
+    await show(createFakePort(), { userRoot: "/root" });
+    expect(toggle().disabled).toBe(false);
+  });
+
+  it("菜单开合反映在 aria-expanded 上", async () => {
+    const toggle = () => container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    await show(createFakePort(), { packMenu: { x: 1, y: 2 } });
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    await show(createFakePort(), { packMenu: null });
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
   });
 });
