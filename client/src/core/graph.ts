@@ -3,15 +3,19 @@
 import { findTask, type Board, type BoardEdge, type BoardNode, type LayerRecord, type ResultRecord, type TaskNode } from "./board";
 import {
   findModel,
+  inputImageRuleOf,
   isSupported,
+  maxReferencesOf,
   workflowFor,
   type CapabilityTable,
   type InputImageRule,
+  type InputScene,
   type WorkflowName,
 } from "./capabilities";
 import { resolveFromRoot } from "./paths";
 import type { ReferenceSource } from "./taskDir";
 import { expandImageEdges, type PortSlot } from "./region";
+import { imageFormatOf, imageRuleViolations } from "./imageRule";
 
 export const IMAGE_PORT_PREFIX = "image:";
 
@@ -182,20 +186,38 @@ function targetPortVerdict(board: Board, table: CapabilityTable, c: Connection, 
     if (c.targetHandle === "negative" && !ports.negative) return no("模型不支持负向提示词");
   } else if (imageIndex !== null) {
     if (source.type === "prompt") return no("图片端口只接参考图或结果节点");
-    return imageConnectionVerdict(board, table, target.id, imageIndex, ports.maxReferences);
+    return imageConnectionVerdict(board, table, target.id, imageIndex, referencePolicy(board, table, target.id), source);
   } else {
     return no("目标端口无效");
   }
   return { ok: true };
 }
 
-function imageConnectionVerdict(board: Board, table: CapabilityTable, taskId: string, imageIndex: number, maxReferences: number): Verdict {
+function imageConnectionVerdict(board: Board, table: CapabilityTable, taskId: string, imageIndex: number, policy: ReferencePolicy | null, source: BoardNode): Verdict {
   const count = imageEdges(board, taskId).length;
   // 名额按展开后序号算：区域叠加图也占 1 个参考图名额。
-  if (imagePortSlots(board, table, taskId).length >= maxReferences) {
-    return no(maxReferences === 0 ? "模型不支持图片编辑" : `参考图已达模型上限 ${maxReferences} 张`);
-  }
+  if (imagePortSlots(board, table, taskId).length >= (policy?.maxReferences ?? 0)) return no(referenceCapReason(policy));
+  const refused = sourceRuleRefusal(policy, source);
+  if (refused !== null) return no(refused);
   return imageIndex !== count ? no("该端口已有连线") : { ok: true };
+}
+
+/**
+ * 拖线时就地拦格式（#176）：webp 这类源图不许接上拆分任务。
+ * 像素要解码才知道，由标黄（canvasNodes 按场景规则算）与提交前快照（run）接着管。
+ */
+function sourceRuleRefusal(policy: ReferencePolicy | null, source: BoardNode): string | null {
+  if (!policy || policy.scene !== "layer_split" || !policy.layerDeclared) return null;
+  if (source.type !== "reference" && source.type !== "result") return null;
+  if (policy.rule.formats.includes(imageFormatOf(source.path))) return null;
+  return `图层拆分参考图只接受 ${policy.rule.formats.map((f) => f.toUpperCase()).join(" / ")}`;
+}
+
+/** 名额满时的说法：拆分场景说拆分的规矩，其余沿用模型上限。 */
+function referenceCapReason(policy: ReferencePolicy | null): string {
+  const max = policy?.maxReferences ?? 0;
+  if (max === 0) return "模型不支持图片编辑";
+  return policy?.scene === "layer_split" && policy.layerDeclared ? `图层拆分只接受 ${max} 张参考图` : `参考图已达模型上限 ${max} 张`;
 }
 
 /** 追加一条用户连线（调用前应先 canConnect）；图片线总是落在下一个空端口。 */
@@ -289,7 +311,8 @@ export function taskPorts(board: Board, table: CapabilityTable, taskId: string):
     return { negative: hasNegativeEdge, imageSlots: count, maxReferences: 0, layerDecomposition: !!task?.layer_decomposition, transparentBackground: !!task?.transparent_background };
   }
   const wf = model.workflows[workflowOf(board, taskId)];
-  const maxReferences = model.workflows.image_edit.max_references;
+  // 名额按场景取（#176）：拆分开关打开就是拆分场景，只给声明里的那一张留空位。
+  const maxReferences = referencePolicy(board, table, taskId)?.maxReferences ?? 0;
   const expanded = expandImageEdges(imageEdges(board, taskId), model).length;
   return {
     negative: isSupported(wf.supports_negative_prompt) || hasNegativeEdge,
@@ -333,6 +356,66 @@ export function forkPrompt(board: Board, promptId: string, fork: { newNodeId: st
 
 // ---- 参考图输入规则 ----
 
+/** 任务当前的参考图场景与随之而来的名额 / 规则（#176）：拆分开关决定场景，值全部来自能力表。 */
+export interface ReferencePolicy {
+  scene: InputScene;
+  maxReferences: number;
+  rule: InputImageRule;
+  /** 该工作流是否真的声明了拆分场景；没声明时拆分场景按工作流 / 模型级规则回落（说法也用通用口径）。 */
+  layerDeclared: boolean;
+}
+
+/** 参考图名额一直按图片编辑算（接上参考图就是进入图片编辑）；拆分场景再按拆分声明收窄。 */
+export function referencePolicy(board: Board, table: CapabilityTable, taskId: string): ReferencePolicy | null {
+  const task = findTask(board, taskId);
+  const model = task && findModel(table, task.model);
+  if (!task || !model) return null;
+  const layerDeclared = model.workflows.image_edit.layer_split != null;
+  const scene: InputScene = task.layer_decomposition ? "layer_split" : "generate";
+  return { scene, maxReferences: maxReferencesOf(model, "image_edit", scene), rule: inputImageRuleOf(model, "image_edit", scene), layerDeclared };
+}
+
+/**
+ * 拆分场景的就地拦截（#176）：选完图就能说清原因，不等发请求。
+ * 张数超限、格式不在声明里、字节与像素越界都在这里判；导入图带着 bytes 来时字节也当场拦。
+ */
+export function splitReferenceRefusal(
+  board: Board,
+  table: CapabilityTable,
+  taskId: string,
+  images: readonly { path: string; width: number; height: number; bytes?: number }[],
+): string | null {
+  const policy = referencePolicy(board, table, taskId);
+  if (!policy || policy.scene !== "layer_split") return null;
+  if (imageEdges(board, taskId).length + images.length > policy.maxReferences) return `图层拆分只接受 ${policy.maxReferences} 张参考图`;
+  for (const image of images) {
+    const facts = { format: imageFormatOf(image.path), bytes: image.bytes ?? 0, width: image.width, height: image.height };
+    const violations = imageRuleViolations(facts, policy.rule);
+    if (violations.length) return `图层拆分参考图不合规：${violations.join("；")}`;
+  }
+  return null;
+}
+
+/**
+ * 图片节点该按哪条规则标黄（#176）：逐条下游任务按自己的场景取 —— 拆分任务用拆分声明，
+ * 其余用该模型的工作流级 / 模型级规则。未接线的参考图按回退模型，结果图没接任务不提示。
+ */
+export function inputRulesFor(board: Board, table: CapabilityTable, nodeId: string, fallbackModel: string | null): InputImageRule[] {
+  const rules: InputImageRule[] = [];
+  const seen = new Set<string>();
+  const downstream = board.edges.filter((e) => e.from[0] === nodeId).map((e) => findTask(board, e.to[0]));
+  for (const modelId of inputRuleModels(board, nodeId, fallbackModel)) {
+    const model = findModel(table, modelId);
+    if (!model) continue;
+    const scene: InputScene = downstream.find((t) => t?.model === modelId)?.layer_decomposition ? "layer_split" : "generate";
+    const key = `${modelId}|${scene}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rules.push(inputImageRuleOf(model, "image_edit", scene));
+  }
+  return rules;
+}
+
 /**
  * 图片节点按哪些模型的输入规则提示：直接下游任务的模型（去重）。
  * 未接线的参考图按调用方给的回退模型（新建任务实际会用的默认模型）；结果图没接任务不提示。
@@ -344,44 +427,6 @@ export function inputRuleModels(board: Board, nodeId: string, fallbackModel: str
   return fallbackModel ? [fallbackModel] : [];
 }
 
-export interface ImageFacts {
-  /** 小写格式名：png / jpeg / webp …；未知为空串。 */
-  format: string;
-  bytes: number;
-  width: number;
-  height: number;
-}
-
-export const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-
-/** 按模型 input_image_rule 预校验参考图，逐项给出说明；违反时参考图节点标黄。 */
-export function imageRuleViolations(image: ImageFacts, rule: InputImageRule): string[] {
-  const out: string[] = [];
-  if (!rule.formats.includes(image.format)) {
-    out.push(`格式 ${image.format.toUpperCase() || "未知"} 不受支持（支持 ${rule.formats.map((f) => f.toUpperCase()).join(" / ")}）`);
-  }
-  if (rule.max_bytes !== null && image.bytes > rule.max_bytes) out.push(`文件 ${mb(image.bytes)} 超过上限 ${mb(rule.max_bytes)}`);
-  if (image.width > 0 && image.height > 0) out.push(...imagePixelViolations(image, rule), ...imageAspectViolations(image, rule));
-  return out;
-}
-
-function imagePixelViolations(image: ImageFacts, rule: InputImageRule): string[] {
-  const out: string[] = [];
-  const total = image.width * image.height;
-  if (rule.min_total_pixels !== null && total < rule.min_total_pixels) out.push(`总像素 ${total} 低于下限 ${rule.min_total_pixels}`);
-  if (rule.max_total_pixels !== null && total > rule.max_total_pixels) out.push(`总像素 ${total} 超过上限 ${rule.max_total_pixels}`);
-  const short = Math.min(image.width, image.height);
-  if (rule.min_short_edge !== null && short < rule.min_short_edge) out.push(`最短边 ${short} px 小于 ${rule.min_short_edge} px`);
-  return out;
-}
-
-function imageAspectViolations(image: ImageFacts, rule: InputImageRule): string[] {
-  const out: string[] = [];
-  const ratio = image.width / image.height;
-  const lo = rule.min_aspect_ratio;
-  const hi = rule.max_aspect_ratio;
-  if ((lo !== null && ratio < lo) || (hi !== null && ratio > hi)) {
-    out.push(`宽高比 ${ratio.toFixed(2)} 超出 ${lo === null ? "0" : lo.toFixed(2)}～${hi === null ? "∞" : hi.toFixed(2)}`);
-  }
-  return out;
-}
+// 规则判定只有一处实现（imageRule.ts）：标黄、拖线拦截、请求体与提交前快照共用同一套说法。
+export { imageRuleViolations, mb } from "./imageRule";
+export type { ImageFacts } from "./imageRule";

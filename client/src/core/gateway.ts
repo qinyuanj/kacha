@@ -3,8 +3,9 @@
 // HTTP 由调用方注入（壳里是浏览器原生 fetch，测试里是夹具回放）。
 // 发什么由发送计划（sendPlan.ts）决定；这里只把发送文本与原生负向放进请求体。
 import { withinPixelRange } from "./size";
-import { isSupported, layerMaxImagesRuleOf, transparentRuleOf, workflowFor, type ModelCapability } from "./capabilities";
+import { inputImageRuleOf, isSupported, layerMaxImagesRuleOf, maxReferencesOf, transparentRuleOf, workflowFor, type ModelCapability } from "./capabilities";
 import { errorText } from "./errors";
+import { imageRuleViolations } from "./imageRule";
 
 /** Flash 图层拆分的尺寸档，顺序即界面下拉顺序。 */
 export const LAYER_SIZES = ["auto", "1K", "1.5K", "2K"] as const;
@@ -191,13 +192,28 @@ function flashGenerationSizeInvalid(input: GenerationInput): boolean {
   return !withinPixelRange({ min_total_pixels: 921600, max_total_pixels: 4624220, min_aspect_ratio: 1 / 16, max_aspect_ratio: 16 }, input.size.width, input.size.height);
 }
 
-/** 图层拆分只吃一张 PNG/JPEG，且不超过 30MB。 */
-function flashSplitReferencesInvalid(input: GenerationInput): boolean {
-  if (!input.layerDecomposition) return false;
-  if (input.references.length !== 1) return true;
-  const reference = input.references[0];
-  if (!["image/png", "image/jpeg"].includes(reference.mediaType)) return true;
-  return reference.bytes.length > 30000000;
+/** 参考图 MIME → 能力表里的格式名（小写，jpg 归一到 jpeg）。 */
+function mediaFormatOf(mediaType: string): string {
+  const subtype = mediaType.replace(/^image\//i, "").toLowerCase();
+  return subtype === "jpg" ? "jpeg" : subtype;
+}
+
+/**
+ * 拆分场景的参考图约束（#176）：张数、格式与字节上限全部取能力表该工作流的 layer_split 声明，
+ * 没声明就沿用工作流级 / 模型级规则 —— 请求层不再写死 PNG / JPEG 或 30MB。
+ */
+function assertLayerSplitReferences(input: GenerationInput): void {
+  if (!input.layerDecomposition) return;
+  const workflow = workflowFor(input.references.length);
+  const rule = inputImageRuleOf(input.model, workflow, "layer_split");
+  const max = maxReferencesOf(input.model, workflow, "layer_split");
+  if (input.references.length < 1) throw new GatewayError("config", "图层拆分需要一张参考图");
+  if (input.references.length > max) throw new GatewayError("config", max === 1 ? "图层拆分只接受 1 张参考图" : `图层拆分最多 ${max} 张参考图`);
+  // 判定与界面标黄、提交前快照同一个函数（imageRule.ts）；这里只知道 MIME 与字节，像素留给快照阶段。
+  const violations = input.references.flatMap((reference) =>
+    imageRuleViolations({ format: mediaFormatOf(reference.mediaType), bytes: reference.bytes.length, width: 0, height: 0 }, rule),
+  );
+  if (violations.length) throw new GatewayError("config", `图层拆分参考图不合规：${violations.join("；")}`);
 }
 
 function flashLayerSizeInvalid(input: GenerationInput): boolean {
@@ -255,7 +271,7 @@ function flashRequestBody(input: GenerationInput, options: ReturnType<typeof out
 const buildFlashImagesGenerations: RequestShape["build"] = (input) => {
   if (input.references.length > 10) throw new GatewayError("config", "Flash 参考图最多 10 张");
   if (flashGenerationSizeInvalid(input)) throw new GatewayError("config", "Flash 生成尺寸超出范围");
-  if (flashSplitReferencesInvalid(input)) throw new GatewayError("config", "Flash 图层拆分需要一张 PNG/JPEG 参考图（不超过 30MB）");
+  assertLayerSplitReferences(input);
   if (flashLayerSizeInvalid(input)) throw new GatewayError("config", "Flash 图层尺寸无效");
   const options = outputOptions(input.outputOptions);
   if (input.transparentBackground) assertTransparentBackground(input, options);

@@ -54,7 +54,19 @@
             },
             "custom": { "min_total_pixels": 921600, "max_total_pixels": 4624220, "min_aspect_ratio": 0.0625, "max_aspect_ratio": 16 }
           },
-          "layer_decomposition": "supported"
+          "layer_decomposition": "supported",
+          "layer_split": {
+            "max_references": 1,
+            "input_image_rule": {
+              "formats": ["png", "jpeg"],
+              "max_bytes": 30000000,
+              "min_total_pixels": 262144,
+              "max_total_pixels": 36000000,
+              "min_short_edge": 15,
+              "min_aspect_ratio": 0.0625,
+              "max_aspect_ratio": 16
+            }
+          }
         }
       }
     },

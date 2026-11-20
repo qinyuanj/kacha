@@ -8,7 +8,7 @@ import { autoStageGroups } from "./autoStages";
 import { taskCount, type Board, type BoardEdge, type PortRef, type PromptNode, type Region, type TaskNode } from "./board";
 import { findModel, type CapabilityTable } from "./capabilities";
 import { attachReferences, newTask } from "./dragCreate";
-import { canConnect, connect, disconnect, forkPrompt, moveImagePort, removeNodes, syncImagePorts, workflowOf, type Connection } from "./graph";
+import { canConnect, connect, disconnect, forkPrompt, moveImagePort, removeNodes, splitReferenceRefusal, syncImagePorts, workflowOf, type Connection } from "./graph";
 import { countLabel, MERGE_PAUSE_MS, type UserChange } from "./history";
 import { addAsReference, addAsReferenceTarget, continueEditing, LOCKED_HINT, pasteClip, PASTE_OFFSET, type Clip, type Outcome } from "./iterate";
 import { addResultNode, PROMPT_NODE_SIZE, type RunResult } from "./layout";
@@ -53,6 +53,8 @@ export interface ImportedImage {
   display_name: string;
   width: number;
   height: number;
+  /** 文件字节数：选图当下就能按声明的 max_bytes 拦截（#176）；缺省 = 未知，留给派发前按快照验。 */
+  bytes?: number;
 }
 
 /**
@@ -286,6 +288,9 @@ const referenceNodes = (images: ImportedImage[], at: Pos, env: EditEnv) =>
 
 function addReferencesDraft(board: Board, change: ChangeOf<"addReferences">, env: EditEnv): Draft {
   if (!change.images.length) return { board };
+  // 拆分场景就地拦截（#176）：不合规就不落节点、不接线，只说明原因。
+  const refusal = change.attach ? splitReferenceRefusal(board, env.table, change.attach.taskId, change.images) : null;
+  if (refusal !== null) return { board, hint: refusal };
   const nodes = referenceNodes(change.images, change.at, env);
   const step = { label: countLabel("添加", nodes.length, "张参考图") };
   const selection = [nodes[nodes.length - 1].id];

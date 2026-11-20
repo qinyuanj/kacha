@@ -181,7 +181,7 @@ describe("drop", () => {
     expect(knownImageInfo("/~/导入参考图/a.png")).toEqual(imageInfo);
     expect(apply).toHaveBeenCalledWith({
       kind: "addReferences",
-      images: [{ path: "导入参考图/a.png", sha256: "sha-a", display_name: "a.png", width: 64, height: 48 }],
+      images: [{ path: "导入参考图/a.png", sha256: "sha-a", display_name: "a.png", width: 64, height: 48, bytes: imageInfo.bytes }],
       at: [60, 80],
       attach: null,
     });

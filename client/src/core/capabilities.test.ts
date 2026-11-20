@@ -79,10 +79,9 @@ describe("Seedream 5.5 上架条目", () => {
     expect(five().workflows.text_to_image.size_rule.custom).toEqual({ min_total_pixels: 921600, max_total_pixels: 4624220, min_aspect_ratio: 0.0625, max_aspect_ratio: 16 });
   });
 
-  it("通过现有 schema 校验；本票不加 #175 的 layer_decomposition_rule 与拆分场景 input_image_rule", () => {
+  it("通过现有 schema 校验；5.5 不声明 #176 的拆分场景规则（它的拆层仍是待测）", () => {
     expect(parseCapabilityTable(structuredClone(BUILTIN_TABLE)).ok).toBe(true);
-    expect(five()).not.toHaveProperty("layer_decomposition_rule");
-    for (const wf of ["text_to_image", "image_edit"] as const) expect(five().workflows[wf]).not.toHaveProperty("layer_decomposition_rule");
+    for (const wf of ["text_to_image", "image_edit"] as const) expect(five().workflows[wf]).not.toHaveProperty("layer_split");
   });
 });
 

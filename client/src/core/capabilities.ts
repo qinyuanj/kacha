@@ -57,6 +57,17 @@ export interface LayerMaxImagesRule {
   default: number;
 }
 
+/**
+ * 拆分场景的输入规则（#176）：拆分只接受声明里的张数、格式与像素范围，
+ * 声明在工作流上，整条覆盖模型级 input_image_rule（解析见 inputImageRuleOf）。
+ */
+export interface LayerSplitRule {
+  /** 拆分场景的参考图张数上限：拆分的底图只有一张。 */
+  max_references: number;
+  /** 拆分场景的参考图规则；整条替换模型级，不做逐字段合并（null 的含义不会被继承搞混）。 */
+  input_image_rule: InputImageRule;
+}
+
 export interface WorkflowCapability {
   supports_negative_prompt: TriState;
   min_references: number;
@@ -67,6 +78,13 @@ export interface WorkflowCapability {
   transparent_rule?: TransparentRule;
   /** 拆分图层的输出张数约束；缺省 = 该工作流不发 max_images（见 LayerMaxImagesRule）。 */
   layer_max_images?: LayerMaxImagesRule | null;
+  /**
+   * 本工作流的参考图规则（生成场景）：声明了整条覆盖模型级，缺省回落模型级（#176）。
+   * 键名按工作流而不是场景 —— 拆分场景见下面的 layer_split，两者并列、互不覆盖。
+   */
+  input_image_rule?: InputImageRule | null;
+  /** 拆分场景的参考图规则与张数；缺省回落本工作流、再回落模型级（#176）。 */
+  layer_split?: LayerSplitRule | null;
 }
 
 export interface ModelCapability {
@@ -100,6 +118,27 @@ export function isSupported(value: TriState): boolean {
 export function workflowFor(referenceCount: number): WorkflowName {
   return referenceCount > 0 ? "image_edit" : "text_to_image";
 }
+
+/** 输入场景：普通生成，或图层拆分（#176）。规则按场景取，不看模型名。 */
+export type InputScene = "generate" | "layer_split";
+
+/**
+ * 参考图规则按层级解析（#176）：拆分场景 > 工作流级 > 模型级。
+ * 老模型两条都没声明时逐级回落到模型级，行为与改动前一致。
+ */
+export function inputImageRuleOf(model: ModelCapability, workflow: WorkflowName, scene: InputScene = "generate"): InputImageRule {
+  const declared = model.workflows[workflow];
+  if (scene === "layer_split" && declared.layer_split) return declared.layer_split.input_image_rule;
+  return declared.input_image_rule ?? model.input_image_rule;
+}
+
+/** 与规则同层级的参考图张数上限：拆分场景用拆分声明，缺省回落该工作流的 max_references。 */
+export function maxReferencesOf(model: ModelCapability, workflow: WorkflowName, scene: InputScene = "generate"): number {
+  const declared = model.workflows[workflow];
+  if (scene === "layer_split" && declared.layer_split) return declared.layer_split.max_references;
+  return declared.max_references;
+}
+
 
 /** 该工作流下拆分图层的张数约束；未声明返回 null（请求里不发 max_images）。 */
 export function layerMaxImagesRuleOf(model: ModelCapability, workflow: WorkflowName): LayerMaxImagesRule | null {
@@ -211,6 +250,14 @@ function checkLayerMaxImages(value: unknown, path: string, errors: string[]): vo
   checkLayerMaxImagesRange(value, path, errors);
 }
 
+/** 拆分场景的声明：张数上限与整条输入规则都必填（拆分的限制不靠缺省值猜）。 */
+function checkLayerSplit(value: unknown, path: string, errors: string[]): void {
+  if (value === undefined || value === null) return;
+  if (!isObject(value)) return void errors.push(`${path} 必须是对象或 null`);
+  checkPositiveInt(value.max_references, `${path}.max_references`, errors);
+  checkInputImageRule(value.input_image_rule, `${path}.input_image_rule`, errors);
+}
+
 function checkReferenceRange(value: Record<string, unknown>, path: string, errors: string[]): void {
   const min = value.min_references;
   const max = value.max_references;
@@ -239,6 +286,8 @@ function checkWorkflow(value: unknown, path: string, errors: string[]): void {
   checkTri(value.layer_decomposition, `${path}.layer_decomposition`, errors);
   checkTransparentRule(value.transparent_rule, `${path}.transparent_rule`, errors);
   checkLayerMaxImages(value.layer_max_images, `${path}.layer_max_images`, errors);
+  if (value.input_image_rule != null) checkInputImageRule(value.input_image_rule, `${path}.input_image_rule`, errors);
+  checkLayerSplit(value.layer_split, `${path}.layer_split`, errors);
   checkReferenceRange(value, path, errors);
   checkSizeRule(value.size_rule, path, errors);
 }
