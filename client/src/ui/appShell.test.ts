@@ -162,11 +162,33 @@ describe("顶栏", () => {
           updateNotice: null,
           onOpenChangelog: vi.fn(),
           onCloseUpdateNotice: vi.fn(),
-          backupHint: null,
         }),
       ),
     );
     expect(container.textContent).toContain("a");
+  });
+
+  it("不显示服务端时期的常驻备份提示", async () => {
+    await act(async () =>
+      dom.render(
+        createElement(AppTopBar, {
+          sessions: [session()],
+          activeKey: "k1",
+          onActivate: vi.fn(),
+          onClose: vi.fn(),
+          onRename: vi.fn(),
+          onCreate: vi.fn(),
+          onOpenList: vi.fn(),
+          onExportPack: vi.fn(),
+          updateNotice: null,
+          onOpenChangelog: vi.fn(),
+          onCloseUpdateNotice: vi.fn(),
+        }),
+      ),
+    );
+    expect(container.textContent).not.toContain("请定期备份数据根");
+    expect(container.textContent).not.toContain("画板与图片保存在这台电脑");
+    expect(container.querySelector(".topbar-backup-hint")).toBeNull();
   });
 
   it("有新版：给出更新提示", async () => {
@@ -184,7 +206,6 @@ describe("顶栏", () => {
           updateNotice: "1.2.0",
           onOpenChangelog: vi.fn(),
           onCloseUpdateNotice: vi.fn(),
-          backupHint: null,
         }),
       ),
     );

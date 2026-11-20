@@ -3,7 +3,6 @@
 import type { ComponentProps } from "react";
 import { AppBoardList, AppPackMenu, AppToolbar, AppTopBar, AppWorkspace } from "./appPanels";
 import { AppNotices } from "./appNotices";
-import { BackupHint } from "./appBars";
 import type { AppView } from "./appView";
 import type { UpdateStatusView } from "./updateStatusView";
 import type { Session } from "./useBoardSessions";
@@ -82,7 +81,6 @@ export function AppShell(props: {
         updateNotice={props.updateNotice}
         onOpenChangelog={props.onOpenChangelog}
         onCloseUpdateNotice={props.onCloseUpdateNotice}
-        backupHint={<BackupHint />}
       />
       {props.boardListOpen && userRoot && (
         <AppBoardList

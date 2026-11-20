@@ -6,6 +6,7 @@
 
 | 版本 | 恢复来源 | 核对结果 |
 | --- | --- | --- |
+| 1.6.6 | 当前桌面说明；参考图数纠正依据：火山 Ark 官方 Seedream 5.5 文档（图层拆分为单张拆解、最多 10 张属于图生 RGBA、max_images 是输出数 [2,100] 默认 30），火山引擎国际站 ModelArk API 文档交叉验证「Only one image is supported」 | 另含两项 UI 清理：折叠边、备份提示。 |
 | 1.6.5 | 当前桌面说明；修复来源：真机验收发现的排程未重排（`updateScheduler.reschedule` 从未在生产代码里被调用）与下载中被插队；改进来源：owner 2026-11-20 提出的三项（更新后自动打开、图标、检查间隔 15 分钟） | 能力状态只放开 5.5；5.0 pro 保持待测。 |
 | 1.6.4 | 当前桌面说明；修复来源：2026-11-20 真机验收的 `detail` 日志（`Client.Timeout exceeded while awaiting headers`），`desktop/internal/gateway/request.go` 按请求性质分超时 | 只记超时区分这一处修复；能力状态沿用 1.6.2 节。 |
 | 1.6.3 | 当前桌面说明；修复来源：commit `1f85e81`（失败日志补 `detail` 字段，结果图校验报错带字节数与开头字节） | 只记诊断可读性这一处修复；能力状态沿用 1.6.2 节。 |

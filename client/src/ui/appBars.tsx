@@ -1,7 +1,7 @@
 // 工作台顶部的提示条（#137）：从 src/App.tsx 拆出的子组件，让 App 只留接线。
 import type { Board } from "../core/board";
 import type { SizeTier } from "../core/boardSize";
-import { ARCHIVE_TEXT, BACKUP_HINT_TEXT, MANAGE_BOARDS_TEXT, sizeNoticeText, usageLimitText } from "./boardText";
+import { ARCHIVE_TEXT, MANAGE_BOARDS_TEXT, sizeNoticeText, usageLimitText } from "./boardText";
 import { saveFailureNotice } from "./appUiState";
 import type { UpdateStatusView } from "./updateStatusView";
 
@@ -122,6 +122,3 @@ export function UpdateStatusBar({ view, onDefer }: { view: UpdateStatusView; onD
     </div>
   );
 }
-
-/** 顶栏常驻的备份提示。 */
-export const BackupHint = () => <div className="muted small topbar-backup-hint">{BACKUP_HINT_TEXT}</div>;

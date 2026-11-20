@@ -758,12 +758,6 @@ body[data-port-drag="ok"] * {
   background: #e6e9ee;
   border-bottom: 1px solid var(--border);
 }
-.topbar-backup-hint {
-  align-self: center;
-  padding: 0 10px;
-  color: #8a6d1f;
-  white-space: nowrap;
-}
 .update-notice {
   flex-shrink: 0;
   flex-wrap: wrap;

@@ -127,18 +127,24 @@ export function taskView(board: Board, table: CapabilityTable, taskId: string, f
   };
 }
 
+/** 图层拆分参考图数的统一文案：一张时说是待拆分图，多张时说上限。 */
+export function layerSplitReferenceText(max: number): string {
+  return max === 1
+    ? "图层拆分只接受 1 张待拆分图，不支持区域派生图"
+    : `图层拆分最多 ${max} 张参考图`;
+}
+
 /** Flash 拆层不要求提示词，改按实际参考图数与图层尺寸校验。 */
 function inputReasons(board: Board, table: CapabilityTable, task: TaskNode, model: ModelCapability | undefined): UnrunnableReason[] {
   const taskId = task.id;
   const flashLayers = isFlashShape(model) && task.layer_decomposition;
-  // 张数与格式取拆分声明（#176）：文案里不再写死"一张 PNG/JPEG"，表格改了这里跟着改。
+  // 张数取拆分声明（#176）：文案随表格里的 max 变化，一张时说清是待拆分图。
   const layerPolicy = flashLayers ? referencePolicy(board, table, taskId) : null;
   const layerMax = layerPolicy?.maxReferences ?? 1;
-  const layerFormats = (layerPolicy?.rule.formats ?? ["png", "jpeg"]).map((format) => format.toUpperCase()).join(" / ");
   return [
     ...(flashLayers ? [] : promptReasons(board, taskId)),
     ...(flashLayers && imagePortSlots(board, table, taskId).length !== layerMax
-      ? [reason("layerNeedsOneImage", `图层拆分需要恰好 ${layerMax} 张 ${layerFormats} 参考图，不支持区域派生图`)]
+      ? [reason("layerNeedsOneImage", layerSplitReferenceText(layerMax))]
       : []),
     ...(flashLayers && !isLayerSize(task.layer_size ?? "auto") ? [reason("sizeUnsupported", `图层尺寸只支持 ${LAYER_SIZES_TEXT}`)] : []),
     ...layerCountReasons(board, model, task, flashLayers),

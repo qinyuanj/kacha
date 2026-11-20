@@ -10,7 +10,7 @@ import { firstRegionOf, slotsFromReferences } from "./region";
 import { planSend } from "./sendPlan";
 import { isAutoRatio, resolveSize } from "./size";
 import { snapshotOf } from "./submission";
-import { missingImageText, submissionBlockers } from "./taskView";
+import { layerSplitReferenceText, missingImageText, submissionBlockers } from "./taskView";
 import { LocalError, newTaskId, readSubmission, taskDirOfTaskId, saveLayers, saveResult, sniffImage, writeSubmission, type LayerRecord, type ReferenceSource, type SubmissionPlan, type TaskFs } from "./taskDir";
 import { errorText } from "./errors";
 
@@ -165,7 +165,7 @@ function validateSubmissionInputs(board: Board, table: CapabilityTable, taskNode
   // 读到即按该任务模型的输入规则处理成参考图快照；叠加图从处理后的快照合成，两者尺寸一致。
   // 张数取拆分声明（#176），不再在这里写死一张。
   const max = referencePolicy(board, table, taskNodeId)?.maxReferences ?? 1;
-  if (flashLayers && (sourceCount !== max || slotCount !== 1)) throw new LocalError(`图层拆分需要恰好 ${max} 张参考图，不支持区域派生图`);
+  if (flashLayers && (sourceCount !== max || slotCount !== 1)) throw new LocalError(layerSplitReferenceText(max));
 }
 
 /** 读取并固化用户接入的源图，图层任务先校验原图，其余按模型处理。 */
@@ -299,7 +299,7 @@ async function validateRegeneratedReferences(deps: RunDeps, model: ModelCapabili
   if (isFlashShape(model)) {
     if (references.length > 10) throw new LocalError("Flash 参考图最多 10 张");
     const layerMax = maxReferencesOf(model, workflowFor(references.length), "layer_split");
-    if (layerDecomposition && references.length !== layerMax) throw new LocalError(`图层拆分需要恰好 ${layerMax} 张参考图`);
+    if (layerDecomposition && references.length !== layerMax) throw new LocalError(layerSplitReferenceText(layerMax));
     for (const ref of references) {
       if (layerDecomposition) await validateLayerReference(deps, ref.bytes, inputImageRuleOf(model, workflowFor(references.length), "layer_split"));
       else await validateFlashReference(deps, ref.bytes, model.input_image_rule);

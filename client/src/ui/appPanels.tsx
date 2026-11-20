@@ -1,5 +1,5 @@
 // 工作台各个区块的子组件（#137）：从 src/App.tsx 拆出，让 App 只留接线与状态。
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { BoardCanvas } from "./BoardCanvas";
 import { BoardListDialog } from "./BoardListDialog";
@@ -10,7 +10,7 @@ import { RunIndicator } from "./RunIndicator";
 import { TabBar } from "./TabBar";
 import type { Session } from "./useBoardSessions";
 
-/** 顶栏：备份提示、标签页与「已更新」提示条。 */
+/** 顶栏：标签页与「已更新」提示条。 */
 export function AppTopBar({
   sessions,
   activeKey,
@@ -23,7 +23,6 @@ export function AppTopBar({
   updateNotice,
   onOpenChangelog,
   onCloseUpdateNotice,
-  backupHint,
 }: {
   sessions: Session[];
   activeKey: string | null;
@@ -37,12 +36,10 @@ export function AppTopBar({
   updateNotice: string | null;
   onOpenChangelog(): void;
   onCloseUpdateNotice(): void;
-  backupHint: ReactNode;
 }) {
   return (
     <>
       <div className="topbar">
-        {backupHint}
         <TabBar
           sessions={sessions}
           activeKey={activeKey}

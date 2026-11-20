@@ -3,7 +3,7 @@ import type { Board, BoardEdge, BoardNode, TaskNode } from "./board";
 import { BUILTIN_TABLE, type CapabilityTable } from "./capabilities";
 import { imagePortSlots } from "./graph";
 import { buildConfirmItems } from "./submission";
-import { CHAIN_TRANSPARENT_WARNING, sendPlanOf, taskView, type TaskFacts } from "./taskView";
+import { CHAIN_TRANSPARENT_WARNING, layerSplitReferenceText, sendPlanOf, taskView, type TaskFacts } from "./taskView";
 
 const QWEN_PRO = "qwen-image-3.0-pro";
 
@@ -110,6 +110,15 @@ describe("Flash 图层任务视图", () => {
     expect(view(b).reasons.map((r) => r.kind)).toEqual(expect.arrayContaining(["layerNeedsOneImage", "sizeUnsupported"]));
     // 期望文案手写：独立于 LAYER_SIZES 的拼接，固定用户看到的原因（防同义反复）。
     expect(view(b).reasons.find((r) => r.kind === "sizeUnsupported")?.text).toBe("图层尺寸只支持 1K / 1.5K / 2K / auto");
+  });
+
+  it("Seedream 5.5 拆分只收一张：一张不标红，两张才标红", () => {
+    const model = "doubao-seedream-5-5-261028";
+    expect(view(ready({ model, layer_decomposition: true }, ["r1"])).reasons).toEqual([]);
+    const b = ready({ model, layer_decomposition: true }, ["r1", "r2"]);
+    expect(kinds(b)).toEqual([["layerNeedsOneImage", "error"]]);
+    expect(view(b).reasons[0].text).toBe("图层拆分只接受 1 张待拆分图，不支持区域派生图");
+    expect(layerSplitReferenceText(3)).toBe("图层拆分最多 3 张参考图");
   });
 });
 

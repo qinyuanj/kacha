@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-// 工作台的提示条（#137）：保存失败、体量提醒、归档与备份提示。
+// 工作台的提示条（#137）：保存失败、体量提醒与归档提示。
 import { act, createElement } from "react";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Board } from "../core/board";
-import { ArchivedBar, BackupHint, SaveFailureBar, SizeNoticeBar, UsageLimitBar } from "./appBars";
+import { ArchivedBar, SaveFailureBar, SizeNoticeBar, UsageLimitBar } from "./appBars";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -76,10 +76,5 @@ describe("提示条", () => {
   it("归档提示：给出取消归档与复制", async () => {
     await act(async () => dom.render(createElement(ArchivedBar, { onUnarchive: () => undefined, onCopy: () => undefined })));
     expect(container.textContent).toContain("归档");
-  });
-
-  it("备份提示：一直显示", async () => {
-    await act(async () => dom.render(createElement(BackupHint, {})));
-    expect(container.textContent).toContain("备份数据根");
   });
 });

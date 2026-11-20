@@ -138,6 +138,12 @@ describe("Seedream 5.5 请求体（复用 Flash 请求形状，只换 model）",
     });
   });
 
+  it("图层拆分：参考图按拆分规则校验，输出张数仍按 layer_max_images 发 30", () => {
+    const layer = input({ layerDecomposition: true, layerSize: "auto", references: [ref(1)] });
+    expect(buildGenerationRequest(layer).body).toMatchObject({ layer_decomposition: true, max_images: 30 });
+    expect(() => buildGenerationRequest({ ...layer, references: [ref(1), ref(2)] })).toThrow(/图层拆分只接受 1 张参考图/);
+  });
+
   it("多参考图 10 张按序进 image；第 11 张在本地拦下", () => {
     const ten = Array.from({ length: 10 }, (_, i) => ref(i + 1));
     const { body } = buildGenerationRequest(input({ references: ten }));

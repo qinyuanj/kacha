@@ -587,6 +587,7 @@ describe("上下文菜单", () => {
 
   it("锁定任务的连线：断开置灰，原因来自 core/iterate 的锁定提示", async () => {
     const harness = await renderCanvas({ locked: new Set(["t1"]) });
+    await selectNodes(["t1"]);
     await openEdgeMenu(1, 20, 20);
     const expected = menuItems({ kind: "edge", edge: harness.props.board.edges[1] }, menuFactsOf(harness.props.board, { locked: new Set(["t1"]) }));
     expect(menuItemLabels()).toEqual(expected.map((i) => i.label));
@@ -640,6 +641,7 @@ describe("上下文菜单", () => {
   it("连线右键菜单：断开走 React Flow 删除流程", async () => {
     const board = sampleBoard();
     await renderCanvas();
+    await selectNodes(["t1"]);
     await openEdgeMenu(0, 20, 20);
     await act(async () => menuItemButton(menuItems({ kind: "edge", edge: board.edges[0] }, menuFactsOf(board)), "disconnect").click());
     expect(xyflow.flow.deleteElements).toHaveBeenCalledWith({ edges: [{ id: "p1:positive->t1:positive" }] });
@@ -898,6 +900,7 @@ describe("悬浮动作条与放大预览", () => {
 
   it("连线悬浮出信息浮层，移出即收起", async () => {
     await renderCanvas();
+    await selectNodes(["t1"]);
     const edge = canvasFlowEdges()[1];
     const hoverLines = edgeHoverInfo(sampleBoard().edges[1]);
     expect(hoverLines.length).toBeGreaterThan(0);
@@ -1005,6 +1008,7 @@ describe("画布结构", () => {
       ["reference", 320, 60],
       ["task", 600, 60],
     ]);
+    await selectNodes(["t1"]);
     expect(canvasFlowEdges().map((e) => e.id)).toEqual(["p1:positive->t1:positive", "r1:out->t1:image:0"]);
     for (const name of ["background", "controls", "minimap"]) {
       expect(container.querySelector(`[data-xyflow="${name}"]`)).not.toBeNull();
@@ -1086,6 +1090,7 @@ describe("React Flow 回调接线", () => {
     expect(apply).toHaveBeenCalledWith({ kind: "connect", connection: { source: "p1", sourceHandle: "positive", target: "t1", targetHandle: "negative" } });
     await act(async () => flowProps().onMoveEnd!(null, { x: 10, y: 20, zoom: 0.5 }));
     expect(apply).toHaveBeenCalledWith({ kind: "viewport", viewport: { x: 10, y: 20, zoom: 0.5 } });
+    await selectNodes(["t1"]);
     await act(async () => flowProps().onEdgesChange!([{ type: "select", id: "p1:positive->t1:positive", selected: true }]));
     expect(canvasFlowEdges().find((e) => e.id === "p1:positive->t1:positive")?.selected).toBe(true);
   });

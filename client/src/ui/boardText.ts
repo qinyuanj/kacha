@@ -25,9 +25,6 @@ export const STAGE_TEXT = {
   count: (n: number) => `${n} 个节点`,
 } as const;
 
-/** 顶栏常驻的备份提示。 */
-export const BACKUP_HINT_TEXT = "画板与图片保存在这台电脑，请定期备份数据根。";
-
 /** 画板位已用 / 总数（#89）。 */
 export interface Slots {
   used: number;

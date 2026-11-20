@@ -5,6 +5,7 @@ import {
   effectiveTable,
   isSupported,
   mergeOverride,
+  maxReferencesOf,
   modelsByTier,
   parseCapabilityTable,
   untestedCapabilities,
@@ -80,9 +81,12 @@ describe("Seedream 5.5 上架条目", () => {
     expect(five().workflows.text_to_image.size_rule.custom).toEqual({ min_total_pixels: 921600, max_total_pixels: 4624220, min_aspect_ratio: 0.0625, max_aspect_ratio: 16 });
   });
 
-  it("通过现有 schema 校验；5.5 不声明 #176 的拆分场景规则（它的拆层仍是待测）", () => {
+  it("通过现有 schema 校验；5.5 只在 image_edit 声明拆分场景规则", () => {
     expect(parseCapabilityTable(structuredClone(BUILTIN_TABLE)).ok).toBe(true);
-    for (const wf of ["text_to_image", "image_edit"] as const) expect(five().workflows[wf]).not.toHaveProperty("layer_split");
+    expect(five().workflows.text_to_image.layer_split).toBeUndefined();
+    expect(maxReferencesOf(five(), "image_edit", "layer_split")).toBe(1);
+    expect(five().workflows.image_edit.layer_split!.input_image_rule).toEqual(five().input_image_rule);
+    expect(five().workflows.image_edit.layer_max_images).toEqual({ min: 2, max: 100, default: 30 });
   });
 });
 
