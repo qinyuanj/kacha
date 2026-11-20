@@ -47,6 +47,16 @@ export interface SizeRule {
   custom: PixelRange | null;
 }
 
+/**
+ * 图层拆分的输出张数约束（#175）：只有声明了这条的工作流才在请求里发 max_images。
+ * 没声明 = 该工作流不接受张数配置 —— 5.0 Flash / Pro 保持原样，请求体里不出现这个字段。
+ */
+export interface LayerMaxImagesRule {
+  min: number;
+  max: number;
+  default: number;
+}
+
 export interface WorkflowCapability {
   supports_negative_prompt: TriState;
   min_references: number;
@@ -55,6 +65,8 @@ export interface WorkflowCapability {
   layer_decomposition: TriState;
   /** 透明背景怎么落地；缺省 alpha_reference（见 TransparentRule）。只在模型支持透明背景时有意义。 */
   transparent_rule?: TransparentRule;
+  /** 拆分图层的输出张数约束；缺省 = 该工作流不发 max_images（见 LayerMaxImagesRule）。 */
+  layer_max_images?: LayerMaxImagesRule | null;
 }
 
 export interface ModelCapability {
@@ -87,6 +99,11 @@ export function isSupported(value: TriState): boolean {
 /** 工作流由参考图张数决定：0 张 = 文生图，≥1 张 = 图片编辑。 */
 export function workflowFor(referenceCount: number): WorkflowName {
   return referenceCount > 0 ? "image_edit" : "text_to_image";
+}
+
+/** 该工作流下拆分图层的张数约束；未声明返回 null（请求里不发 max_images）。 */
+export function layerMaxImagesRuleOf(model: ModelCapability, workflow: WorkflowName): LayerMaxImagesRule | null {
+  return model.workflows[workflow].layer_max_images ?? null;
 }
 
 /** 该工作流下透明背景怎么落地；未声明按 alpha_reference（既有行为）。 */
@@ -167,6 +184,33 @@ function checkTransparentRule(value: unknown, path: string, errors: string[]): v
   if (value !== undefined && value !== "native" && value !== "alpha_reference") errors.push(`${path} 必须是 native 或 alpha_reference`);
 }
 
+function checkPositiveInt(value: unknown, path: string, errors: string[]): void {
+  if (!Number.isInteger(value) || (value as number) < 1) errors.push(`${path} 必须是正整数`);
+}
+
+const isInt = (value: unknown): value is number => Number.isInteger(value);
+
+/** default 是否没落在 min–max 之间；三者不全是整数时不算越界（由 checkPositiveInt 报）。 */
+function defaultOutOfRange(value: Record<string, unknown>): boolean {
+  const { min, max, default: fallback } = value;
+  if (!isInt(min) || !isInt(max) || !isInt(fallback)) return false;
+  return fallback < min || fallback > max;
+}
+
+function checkLayerMaxImagesRange(value: Record<string, unknown>, path: string, errors: string[]): void {
+  checkPositiveInt(value.min, `${path}.min`, errors);
+  checkPositiveInt(value.max, `${path}.max`, errors);
+  checkPositiveInt(value.default, `${path}.default`, errors);
+  if (isInt(value.min) && isInt(value.max) && value.min > value.max) errors.push(`${path}.min 不能大于 max`);
+  if (defaultOutOfRange(value)) errors.push(`${path}.default 必须落在 min–max 之间`);
+}
+
+function checkLayerMaxImages(value: unknown, path: string, errors: string[]): void {
+  if (value === undefined || value === null) return;
+  if (!isObject(value)) return void errors.push(`${path} 必须是对象或 null`);
+  checkLayerMaxImagesRange(value, path, errors);
+}
+
 function checkReferenceRange(value: Record<string, unknown>, path: string, errors: string[]): void {
   const min = value.min_references;
   const max = value.max_references;
@@ -194,6 +238,7 @@ function checkWorkflow(value: unknown, path: string, errors: string[]): void {
   checkTri(value.supports_negative_prompt, `${path}.supports_negative_prompt`, errors);
   checkTri(value.layer_decomposition, `${path}.layer_decomposition`, errors);
   checkTransparentRule(value.transparent_rule, `${path}.transparent_rule`, errors);
+  checkLayerMaxImages(value.layer_max_images, `${path}.layer_max_images`, errors);
   checkReferenceRange(value, path, errors);
   checkSizeRule(value.size_rule, path, errors);
 }
