@@ -80,7 +80,10 @@ function bodyOf(req: IncomingMessage): Promise<string> {
   });
 }
 
-async function until<T>(check: () => T | undefined | null | false, timeoutMs = 15000): Promise<T> {
+// 内部期限必须短于调用用例自己的超时，否则先炸的是那句笼统的 vitest 超时；
+// 也不能太短：这几条走真实 HTTP 与真实文件系统，拥挤的 CI runner 上观测到过 15.2s
+// （PR #190，本地空闲 0.6s）。45s 给足余量，真挂死仍然会失败。
+async function until<T>(check: () => T | undefined | null | false, timeoutMs = 45000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const value = check();
@@ -436,7 +439,8 @@ describe("桌面端口的参考图编辑闭环（#154）", () => {
     // 两次 regenerate 各要读任务目录并写结果。CI runner 的磁盘比本机慢得多，
     // 默认 5s 曾在 PR #185 上稳定超时（本地 2573 项全过也拦不住）。
     // 与 desktopGeneration.test.ts 里那条长用例同一处理：显式给足时间。
-  }, 30000);
+    // 60s 比 until 的 45s 内部期限长，失败时先看到上面那句具体原因。
+  }, 60000);
 
   it("生成变体固定一份、进同一结果列不覆盖已有结果；失败后重新生成按当前能力重算发送文本", async () => {
     const s = await setup();
