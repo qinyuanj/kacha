@@ -7,6 +7,13 @@ import re
 CHANGELOG = Path("docs") / "release" / "changelog.md"
 CHANGELOG_GROUPS = ("新增", "改进", "修复")
 DESKTOP_CONFIG = Path("mygo.config.ts")
+RELAY_ASSET = "kacha-feedbackrelay-{version}-windows-amd64.exe"
+"""反馈中继 release 资产名：版本与桌面客户端共用唯一产品版本源。"""
+
+
+def relay_asset_name(version: str) -> str:
+    """当前产品的版本化中继资产名；部署侧按同一规则取资产。"""
+    return RELAY_ASSET.format(version=version)
 
 
 def parse_config_version(text: str) -> str | None:

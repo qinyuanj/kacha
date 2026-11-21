@@ -38,4 +38,4 @@ Windows x64 当前用户安装器由 release 构建产出 `build/windows-amd64/k
 
 ## 反馈
 
-需求与缺陷请到 [GitHub Issues](https://github.com/qinyuanj/kacha/issues) 提交。
+反馈中继默认地址是 `http://lzxsvn:3005`，高级设置里的「反馈中继地址」可以覆盖；留空或地址无效时使用默认值。运维需要提供的凭据与安装交接见 [构建说明的反馈中继章节](packaging/README.md#反馈中继发布与运维交接209)，仓库和测试夹具不含真实 token。首屏反馈入口与发送闭环仍在 #205–#208 接通中；在此之前需求与缺陷仍请到 [GitHub Issues](https://github.com/qinyuanj/kacha/issues) 提交。

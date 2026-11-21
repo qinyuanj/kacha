@@ -2,7 +2,7 @@
 """在开发机构建 Kacha Windows 桌面客户端；只依赖 Python 标准库。
 
 从仓库根运行，命令按 PATH 与 PATHEXT 解析，失败即以中文信息退出。
-产物在 build/windows-amd64/：Kacha.exe、feedbackrelay.exe、build-info.json（本次构建记录的 MyGo / Go / WebView2 版本）。
+产物在 build/windows-amd64/：Kacha.exe、版本化反馈中继、build-info.json（本次构建记录的 MyGo / Go / WebView2 版本）。debug 输出未带版本的 feedbackrelay.exe。
 """
 
 import argparse
@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import sys
 
-from release_gate import check_release_notes, desktop_version
+from release_gate import check_release_notes, desktop_version, relay_asset_name
 
 MYGO_VERSION = "0.9.0"
 """固定的 MyGo 版本：go.mod 的 tool 指令也钉在同一版本，升级要单独验证（ADR 0023）。"""
@@ -105,7 +105,8 @@ def main() -> int:
         raise SystemExit(f"正式构建没有产出当前用户安装器 {installer}")
 
     # 反馈中继是独立单二进制：只用环境变量在运行时配置，Gitea token 不参与编译。
-    relay = output / "feedbackrelay.exe"
+    # 发布中继直接编译成版本化资产名；debug 仍用本地固定名，便于开发脚本引用。
+    relay = output / (relay_asset_name(version) if not args.debug else "feedbackrelay.exe")
     relay_env = dict(os.environ, GOOS=GOOS, GOARCH=GOARCH, CGO_ENABLED="0")
     run(["go", "build", "-o", relay.as_posix(), "./desktop/cmd/feedbackrelay"], root, env=relay_env)
     if not (root / relay).exists():
@@ -124,6 +125,7 @@ def main() -> int:
         "profile": "debug" if args.debug else "release",
         "exe": (output / "Kacha.exe").as_posix(),
         "relay": relay.as_posix(),
+        "relay_asset": relay.as_posix() if not args.debug else None,
         "installer": installer.relative_to(root).as_posix() if not args.debug else None,
     }
     (root / output / "build-info.json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
