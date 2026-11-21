@@ -58,12 +58,17 @@ def make_repo(root: Path, changelog: str = VALID_CHANGELOG) -> dict[str, str]:
         "go",
         "import os, sys\n"
         "from pathlib import Path\n"
+        f"open({log!r}, 'a').write('env GOOS=' + os.environ.get('GOOS', '') + ' GOARCH=' + os.environ.get('GOARCH', '') + ' CGO_ENABLED=' + os.environ.get('CGO_ENABLED', '') + '\\n')\n"
         f"open({log!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
         "args = sys.argv[1:]\n"
         "if args[:1] == ['version']:\n"
         "    print('go version go1.27.3 windows/amd64')\n"
         "elif args[:3] == ['tool', 'mygo', 'version']:\n"
         "    print('mygo 0.9.0')\n"
+        "elif args[:1] == ['build']:\n"
+        "    out = Path(args[args.index('-o') + 1])\n"
+        "    out.mkdir(parents=True, exist_ok=True)\n"
+        "    (out / 'feedbackrelay.exe').write_bytes(b'relay')\n"
         "else:\n"
         "    base = args[args.index('-o') + 1] if '-o' in args else 'build'\n"
         "    out = Path(base) / 'windows-amd64'\n"
@@ -197,6 +202,46 @@ class BuildDesktopTest(unittest.TestCase):
             calls = (root / "calls.log").read_text(encoding="utf-8")
             self.assertIn("-debug -o build/debug", calls)
             self.assertNotIn("npm ci", calls)
+
+    def test_release_build_produces_relay_binary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = make_repo(root)
+            result = run_build(root, env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            relay = root / "build" / "windows-amd64" / "feedbackrelay.exe"
+            self.assertTrue(relay.exists(), f"没有产出 {relay}")
+            calls = (root / "calls.log").read_text(encoding="utf-8")
+            self.assertIn("build -o build/windows-amd64/feedbackrelay.exe ./desktop/cmd/feedbackrelay", calls)
+            self.assertIn("env GOOS=windows GOARCH=amd64 CGO_ENABLED=0", calls)
+            info = json.loads((root / "build" / "windows-amd64" / "build-info.json").read_text(encoding="utf-8"))
+            self.assertEqual(info["relay"], "build/windows-amd64/feedbackrelay.exe")
+            self.assertIn("中继", result.stdout)
+
+    def test_debug_build_produces_relay_binary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = make_repo(root)
+            result = run_build(root, env, "--debug", "--skip-install")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            relay = root / "build" / "debug" / "windows-amd64" / "feedbackrelay.exe"
+            self.assertTrue(relay.exists(), f"没有产出 {relay}")
+            calls = (root / "calls.log").read_text(encoding="utf-8")
+            self.assertIn("build -o build/debug/windows-amd64/feedbackrelay.exe ./desktop/cmd/feedbackrelay", calls)
+            info = json.loads((root / "build/debug/windows-amd64/build-info.json").read_text(encoding="utf-8"))
+            self.assertEqual(info["relay"], "build/debug/windows-amd64/feedbackrelay.exe")
+
+    def test_build_keeps_runtime_token_out_of_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = make_repo(root)
+            secret = "fixture-runtime-secret"
+            env["FEEDBACK_GITEA_TOKEN"] = secret
+            result = run_build(root, env, "--debug", "--skip-install")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = (root / "calls.log").read_text(encoding="utf-8")
+            info = (root / "build/debug/windows-amd64/build-info.json").read_text(encoding="utf-8")
+            self.assertNotIn(secret, result.stdout + result.stderr + calls + info)
 
     def test_fails_when_exe_missing(self):
         with tempfile.TemporaryDirectory() as tmp:

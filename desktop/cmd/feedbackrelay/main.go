@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -10,14 +11,9 @@ import (
 )
 
 func main() {
-	cfg := feedbackrelay.Config{
-		GiteaBase: envOr("FEEDBACK_GITEA_URL", "http://lzxsvn:3000"),
-		OwnerRepo: envOr("FEEDBACK_GITEA_REPO", "qinyuanj/kacha-feedback"),
-		Token:     os.Getenv("FEEDBACK_GITEA_TOKEN"),
-		Address:   envOr("FEEDBACK_ADDR", ":3005"),
-	}
-	if cfg.Token == "" {
-		log.Fatal("缺少环境变量 FEEDBACK_GITEA_TOKEN")
+	cfg, err := loadConfig(os.Getenv)
+	if err != nil {
+		log.Fatal(err)
 	}
 	svc := feedbackrelay.New(cfg)
 	log.Printf("反馈中继监听 %s，写入 %s", cfg.Address, cfg.OwnerRepo)
@@ -26,8 +22,22 @@ func main() {
 	}
 }
 
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
+// loadConfig 只从环境变量读取运行参数；Gitea 写 token 在运行时注入，不进入二进制。
+func loadConfig(getenv func(string) string) (feedbackrelay.Config, error) {
+	cfg := feedbackrelay.Config{
+		GiteaBase: envOr(getenv, "FEEDBACK_GITEA_URL", "http://lzxsvn:3000"),
+		OwnerRepo: envOr(getenv, "FEEDBACK_GITEA_REPO", "qinyuanj/kacha-feedback"),
+		Token:     getenv("FEEDBACK_GITEA_TOKEN"),
+		Address:   envOr(getenv, "FEEDBACK_ADDR", ":3005"),
+	}
+	if cfg.Token == "" {
+		return cfg, errors.New("缺少环境变量 FEEDBACK_GITEA_TOKEN")
+	}
+	return cfg, nil
+}
+
+func envOr(getenv func(string) string, key, def string) string {
+	if v := getenv(key); v != "" {
 		return v
 	}
 	return def

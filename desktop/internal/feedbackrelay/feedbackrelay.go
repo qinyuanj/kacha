@@ -51,9 +51,10 @@ type Outcome struct {
 }
 
 type dedupEntry struct {
-	number int
-	url    string
-	at     time.Time
+	number      int
+	url         string
+	at          time.Time
+	fingerprint string
 }
 
 type rateBucket struct {
@@ -130,13 +131,17 @@ func (s *Service) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxRequestBytes)
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
-		writeOutcome(w, http.StatusBadRequest, Outcome{Kind: "too_large", Message: "请求体过大或不是 multipart/form-data"})
+		writeOutcome(w, http.StatusRequestEntityTooLarge, Outcome{Kind: "too_large", Message: "请求体过大或不是 multipart/form-data"})
 		return
 	}
 
 	category := strings.TrimSpace(r.FormValue("category"))
-	if !validCategories[category] {
+	if category == "" {
 		category = "other"
+	}
+	if !validCategories[category] {
+		writeOutcome(w, http.StatusBadRequest, Outcome{Kind: "invalid", Message: "不支持的分类"})
+		return
 	}
 	body := strings.TrimSpace(r.FormValue("body"))
 	if body == "" {
@@ -144,24 +149,28 @@ func (s *Service) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shots, oc := s.collectFiles(r, "screenshots", s.cfg.MaxScreenshots, s.cfg.MaxScreenshotBytes, true)
+	shots, oc := s.collectFiles(r, []string{"screenshots[]", "screenshots"}, s.cfg.MaxScreenshots, s.cfg.MaxScreenshotBytes, true)
 	if oc != nil {
 		writeOutcome(w, oc.status, oc.outcome)
 		return
 	}
-	packs, oc := s.collectFiles(r, "diagnostics_pack", 1, s.cfg.MaxRequestBytes, false)
+	packs, oc := s.collectFiles(r, []string{"diagnostics_pack"}, 1, s.cfg.MaxRequestBytes, false)
 	if oc != nil {
 		writeOutcome(w, oc.status, oc.outcome)
 		return
 	}
 
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	if key == "" {
-		key = contentKey(body, shots)
-	}
-	if e, ok := s.lookupDup(key); ok {
-		writeOutcome(w, http.StatusOK, Outcome{OK: true, Kind: "duplicate", Message: fmt.Sprintf("刚刚已提交过 #%d", e.number), Number: e.number, URL: e.url})
-		return
+	fingerprint := contentKey(body, shots, packs)
+	if key != "" {
+		if e, ok := s.lookupDup(key); ok {
+			if e.fingerprint != fingerprint {
+				writeOutcome(w, http.StatusConflict, Outcome{Kind: "invalid", Message: "幂等键对应内容不同"})
+				return
+			}
+			writeOutcome(w, http.StatusOK, Outcome{OK: true, Kind: "duplicate", Message: fmt.Sprintf("刚刚已提交过 #%d", e.number), Number: e.number, URL: e.url})
+			return
+		}
 	}
 
 	title := strings.TrimSpace(r.FormValue("title"))
@@ -198,7 +207,9 @@ func (s *Service) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		_ = s.patchIssue(created.Number, issueBody+"\n\n---\n\n"+strings.Join(links, "\n\n"))
 	}
 
-	s.remember(key, dedupEntry{number: created.Number, url: created.HTMLURL, at: s.now()})
+	if key != "" {
+		s.remember(key, dedupEntry{number: created.Number, url: created.HTMLURL, at: s.now(), fingerprint: fingerprint})
+	}
 	writeOutcome(w, http.StatusOK, Outcome{OK: true, Kind: "created", Message: fmt.Sprintf("已提交 #%d", created.Number), Number: created.Number, URL: created.HTMLURL})
 }
 
@@ -209,21 +220,24 @@ type collectResult struct {
 }
 
 // collectFiles 校验并读取某字段的文件：张数、单文件体积、图片格式（仅图片时）。
-func (s *Service) collectFiles(r *http.Request, field string, maxCount int, maxBytes int64, imageOnly bool) ([]upload, *collectResult) {
+func (s *Service) collectFiles(r *http.Request, fields []string, maxCount int, maxBytes int64, imageOnly bool) ([]upload, *collectResult) {
 	if r.MultipartForm == nil {
 		return nil, nil
 	}
-	fhs := r.MultipartForm.File[field]
+	var fhs []*multipart.FileHeader
+	for _, field := range fields {
+		fhs = append(fhs, r.MultipartForm.File[field]...)
+	}
 	if len(fhs) == 0 {
 		return nil, nil
 	}
 	if len(fhs) > maxCount {
-		return nil, &collectResult{status: http.StatusBadRequest, outcome: Outcome{Kind: "too_large", Message: fmt.Sprintf("%s 最多 %d 个", field, maxCount)}}
+		return nil, &collectResult{status: http.StatusBadRequest, outcome: Outcome{Kind: "too_large", Message: fmt.Sprintf("%s 最多 %d 个", strings.Join(fields, "/"), maxCount)}}
 	}
 	var out []upload
 	for _, fh := range fhs {
 		if fh.Size > maxBytes {
-			return nil, &collectResult{status: http.StatusBadRequest, outcome: Outcome{Kind: "too_large", Message: fmt.Sprintf("附件 %s 超过 %d 字节上限", fh.Filename, maxBytes)}}
+			return nil, &collectResult{status: http.StatusRequestEntityTooLarge, outcome: Outcome{Kind: "too_large", Message: fmt.Sprintf("附件 %s 超过 %d 字节上限", fh.Filename, maxBytes)}}
 		}
 		f, err := fh.Open()
 		if err != nil {
@@ -235,7 +249,7 @@ func (s *Service) collectFiles(r *http.Request, field string, maxCount int, maxB
 			return nil, &collectResult{status: http.StatusBadRequest, outcome: Outcome{Kind: "invalid", Message: "读取附件失败"}}
 		}
 		if int64(len(data)) > maxBytes {
-			return nil, &collectResult{status: http.StatusBadRequest, outcome: Outcome{Kind: "too_large", Message: fmt.Sprintf("附件 %s 超过 %d 字节上限", fh.Filename, maxBytes)}}
+			return nil, &collectResult{status: http.StatusRequestEntityTooLarge, outcome: Outcome{Kind: "too_large", Message: fmt.Sprintf("附件 %s 超过 %d 字节上限", fh.Filename, maxBytes)}}
 		}
 		ct := http.DetectContentType(data)
 		if imageOnly && !strings.HasPrefix(ct, "image/png") && !strings.HasPrefix(ct, "image/jpeg") {
@@ -465,12 +479,16 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-func contentKey(body string, shots []upload) string {
+func contentKey(body string, groups ...[]upload) string {
 	h := sha256.New()
 	h.Write([]byte(body))
-	for _, u := range shots {
-		sum := sha256.Sum256(u.data)
-		h.Write(sum[:])
+	for _, group := range groups {
+		for _, u := range group {
+			h.Write([]byte(u.name))
+			h.Write([]byte{0})
+			h.Write(u.data)
+			h.Write([]byte{0})
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
