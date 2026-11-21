@@ -114,6 +114,7 @@ export function AppToolbar({
   onOpenChangelog,
   settingsLoaded,
   onOpenSettings,
+  onOpenFeedback,
   update,
 }: {
   /** 画布把工具栏 portal 进这个容器。 */
@@ -130,6 +131,8 @@ export function AppToolbar({
   onOpenChangelog(): void;
   settingsLoaded: boolean;
   onOpenSettings(): void;
+  /** 首屏反馈入口（#206）。 */
+  onOpenFeedback(): void;
   /** 更新入口的接线（#181）：首页版本号旁的那一份，与高级设置共用同一份快照与动作。 */
   update: UpdateControl;
 }) {
@@ -155,6 +158,7 @@ export function AppToolbar({
         </button>
         {version && <button className="topbar-button topbar-version" onClick={onOpenChangelog} disabled={!ready} aria-haspopup="dialog" title="查看更新内容">Kacha {version}</button>}
         <UpdateToolbarControl {...update} />
+        <button className="topbar-button" onClick={onOpenFeedback} aria-haspopup="dialog">反馈</button>
         <button className="topbar-button" onClick={onOpenSettings} disabled={!settingsLoaded}>
           ⚙ 高级设置
         </button>

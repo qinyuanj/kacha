@@ -40,6 +40,7 @@ export function AppShell(props: {
   onOpenList(): void;
   onExportPack(key: string): void;
   onOpenChangelog(): void;
+  onOpenFeedback(): void;
   onCloseUpdateNotice(): void;
   onOpenListItem(path: string): void;
   onCloseBoardList(): void;
@@ -108,6 +109,7 @@ export function AppShell(props: {
         version={props.version}
         ready={ready}
         onOpenChangelog={props.onOpenChangelog}
+        onOpenFeedback={props.onOpenFeedback}
         settingsLoaded={props.settingsLoaded}
         onOpenSettings={props.onOpenSettings}
         update={props.update}

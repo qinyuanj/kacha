@@ -261,7 +261,7 @@ describe("工具栏", () => {
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
           onOpenSettings: vi.fn(),
-          update: updateControl(),
+          onOpenFeedback: vi.fn(), update: updateControl(),
         }) }),
       ),
     );
@@ -285,7 +285,7 @@ describe("工具栏", () => {
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
           onOpenSettings: vi.fn(),
-          update: updateControl(),
+          onOpenFeedback: vi.fn(), update: updateControl(),
         }) }),
       ),
     );
@@ -313,6 +313,7 @@ describe("工具栏", () => {
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
           onOpenSettings: vi.fn(),
+          onOpenFeedback: vi.fn(),
           update: updateControl({ phase: "ready", version: "1.6.7", verified: true, installable: true, downloaded: 100, total: 100 }),
         }) }),
       ),
@@ -334,7 +335,7 @@ describe("工作台外壳的接线", () => {
   const shell = (patch: Partial<ComponentProps<typeof AppShell>> = {}): ComponentProps<typeof AppShell> => ({
     view: viewOf(), sessions: [], activeKey: null, userRoot: "/root", ready: true, version: "1.0",
     updateNotice: null, packMenu: null, boardListOpen: false, manageBoards: false, settingsLoaded: true,
-    runIndicator: indicator, updateStatus: updateStatusView({ snapshot: emptySnapshot(), auto: IDLE_AUTO_VIEW }), update: updateControl(),
+    runIndicator: indicator, updateStatus: updateStatusView({ snapshot: emptySnapshot(), auto: IDLE_AUTO_VIEW }), onOpenFeedback: vi.fn(), update: updateControl(),
     onDeferUpdate: vi.fn(), tableError: null, settingsFileProblem: null, settingsOpen: false,
     usageNotice: null, canvasProps: {} as never,
     onActivate: vi.fn(), onCloseTab: vi.fn(), onRename: vi.fn(), onCreate: vi.fn(), onOpenList: vi.fn(),
