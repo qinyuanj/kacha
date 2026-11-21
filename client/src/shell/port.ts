@@ -20,7 +20,7 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics" | "update" | "dataRoot";
+export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics" | "update" | "dataRoot" | "feedback";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
@@ -53,6 +53,8 @@ export interface ShellFeatures {
    * 未声明时按不可用处理——没有实现就不能出现「迁移」入口。
    */
   readonly dataRoot?: boolean;
+  /** 反馈（#205）：只有配置了中继地址才为 true；未声明时按不可用处理。 */
+  readonly feedback: boolean;
 }
 
 /** 端口失败的类别：界面只按它分支。 */
@@ -143,6 +145,7 @@ export const FEATURE_LABELS: Record<FeatureId, string> = {
   diagnostics: "诊断包导出",
   update: "自动更新",
   dataRoot: "本机数据位置",
+  feedback: "反馈",
 };
 
 // ---- 端口分组 ----
@@ -252,6 +255,49 @@ export interface PackStore {
   exportPack(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number; target?: string }>;
 }
 
+/**
+ * 反馈提交（#205）：输入是用户填写的文字与环境元数据，relayUrl 由接线层从设置解析后填入。
+ * 桌面与内存替身用同一份形状，UI 只按 kind 分支。
+ */
+export interface FeedbackSpec {
+  title: string;
+  category: string;
+  body: string;
+  version: string;
+  build: string;
+  os: string;
+  board_name: string;
+  contact?: string;
+  /** 高级设置的覆盖地址；空值走 Go 侧默认配置。 */
+  relay_url?: string;
+}
+
+/** 反馈的稳定结局类别；与 Go feedbackservice 的 kind 逐字一致。 */
+export type FeedbackKind = "ok" | "duplicate" | "unreachable" | "rejected" | "invalid" | "too_large" | "unavailable";
+
+/** 反馈结局：成功带 issue 编号与链接；失败是可显示的类型化文案，不靠异常。 */
+export interface FeedbackOutcome {
+  ok: boolean;
+  kind: FeedbackKind;
+  message: string;
+  number?: number;
+  url?: string;
+}
+
+/** 没有 Feedback 绑定或没有配置中继地址时的统一结局。 */
+export const FEEDBACK_UNAVAILABLE: FeedbackOutcome = {
+  ok: false,
+  kind: "unavailable",
+  message: "反馈暂不可用：未配置中继地址",
+  number: undefined,
+  url: undefined,
+};
+
+/** 反馈端口：单一 Send(spec) 方法（#205）。 */
+export interface FeedbackPort {
+  send(spec: FeedbackSpec): Promise<FeedbackOutcome>;
+}
+
 /** 诊断包导出的类型化结局：取消没有成功提示，失败带可显示的原因。 */
 export type DiagnosticsOutcome =
   | { kind: "saved"; bytes: number }
@@ -349,4 +395,6 @@ export interface ShellPort {
   readonly core: CorePorts;
   /** 本机数据位置迁移（#161）；没有这一项的实现在 features.dataRoot 上明确关掉。 */
   readonly dataRoot: DataRootStore;
+  /** 反馈提交（#205）；没有绑定或没配中继时返回 unavailable 结局。 */
+  readonly feedback: FeedbackPort;
 }

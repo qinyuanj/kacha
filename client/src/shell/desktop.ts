@@ -7,7 +7,7 @@
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
 // 各组实现（画板、文件、元数据、媒体、画板包、用量）在 shell/desktopStores.ts（#137），这里只做接线。
-import { PortError, portFailureOf, type ClipboardContent, type DataRootStore, type DiagnosticsOutcome, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort, type UpdatePort } from "./port";
+import { FEEDBACK_UNAVAILABLE, PortError, portFailureOf, type ClipboardContent, type DataRootStore, type DiagnosticsOutcome, type FeedbackOutcome, type FeedbackPort, type FeedbackSpec, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort, type UpdatePort } from "./port";
 import type { PackEntryFact, PackExportSpec } from "../core/boardPack";
 import type { BoardMeasure } from "../core/tidy";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
@@ -46,7 +46,7 @@ export interface DesktopInfo {
   version: string;
   user_data_root: string;
   board_root: string;
-  features: { generation: boolean; usage: boolean; pack_export: boolean; archive?: boolean; tidy?: boolean; update?: boolean };
+  features: { generation: boolean; usage: boolean; pack_export: boolean; archive?: boolean; tidy?: boolean; update?: boolean; feedback?: boolean };
 }
 
 /** Go 侧本地能力（Local 服务）：方法名与 Go 侧绑定名一致。 */
@@ -319,6 +319,11 @@ export interface DesktopDataRootBridge {
   move(target: string): Promise<DesktopDataRootOutcome>;
 }
 
+/** Go 侧反馈服务（Feedback.Send）：把文字反馈交给配置的中继。 */
+export interface DesktopFeedbackBridge {
+  send(spec: FeedbackSpec): Promise<FeedbackOutcome>;
+}
+
 /** MyGo 桥：Go 侧绑定与测试替身都满足它。 */
 export interface DesktopBridge {
   info(): Promise<DesktopInfo>;
@@ -337,6 +342,8 @@ export interface DesktopBridge {
   update?: DesktopUpdateBridge;
   /** 本机数据位置迁移（#161）；没有这一项时能力关闭、入口不出现。 */
   dataRoot?: DesktopDataRootBridge;
+  /** 反馈（#205）；没有这一项或 Go 没配中继时能力关闭。 */
+  feedback?: DesktopFeedbackBridge;
 }
 
 /** 本切片还没有的能力：以 kind: "unavailable" 拒绝。 */
@@ -493,6 +500,8 @@ export function desktopFeatures(bridge: DesktopBridge, info: DesktopInfo): Shell
     update: bridge.update !== undefined && (info.features.update ?? false),
     // 数据位置迁移（#161）：桥上有真实 Storage 服务才开放，否则入口不出现。
     dataRoot: bridge.dataRoot !== undefined,
+    // 反馈（#205）：桥上有服务还不够，Go 侧必须明确配置了中继地址。
+    feedback: bridge.feedback !== undefined && (info.features.feedback ?? false),
   };
 }
 
@@ -568,6 +577,11 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
   // 网关配置、系统保护的密钥与模型发现（#152）：经 Gateway 绑定走 Go 服务。
   const gatewayPorts = createGatewayPorts(bridge);
 
+  // 反馈（#205）：没有绑定就返回同形 unavailable 结局，界面按能力开关隐藏入口。
+  const feedback: FeedbackPort = bridge.feedback
+    ? { send: (spec) => bridge.feedback!.send(spec) }
+    : { send: async () => FEEDBACK_UNAVAILABLE };
+
   const port: ShellPort = {
     userRoot: info.user_data_root,
     features,
@@ -580,6 +594,7 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     usage,
     update,
     dataRoot,
+    feedback,
     core: {
       taskFs: { writeNewFile: files.writeNewFile, readFile: files.readFile },
       runDeps: {

@@ -30,6 +30,23 @@ func generatedClient(t *testing.T) string {
 	return string(client)
 }
 
+// 反馈服务（#205）的绑定名与方法是页面调用约定：
+// client/src/shell/desktopBridge.ts 按 Feedback.Send(spec) 调用；生成的客户端必须带上它。
+func TestBindServicesExposeFeedbackService(t *testing.T) {
+	src := generatedClient(t)
+	start := strings.Index(src, "export const Feedback")
+	if start < 0 {
+		t.Fatalf("生成的客户端里没有 Feedback 服务：\n%s", src)
+	}
+	section := src[start:]
+	if end := strings.Index(section, "} as const;"); end > 0 {
+		section = section[:end]
+	}
+	if !strings.Contains(section, "Feedback.Send") {
+		t.Fatalf("生成的 Feedback 服务缺少 Send：\n%s", section)
+	}
+}
+
 // 更新服务（#164）的绑定名与方法是页面调用约定：
 // client/src/shell/desktopBridge.ts 按 Update.Status / Check / Install 调用。
 //
