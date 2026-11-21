@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { DiagnosticsPackOutcome, FeedbackAttachment, FeedbackOutcome, FeedbackSpec } from "../shell/port";
+import type { DiagnosticsPackOutcome, FeedbackAttachment, FeedbackKind, FeedbackOutcome, FeedbackSpec } from "../shell/port";
 import { useShell } from "./shell";
 
 const CATEGORIES = ["缺陷", "需求", "建议", "其他"] as const;
@@ -18,6 +18,36 @@ export function redactFeedbackText(text: string): string {
 export function feedbackBoardName(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.at(-1)?.replace(/\.kacha$/i, "") ?? "";
+}
+
+/** #208：结局按稳定 kind 映射，后端同一句 message 也不会退化成笼统失败。 */
+const FEEDBACK_MESSAGES: Record<Exclude<FeedbackKind, "ok">, string> = {
+  unreachable: "网络不可达：无法连接反馈中继，请检查网络或稍后再试。",
+  rejected: "服务器拒绝：反馈未被接受，请修改内容后再试。",
+  invalid: "内容无效：请检查标题、分类和正文后重试。",
+  too_large: "内容过大：请减少或压缩截图与诊断包后重试。",
+  duplicate: "刚刚已提交过，请勿重复提交。",
+  unavailable: "反馈暂不可用：未配置中继地址或中继已关闭。",
+};
+
+function feedbackMessage(outcome: FeedbackOutcome): string {
+  if (outcome.kind === "duplicate" && outcome.number) return `刚刚已提交过 #${outcome.number}，请勿重复提交。`;
+  return FEEDBACK_MESSAGES[outcome.kind as Exclude<FeedbackKind, "ok">];
+}
+
+/** 失败后一键复制的是已脱敏的完整文字内容，附件只列摘要，不复制二进制。 */
+function feedbackClipboardText(spec: FeedbackSpec): string {
+  return [
+    `标题：${spec.title || "（无）"}`,
+    `分类：${spec.category}`,
+    `正文：${spec.body}`,
+    `版本：${spec.version}（build ${spec.build || "未知"}）`,
+    `系统：${spec.os}`,
+    `当前画板：${spec.board_name || "（未打开画板）"}`,
+    `提交者：${spec.contact ?? "匿名"}`,
+    `截图：${spec.screenshots?.length ? spec.screenshots.map((a) => a.name).join("、") : "（无）"}`,
+    `诊断包：${spec.diagnostics_pack?.name ?? "（未附带）"}`,
+  ].join("\n");
 }
 
 function isFailure(outcome: FeedbackOutcome): boolean {
@@ -57,7 +87,7 @@ export interface FeedbackDialogProps {
   onClose(): void;
 }
 
-/** 首屏反馈表单（#206 / #207）：附件先本地校验，再随同一份 spec 交给 Feedback 端口。 */
+/** 首屏反馈表单（#206 / #207 / #208）：预览可改，失败不丢内容，按 kind 给不同结局。 */
 export function FeedbackDialog({ version, build, boardName, onClose }: FeedbackDialogProps) {
   const port = useShell();
   const [title, setTitle] = useState("");
@@ -69,6 +99,9 @@ export function FeedbackDialog({ version, build, boardName, onClose }: FeedbackD
   const [attachmentError, setAttachmentError] = useState("");
   const [step, setStep] = useState<"form" | "preview" | "receipt">("form");
   const [outcome, setOutcome] = useState<FeedbackOutcome | null>(null);
+  const [sending, setSending] = useState(false);
+  const [submittedSpec, setSubmittedSpec] = useState<FeedbackSpec | null>(null);
+  const [copied, setCopied] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -144,11 +177,34 @@ export function FeedbackDialog({ version, build, boardName, onClose }: FeedbackD
     setAttachmentError("");
   };
 
-  const send = async () => {
-    const result = await port.feedback.send(spec);
-    setOutcome(result);
-    setStep("receipt");
+  const send = async (request: FeedbackSpec) => {
+    if (sending) return;
+    setSending(true);
+    setCopied(false);
+    setSubmittedSpec(request);
+    try {
+      setOutcome(await port.feedback.send(request));
+      setStep("receipt");
+    } finally {
+      setSending(false);
+    }
   };
+
+  const editAgain = () => {
+    setOutcome(null);
+    setCopied(false);
+    setStep("form");
+  };
+
+  const copyContent = async () => {
+    await port.media.copyText(feedbackClipboardText(submittedSpec ?? spec));
+    setCopied(true);
+  };
+
+  const attachmentSummary = [
+    screenshots.length ? `截图 ${screenshots.length} 张（${screenshots.map((a) => a.name).join("、")}）` : "截图 0 张（无）",
+    `诊断包 ${diagnosticsPack?.name ?? "未附带"}`,
+  ].join("；");
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -193,36 +249,43 @@ export function FeedbackDialog({ version, build, boardName, onClose }: FeedbackD
         {step === "preview" && (
           <>
             <div className="feedback-preview">
+              <label className="form-row">标题（可选）<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+              <label className="form-row">分类<select value={category} onChange={(event) => setCategory(event.target.value)}>{CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+              <label className="form-row">正文（可修改）<textarea value={redactFeedbackText(body)} onChange={(event) => setBody(event.target.value)} rows={6} /></label>
               <p>标题：{spec.title || "（无）"}</p>
               <p>分类：{spec.category}</p>
               <p>正文：{spec.body}</p>
-              <p>版本：{spec.version}（build {spec.build || "未知"}）</p>
-              <p>系统：{spec.os}</p>
-              <p>当前画板：{spec.board_name || "（未打开画板）"}</p>
+              <p className="feedback-preview-meta">自动元数据：版本 {spec.version}（build {spec.build || "未知"}）、系统 {spec.os}、当前画板 {spec.board_name || "（未打开画板）"}；只含画板名字，不含路径或密钥。</p>
               <p>提交者：{spec.contact ?? "匿名"}</p>
-              <p>截图：{screenshots.length ? screenshots.map((a) => a.name).join("、") : "（无）"}</p>
-              <p>诊断包：{diagnosticsPack?.name ?? "（未附带）"}</p>
+              <p>附件摘要：{attachmentSummary}。</p>
             </div>
             <div className="modal-foot">
-              <button onClick={() => setStep("form")}>返回修改</button>
-              <button onClick={onClose}>取消</button>
-              <button className="primary" onClick={() => void send()}>确认发送</button>
+              <button disabled={sending} onClick={() => setStep("form")}>返回修改</button>
+              <button disabled={sending} onClick={onClose}>取消</button>
+              <button className="primary" disabled={sending} onClick={() => void send(spec)}>确认发送</button>
             </div>
           </>
         )}
         {step === "receipt" && outcome && (
           <>
             {isFailure(outcome) ? (
-              <div className="form-error" role="alert">{outcome.message}；请稍后重试。</div>
+              <div className="form-error" role="alert">
+                <p>{feedbackMessage(outcome)}</p>
+              </div>
             ) : (
               <div className="feedback-receipt">
                 <p>已提交 {outcome.number ? <a href={outcome.url} target="_blank" rel="noreferrer">#{outcome.number}</a> : ""}</p>
                 {outcome.url && <p className="feedback-url">{outcome.url}</p>}
               </div>
             )}
+            {isFailure(outcome) && outcome.url && (
+              <p className="feedback-return-link">返回链接：<a href={outcome.url} target="_blank" rel="noreferrer">{outcome.number ? `#${outcome.number}` : "查看反馈"}</a></p>
+            )}
             <div className="modal-foot">
               <button onClick={onClose}>关闭</button>
-              {isFailure(outcome) && <button className="primary" onClick={() => void send()}>重试</button>}
+              {isFailure(outcome) && <button onClick={editAgain}>返回修改</button>}
+              {isFailure(outcome) && <button disabled={copied} onClick={() => void copyContent()}>{copied ? "已复制内容" : "复制内容"}</button>}
+              {isFailure(outcome) && outcome.kind !== "duplicate" && <button className="primary" disabled={sending} onClick={() => void send(submittedSpec ?? spec)}>重试</button>}
             </div>
           </>
         )}
