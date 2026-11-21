@@ -88,6 +88,7 @@ export function App({ version }: AppProps) {
   const settings = useSettings();
   const [table, setTable] = useState<CapabilityTable>(BUILTIN_TABLE);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   // 编辑环境随渲染更新（能力表、网关发现），锁定集按画板现取运行器的最新快照；sessions 在每次画板变更时取。
   const envRef = useRef({ table, discovery: settings.discovery });
   envRef.current = { table, discovery: settings.discovery };
@@ -352,6 +353,7 @@ export function App({ version }: AppProps) {
     confirmOpen: state.confirm !== null,
     sendTextOpen: state.sendText !== null,
     packDialogOpen: pack.dialog !== null,
+    feedbackOpen,
   });
   return (
 
@@ -447,6 +449,7 @@ export function App({ version }: AppProps) {
         onCloseMissing={(key) => void discardMissingBoard(key)}
         onImportPack={() => void pack.importPack()}
         importDisabled={view.importDisabled}
+        onOpenFeedback={() => setFeedbackOpen(true)}
         onToolbarSlot={setToolbarSlot}
       />
       <AppOverlays
@@ -456,6 +459,10 @@ export function App({ version }: AppProps) {
         changelogOpen={state.changelogOpen}
         version={versionOrEmpty(version)}
         onChangelogClose={() => store.setChangelogOpen(false)}
+        build=""
+        feedbackOpen={feedbackOpen}
+        onFeedbackClose={() => setFeedbackOpen(false)}
+        feedbackBoardName={activeKey ? view.titleOf(activeKey) : ""}
         confirm={state.confirm}
         onConfirmCancel={() => store.setConfirm(null)}
         onConfirm={(ids) => void runNow(state.confirm!.boardKey, state.confirm!.board, ids)}

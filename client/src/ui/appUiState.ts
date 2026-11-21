@@ -44,8 +44,9 @@ export function modalOpenOf(state: {
   confirmOpen: boolean;
   sendTextOpen: boolean;
   packDialogOpen: boolean;
+  feedbackOpen?: boolean;
 }): boolean {
-  return state.settingsOpen || state.changelogOpen || state.boardListOpen || state.confirmOpen || state.sendTextOpen || state.packDialogOpen;
+  return state.settingsOpen || state.changelogOpen || state.boardListOpen || state.confirmOpen || state.sendTextOpen || state.packDialogOpen || state.feedbackOpen === true;
 }
 
 /** 画板包菜单里各条目的禁用原因：导出与下载各说各的。 */
