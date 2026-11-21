@@ -4,8 +4,9 @@
 // 源码与单测在没有它时也要能编译。调用名与 Go 侧绑定名一致（Shell.Info / Local.WriteBoard）。
 import { call } from "mygo-runtime";
 
-import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopDataRootBridge, DesktopDataRootOutcome, DesktopDataRootStatus, DesktopDiagnosticsBridge, DesktopDiagnosticsOutcome, DesktopExportOutcome, DesktopExportSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy, DesktopUpdateBridge, DesktopUsageBridge } from "./desktop";
+import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopDataRootBridge, DesktopDataRootOutcome, DesktopDataRootStatus, DesktopDiagnosticsBridge, DesktopDiagnosticsOutcome, DesktopExportOutcome, DesktopFeedbackBridge, DesktopExportSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy, DesktopUpdateBridge, DesktopUsageBridge } from "./desktop";
 import type { PackEntryFact } from "../core/boardPack";
+import type { FeedbackOutcome } from "./port";
 
 /** camelCase 的页面侧方法名 → Go 侧的 PascalCase 绑定名。 */
 function goName(method: string): string {
@@ -66,6 +67,10 @@ export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promi
     },
     export: () => callFn("Diagnostics.Export") as Promise<DesktopDiagnosticsOutcome>,
   };
+  // 反馈（#205）：与 Go 侧 BindAs("Feedback", feedbackservice.New(...)) 对齐。
+  const feedback: DesktopFeedbackBridge = {
+    send: (spec) => callFn("Feedback.Send", spec) as Promise<FeedbackOutcome>,
+  };
   // 本机数据位置（#161）：与 Go 侧 BindAs("Storage", storage.NewWithBusy(...)) 对齐。
   // 少这一项时 features.dataRoot 为 false，设置里不会出现迁移入口。
   const dataRoot: DesktopDataRootBridge = {
@@ -83,5 +88,6 @@ export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promi
     usage,
     update,
     diagnostics,
+    feedback,
   };
 }

@@ -2,7 +2,7 @@
 import type { ImportOptions } from "../../core/boardPack";
 import type { BoardWriteOptions } from "../types";
 import type { ClipboardContent, ImageCopyResult } from "../port";
-import type { DiagnosticsOutcome, FeatureId, PortFailureKind } from "../port";
+import type { DiagnosticsOutcome, FeatureId, FeedbackOutcome, FeedbackSpec, PortFailureKind } from "../port";
 
 export interface FakeBoard {
   path: string;
@@ -56,6 +56,8 @@ export interface FakePortOptions {
   moveFailure?: PortFailureKind;
   /** 迁移成功时的文件数（结局文案用）。 */
   moveFiles?: number;
+  /** 反馈发送的脚本化结局（缺省成功）。 */
+  feedbackOutcome?: FeedbackOutcome;
 }
 
 /** 替身记下的调用：断言界面把结局传出去时用。 */
@@ -87,6 +89,8 @@ export interface FakeCalls {
   downloadBoardResults?: string[];
   writeNewFile?: { absPath: string; bytes: Uint8Array }[];
   exportDiagnostics: number;
+  /** 反馈提交收到的 spec（按顺序）。 */
+  feedback: FeedbackSpec[];
   /** 迁移请求过的目标目录（按顺序）。 */
   moveTargets?: string[];
   /** 替身认为的当前数据根；迁移成功后换成新位置。 */
