@@ -6,6 +6,7 @@
 // 工作台负责把那一份接线递给这里（#180 起主界面与本段共用同一份），这里只留 DOM。
 // #181 起入口放在首页版本号旁，不再藏在高级设置里。
 import { useShell } from "./shell";
+import { updateButtonView } from "./updateButtonView";
 import { updateSectionView } from "./updateSectionView";
 import type { UpdateControl } from "./useUpdate";
 import type { UpdatePhase } from "../core/update";
@@ -43,14 +44,20 @@ export function UpdateToolbarControl({ snapshot, state, check, install }: Update
   if (!port.features.update) return null;
 
   const view = updateSectionView({ snapshot, preparing: state.preparing, prepareError: state.prepareError || state.installError });
-  const checking = snapshot.phase === "checking";
+  const button = updateButtonView(snapshot);
   const failed = snapshot.phase === "error";
   const reason = errorText(failed ? snapshot.error : "", view.prepareError);
 
   return (
     <div className="topbar-update" aria-label="更新入口">
-      <button className="topbar-button" onClick={() => check()} disabled={!view.canCheck} title={view.status}>
-        {checking ? "检查中…" : "检查更新"}
+      <button
+        className={`topbar-button topbar-update-btn topbar-update-${button.tone}`}
+        onClick={() => check()}
+        disabled={!view.canCheck}
+        title={view.status}
+        data-update-tone={button.tone}
+      >
+        {button.label}
       </button>
       {hasUpdate(snapshot.phase) && (
         <button

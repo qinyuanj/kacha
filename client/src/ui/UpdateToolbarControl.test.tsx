@@ -98,6 +98,21 @@ describe("首页版本号旁的更新入口", () => {
     expect(button("检查中").disabled).toBe(true);
   });
 
+  // #181：按钮跟着状态变文案与颜色。
+  it("已是最新：按钮变绿并说「已是最新」", async () => {
+    await show(createFakePort(), { ...emptySnapshot(), phase: "up_to_date" });
+    const el = container.querySelector(".topbar-update-btn");
+    expect(el?.textContent).toContain("已是最新");
+    expect(el?.getAttribute("data-update-tone")).toBe("latest");
+  });
+
+  it("有新版本：按钮变红并带上版本号", async () => {
+    await show(createFakePort(), { ...emptySnapshot(), phase: "available", version: "1.6.8" });
+    const el = container.querySelector(".topbar-update-btn");
+    expect(el?.textContent).toContain("有新版本 1.6.8");
+    expect(el?.getAttribute("data-update-tone")).toBe("action");
+  });
+
   it("有未完成任务时拒绝安装，且不起安装器", async () => {
     const port = createFakePort();
     await show(port, ready(), { queue: { pending: () => 2, setSubmissionGuard: () => undefined } });

@@ -5,6 +5,8 @@
   background: #f6f7f9;
   --red: #d1242f;
   --yellow: #d4a72c;
+  /* 成功色与 .ok-text 同源：已是最新这类「没坏事」的状态用它。 */
+  --green: #1a7f37;
   --border: #d0d7de;
   /* 端口与连线类型色：图片 = 青绿，正向提示词 = 靛蓝，负向提示词 = 品红（与错误态 --red 区分）；系统连线灰虚线。 */
   --port-image: #0f9d8a;
@@ -781,6 +783,23 @@ body[data-port-drag="ok"] * {
 .topbar-update .topbar-update-install {
   border-color: var(--accent, #4c8dff);
   color: var(--accent, #4c8dff);
+}
+
+/* 更新按钮跟着阶段变色（#181）：绿 = 已是最新，红 = 有更新或失败，中性 = 其余阶段。 */
+.topbar-update-btn.topbar-update-latest {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.topbar-update-btn.topbar-update-action {
+  border-color: var(--red);
+  color: var(--red);
+  font-weight: 600;
+}
+
+.topbar-update-btn.topbar-update-bad {
+  border-color: var(--red);
+  color: var(--red);
 }
 
 .topbar-update-link {
