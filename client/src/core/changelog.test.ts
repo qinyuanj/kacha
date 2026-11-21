@@ -76,14 +76,14 @@ describe("仓库里的更新说明与桌面版本", () => {
     const section = parseChangelog(notes).find((v) => v.version === desktop);
     expect(section, `docs/release/changelog.md 缺少当前版本 ${desktop} 的一节`).toBeDefined();
     expect(section!.groups.flatMap((g) => g.items).length, `docs/release/changelog.md 中 ${desktop} 一节没有条目`).toBeGreaterThan(0);
-    // 当前版本一节要说清已接通与仍不可用的能力（#153 起单份文生图、#154 参考图编辑、#156 透明背景与图层拆分已接通）。
+    // 当前版本一节只讲本版用户可见的反馈能力（#203 审阅：不再夹带文生图等无关说明）。
     const currentText = JSON.stringify(section!.groups);
-    expect(currentText).toContain("单份文生图");
-    expect(currentText).toContain("整理");
-    expect(currentText).toContain("参考图编辑");
-    expect(currentText).toContain("透明背景");
-    expect(currentText).toContain("图层拆分");
-    expect(currentText).toContain("尚不可用");
+    expect(currentText).toContain("反馈");
+    expect(currentText).toContain("诊断包");
+    expect(currentText).not.toContain("单份文生图");
+    expect(currentText).not.toContain("参考图编辑");
+    expect(currentText).not.toContain("透明背景");
+    expect(currentText).not.toContain("图层拆分");
   });
 
   it("恢复全部可查版本，按新在前排列且不重复、不缺漏", () => {

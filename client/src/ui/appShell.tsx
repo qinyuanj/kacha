@@ -41,6 +41,8 @@ export function AppShell(props: {
   onExportPack(key: string): void;
   onOpenChangelog(): void;
   onOpenFeedback(): void;
+  /** 反馈能力开关（#206）：关闭时入口标暂不可用。 */
+  feedbackAvailable?: boolean;
   onCloseUpdateNotice(): void;
   onOpenListItem(path: string): void;
   onCloseBoardList(): void;
@@ -110,6 +112,7 @@ export function AppShell(props: {
         ready={ready}
         onOpenChangelog={props.onOpenChangelog}
         onOpenFeedback={props.onOpenFeedback}
+        feedbackAvailable={props.feedbackAvailable ?? true}
         settingsLoaded={props.settingsLoaded}
         onOpenSettings={props.onOpenSettings}
         update={props.update}

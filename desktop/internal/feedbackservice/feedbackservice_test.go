@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/qinyuanj/kacha/desktop/internal/feedbackrelay"
 )
 
 type relayCapture struct {
@@ -145,6 +147,48 @@ func TestSendMapsFakeRelayOutcomesToStableKinds(t *testing.T) {
 	}
 }
 
+type captureTransport struct{ request *http.Request }
+
+func (c *captureTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.request = r
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"ok":true,"kind":"created","message":"已提交 #1","number":1,"url":"http://fake/1"}`)),
+		Request:    r,
+	}, nil
+}
+
+func TestDefaultRelayAddressIsLzxsvn3005(t *testing.T) {
+	if DefaultRelayURL != "http://lzxsvn:3005" {
+		t.Fatalf("DefaultRelayURL = %q", DefaultRelayURL)
+	}
+}
+
+func TestSendUsesConfiguredDefaultWhenSpecOmitsOverride(t *testing.T) {
+	trip := &captureTransport{}
+	out := New(Config{RelayURL: DefaultRelayURL, Client: &http.Client{Transport: trip}}).Send(sampleSpec())
+	if !out.OK {
+		t.Fatalf("Send outcome = %+v", out)
+	}
+	if trip.request == nil || trip.request.URL.String() != "http://lzxsvn:3005/api/feedback" {
+		t.Fatalf("request URL = %v", trip.request)
+	}
+}
+
+func TestSendExplicitOverrideWorksWithBlankConfiguredRelay(t *testing.T) {
+	server, captured := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "已提交 #1", Number: 1})
+	defer server.Close()
+	spec := sampleSpec()
+	spec.RelayURL = server.URL
+	if out := New(Config{}).Send(spec); !out.OK {
+		t.Fatalf("Send outcome = %+v", out)
+	}
+	if captured().calls != 1 {
+		t.Fatalf("relay calls = %d", captured().calls)
+	}
+}
+
 func TestSendWithoutRelayAddressIsExplicitlyUnavailable(t *testing.T) {
 	got := New(Config{}).Send(sampleSpec())
 	want := Outcome{Kind: "unavailable", Message: "反馈暂不可用：未配置中继地址"}
@@ -192,6 +236,64 @@ func TestSendUploadsScreenshotsAndDiagnosticsPack(t *testing.T) {
 	}
 	if len(req.diagnosticNames) != 1 || req.diagnosticNames[0] != "diagnostics.zip" {
 		t.Fatalf("diagnostics_pack files = %v", req.diagnosticNames)
+	}
+}
+
+func TestChineseCategoryLabelReachesRelayAsStableCode(t *testing.T) {
+	cases := []struct {
+		label, code string
+		id          int64
+	}{
+		{"缺陷", "bug", 1},
+		{"需求", "feature", 2},
+		{"建议", "suggestion", 3},
+		{"其他", "other", 4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label+"->"+tc.code, func(t *testing.T) {
+			var issueTitle string
+			var issueLabels []int64
+			gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/o/r/labels":
+					_, _ = io.WriteString(w, `[{"id":1,"name":"type/bug"},{"id":2,"name":"type/feature"},{"id":3,"name":"type/suggestion"},{"id":4,"name":"type/other"},{"id":5,"name":"source/app"}]`)
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/o/r/issues":
+					var issue struct {
+						Title  string  `json:"title"`
+						Labels []int64 `json:"labels"`
+					}
+					_ = json.NewDecoder(r.Body).Decode(&issue)
+					issueTitle, issueLabels = issue.Title, issue.Labels
+					_, _ = io.WriteString(w, `{"number":7,"html_url":"http://gitea.test/issues/7"}`)
+				case strings.HasSuffix(r.URL.Path, "/assets"):
+					_, _ = io.WriteString(w, `{"browser_download_url":"http://gitea.test/assets/x"}`)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer gitea.Close()
+
+			relay := httptest.NewServer(feedbackrelay.New(feedbackrelay.Config{
+				GiteaBase: gitea.URL,
+				OwnerRepo: "o/r",
+				Token:     "test-token",
+			}).Handler())
+			defer relay.Close()
+
+			spec := sampleSpec()
+			spec.Category = tc.code
+			spec.Title = "" // 中继生成的标题应使用对应的中文分类标签
+			out := New(Config{RelayURL: relay.URL}).Send(spec)
+			if !out.OK || out.Number != 7 {
+				t.Fatalf("Send outcome = %+v", out)
+			}
+			if !strings.HasPrefix(issueTitle, "["+tc.label+"]") {
+				t.Fatalf("issue title = %q, want label %q", issueTitle, tc.label)
+			}
+			if !reflect.DeepEqual(issueLabels, []int64{tc.id, 5}) {
+				t.Fatalf("issue labels = %v, want [%d 5]", issueLabels, tc.id)
+			}
+		})
 	}
 }
 

@@ -114,10 +114,11 @@ describe("API 密钥管理（#152）", () => {
     expect(state.save).toHaveBeenCalledWith(DEFAULT_SETTINGS, "sk-replacement");
   });
 
-  it("反馈中继：高级设置显示默认地址，覆盖值优先生效", async () => {
+  it("反馈中继：高级设置用默认地址作占位，覆盖值优先生效", async () => {
     const state = settings({ apiKey: "sk-old" });
     await show(createFakePort(), state);
-    expect(relayInput().value).toBe("http://lzxsvn:3005");
+    expect(relayInput().value).toBe("");
+    expect(relayInput().placeholder).toBe("http://lzxsvn:3005");
     await typeInto(relayInput(), "http://relay.test:3105");
     await act(async () => buttonWithText("保存").click());
     expect(state.save).toHaveBeenCalledWith(expect.objectContaining({ feedback_relay_url: "http://relay.test:3105" }), "sk-old");

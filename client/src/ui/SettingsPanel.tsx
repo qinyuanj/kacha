@@ -97,10 +97,15 @@ function ConcurrencyRow({
   );
 }
 
+function closeOnBackdrop(event: React.MouseEvent, onClose: () => void): void {
+  if (event.target === event.currentTarget) onClose();
+}
+
 export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
   const port = useShell();
   const [baseUrl, setBaseUrl] = useState(settings.settings.base_url);
-  const [feedbackRelayUrl, setFeedbackRelayUrl] = useState(settings.settings.feedback_relay_url ?? DEFAULT_FEEDBACK_RELAY_URL);
+  // 空白表示没有显式覆盖；默认地址只作输入框占位，不写回 settings.json。
+  const [feedbackRelayUrl, setFeedbackRelayUrl] = useState(settings.settings.feedback_relay_url);
   // 草稿是原始文本，输入中可为空或越界；失焦与保存时才经 parseConcurrency 钳制。
   const [concurrencyDraft, setConcurrencyDraft] = useState(String(settings.settings.concurrency));
   // 密钥草稿：只有点保存 / 清除才写进系统保护存储；测试连接用草稿，不用上一次读到的旧值。
@@ -154,7 +159,7 @@ export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
   };
 
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-backdrop" onMouseDown={(e) => closeOnBackdrop(e, onClose)}>
       <div className="modal" role="dialog" aria-label="高级设置">
         <div className="modal-head">
           <strong>高级设置</strong>

@@ -16,6 +16,7 @@ import (
 )
 
 // DefaultRelayURL 是桌面壳内置的中继地址；高级设置覆盖由调用方通过 Spec.RelayURL 传入（#209）。
+// 客户端常量在 client/src/core/feedback.ts；packaging/tests/test_feedback_contract_sync.py 防止两端漂移。
 const DefaultRelayURL = "http://lzxsvn:3005"
 
 // 稳定结局类别：页面与端口替身共用同一组字符串。
@@ -30,6 +31,7 @@ const (
 )
 
 // 稳定文案：中继的原始服务器错误不直接暴露给页面。
+// 客户端同一批文案在 client/src/core/feedback.ts，由 test_feedback_contract_sync.py 逐字核对。
 const (
 	MessageUnavailable = "反馈暂不可用：未配置中继地址"
 	MessageUnreachable = "反馈中继不可达，请稍后再试"
@@ -50,6 +52,7 @@ type Attachment struct {
 }
 
 // 附件上限与 relay 一致：0–5 张 PNG/JPG，单张 ≤10MB；诊断包复用允许清单的 4MB 上限。
+// 客户端截图上限在 client/src/core/feedback.ts，由 test_feedback_contract_sync.py 核对。
 const (
 	MaxScreenshots          = 5
 	MaxScreenshotBytes      = 10 << 20
@@ -66,7 +69,7 @@ type Spec struct {
 	OS        string `json:"os"`
 	BoardName string `json:"board_name"`
 	Contact   string `json:"contact,omitempty"`
-	// RelayURL 是可选的本次调用覆盖；空值使用 Config.RelayURL。
+	// RelayURL 是可选的本次调用覆盖；空值使用 Config.RelayURL（界面只在显式非默认覆盖时填）。
 	RelayURL string `json:"relay_url,omitempty"`
 	// Screenshots 与 DiagnosticsPack 是 #207 的附件，字段名与前端 spec 一致。
 	Screenshots     []Attachment `json:"screenshots,omitempty"`
@@ -82,7 +85,7 @@ type Outcome struct {
 	URL     string `json:"url,omitempty"`
 }
 
-// Config 是服务的运行参数；RelayURL 为空时所有发送都明确不可用。
+// Config 是服务的运行参数；RelayURL 为空且调用方也没有显式覆盖时，发送明确不可用。
 type Config struct {
 	RelayURL string
 	Client   *http.Client

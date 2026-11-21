@@ -172,6 +172,47 @@ describe("工作台", () => {
     expect(port.calls.updateInstall).toBe(0);
   });
 
+  it("首屏反馈预览使用真实产品版本作为 build，不显示未知", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    await show(port, { version: "1.9.9" });
+    const feedback = [...container.querySelectorAll("button")].find((button) => button.textContent === "反馈");
+    await act(async () => feedback?.click());
+    const textarea = container.querySelector("textarea")!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+      setter?.call(textarea, "真实构建标识");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const preview = [...container.querySelectorAll("button")].find((button) => button.textContent === "预览");
+    await act(async () => preview?.click());
+    expect(container.textContent).toContain("build 1.9.9");
+    expect(container.textContent).not.toContain("build 未知");
+  });
+
+  it("反馈能力关闭：入口标暂不可用，打开后发送给出不可用并可重试", async () => {
+    const port = createFakePort({ missing: ["feedback"] });
+    port.board.list = async () => listing();
+    await show(port);
+    const feedback = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("反馈"));
+    expect(feedback?.textContent).toContain("暂不可用");
+    await act(async () => feedback?.click());
+    const textarea = container.querySelector("textarea")!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+      setter?.call(textarea, "能力关闭也要能重试");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const preview = [...container.querySelectorAll("button")].find((button) => button.textContent === "预览");
+    await act(async () => preview?.click());
+    const send = [...container.querySelectorAll("button")].find((button) => button.textContent === "确认发送");
+    await act(async () => send?.click());
+    expect(container.textContent).toContain("反馈暂不可用");
+    const retry = [...container.querySelectorAll("button")].find((button) => button.textContent === "重试");
+    await act(async () => retry?.click());
+    expect(port.calls.feedback).toHaveLength(2);
+  });
+
   it("首屏反馈入口：打开表单后可以关闭", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();

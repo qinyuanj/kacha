@@ -42,6 +42,8 @@ type fakeGitea struct {
 	patchedBodies []string
 	assets        []assetUpload
 	failStatus    int
+	failAsset     int
+	failPatch     int
 }
 
 func newFakeGitea(t *testing.T) *fakeGitea {
@@ -72,6 +74,13 @@ func newFakeGitea(t *testing.T) *fakeGitea {
 		_, _ = io.WriteString(w, `{"number":42,"html_url":"http://fake/issues/42"}`)
 	})
 	mux.HandleFunc("PATCH /api/v1/repos/{owner}/{repo}/issues/{index}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		status := f.failPatch
+		f.mu.Unlock()
+		if status != 0 {
+			w.WriteHeader(status)
+			return
+		}
 		raw, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
 		f.patchedBodies = append(f.patchedBodies, string(raw))
@@ -80,6 +89,13 @@ func newFakeGitea(t *testing.T) *fakeGitea {
 		_, _ = io.WriteString(w, "{}")
 	})
 	mux.HandleFunc("POST /api/v1/repos/{owner}/{repo}/issues/{index}/assets", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		status := f.failAsset
+		f.mu.Unlock()
+		if status != 0 {
+			w.WriteHeader(status)
+			return
+		}
 		name := r.URL.Query().Get("name")
 		raw, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
@@ -106,6 +122,18 @@ func (f *fakeGitea) setFailStatus(status int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.failStatus = status
+}
+
+func (f *fakeGitea) setFailAssetStatus(status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failAsset = status
+}
+
+func (f *fakeGitea) setFailPatchStatus(status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failPatch = status
 }
 
 func newSvc(f *fakeGitea, mutate func(*Config)) *Service {
@@ -241,6 +269,40 @@ func TestFeedbackCreatesIssueWithAllFieldsAndAttachments(t *testing.T) {
 		if !strings.Contains(patched[0], link) {
 			t.Fatalf("patched issue body missing %q: %s", link, patched[0])
 		}
+	}
+}
+
+func TestAttachmentUploadFailureReturnsTypedFailure(t *testing.T) {
+	f := newFakeGitea(t)
+	f.setFailAssetStatus(http.StatusBadGateway)
+	body, ct := multipartBody(t, map[string]string{"body": "附件失败"}, map[string][]byte{"shot.png": pngBytes()}, nil)
+	status, outcome := postFeedback(t, newSvc(f, nil).Handler(), body, ct, "asset-fail", "")
+	if status != http.StatusBadGateway || outcome.OK || outcome.Kind != "failed" {
+		t.Fatalf("status=%d outcome=%+v", status, outcome)
+	}
+	if !strings.Contains(outcome.Message, "附件") {
+		t.Fatalf("message lacks attachment context: %q", outcome.Message)
+	}
+	issues, patched, assets := f.snapshot()
+	if len(issues) != 1 || len(patched) != 0 || len(assets) != 0 {
+		t.Fatalf("issues=%d patched=%d assets=%d", len(issues), len(patched), len(assets))
+	}
+}
+
+func TestAttachmentLinkPatchFailureReturnsTypedFailure(t *testing.T) {
+	f := newFakeGitea(t)
+	f.setFailPatchStatus(http.StatusInternalServerError)
+	body, ct := multipartBody(t, map[string]string{"body": "回写失败"}, map[string][]byte{"shot.png": pngBytes()}, nil)
+	status, outcome := postFeedback(t, newSvc(f, nil).Handler(), body, ct, "patch-fail", "")
+	if status != http.StatusBadGateway || outcome.OK || outcome.Kind != "failed" {
+		t.Fatalf("status=%d outcome=%+v", status, outcome)
+	}
+	if !strings.Contains(outcome.Message, "链接") {
+		t.Fatalf("message lacks link context: %q", outcome.Message)
+	}
+	_, patched, assets := f.snapshot()
+	if len(patched) != 0 || len(assets) != 1 {
+		t.Fatalf("patched=%d assets=%d", len(patched), len(assets))
 	}
 }
 
@@ -408,6 +470,42 @@ func TestDedupWithinWindow(t *testing.T) {
 	issues, _, assets := f.snapshot()
 	if len(issues) != 1 || len(assets) != 1 {
 		t.Fatalf("issues=%d assets=%d", len(issues), len(assets))
+	}
+}
+
+func TestDedupWithoutKeyUsesBodyAndImageHash(t *testing.T) {
+	f := newFakeGitea(t)
+	h := newSvc(f, nil).Handler()
+	send := func() (int, Outcome) {
+		body, ct := multipartBody(t, map[string]string{"body": "没有幂等键也要去重"}, map[string][]byte{"a.png": pngBytes()}, nil)
+		return postFeedback(t, h, body, ct, "", "")
+	}
+	if status, first := send(); status != http.StatusOK || first.Kind != "created" {
+		t.Fatalf("first: status=%d outcome=%+v", status, first)
+	}
+	if status, again := send(); status != http.StatusOK || again.Kind != "duplicate" || again.Number != 42 {
+		t.Fatalf("duplicate: status=%d outcome=%+v", status, again)
+	}
+	issues, _, assets := f.snapshot()
+	if len(issues) != 1 || len(assets) != 1 {
+		t.Fatalf("issues=%d assets=%d", len(issues), len(assets))
+	}
+}
+
+func TestDedupContentHashMatchesAcrossKeyPresence(t *testing.T) {
+	f := newFakeGitea(t)
+	h := newSvc(f, nil).Handler()
+	firstBody, firstCT := multipartBody(t, map[string]string{"body": "同一内容"}, nil, nil)
+	if status, first := postFeedback(t, h, firstBody, firstCT, "with-key", ""); status != http.StatusOK || first.Kind != "created" {
+		t.Fatalf("first: status=%d outcome=%+v", status, first)
+	}
+	secondBody, secondCT := multipartBody(t, map[string]string{"body": "同一内容"}, nil, nil)
+	if status, again := postFeedback(t, h, secondBody, secondCT, "", ""); status != http.StatusOK || again.Kind != "duplicate" || again.Number != 42 {
+		t.Fatalf("duplicate: status=%d outcome=%+v", status, again)
+	}
+	issues, _, _ := f.snapshot()
+	if len(issues) != 1 {
+		t.Fatalf("issues=%d", len(issues))
 	}
 }
 

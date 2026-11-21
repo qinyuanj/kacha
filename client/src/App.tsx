@@ -452,6 +452,7 @@ export function App({ version }: AppProps) {
         onImportPack={() => void pack.importPack()}
         importDisabled={view.importDisabled}
         onOpenFeedback={() => setFeedbackOpen(true)}
+        feedbackAvailable={port.features.feedback}
         onToolbarSlot={setToolbarSlot}
       />
       <AppOverlays
@@ -461,7 +462,9 @@ export function App({ version }: AppProps) {
         changelogOpen={state.changelogOpen}
         version={versionOrEmpty(version)}
         onChangelogClose={() => store.setChangelogOpen(false)}
-        build=""
+        // 构建标识来自唯一产品版本源（mygo.config.ts → Shell.Info.Version / build-info.json 的 version）；
+        // 不再传空字符串，否则预览永远显示「未知」。源码运行退回 dev 也是真实构建身份。
+        build={versionOrEmpty(version)}
         feedbackOpen={feedbackOpen}
         onFeedbackClose={() => setFeedbackOpen(false)}
         feedbackBoardName={activeKey ? view.titleOf(activeKey) : ""}
