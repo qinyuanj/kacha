@@ -4,7 +4,7 @@
 // 源码与单测在没有它时也要能编译。调用名与 Go 侧绑定名一致（Shell.Info / Local.WriteBoard）。
 import { call } from "mygo-runtime";
 
-import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopDataRootBridge, DesktopDataRootOutcome, DesktopDataRootStatus, DesktopDiagnosticsBridge, DesktopDiagnosticsOutcome, DesktopExportOutcome, DesktopFeedbackBridge, DesktopExportSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy, DesktopUpdateBridge, DesktopUsageBridge } from "./desktop";
+import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopDataRootBridge, DesktopDataRootOutcome, DesktopDataRootStatus, DesktopDiagnosticsBridge, DesktopDiagnosticsBundle, DesktopDiagnosticsOutcome, DesktopExportOutcome, DesktopFeedbackBridge, DesktopExportSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy, DesktopUpdateBridge, DesktopUsageBridge } from "./desktop";
 import type { PackEntryFact } from "../core/boardPack";
 import type { FeedbackOutcome } from "./port";
 
@@ -66,6 +66,8 @@ export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promi
       void Promise.resolve(callFn("Diagnostics.Log", kind, fields)).catch(() => undefined);
     },
     export: () => callFn("Diagnostics.Export") as Promise<DesktopDiagnosticsOutcome>,
+    // 反馈附件（#207）：复用允许清单生成内存包，不弹「另存为」对话框。
+    pack: () => callFn("Diagnostics.Bundle") as Promise<DesktopDiagnosticsBundle>,
   };
   // 反馈（#205）：与 Go 侧 BindAs("Feedback", feedbackservice.New(...)) 对齐。
   const feedback: DesktopFeedbackBridge = {

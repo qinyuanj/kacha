@@ -54,6 +54,7 @@ export function emptyFakeCalls(): FakeCalls {
     saveCopyAs: [],
     log: [],
     exportDiagnostics: 0,
+    diagnosticsPack: 0,
     feedback: [],
     uploadReference: [],
     inspectImage: [],

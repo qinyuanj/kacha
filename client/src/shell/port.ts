@@ -259,6 +259,19 @@ export interface PackStore {
  * 反馈提交（#205）：输入是用户填写的文字与环境元数据，relayUrl 由接线层从设置解析后填入。
  * 桌面与内存替身用同一份形状，UI 只按 kind 分支。
  */
+export interface FeedbackAttachment {
+  /** 附件的显示名；截图用原文件名，诊断包用固定名。 */
+  name: string;
+  /** MIME 类型；Go 侧 []byte JSON 以 base64 传输。 */
+  content_type: string;
+  data: string;
+}
+
+/** 反馈可附带的脱敏诊断包生成结局；失败带可显示原因。 */
+export type DiagnosticsPackOutcome =
+  | { kind: "saved"; name: string; contentType: string; data: string }
+  | { kind: "failed"; message: string };
+
 export interface FeedbackSpec {
   title: string;
   category: string;
@@ -270,6 +283,10 @@ export interface FeedbackSpec {
   contact?: string;
   /** 高级设置的覆盖地址；空值走 Go 侧默认配置。 */
   relay_url?: string;
+  /** 0–5 张 PNG/JPG 截图；base64 字节经 Feedback.Send 原样交到 Go 服务。 */
+  screenshots?: FeedbackAttachment[];
+  /** 可选脱敏诊断包；由 Diagnostics.Bundle 生成，不写本机文件也随反馈一起上传。 */
+  diagnostics_pack?: FeedbackAttachment;
 }
 
 /** 反馈的稳定结局类别；与 Go feedbackservice 的 kind 逐字一致。 */
@@ -315,6 +332,8 @@ export interface UiStore {
   log(kind: LogKind, fields: Record<string, unknown>): void;
   /** 导出脱敏诊断包，目标由本机「另存为」对话框选。 */
   exportDiagnostics(): Promise<DiagnosticsOutcome>;
+  /** 为反馈生成内存中的脱敏诊断包；复用同一套允许清单和脱敏逻辑。 */
+  diagnosticsPack(): Promise<DiagnosticsPackOutcome>;
   /** 焦点 / 点击是否落在可编辑控件里（方向键与编辑类快捷键留给控件）。 */
   isEditableTarget(target: EventTarget | null): boolean;
   /** 装上页面级输入接管（#97），返回卸载函数。 */

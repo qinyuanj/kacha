@@ -58,6 +58,8 @@ export interface FakePortOptions {
   moveFiles?: number;
   /** 反馈发送的脚本化结局（缺省成功）。 */
   feedbackOutcome?: FeedbackOutcome;
+  /** 反馈诊断包的脚本化结局（缺省成功的小包）。 */
+  diagnosticsPackOutcome?: import("../port").DiagnosticsPackOutcome;
 }
 
 /** 替身记下的调用：断言界面把结局传出去时用。 */
@@ -91,6 +93,8 @@ export interface FakeCalls {
   exportDiagnostics: number;
   /** 反馈提交收到的 spec（按顺序）。 */
   feedback: FeedbackSpec[];
+  /** 反馈诊断包被请求的次数。 */
+  diagnosticsPack: number;
   /** 迁移请求过的目标目录（按顺序）。 */
   moveTargets?: string[];
   /** 替身认为的当前数据根；迁移成功后换成新位置。 */
