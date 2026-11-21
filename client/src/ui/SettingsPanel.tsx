@@ -5,7 +5,7 @@ import { useShell } from "./shell";
 import { DataRootSection } from "./DataRootSection";
 import type { DataRootActions } from "./dataRootMove";
 import { DiagnosticsSection } from "./DiagnosticsSection";
-import { DEFAULT_SETTINGS, MAX_CONCURRENCY, MIN_CONCURRENCY, normalizeBaseUrl } from "../core/settings";
+import { DEFAULT_FEEDBACK_RELAY_URL, DEFAULT_SETTINGS, MAX_CONCURRENCY, MIN_CONCURRENCY, normalizeBaseUrl } from "../core/settings";
 import { UsageSection } from "./UsageSection";
 import type { ConnectionResult, useSettings } from "./useSettings";
 import { concurrencyOnBlur, connectionText, discoveryText, settingsPanelView, settingsToSave } from "./settingsPanelView";
@@ -27,6 +27,20 @@ function GatewayRow({ baseUrl, urlError, plainHttp, onChange }: { baseUrl: strin
       </label>
       {urlError && <div className="form-error">{urlError}</div>}
       {plainHttp && <div className="notice notice-warn">明文 HTTP：密钥与图片不加密传输，仅限可信内网使用。</div>}
+    </>
+  );
+}
+
+/** 反馈中继覆盖那一行：留空即使用内置默认地址。 */
+function RelayRow({ value, error, onChange }: { value: string; error: string | null; onChange(value: string): void }) {
+  return (
+    <>
+      <label className="form-row">
+        <span>反馈中继地址</span>
+        <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={DEFAULT_FEEDBACK_RELAY_URL} spellCheck={false} />
+        <span className="muted small">留空使用 {DEFAULT_FEEDBACK_RELAY_URL}；覆盖值优先</span>
+      </label>
+      {error && <div className="form-error">{error}</div>}
     </>
   );
 }
@@ -86,6 +100,7 @@ function ConcurrencyRow({
 export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
   const port = useShell();
   const [baseUrl, setBaseUrl] = useState(settings.settings.base_url);
+  const [feedbackRelayUrl, setFeedbackRelayUrl] = useState(settings.settings.feedback_relay_url ?? DEFAULT_FEEDBACK_RELAY_URL);
   // 草稿是原始文本，输入中可为空或越界；失焦与保存时才经 parseConcurrency 钳制。
   const [concurrencyDraft, setConcurrencyDraft] = useState(String(settings.settings.concurrency));
   // 密钥草稿：只有点保存 / 清除才写进系统保护存储；测试连接用草稿，不用上一次读到的旧值。
@@ -101,6 +116,7 @@ export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
 
   const view = settingsPanelView({
     baseUrl,
+    feedbackRelayUrl,
     concurrencyDraft,
     savedConcurrency: settings.settings.concurrency,
     file: settings.file,
@@ -118,10 +134,10 @@ export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
   };
 
   const submit = async () => {
-    if (view.urlError) return;
+    if (view.urlError || view.feedbackRelayUrlError) return;
     setSaving(true);
     setError(null);
-    const problem = await settings.save(settingsToSave(settings.settings, baseUrl, concurrencyDraft), apiKeyDraft);
+    const problem = await settings.save(settingsToSave(settings.settings, baseUrl, concurrencyDraft, feedbackRelayUrl), apiKeyDraft);
     setSaving(false);
     if (problem) return setError(problem);
     onClose();
@@ -148,6 +164,7 @@ export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
         {settings.fileProblem && <div className="notice notice-warn">{settings.fileProblem}</div>}
 
         <GatewayRow baseUrl={baseUrl} urlError={view.urlError} plainHttp={view.plainHttp} onChange={setBaseUrl} />
+        <RelayRow value={feedbackRelayUrl} error={view.feedbackRelayUrlError} onChange={setFeedbackRelayUrl} />
 
         <label className="form-row">
           <span>API 密钥</span>

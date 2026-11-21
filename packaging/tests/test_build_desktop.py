@@ -209,13 +209,14 @@ class BuildDesktopTest(unittest.TestCase):
             env = make_repo(root)
             result = run_build(root, env)
             self.assertEqual(result.returncode, 0, result.stderr)
-            relay = root / "build" / "windows-amd64" / "feedbackrelay.exe"
-            self.assertTrue(relay.exists(), f"没有产出 {relay}")
+            relay = root / "build" / "windows-amd64" / "kacha-feedbackrelay-0.1.0-windows-amd64.exe"
+            self.assertTrue(relay.exists(), f"没有产出版本化发布资产 {relay}")
             calls = (root / "calls.log").read_text(encoding="utf-8")
-            self.assertIn("build -o build/windows-amd64/feedbackrelay.exe ./desktop/cmd/feedbackrelay", calls)
+            self.assertIn("build -o build/windows-amd64/kacha-feedbackrelay-0.1.0-windows-amd64.exe ./desktop/cmd/feedbackrelay", calls)
             self.assertIn("env GOOS=windows GOARCH=amd64 CGO_ENABLED=0", calls)
             info = json.loads((root / "build" / "windows-amd64" / "build-info.json").read_text(encoding="utf-8"))
-            self.assertEqual(info["relay"], "build/windows-amd64/feedbackrelay.exe")
+            self.assertEqual(info["relay"], "build/windows-amd64/kacha-feedbackrelay-0.1.0-windows-amd64.exe")
+            self.assertEqual(info["relay_asset"], "build/windows-amd64/kacha-feedbackrelay-0.1.0-windows-amd64.exe")
             self.assertIn("中继", result.stdout)
 
     def test_debug_build_produces_relay_binary(self):

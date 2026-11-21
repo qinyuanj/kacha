@@ -24,6 +24,7 @@ TAG = "v" + VERSION
 BASE_URL = "http://gitea.test"
 REPO = "qinyuanj/kacha-cd"
 INSTALLER = f"kacha-setup-{VERSION}-amd64.exe"
+RELAY = f"kacha-feedbackrelay-{VERSION}-windows-amd64.exe"
 PACKAGE_URL = f"{BASE_URL}/{REPO}/releases/download/{TAG}/{INSTALLER}"
 # 64 字节的签名（Ed25519 的长度）；真正的验签在 Go 侧，这里的值只要形状对。
 SIGNATURE = base64.b64encode(bytes(range(64))).decode()
@@ -44,14 +45,17 @@ def descriptor(**overrides: object) -> dict[str, object]:
     return data
 
 
-def assets(desc: dict[str, object] | None = None, *, omit_signature: bool = False) -> dict[str, bytes]:
+def assets(desc: dict[str, object] | None = None, *, omit_signature: bool = False, omit_relay: bool = False) -> dict[str, bytes]:
     files = {
         INSTALLER: b"installer",
         INSTALLER + ".sig": (str((desc or descriptor())["signature"]) + "\n").encode(),
+        RELAY: b"relay",
         "update-windows-amd64.json": (json.dumps(desc or descriptor(), ensure_ascii=False, indent=2) + "\n").encode(),
     }
     if omit_signature:
         del files[INSTALLER + ".sig"]
+    if omit_relay:
+        del files[RELAY]
     return files
 
 
@@ -170,7 +174,27 @@ class ReleaseAssetGateTest(RepoFixture):
     def test_accepts_the_real_descriptor_with_the_signature_asset(self):
         self.write_assets()
         paths = self.collect()
-        self.assertEqual([p.name for p in paths], [INSTALLER, INSTALLER + ".sig", "update-windows-amd64.json", "SHA256SUMS"])
+        self.assertEqual([p.name for p in paths], [INSTALLER, INSTALLER + ".sig", RELAY, "update-windows-amd64.json", "SHA256SUMS"])
+
+    def test_relay_asset_name_uses_the_product_version(self):
+        self.assertEqual(publish_release.relay_asset_name(VERSION), RELAY)
+        self.assertEqual(publish_release.relay_asset_name("9.9.9"), "kacha-feedbackrelay-9.9.9-windows-amd64.exe")
+
+    def test_collects_the_versioned_relay_binary(self):
+        self.write_assets()
+        paths = self.collect()
+        self.assertIn(RELAY, [p.name for p in paths])
+
+    def test_requires_the_versioned_relay_binary(self):
+        message = self.assert_rejected(assets(omit_relay=True), words=RELAY)
+        self.assertIn(RELAY, message)
+
+    def test_rejects_a_relay_binary_that_does_not_match_checksums(self):
+        self.write_assets()
+        (self.release_dir / RELAY).write_bytes(b"tampered relay")
+        with self.assertRaises(SystemExit) as caught:
+            self.collect()
+        self.assertIn("SHA256SUMS", str(caught.exception))
 
     def test_rejects_another_platform(self):
         self.assert_rejected(assets(descriptor(platform="linux-amd64")), words="平台")

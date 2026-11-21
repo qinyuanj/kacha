@@ -72,4 +72,16 @@ describe("高级设置面板", () => {
     expect(saved.base_url).toBe("http://gw:3001");
     expect(saved.concurrency).toBe(10);
   });
+
+  it("反馈中继覆盖非法时保存置灰", () => {
+    expect(settingsPanelView({ ...base, feedbackRelayUrl: "http://relay.test:3005" }).canSave).toBe(true);
+    const invalid = settingsPanelView({ ...base, feedbackRelayUrl: "不是地址" });
+    expect(invalid.feedbackRelayUrlError).toBeTruthy();
+    expect(invalid.canSave).toBe(false);
+  });
+
+  it("保存时反馈中继覆盖随设置写入", () => {
+    const saved = settingsToSave(DEFAULT_SETTINGS, "  http://gw:3001//  ", "99", " http://relay.test:3105/ ");
+    expect(saved.feedback_relay_url).toBe("http://relay.test:3105");
+  });
 });
