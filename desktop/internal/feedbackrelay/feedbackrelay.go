@@ -23,10 +23,11 @@ import (
 )
 
 // validCategories 是可接受的分类；与 Gitea 的 label 一一对应（type/<category>）。
+// 这些 code 与中文标签必须和 client/src/core/feedback.ts 同步（test_feedback_contract_sync.py）。
 var validCategories = map[string]bool{"bug": true, "feature": true, "suggestion": true, "other": true}
 
-// categoryLabel 是给 issue 标题用的中文分类名。
-var categoryLabel = map[string]string{"bug": "缺陷", "feature": "需求", "suggestion": "建议", "other": "反馈"}
+// categoryLabel 是给 issue 标题用的中文分类名；与界面下拉的中文标签一致。
+var categoryLabel = map[string]string{"bug": "缺陷", "feature": "需求", "suggestion": "建议", "other": "其他"}
 
 // Config 是中继的运行参数，来自环境变量；零值由 New 补默认。
 type Config struct {
@@ -68,11 +69,12 @@ type Service struct {
 	client *http.Client
 	now    func() time.Time
 
-	mu      sync.Mutex
-	dedup   map[string]dedupEntry
-	labels  map[string]int64
-	labelAt time.Time
-	rates   map[string]*rateBucket
+	mu            sync.Mutex
+	dedup         map[string]dedupEntry
+	byFingerprint map[string]dedupEntry
+	labels        map[string]int64
+	labelAt       time.Time
+	rates         map[string]*rateBucket
 }
 
 // New 造一个中继服务并补齐默认值。
@@ -93,11 +95,12 @@ func New(cfg Config) *Service {
 		cfg.DedupWindow = 2 * time.Minute
 	}
 	return &Service{
-		cfg:    cfg,
-		client: &http.Client{Timeout: 30 * time.Second},
-		now:    time.Now,
-		dedup:  map[string]dedupEntry{},
-		rates:  map[string]*rateBucket{},
+		cfg:           cfg,
+		client:        &http.Client{Timeout: 30 * time.Second},
+		now:           time.Now,
+		dedup:         map[string]dedupEntry{},
+		byFingerprint: map[string]dedupEntry{},
+		rates:         map[string]*rateBucket{},
 	}
 }
 
@@ -172,6 +175,11 @@ func (s *Service) handleFeedback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// 没有幂等键不能成为绕过去重的入口：正文与图片的 2 分钟内容哈希同样算重复。
+	if e, ok := s.lookupFingerprint(fingerprint); ok {
+		writeOutcome(w, http.StatusOK, Outcome{OK: true, Kind: "duplicate", Message: fmt.Sprintf("刚刚已提交过 #%d", e.number), Number: e.number, URL: e.url})
+		return
+	}
 
 	title := strings.TrimSpace(r.FormValue("title"))
 	if title == "" {
@@ -195,7 +203,9 @@ func (s *Service) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	for _, u := range append(shots, packs...) {
 		assetURL, uerr := s.uploadAsset(created.Number, u.name, u.data, u.contentType)
 		if uerr != nil {
-			continue
+			// 附件没传上去就不算成功：明确告诉客户端，别让它把半条反馈当已提交。
+			writeOutcome(w, http.StatusBadGateway, Outcome{Kind: "failed", Message: "上传附件失败：服务器无法写入 Gitea"})
+			return
 		}
 		if strings.HasPrefix(u.contentType, "image/") {
 			links = append(links, fmt.Sprintf("![%s](%s)", u.name, assetURL))
@@ -204,12 +214,14 @@ func (s *Service) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(links) > 0 {
-		_ = s.patchIssue(created.Number, issueBody+"\n\n---\n\n"+strings.Join(links, "\n\n"))
+		if perr := s.patchIssue(created.Number, issueBody+"\n\n---\n\n"+strings.Join(links, "\n\n")); perr != nil {
+			// 附件链接没写回 issue 也算失败：用户拿到成功回执却看不到附件同样是坏结局。
+			writeOutcome(w, http.StatusBadGateway, Outcome{Kind: "failed", Message: "附件链接回写失败：服务器无法更新 Gitea issue"})
+			return
+		}
 	}
 
-	if key != "" {
-		s.remember(key, dedupEntry{number: created.Number, url: created.HTMLURL, at: s.now(), fingerprint: fingerprint})
-	}
+	s.remember(key, dedupEntry{number: created.Number, url: created.HTMLURL, at: s.now(), fingerprint: fingerprint})
 	writeOutcome(w, http.StatusOK, Outcome{OK: true, Kind: "created", Message: fmt.Sprintf("已提交 #%d", created.Number), Number: created.Number, URL: created.HTMLURL})
 }
 
@@ -465,9 +477,26 @@ func (s *Service) lookupDup(key string) (dedupEntry, bool) {
 	return e, true
 }
 
+func (s *Service) lookupFingerprint(fingerprint string) (dedupEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.byFingerprint[fingerprint]
+	if !ok {
+		return dedupEntry{}, false
+	}
+	if s.now().Sub(e.at) > s.cfg.DedupWindow {
+		delete(s.byFingerprint, fingerprint)
+		return dedupEntry{}, false
+	}
+	return e, true
+}
+
 func (s *Service) remember(key string, e dedupEntry) {
 	s.mu.Lock()
-	s.dedup[key] = e
+	if key != "" {
+		s.dedup[key] = e
+	}
+	s.byFingerprint[e.fingerprint] = e
 	s.mu.Unlock()
 }
 

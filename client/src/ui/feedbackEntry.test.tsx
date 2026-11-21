@@ -47,4 +47,28 @@ describe("首屏反馈入口（#206）", () => {
     await act(async () => button!.click());
     expect(onOpenFeedback).toHaveBeenCalledTimes(1);
   });
+
+  it("反馈能力关闭时入口标暂不可用，仍可点击重试打开", async () => {
+    const onOpenFeedback = vi.fn();
+    await act(async () => root.render(createElement(ShellProvider, { port: createFakePort({ missing: ["feedback"] }), children: createElement(AppToolbar, {
+      setToolbarSlot: vi.fn(),
+      canvasReady: false,
+      runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
+      packMenuOpen: false,
+      packMenuDisabled: true,
+      onTogglePackMenu: vi.fn(),
+      version: "1.8.0",
+      ready: true,
+      onOpenChangelog: vi.fn(),
+      settingsLoaded: true,
+      onOpenSettings: vi.fn(),
+      update: { snapshot: { status: "idle" }, state: { preparing: false, prepareError: "", installError: "" }, check: vi.fn(), install: vi.fn() } as unknown as UpdateControl,
+      onOpenFeedback,
+      feedbackAvailable: false,
+    }) })));
+    const button = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("反馈"));
+    expect(button?.textContent).toContain("暂不可用");
+    await act(async () => button!.click());
+    expect(onOpenFeedback).toHaveBeenCalledTimes(1);
+  });
 });

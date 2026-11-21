@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DiagnosticsPackOutcome, FeedbackAttachment, FeedbackKind, FeedbackOutcome, FeedbackSpec } from '../shell/port';
+import { FEEDBACK_CATEGORIES, FEEDBACK_FAILURE_MESSAGES as FEEDBACK_MESSAGES, FEEDBACK_MAX_SCREENSHOT_BYTES as MAX_SCREENSHOT_BYTES, FEEDBACK_MAX_SCREENSHOTS as MAX_SCREENSHOTS, feedbackCategoryLabel } from '../core/feedback';
 import { useShell } from './shell';
 
-const CATEGORIES = ['缺陷', '需求', '建议', '其他'] as const;
-const MAX_SCREENSHOTS = 5;
-const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024;
 const IMAGE_TYPES = ['image/png', 'image/jpeg'];
 
 /** #206 的脱敏只处理预览可见文本：本机路径换成占位，凭据整段移除。 */
@@ -19,15 +17,6 @@ export function feedbackBoardName(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.at(-1)?.replace(/\.kacha$/i, '') ?? '';
 }
-/** #208：结局按稳定 kind 映射，后端同一句 message 也不会退化成笼统失败。 */
-const FEEDBACK_MESSAGES: Record<Exclude<FeedbackKind, 'ok'>, string> = {
-  unreachable: '网络不可达：无法连接反馈中继，请检查网络或稍后再试。',
-  rejected: '服务器拒绝：反馈未被接受，请修改内容后再试。',
-  invalid: '内容无效：请检查标题、分类和正文后重试。',
-  too_large: '内容过大：请减少或压缩截图与诊断包后重试。',
-  duplicate: '刚刚已提交过，请勿重复提交。',
-  unavailable: '反馈暂不可用：未配置中继地址或中继已关闭。',
-};
 
 function feedbackMessage(outcome: FeedbackOutcome): string {
   if (outcome.kind === 'duplicate' && outcome.number) return `刚刚已提交过 #${outcome.number}，请勿重复提交。`;
@@ -38,7 +27,7 @@ function feedbackMessage(outcome: FeedbackOutcome): string {
 function feedbackClipboardText(spec: FeedbackSpec): string {
   return [
     `标题：${spec.title || '（无）'}`,
-    `分类：${spec.category}`,
+    `分类：${feedbackCategoryLabel(spec.category)}`,
     `正文：${spec.body}`,
     `版本：${spec.version}（build ${spec.build || '未知'}）`,
     `系统：${spec.os}`,
@@ -203,6 +192,7 @@ interface FeedbackFormProps {
   contact: string; setContact: Setter<string>;
   screenshots: FeedbackAttachment[]; setScreenshots: Setter<FeedbackAttachment[]>;
   diagnosticsPack: FeedbackAttachment | null; attachmentError: string;
+  diagnosticsAvailable: boolean;
   onPick(): void; onToggleDiagnostics(pressed: boolean): void;
   onClose(): void; onPreview(): void;
 }
@@ -211,7 +201,7 @@ function FeedbackForm(props: FeedbackFormProps) {
   return (
     <>
       <label className='form-row'>标题（可选）<input value={props.title} onChange={(event) => props.setTitle(event.target.value)} /></label>
-      <label className='form-row'>分类<select value={props.category} onChange={(event) => props.setCategory(event.target.value)}>{CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+      <label className='form-row'>分类<select value={props.category} onChange={(event) => props.setCategory(event.target.value)}>{FEEDBACK_CATEGORIES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>
       <label className='form-row'>正文<textarea value={props.body} onChange={(event) => props.setBody(event.target.value)} rows={8} /></label>
       <label className='form-row'>称呼或联系方式（可选，默认匿名）<input value={props.contact} placeholder='匿名' onChange={(event) => props.setContact(event.target.value)} /></label>
       <div className='form-row'>
@@ -229,10 +219,16 @@ function FeedbackForm(props: FeedbackFormProps) {
         </ul>
       )}
       <div className='form-row'>
-        <button type='button' aria-pressed={props.diagnosticsPack !== null} onClick={() => props.onToggleDiagnostics(props.diagnosticsPack === null)}>
-          {props.diagnosticsPack ? '取消附带脱敏诊断包' : '附带脱敏诊断包'}
-        </button>
-        <span className='muted small'>仅版本、平台、运行状态与脱敏日志；不含密钥、凭据、主机名或画板内容。</span>
+        {props.diagnosticsAvailable ? (
+          <>
+            <button type='button' aria-pressed={props.diagnosticsPack !== null} onClick={() => props.onToggleDiagnostics(props.diagnosticsPack === null)}>
+              {props.diagnosticsPack ? '取消附带脱敏诊断包' : '附带脱敏诊断包'}
+            </button>
+            <span className='muted small'>仅版本、平台、运行状态与脱敏日志；不含密钥、凭据、主机名或画板内容。</span>
+          </>
+        ) : (
+          <span className='muted small'>诊断包导出暂不可用，反馈正文仍可发送。</span>
+        )}
       </div>
       {props.attachmentError && <div className='form-error' role='alert'>{props.attachmentError}</div>}
       <div className='modal-foot'>
@@ -254,10 +250,10 @@ function FeedbackPreview(props: FeedbackPreviewProps) {
     <>
       <div className='feedback-preview'>
         <label className='form-row'>标题（可选）<input value={props.title} onChange={(event) => props.setTitle(event.target.value)} /></label>
-        <label className='form-row'>分类<select value={props.category} onChange={(event) => props.setCategory(event.target.value)}>{CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className='form-row'>分类<select value={props.category} onChange={(event) => props.setCategory(event.target.value)}>{FEEDBACK_CATEGORIES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>
         <label className='form-row'>正文（可修改）<textarea value={redactFeedbackText(props.body)} onChange={(event) => props.setBody(event.target.value)} rows={6} /></label>
         <p>标题：{props.spec.title || '（无）'}</p>
-        <p>分类：{props.spec.category}</p>
+        <p>分类：{feedbackCategoryLabel(props.spec.category)}</p>
         <p>正文：{props.spec.body}</p>
         <p className='feedback-preview-meta'>自动元数据：版本 {props.spec.version}（build {props.spec.build || '未知'}）、系统 {props.spec.os}、当前画板 {props.spec.board_name || '（未打开画板）'}；只含画板名字，不含路径或密钥。</p>
         <p>提交者：{props.spec.contact ?? '匿名'}</p>
@@ -319,7 +315,7 @@ function FeedbackReceipt(props: FeedbackReceiptProps) {
 export function FeedbackDialog({ version, build, boardName, relayUrl, onClose }: FeedbackDialogProps) {
   const port = useShell();
   const [title, setTitle] = useState('');
-  const [category, setCategory] = useState<string>(CATEGORIES[0]);
+  const [category, setCategory] = useState<string>(FEEDBACK_CATEGORIES[0].code);
   const [body, setBody] = useState('');
   const [contact, setContact] = useState('');
   const [screenshots, setScreenshots] = useState<FeedbackAttachment[]>([]);
@@ -356,7 +352,7 @@ export function FeedbackDialog({ version, build, boardName, relayUrl, onClose }:
           <h2 id='feedback-title'>反馈</h2>
           <button ref={closeRef} className='icon-button' aria-label='关闭反馈' onClick={onClose}>✕</button>
         </div>
-        {step === 'form' && <FeedbackForm title={title} setTitle={setTitle} category={category} setCategory={setCategory} body={body} setBody={setBody} contact={contact} setContact={setContact} screenshots={screenshots} setScreenshots={setScreenshots} diagnosticsPack={diagnosticsPack} attachmentError={attachmentError} onPick={() => void pick()} onToggleDiagnostics={(pressed) => void toggle(pressed)} onClose={onClose} onPreview={() => setStep('preview')} />}
+        {step === 'form' && <FeedbackForm title={title} setTitle={setTitle} category={category} setCategory={setCategory} body={body} setBody={setBody} contact={contact} setContact={setContact} screenshots={screenshots} setScreenshots={setScreenshots} diagnosticsPack={diagnosticsPack} attachmentError={attachmentError} diagnosticsAvailable={!!port.features.diagnostics} onPick={() => void pick()} onToggleDiagnostics={(pressed) => void toggle(pressed)} onClose={onClose} onPreview={() => setStep('preview')} />}
         {step === 'preview' && <FeedbackPreview title={title} setTitle={setTitle} category={category} setCategory={setCategory} body={body} setBody={setBody} spec={spec} attachmentSummary={attachmentSummary} sending={sending} onBack={() => setStep('form')} onClose={onClose} onSend={() => void send(spec)} />}
         {step === 'receipt' && outcome && <FeedbackReceipt outcome={outcome} copied={copied} sending={sending} onClose={onClose} onEditAgain={editAgain} onCopy={() => void copyContent()} onRetry={() => void send(submittedSpec ?? spec)} />}
       </div>

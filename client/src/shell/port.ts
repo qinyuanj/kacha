@@ -3,6 +3,7 @@
 // 或在调用时返回 kind: "unavailable"，界面据此隐藏入口而不是失败得很晚。
 import { errorText } from "../core/errors";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
+import { FEEDBACK_FAILURE_MESSAGES } from "../core/feedback";
 import type { ImportOptions, ImportResult, PackEntryFact, PackExportSpec, PackFs, PackIo } from "../core/boardPack";
 import type { DirEntry, RelocateFs } from "../core/relocate";
 import type { RunDeps } from "../core/run";
@@ -305,7 +306,7 @@ export interface FeedbackOutcome {
 export const FEEDBACK_UNAVAILABLE: FeedbackOutcome = {
   ok: false,
   kind: "unavailable",
-  message: "反馈暂不可用：未配置中继地址",
+  message: FEEDBACK_FAILURE_MESSAGES.unavailable,
   number: undefined,
   url: undefined,
 };

@@ -60,14 +60,18 @@ async function field(labelText: string): Promise<HTMLInputElement | HTMLTextArea
   return control;
 }
 
-async function setSelect(labelText: string, value: string): Promise<void> {
+/** 按用户看得到的中文选项选择，返回真正交给端口的稳定 code。 */
+async function setSelectByVisibleLabel(labelText: string, optionText: string): Promise<string> {
   const select = await field(labelText);
   if (!(select instanceof HTMLSelectElement)) throw new Error(`没有找到下拉框：${labelText}`);
+  const option = [...select.options].find((item) => item.textContent?.trim() === optionText);
+  if (!option) throw new Error(`没有找到选项：${optionText}`);
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
-    setter?.call(select, value);
+    setter?.call(select, option.value);
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
+  return option.value;
 }
 
 describe("反馈对话框（#206）", () => {
@@ -100,9 +104,31 @@ describe("反馈对话框（#206）", () => {
     await click("预览");
     await click("确认发送");
     expect(port.calls.feedback).toHaveLength(1);
-    expect(port.calls.feedback[0]).toEqual(expect.objectContaining({ title: "生成失败", category: "缺陷", body: "无法生成", version: "1.8.0", build: "42", board_name: "项目 A" }));
+    expect(port.calls.feedback[0]).toEqual(expect.objectContaining({ title: "生成失败", category: "bug", body: "无法生成", version: "1.8.0", build: "42", board_name: "项目 A" }));
     const link = byText<HTMLAnchorElement>("a", "#17");
     expect(link.href).toBe("https://gitea.test/kacha-feedback/issues/17");
+  });
+
+  it("分类下拉显示中文标签，发送时用稳定英文 code", async () => {
+    const port = createFakePort();
+    await show(port);
+    const select = await field("分类") as HTMLSelectElement;
+    expect([...select.options].map((option) => option.textContent)).toEqual(["缺陷", "需求", "建议", "其他"]);
+    expect(await setSelectByVisibleLabel("分类", "需求")).toBe("feature");
+    await setInput("正文", "分类契约");
+    await click("预览");
+    expect(container.textContent).toContain("分类：需求");
+    await click("确认发送");
+    expect(port.calls.feedback[0]).toEqual(expect.objectContaining({ category: "feature" }));
+  });
+
+  it("没有显式高级覆盖时不向 Feedback 端口发送 relay_url", async () => {
+    const port = createFakePort();
+    await show(port);
+    await setInput("正文", "使用 Go 默认中继");
+    await click("预览");
+    await click("确认发送");
+    expect(port.calls.feedback[0]).not.toHaveProperty("relay_url");
   });
 
   it("高级设置解析出的反馈中继地址随每次发送进入 Feedback 端口", async () => {
@@ -182,6 +208,13 @@ describe("反馈对话框（#206）", () => {
     expect(container.textContent).toContain("采集失败");
     expect(failed.calls.feedback).toHaveLength(0);
   });
+  it("诊断能力关闭时不显示附带诊断包入口", async () => {
+    const port = createFakePort({ missing: ["diagnostics"] });
+    await show(port);
+    expect(findButton("附带脱敏诊断包")).toBeUndefined();
+    expect(findButton("取消附带脱敏诊断包")).toBeUndefined();
+  });
+
   it("端口未配置时显示暂不可用并可重新发送", async () => {
     const port = createFakePort({ missing: ["feedback"] });
     await show(port);
@@ -203,10 +236,10 @@ describe("反馈预览、结局与重试（#208）", () => {
     url: "https://gitea.test/kacha-feedback/issues/17",
   };
   const FAILURE_CASES = [
-    { kind: "unreachable" as const, expected: "网络不可达" },
-    { kind: "rejected" as const, expected: "服务器拒绝" },
-    { kind: "invalid" as const, expected: "内容无效" },
-    { kind: "too_large" as const, expected: "内容过大" },
+    { kind: "unreachable" as const, expected: "反馈中继不可达" },
+    { kind: "rejected" as const, expected: "反馈被中继拒绝" },
+    { kind: "invalid" as const, expected: "反馈内容不合法" },
+    { kind: "too_large" as const, expected: "反馈内容过大" },
     { kind: "duplicate" as const, expected: "刚刚已提交过 #17" },
   ];
 
@@ -217,10 +250,10 @@ describe("反馈预览、结局与重试（#208）", () => {
     await setInput("正文", "旧正文");
     await click("预览");
     await setInput("标题", "新标题");
-    await setSelect("分类", "建议");
+    expect(await setSelectByVisibleLabel("分类", "建议")).toBe("suggestion");
     await setInput("正文", "新正文");
     await click("确认发送");
-    expect(port.calls.feedback[0]).toEqual(expect.objectContaining({ title: "新标题", category: "建议", body: "新正文" }));
+    expect(port.calls.feedback[0]).toEqual(expect.objectContaining({ title: "新标题", category: "suggestion", body: "新正文" }));
   });
 
   it.each(FAILURE_CASES)("$kind 映射为独立文案，不显示笼统失败", async ({ kind, expected }) => {
@@ -259,7 +292,7 @@ describe("反馈预览、结局与重试（#208）", () => {
     await show(port);
     await setInput("标题", "原样标题");
     await setInput("正文", "原样正文");
-    await setSelect("分类", "建议");
+    await setSelectByVisibleLabel("分类", "建议");
     await click("选择截图");
     await click("附带脱敏诊断包");
     await click("预览");
@@ -267,11 +300,11 @@ describe("反馈预览、结局与重试（#208）", () => {
     expect(container.textContent).toContain("画面.png");
     expect(container.textContent).toContain("diagnostics.zip");
     await click("确认发送");
-    expect(container.textContent).toContain("网络不可达");
+    expect(container.textContent).toContain("反馈中继不可达");
 
     await click("返回修改");
     expect((await field("标题") as HTMLInputElement).value).toBe("原样标题");
-    expect((await field("分类") as HTMLSelectElement).value).toBe("建议");
+    expect((await field("分类") as HTMLSelectElement).value).toBe("suggestion");
     expect((await field("正文") as HTMLTextAreaElement).value).toBe("原样正文");
     expect(container.textContent).toContain("画面.png");
     expect(findButton("取消附带脱敏诊断包")).not.toBeUndefined();
