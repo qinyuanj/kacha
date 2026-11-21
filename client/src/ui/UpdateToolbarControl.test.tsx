@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 自动更新那一段（#164、#180）：只验页面这一侧——按快照显示、只有已验签才能点安装、
+// 首页版本号旁的更新入口（#164、#180、#181）：只验页面这一侧——按快照显示、只有已验签才能点安装、
 // 准备被拒时不起安装、安装失败后恢复创作、保存没成功时也不装。
 // 选版与验签在 Go 侧，替身不重复判定；快照与动作由工作台接线，这里用真 hook 接在替身上。
 import { act, createElement } from "react";
@@ -7,7 +7,7 @@ import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { ShellProvider } from "./shell";
-import { UpdateSection } from "./UpdateSection";
+import { UpdateToolbarControl } from "./UpdateToolbarControl";
 import { useUpdateActions } from "./useUpdate";
 import { emptySnapshot, type UpdateSnapshot } from "../core/update";
 import { UNSAVED_MESSAGE, type UpdatePreparationPorts } from "../core/updatePreparation";
@@ -47,29 +47,35 @@ const ready = (overrides: Partial<UpdateSnapshot> = {}): UpdateSnapshot => ({
 /** 把真实的动作 hook 接在替身上：这一段测的就是「准备被拒就不安装」。 */
 function Host({ snapshot, deps }: { snapshot: UpdateSnapshot; deps: UpdatePreparationPorts }): ReturnType<typeof createElement> {
   const { state, check, install } = useUpdateActions(deps, async () => undefined);
-  return createElement(UpdateSection, { snapshot, state, check: () => void check(), install });
+  return createElement(UpdateToolbarControl, { snapshot, state, check: () => void check(), install });
 }
 
 async function show(port: FakePort, snapshot: UpdateSnapshot, overrides: Partial<UpdatePreparationPorts> = {}): Promise<void> {
   await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(Host, { snapshot, deps: { ...baseDeps, ...overrides } }) })));
 }
 
-/** 按文字找按钮：面板上按钮不多，比 data-testid 更贴近用户看到的东西。 */
+/** 按文字找按钮：入口上按钮不多，比 data-testid 更贴近用户看到的东西。 */
 function button(text: string): HTMLButtonElement {
   const found = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes(text));
   if (!found) throw new Error(`没有找到按钮「${text}」`);
   return found as HTMLButtonElement;
 }
 
-/** 面板上的说明文字。 */
+/** 入口上的文字。 */
 function hint(): string {
   return container.textContent ?? "";
 }
 
-describe("自动更新面板", () => {
+describe("首页版本号旁的更新入口", () => {
   it("能力没开时整段不显示", async () => {
     await show(createFakePort({ missing: ["update"] }), emptySnapshot());
-    expect(hint()).not.toContain("自动更新");
+    expect(container.querySelector(".topbar-update")).toBeNull();
+  });
+
+  it("没有新版本时只摆检查更新，不常驻一个灰的安装按钮", async () => {
+    await show(createFakePort(), emptySnapshot());
+    expect(hint()).toContain("检查更新");
+    expect(container.textContent).not.toContain("下载并安装");
   });
 
   it("下载完成但没验签：安装按钮不能点", async () => {
@@ -85,7 +91,6 @@ describe("自动更新面板", () => {
   it("已验签且可装：安装按钮能点", async () => {
     await show(createFakePort(), ready());
     expect(button("下载并安装").disabled).toBe(false);
-    expect(hint()).toContain("1.6.0");
   });
 
   it("正在检查时不能重复点检查", async () => {

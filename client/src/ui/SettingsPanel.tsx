@@ -6,7 +6,6 @@ import { DataRootSection } from "./DataRootSection";
 import type { DataRootActions } from "./dataRootMove";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 import { DEFAULT_SETTINGS, MAX_CONCURRENCY, MIN_CONCURRENCY, normalizeBaseUrl } from "../core/settings";
-import { UpdateSection, type UpdateSectionProps } from "./UpdateSection";
 import { UsageSection } from "./UsageSection";
 import type { ConnectionResult, useSettings } from "./useSettings";
 import { concurrencyOnBlur, connectionText, discoveryText, settingsPanelView, settingsToSave } from "./settingsPanelView";
@@ -14,8 +13,6 @@ import { concurrencyOnBlur, connectionText, discoveryText, settingsPanelView, se
 interface Props {
   settings: ReturnType<typeof useSettings>;
   onClose: () => void;
-  /** 更新那一段的快照与动作（#164、#180）：由工作台统一接线，主界面与本段共用。 */
-  update: UpdateSectionProps;
   /** 数据位置迁移的接线（#161）；工作台没给就不显示这一段。 */
   dataRoot?: DataRootActions;
 }
@@ -86,7 +83,7 @@ function ConcurrencyRow({
   );
 }
 
-export function SettingsPanel({ settings, onClose, update, dataRoot }: Props) {
+export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
   const port = useShell();
   const [baseUrl, setBaseUrl] = useState(settings.settings.base_url);
   // 草稿是原始文本，输入中可为空或越界；失焦与保存时才经 parseConcurrency 钳制。
@@ -170,8 +167,6 @@ export function SettingsPanel({ settings, onClose, update, dataRoot }: Props) {
           onChange={setConcurrencyDraft}
           onBlur={() => setConcurrencyDraft(concurrencyOnBlur(concurrencyDraft, settings.settings.concurrency))}
         />
-
-        <UpdateSection {...update} />
 
         {dataRoot && <DataRootSection actions={dataRoot} />}
 

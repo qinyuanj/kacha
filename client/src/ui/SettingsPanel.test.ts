@@ -4,8 +4,6 @@ import { act, createElement } from "react";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS } from "../core/settings";
-import { emptySnapshot } from "../core/update";
-import type { UpdateSectionProps } from "./UpdateSection";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { ShellProvider } from "./shell";
 import { SettingsPanel } from "./SettingsPanel";
@@ -48,16 +46,8 @@ function settings(overrides: Partial<SettingsState> = {}): PanelSettings {
   } as unknown as PanelSettings;
 }
 
-// 更新那一段的快照与动作（#164、#180）：面板只摆放，替身给空快照与可直接调用的动作。
-const UPDATE_DEPS: UpdateSectionProps = {
-  snapshot: emptySnapshot(),
-  state: { preparing: false, prepareError: "", installError: "" },
-  check: () => undefined,
-  install: async () => ({ ok: true }),
-};
-
 async function show(port: FakePort, state = settings(), dataRoot?: Parameters<typeof SettingsPanel>[0]["dataRoot"]): Promise<void> {
-  await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: state, onClose: vi.fn(), update: UPDATE_DEPS, ...(dataRoot ? { dataRoot } : {}) }) })));
+  await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: state, onClose: vi.fn(), ...(dataRoot ? { dataRoot } : {}) }) })));
 }
 
 /** 密钥输入框（密码框，不把密钥显示成普通文本）。 */
@@ -82,6 +72,15 @@ async function typeInto(input: HTMLInputElement, text: string): Promise<void> {
   });
 }
 
+
+// #181：更新入口搬到了首页版本号旁边，高级设置里不再有。
+describe("高级设置不再藏更新入口（#181）", () => {
+  it("面板里没有检查更新与下载并安装", async () => {
+    await show(createFakePort());
+    expect(container.textContent).not.toContain("检查更新");
+    expect(container.textContent).not.toContain("下载并安装");
+  });
+});
 
 describe("API 密钥管理（#152）", () => {
   it("密钥框是密码输入，状态只说受系统保护，不把密钥显示成正文", async () => {
@@ -221,7 +220,7 @@ describe("诊断包导出（#162）", () => {
   it("点弹窗外面的遮罩会关闭设置", async () => {
     const close = vi.fn();
     const port = createFakePort();
-    await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: settings(), onClose: close, update: UPDATE_DEPS }) })));
+    await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(SettingsPanel, { settings: settings(), onClose: close }) })));
     const backdrop = container.querySelector(".modal-backdrop")!;
     await act(async () => backdrop.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
     expect(close).toHaveBeenCalledTimes(1);

@@ -156,10 +156,10 @@ describe("自动安装：倒计时", () => {
     const started = autoStep({ ...INITIAL_AUTO_STATE, startup: "other" }, input(), NOW);
     expect(started.install).toBe(false);
     expect(started.state.deadline).toBe(NOW + AUTO_INSTALL_DELAY_MS);
-    expect(autoInstallView(started.state, NOW).seconds).toBe(30);
-    const later = autoStep(started.state, input(), NOW + 20_000);
+    expect(autoInstallView(started.state, NOW).seconds).toBe(AUTO_INSTALL_DELAY_MS / 1000);
+    const later = autoStep(started.state, input(), NOW + AUTO_INSTALL_DELAY_MS - 5_000);
     expect(later.install).toBe(false);
-    expect(autoInstallView(later.state, NOW + 20_000).seconds).toBe(10);
+    expect(autoInstallView(later.state, NOW + AUTO_INSTALL_DELAY_MS - 5_000).seconds).toBe(5);
   });
 
   it("差一毫秒不装，到点才装", () => {

@@ -85,7 +85,7 @@ describe("空闲自动安装的接线", () => {
     expect(shown?.view.counting).toBe(false);
     await render(deps());
     expect(shown?.view.counting).toBe(true);
-    expect(shown?.view.seconds).toBe(30);
+    expect(shown?.view.seconds).toBe(AUTO_INSTALL_DELAY_MS / 1000);
     expect(installs).toBe(0);
   });
 

@@ -8,6 +8,7 @@ import type { Board } from "../core/board";
 import { emptyHistory } from "../core/history";
 import { AppNotices, type AppNoticesProps } from "./appNotices";
 import { emptySnapshot, type UpdateSnapshot } from "../core/update";
+import type { UpdateControl } from "./useUpdate";
 import { IDLE_AUTO_VIEW, type AutoInstallView } from "../core/updateAutoInstall";
 import { updateStatusView } from "./updateStatusView";
 import { AppPackMenu, AppToolbar, AppTopBar } from "./appPanels";
@@ -34,6 +35,14 @@ afterEach(async () => {
 });
 
 const board = { title: "a", format_version: 2, viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges: [], extra: {} } as unknown as Board;
+
+// 更新入口的替身（#181）：首页版本号旁的那一份，快照与动作都可直接调用。
+const updateControl = (patch: Partial<UpdateSnapshot> = {}): UpdateControl => ({
+  snapshot: { ...emptySnapshot(), ...patch },
+  state: { preparing: false, prepareError: "", installError: "" },
+  check: vi.fn(),
+  install: vi.fn(async () => ({ ok: true })),
+});
 
 const session = (): Session =>
   ({ key: "k1", path: "/~/a.ugcboard.json", status: "ok", board, history: emptyHistory(), notice: null, saveError: null, version: null, conflicted: false, missing: false }) as Session;
@@ -240,7 +249,7 @@ describe("工具栏", () => {
   it("没有画板：放置灰占位", async () => {
     await act(async () =>
       dom.render(
-        createElement(AppToolbar, {
+        createElement(ShellProvider, { port: createFakePort(), children: createElement(AppToolbar, {
           setToolbarSlot: vi.fn(),
           canvasReady: false,
           runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
@@ -252,11 +261,63 @@ describe("工具栏", () => {
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
           onOpenSettings: vi.fn(),
-        }),
+          update: updateControl(),
+        }) }),
       ),
     );
     expect(container.querySelector(".board-toolbar-slot")).not.toBeNull();
     expect(container.textContent).toContain("画板包");
+  });
+
+  // #181：更新入口在首页版本号旁边，不再藏在高级设置里。
+  it("版本号旁边有检查更新入口", async () => {
+    await act(async () =>
+      dom.render(
+        createElement(ShellProvider, { port: createFakePort(), children: createElement(AppToolbar, {
+          setToolbarSlot: vi.fn(),
+          canvasReady: false,
+          runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
+          packMenuOpen: false,
+          packMenuDisabled: false,
+          onTogglePackMenu: vi.fn(),
+          version: "1.6.6",
+          ready: true,
+          onOpenChangelog: vi.fn(),
+          settingsLoaded: true,
+          onOpenSettings: vi.fn(),
+          update: updateControl(),
+        }) }),
+      ),
+    );
+    const version = container.querySelector(".topbar-version");
+    const entry = container.querySelector(".topbar-update");
+    expect(version).not.toBeNull();
+    expect(entry).not.toBeNull();
+    // 入口紧挨着版本号：两者在同一个工具栏右侧容器里，版本号在前。
+    expect(version?.parentElement).toBe(entry?.parentElement);
+    expect(entry?.textContent).toContain("检查更新");
+  });
+
+  it("有新版本时入口旁边出现下载并安装", async () => {
+    await act(async () =>
+      dom.render(
+        createElement(ShellProvider, { port: createFakePort(), children: createElement(AppToolbar, {
+          setToolbarSlot: vi.fn(),
+          canvasReady: false,
+          runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
+          packMenuOpen: false,
+          packMenuDisabled: false,
+          onTogglePackMenu: vi.fn(),
+          version: "1.6.6",
+          ready: true,
+          onOpenChangelog: vi.fn(),
+          settingsLoaded: true,
+          onOpenSettings: vi.fn(),
+          update: updateControl({ phase: "ready", version: "1.6.7", verified: true, installable: true, downloaded: 100, total: 100 }),
+        }) }),
+      ),
+    );
+    expect(container.querySelector(".topbar-update")?.textContent).toContain("下载并安装");
   });
 });
 
@@ -269,10 +330,11 @@ describe("工作台外壳的接线", () => {
     downloadDisabled: null, importDisabled: null, sizeNotice: null, titleOf: () => "a", ...patch,
   });
   const indicator = { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() };
+
   const shell = (patch: Partial<ComponentProps<typeof AppShell>> = {}): ComponentProps<typeof AppShell> => ({
     view: viewOf(), sessions: [], activeKey: null, userRoot: "/root", ready: true, version: "1.0",
     updateNotice: null, packMenu: null, boardListOpen: false, manageBoards: false, settingsLoaded: true,
-    runIndicator: indicator, updateStatus: updateStatusView({ snapshot: emptySnapshot(), auto: IDLE_AUTO_VIEW }),
+    runIndicator: indicator, updateStatus: updateStatusView({ snapshot: emptySnapshot(), auto: IDLE_AUTO_VIEW }), update: updateControl(),
     onDeferUpdate: vi.fn(), tableError: null, settingsFileProblem: null, settingsOpen: false,
     usageNotice: null, canvasProps: {} as never,
     onActivate: vi.fn(), onCloseTab: vi.fn(), onRename: vi.fn(), onCreate: vi.fn(), onOpenList: vi.fn(),

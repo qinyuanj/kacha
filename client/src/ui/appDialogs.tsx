@@ -7,11 +7,10 @@ import { SendTextDialog } from "./SendTextDialog";
 import type { DataRootActions } from "./dataRootMove";
 import { SettingsPanel } from "./SettingsPanel";
 import type { useSettings } from "./useSettings";
-import type { UpdateSectionProps } from "./UpdateSection";
 
 /** 设置面板。 */
-export function AppSettingsPanel({ settings, onClose, update, dataRoot }: { settings: ReturnType<typeof useSettings>; onClose(): void; update: UpdateSectionProps; dataRoot?: DataRootActions }) {
-  return <SettingsPanel settings={settings} onClose={onClose} update={update} dataRoot={dataRoot} />;
+export function AppSettingsPanel({ settings, onClose, dataRoot }: { settings: ReturnType<typeof useSettings>; onClose(): void; dataRoot?: DataRootActions }) {
+  return <SettingsPanel settings={settings} onClose={onClose} dataRoot={dataRoot} />;
 }
 
 /** 更新说明。 */
@@ -65,7 +64,6 @@ export function AppOverlays({
   onSendTextClose,
   packDialog,
   toastText,
-  update,
   dataRoot,
 }: {
   settings: ReturnType<typeof useSettings>;
@@ -83,13 +81,12 @@ export function AppOverlays({
   packDialog: BoardPackDialogProps | null;
   toastText: string | null;
   /** 更新那一段的快照与动作（#164、#180）。 */
-  update: UpdateSectionProps;
   /** 数据位置迁移的接线（#161）。 */
   dataRoot?: DataRootActions;
 }) {
   return (
     <>
-      {settingsOpen && <AppSettingsPanel settings={settings} onClose={onSettingsClose} update={update} dataRoot={dataRoot} />}
+      {settingsOpen && <AppSettingsPanel settings={settings} onClose={onSettingsClose} dataRoot={dataRoot} />}
       {changelogOpen && <AppChangelogDialog version={version} onClose={onChangelogClose} />}
       {confirm && (
         <AppRunConfirm

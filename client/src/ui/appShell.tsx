@@ -5,6 +5,7 @@ import { AppBoardList, AppPackMenu, AppToolbar, AppTopBar, AppWorkspace } from "
 import { AppNotices } from "./appNotices";
 import type { AppView } from "./appView";
 import type { UpdateStatusView } from "./updateStatusView";
+import type { UpdateControl } from "./useUpdate";
 import type { Session } from "./useBoardSessions";
 
 /** 工作台的外壳：顶栏、画板列表、工具栏、提示条与工作区。 */
@@ -23,6 +24,8 @@ export function AppShell(props: {
   runIndicator: ComponentProps<typeof AppToolbar>["runIndicator"];
   /** 更新状态提示条（#180）。 */
   updateStatus: UpdateStatusView;
+  /** 更新入口的接线（#181）：首页版本号旁的检查与安装。 */
+  update: UpdateControl;
   onDeferUpdate(): void;
   /** 提示条要的参数。 */
   tableError: string | null;
@@ -107,6 +110,7 @@ export function AppShell(props: {
         onOpenChangelog={props.onOpenChangelog}
         settingsLoaded={props.settingsLoaded}
         onOpenSettings={props.onOpenSettings}
+        update={props.update}
       />
       {props.packMenu && (
         <AppPackMenu

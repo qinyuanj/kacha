@@ -771,6 +771,33 @@ body[data-port-drag="ok"] * {
   min-height: 32px;
 }
 /* 更新状态提示条（#180）：与「已更新」提示条同一套位置与观感，只多一条阶段标记。 */
+/* 首页版本号旁的更新入口（#181）：沿用顶栏按钮的视觉，不另起一套。 */
+.topbar-update {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topbar-update .topbar-update-install {
+  border-color: var(--accent, #4c8dff);
+  color: var(--accent, #4c8dff);
+}
+
+.topbar-update-link {
+  font-size: 12px;
+  color: var(--accent, #4c8dff);
+  text-decoration: none;
+}
+
+.topbar-update-error {
+  font-size: 12px;
+  color: var(--danger, #c0392b);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .update-status {
   flex-shrink: 0;
   flex-wrap: wrap;
