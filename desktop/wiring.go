@@ -4,12 +4,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/egoist/mygo"
 
 	"github.com/qinyuanj/kacha/desktop/internal/clipboard"
 	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/diagnostics"
+	"github.com/qinyuanj/kacha/desktop/internal/feedbackservice"
 	"github.com/qinyuanj/kacha/desktop/internal/gateway"
 	"github.com/qinyuanj/kacha/desktop/internal/localservice"
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
@@ -29,6 +31,13 @@ import (
 func bindServices(shell *shellapp.Shell, roots *dataroot.Roots) {
 	store := localstore.NewFollowing(roots)
 	mygo.BindAs("Shell", shellService{shell: shell})
+	// Feedback（#205）：默认中继地址可被环境变量显式置空以关掉能力；高级设置覆盖走 Send(spec).relay_url。
+	relayURL := feedbackservice.DefaultRelayURL
+	if value, ok := os.LookupEnv("KACHA_FEEDBACK_RELAY_URL"); ok {
+		relayURL = strings.TrimSpace(value)
+	}
+	shell.WithFeedbackRelay(relayURL)
+	mygo.BindAs("Feedback", feedbackservice.New(feedbackservice.Config{RelayURL: relayURL}))
 	mygo.BindAs("Local", localservice.New(store))
 	// Usage 是本机用量、未引用清理与回收恢复（#159）：真实数据根扫描，不用前端替身。
 	mygo.BindAs("Usage", usageservice.New(store))

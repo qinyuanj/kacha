@@ -158,7 +158,7 @@ func TestRegisterAssetProtocol(t *testing.T) {
 
 // 桌面壳的能力开关：画板包导出（#160）、本机用量（#159）、单份生成（#153）与整理（#158）都已接通。
 func TestDesktopFeaturesEnableUsagePackExportAndGeneration(t *testing.T) {
-	features := shellapp.DesktopFeatures(true)
+	features := shellapp.DesktopFeatures(true, true)
 	if !features.Usage || !features.PackExport || !features.Generation || !features.Tidy {
 		t.Fatalf("本机用量、画板包导出、单份生成与整理都已实现，能力开关必须打开：%+v", features)
 	}

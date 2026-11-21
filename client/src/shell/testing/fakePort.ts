@@ -3,7 +3,7 @@
 // 形状与真实适配器一致：失败一律是 PortError，类别（conflict / missing / slotsFull / alreadyExists, ...）与
 // 壳端口使用同一套类别，界面按类别分支的分支点因此在替身下也走得到。
 // 各分组的替身在 shell/testing/fakePortStores.ts（#137），这里只把它们拼起来。
-import { PortError, type CorePorts, type FeatureId, type PortFailureKind, type ShellPort } from "../port";
+import { FEEDBACK_UNAVAILABLE, PortError, type CorePorts, type FeatureId, type FeedbackOutcome, type FeedbackSpec, type PortFailureKind, type ShellPort } from "../port";
 import type { FakeBoard, FakeCalls, FakePortOptions } from "./fakePortTypes";
 import {
   fakeBoardStore,
@@ -18,6 +18,15 @@ import {
 } from "./fakePortStores";
 
 export type { FakeCalls, FakePortOptions } from "./fakePortTypes";
+
+/** 替身缺省反馈成功，界面流程不必先配回执。 */
+const DEFAULT_FEEDBACK_OUTCOME: FeedbackOutcome = {
+  ok: true,
+  kind: "ok",
+  message: "已提交 #17",
+  number: 17,
+  url: "https://gitea.test/kacha-feedback/issues/17",
+};
 
 /** 造一个端口失败（界面按 kind 分支）。 */
 export const fakeFailure = (kind: PortFailureKind, message: string = kind, feature?: FeatureId): PortError =>
@@ -45,6 +54,7 @@ export function emptyFakeCalls(): FakeCalls {
     saveCopyAs: [],
     log: [],
     exportDiagnostics: 0,
+    feedback: [],
     uploadReference: [],
     inspectImage: [],
     list: 0,
@@ -119,6 +129,8 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
       update: !missing.has("update"),
       // 数据位置迁移（#161）：替身默认有；缺这个能力时入口消失。
       dataRoot: !missing.has("dataRoot"),
+      // 反馈（#205）：替身默认有；缺这个能力时调用得到 unavailable 结局。
+      feedback: !missing.has("feedback"),
     },
     board,
     files,
@@ -129,6 +141,13 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
     usage,
     update,
     dataRoot,
+    feedback: {
+      send: async (spec: FeedbackSpec): Promise<FeedbackOutcome> => {
+        calls.feedback.push(spec);
+        if (missing.has("feedback")) return FEEDBACK_UNAVAILABLE;
+        return options.feedbackOutcome ?? DEFAULT_FEEDBACK_OUTCOME;
+      },
+    },
     core,
     calls,
   };

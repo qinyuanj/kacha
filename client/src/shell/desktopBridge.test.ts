@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DesktopInfo } from "./desktop";
 import { mygoBridge } from "./desktopBridge";
+import { FEEDBACK_SPEC, FEEDBACK_SUCCESS } from "./testing/feedbackContract";
 
 const INFO: DesktopInfo = {
   version: "0.1.0",
@@ -108,5 +109,18 @@ describe("本机用量句柄（#159）", () => {
     ]);
     expect(calls[1].args).toEqual([["2026-11-01/x"]]);
     expect(calls[4].args).toEqual(["r000001"]);
+  });
+});
+
+describe("反馈句柄（#205）", () => {
+  it("feedback.send() 调 Feedback.Send——与 Go 侧 BindAs(\"Feedback\", ...) 一致", async () => {
+    const calls: { method: string; args: unknown[] }[] = [];
+    const direct = mygoBridge((method, ...args) => {
+      calls.push({ method, args });
+      if (method === "Feedback.Send") return Promise.resolve(FEEDBACK_SUCCESS);
+      return Promise.reject(new Error("没实现：" + method));
+    });
+    await expect(direct.feedback!.send(FEEDBACK_SPEC)).resolves.toEqual(FEEDBACK_SUCCESS);
+    expect(calls).toEqual([{ method: "Feedback.Send", args: [FEEDBACK_SPEC] }]);
   });
 });
