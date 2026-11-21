@@ -146,6 +146,7 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
       send: async (spec: FeedbackSpec): Promise<FeedbackOutcome> => {
         calls.feedback.push(spec);
         if (missing.has("feedback")) return FEEDBACK_UNAVAILABLE;
+        if (options.feedbackSend) return options.feedbackSend(spec);
         return options.feedbackOutcome ?? DEFAULT_FEEDBACK_OUTCOME;
       },
     },

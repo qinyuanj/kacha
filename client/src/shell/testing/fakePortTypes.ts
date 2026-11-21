@@ -58,6 +58,8 @@ export interface FakePortOptions {
   moveFiles?: number;
   /** 反馈发送的脚本化结局（缺省成功）。 */
   feedbackOutcome?: FeedbackOutcome;
+  /** 反馈发送的脚本化实现：可测序、返回 pending Promise，优先于 feedbackOutcome。 */
+  feedbackSend?: (spec: FeedbackSpec) => Promise<FeedbackOutcome> | FeedbackOutcome;
   /** 反馈诊断包的脚本化结局（缺省成功的小包）。 */
   diagnosticsPackOutcome?: import("../port").DiagnosticsPackOutcome;
 }
