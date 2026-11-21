@@ -61,6 +61,7 @@ export function AppOverlays({
   feedbackOpen,
   onFeedbackClose,
   feedbackBoardName,
+  feedbackRelayUrl,
   confirm,
   onConfirmCancel,
   onConfirm,
@@ -81,6 +82,7 @@ export function AppOverlays({
   feedbackOpen: boolean;
   onFeedbackClose(): void;
   feedbackBoardName: string;
+  feedbackRelayUrl: string;
   confirm: { items: ConfirmItem[]; scope: "selection" | "board"; boardKey: string; board: import("../core/board").Board } | null;
   onConfirmCancel(): void;
   onConfirm(ids: string[]): void;
@@ -89,7 +91,6 @@ export function AppOverlays({
   onSendTextClose(): void;
   packDialog: BoardPackDialogProps | null;
   toastText: string | null;
-  /** 更新那一段的快照与动作（#164、#180）。 */
   /** 数据位置迁移的接线（#161）。 */
   dataRoot?: DataRootActions;
 }) {
@@ -97,7 +98,7 @@ export function AppOverlays({
     <>
       {settingsOpen && <AppSettingsPanel settings={settings} onClose={onSettingsClose} dataRoot={dataRoot} />}
       {changelogOpen && <AppChangelogDialog version={version} onClose={onChangelogClose} />}
-      {feedbackOpen && <FeedbackDialog version={version} build={build} boardName={feedbackBoardName} onClose={onFeedbackClose} />}
+      {feedbackOpen && <FeedbackDialog version={version} build={build} boardName={feedbackBoardName} relayUrl={feedbackRelayUrl} onClose={onFeedbackClose} />}
       {confirm && (
         <AppRunConfirm
           items={confirm.items}

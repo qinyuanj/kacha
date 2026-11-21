@@ -19,6 +19,7 @@ from verify import (
     commands,
     dependency_problems,
     dependencies_preflight,
+    documentation_problems,
     integrity_problems,
     main,
     preflight,
@@ -85,6 +86,76 @@ def client_tree(root: Path, locked: dict, installed: dict | None, on_disk: tuple
         manifest.parent.mkdir(parents=True, exist_ok=True)
         manifest.write_text("{}", encoding="utf-8")
     return root
+
+
+class DocumentationGateTest(unittest.TestCase):
+    """#211：文档与唯一版本源必须一起变更。"""
+
+    @staticmethod
+    def make_tree(root: Path, *, version: str = "2.0.0", changelog_version: str | None = None,
+                  feedback_note: bool = True, adr: bool = True, glossary: bool = True) -> None:
+        (root / "mygo.config.ts").write_text(
+            f'export default {{\n  version: "{version}",\n}};\n', encoding="utf-8")
+        heading = changelog_version or version
+        item = "- 用户可从首屏提交反馈并附带脱敏诊断包。" if feedback_note else "- 修复了本地画板保存问题。"
+        (root / "docs" / "release").mkdir(parents=True, exist_ok=True)
+        (root / "docs" / "release" / "changelog.md").write_text(
+            f"<!-- 当前版本在最前 -->\n\n# {heading}\n\n## 新增\n\n{item}\n", encoding="utf-8")
+        (root / "docs" / "adr").mkdir(parents=True, exist_ok=True)
+        if adr:
+            (root / "docs" / "adr" / "0027-feedback-is-optional.md").write_text(
+                "# 0027\n反馈是可选联网能力，核心画板离线可用，不新增远端应用服务依赖；反馈中继只转发用户主动提交的内容。\n",
+                encoding="utf-8")
+        glossary_text = (
+            "# Kacha\n\n**反馈**：用户主动提交的内容。\n_Avoid_：工单、报障\n\n"
+            "**反馈中继**：转发反馈的可选服务。\n_Avoid_：反馈服务器、客服系统\n"
+            if glossary else "# Kacha\n"
+        )
+        (root / "GLOSSARY.md").write_text(glossary_text, encoding="utf-8")
+        (root / "README.md").write_text(
+            "# Kacha\n\n## 反馈\n\n首屏反馈入口可附带脱敏诊断包。\n", encoding="utf-8")
+
+    def test_current_docs_pass_the_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make_tree(root)
+            self.assertEqual(documentation_problems(root), [])
+
+    def test_version_drift_from_the_single_declaration_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make_tree(root, changelog_version="2.0.1")
+            problems = documentation_problems(root)
+            self.assertTrue(any("2.0.0" in problem and "2.0.1" in problem for problem in problems), problems)
+
+    def test_changelog_without_user_visible_feedback_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make_tree(root, feedback_note=False)
+            self.assertTrue(any("反馈" in problem for problem in documentation_problems(root)))
+
+    def test_missing_adr_and_glossary_terms_are_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make_tree(root, adr=False, glossary=False)
+            problems = documentation_problems(root)
+            self.assertTrue(any("ADR 0027" in problem for problem in problems), problems)
+            self.assertTrue(any("GLOSSARY.md" in problem for problem in problems), problems)
+
+    def test_documentation_gate_stops_the_suite_before_any_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make_tree(root, changelog_version="9.9.9")
+            with (
+                mock.patch.object(verify, "ROOT", root),
+                mock.patch.object(verify, "integrity_problems", return_value=[]),
+                mock.patch.object(verify, "dependencies_preflight", return_value=0),
+                mock.patch("subprocess.run", side_effect=AssertionError("不应继续跑命令")),
+                mock.patch("sys.stderr", new_callable=mock.MagicMock) as stderr,
+                mock.patch("sys.stdout", new_callable=mock.MagicMock),
+            ):
+                self.assertEqual(main([]), 2)
+            self.assertIn("文档与版本门禁失败", "".join(str(call.args[0]) for call in stderr.write.call_args_list))
 
 
 class DependencyPreflightTest(unittest.TestCase):

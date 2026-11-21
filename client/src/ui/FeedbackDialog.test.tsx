@@ -30,8 +30,8 @@ function byText<T extends Element>(selector: string, text: string): T {
   return el;
 }
 
-async function show(port: FakePort, onClose: () => void = () => undefined): Promise<void> {
-  await act(async () => root.render(createElement(ShellProvider, { port, children: createElement(FeedbackDialog, { version: "1.8.0", build: "42", boardName: "/tmp/boards/项目 A.kacha", onClose }) })));
+async function show(port: FakePort, onClose: () => void = () => undefined, relayUrl?: string): Promise<void> {
+  await act(async () => root.render(createElement(ShellProvider, { port, children: createElement(FeedbackDialog, { version: "1.8.0", build: "42", boardName: "/tmp/boards/项目 A.kacha", relayUrl, onClose }) })));
 }
 
 async function setInput(label: string, value: string): Promise<void> {
@@ -103,6 +103,16 @@ describe("反馈对话框（#206）", () => {
     expect(port.calls.feedback[0]).toEqual(expect.objectContaining({ title: "生成失败", category: "缺陷", body: "无法生成", version: "1.8.0", build: "42", board_name: "项目 A" }));
     const link = byText<HTMLAnchorElement>("a", "#17");
     expect(link.href).toBe("https://gitea.test/kacha-feedback/issues/17");
+  });
+
+  it("高级设置解析出的反馈中继地址随每次发送进入 Feedback 端口", async () => {
+    const port = createFakePort();
+    await show(port, undefined, "http://relay.test:3105");
+    await setInput("正文", "无法生成");
+    await click("预览");
+    await click("确认发送");
+    expect(port.calls.feedback).toHaveLength(1);
+    expect(port.calls.feedback[0]).toEqual(expect.objectContaining({ relay_url: "http://relay.test:3105" }));
   });
 
   it("选择截图后预览列出图片并随 Feedback 端口发送", async () => {

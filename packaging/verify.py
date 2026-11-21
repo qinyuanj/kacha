@@ -9,9 +9,12 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
+
+import release_gate
 
 ROOT = Path(__file__).resolve().parent.parent
 BUILD_OUTPUTS = (Path("build"), Path("client") / "target")
@@ -123,9 +126,94 @@ def preflight(root: Path) -> int:
     return 2
 
 
+def documentation_problems(root: Path) -> list[str]:
+    """#211：唯一版本、更新说明、ADR、词表与 README 不能互相脱节。"""
+    problems: list[str] = []
+    config = root / "mygo.config.ts"
+    if not config.is_file():
+        return ["缺少 mygo.config.ts"]
+    try:
+        version = release_gate.desktop_version(root)
+    except (OSError, SystemExit) as error:
+        return [f"mygo.config.ts 无法读取唯一版本：{error}"]
+
+    changelog = root / release_gate.CHANGELOG
+    text = ""
+    if not changelog.is_file():
+        problems.append(f"缺少 {release_gate.CHANGELOG.as_posix()}")
+    else:
+        try:
+            text = changelog.read_text(encoding="utf-8")
+        except OSError as error:
+            problems.append(f"{release_gate.CHANGELOG.as_posix()} 无法读取：{error}")
+    visible = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    headings = re.findall(r"^# (\S+)\s*$", visible, flags=re.MULTILINE)
+    current = headings[0] if headings else "无"
+    if current != version:
+        problems.append(f"{release_gate.CHANGELOG.as_posix()} 当前版本应为 {version}，实际是 {current}")
+    section = release_gate.changelog_section(text, version) if text else None
+    if section is None:
+        problems.append(f"{release_gate.CHANGELOG.as_posix()} 缺少当前版本 {version} 的一节")
+    else:
+        group = None
+        items = 0
+        for line in section:
+            if line.startswith("## "):
+                group = line[3:].strip()
+            elif group in release_gate.CHANGELOG_GROUPS and line.startswith("- ") and line[2:].strip():
+                items += 1
+        if items == 0:
+            problems.append(f"{release_gate.CHANGELOG.as_posix()} 中 {version} 一节没有可显示条目")
+        if "反馈" not in "\n".join(section):
+            problems.append(f"{release_gate.CHANGELOG.as_posix()} 中 {version} 一节没有用户可见的反馈能力")
+
+    adr_files = sorted((root / "docs" / "adr").glob("0027-*.md"))
+    if len(adr_files) != 1:
+        problems.append("缺少 ADR 0027：docs/adr/0027-*.md")
+    else:
+        adr = adr_files[0].read_text(encoding="utf-8")
+        for phrase, label in (
+            ("反馈中继", "反馈中继"),
+            ("可选", "可选联网能力"),
+            ("离线", "核心画板离线可用"),
+            ("远端应用服务", "不新增远端应用服务依赖"),
+        ):
+            if phrase not in adr:
+                problems.append(f"ADR 0027 未说明{label}")
+
+    glossary = root / "GLOSSARY.md"
+    if not glossary.is_file():
+        problems.append("缺少 GLOSSARY.md")
+    else:
+        glossary_text = glossary.read_text(encoding="utf-8")
+        for term in ("反馈", "反馈中继"):
+            if re.search(rf"\*\*{term}\*\*[\s\S]*?_Avoid_[:：]", glossary_text) is None:
+                problems.append(f"GLOSSARY.md 缺少「{term}」及避免使用的近义词")
+
+    readme = root / "README.md"
+    if not readme.is_file():
+        problems.append("缺少 README.md")
+    else:
+        readme_text = readme.read_text(encoding="utf-8")
+        if "## 反馈" not in readme_text or "诊断包" not in readme_text:
+            problems.append("README.md 缺少反馈入口或诊断包使用说明")
+    return problems
+
+
+def documentation_preflight(root: Path) -> int:
+    """文档门禁失败时打印全部原因，允许一次修齐。"""
+    problems = documentation_problems(root)
+    if not problems:
+        return 0
+    print("文档与版本门禁失败：", file=sys.stderr)
+    for problem in problems:
+        print(f"  {problem}", file=sys.stderr)
+    return 2
+
+
 def main(argv: list[str]) -> int:
     selected = commands(argv)
-    code = preflight(ROOT) or dependencies_preflight(ROOT)
+    code = preflight(ROOT) or dependencies_preflight(ROOT) or documentation_preflight(ROOT)
     if code or "--preflight" in argv:
         return code
     failed = []

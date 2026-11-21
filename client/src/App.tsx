@@ -9,6 +9,7 @@ import { shouldShowUpdateNotice } from "./core/changelog";
 import { useUsageLimit } from "./ui/useUsageLimit";
 import { useRunner } from "./ui/useRunner";
 import { useSettings } from "./ui/useSettings";
+import { resolveFeedbackRelayAddress } from "./core/settings";
 import { useBoardPack } from "./ui/useBoardPack";
 import { useRunCallbacks } from "./ui/appRunHooks";
 import { useBoardSessions } from "./ui/useBoardSessions";
@@ -375,6 +376,7 @@ export function App({ version }: AppProps) {
         settingsOpen={state.settingsOpen}
         usageNotice={usageNotice}
         updateStatus={updateStatus}
+        update={update}
         onDeferUpdate={autoInstall.defer}
         runIndicator={{
           active: runState.active,
@@ -463,6 +465,7 @@ export function App({ version }: AppProps) {
         feedbackOpen={feedbackOpen}
         onFeedbackClose={() => setFeedbackOpen(false)}
         feedbackBoardName={activeKey ? view.titleOf(activeKey) : ""}
+        feedbackRelayUrl={resolveFeedbackRelayAddress(settings.settings)}
         confirm={state.confirm}
         onConfirmCancel={() => store.setConfirm(null)}
         onConfirm={(ids) => void runNow(state.confirm!.boardKey, state.confirm!.board, ids)}
@@ -471,7 +474,6 @@ export function App({ version }: AppProps) {
         onSendTextClose={() => store.setSendText(null)}
         packDialog={pack.dialog}
         toastText={state.toastText}
-        update={update}
         dataRoot={dataRootActions}
       />
     </>
