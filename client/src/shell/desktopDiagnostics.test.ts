@@ -1,7 +1,7 @@
 // 诊断包导出（#162）：桌面端口把脱敏日志与导出接到真实的 Diagnostics 绑定上。
 import { describe, expect, it } from "vitest";
 
-import { createDesktopPort, type DesktopBridge, type DesktopDiagnosticsOutcome, type DesktopInfo, type DesktopLocalBridge } from "./desktop";
+import { createDesktopPort, type DesktopBridge, type DesktopDiagnosticsBundle, type DesktopDiagnosticsOutcome, type DesktopInfo, type DesktopLocalBridge } from "./desktop";
 import { portFailureOf } from "./port";
 
 const INFO: DesktopInfo = {
@@ -18,8 +18,10 @@ function local(): DesktopLocalBridge {
 function bridgeWith(diagnostics?: {
   log: (kind: string, fields: Record<string, string>) => void;
   export: () => Promise<DesktopDiagnosticsOutcome>;
+  pack?: () => Promise<DesktopDiagnosticsBundle>;
 }): DesktopBridge {
-  return { info: () => Promise.resolve(INFO), local: local(), ...(diagnostics ? { diagnostics } : {}) };
+  const pack = diagnostics?.pack ?? (() => Promise.resolve({ ok: true, kind: "saved", name: "diagnostics.zip", data: "UEsDBA==", bytes: 8 }));
+  return { info: () => Promise.resolve(INFO), local: local(), ...(diagnostics ? { diagnostics: { ...diagnostics, pack } } : {}) };
 }
 
 describe("诊断采集与导出（#162）", () => {
@@ -28,6 +30,7 @@ describe("诊断采集与导出（#162）", () => {
     const bridge = bridgeWith({
       log: (kind, fields) => { logs.push({ kind, fields }); },
       export: () => Promise.resolve({ ok: true, kind: "", message: "", bytes: 42 }),
+      pack: () => Promise.resolve({ ok: true, kind: "saved", name: "diagnostics.zip", data: "UEsDBA==", bytes: 8 }),
     });
     const { port } = await createDesktopPort(bridge);
     expect(port.features.diagnostics).toBe(true);
@@ -35,6 +38,17 @@ describe("诊断采集与导出（#162）", () => {
     port.ui.log("task", { model: "test-model" });
     expect(logs).toEqual([{ kind: "task", fields: { model: "test-model" } }]);
     expect(await port.ui.exportDiagnostics()).toEqual({ kind: "saved", bytes: 42 });
+    expect(await port.ui.diagnosticsPack()).toEqual({ kind: "saved", name: "diagnostics.zip", contentType: "application/zip", data: "UEsDBA==" });
+  });
+
+  it("诊断包生成失败时返回明确结局，不拿空包给反馈附件", async () => {
+    const bridge = bridgeWith({
+      log: () => undefined,
+      export: () => Promise.resolve({ ok: false, kind: "failed", message: "导出失败", bytes: 0 }),
+      pack: () => Promise.resolve({ ok: false, kind: "failed", message: "采集失败", name: "", data: "", bytes: 0 }),
+    });
+    const { port } = await createDesktopPort(bridge);
+    expect(await port.ui.diagnosticsPack()).toEqual({ kind: "failed", message: "采集失败" });
   });
 
   it("没有 Diagnostics 绑定时保持不可用，不以空成功冒充", async () => {

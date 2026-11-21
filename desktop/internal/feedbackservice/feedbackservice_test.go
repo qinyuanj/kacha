@@ -13,11 +13,13 @@ import (
 )
 
 type relayCapture struct {
-	method         string
-	path           string
-	idempotencyKey string
-	fields         map[string]string
-	calls          int
+	method          string
+	path            string
+	idempotencyKey  string
+	fields          map[string]string
+	files           map[string][]byte
+	diagnosticNames []string
+	calls           int
 }
 
 func newFakeRelay(t *testing.T, status int, outcome Outcome) (*httptest.Server, func() relayCapture) {
@@ -32,13 +34,32 @@ func newFakeRelay(t *testing.T, status int, outcome Outcome) (*httptest.Server, 
 		for _, key := range []string{"title", "category", "body", "version", "build", "os", "board_name", "contact"} {
 			fields[key] = r.FormValue(key)
 		}
+		files := map[string][]byte{}
+		var diagnosticNames []string
+		for field, headers := range r.MultipartForm.File {
+			for _, header := range headers {
+				f, err := header.Open()
+				if err == nil {
+					data, readErr := io.ReadAll(f)
+					_ = f.Close()
+					if readErr == nil {
+						files[header.Filename] = data
+						if field == "diagnostics_pack" {
+							diagnosticNames = append(diagnosticNames, header.Filename)
+						}
+					}
+				}
+			}
+		}
 		mu.Lock()
 		captured = relayCapture{
-			method:         r.Method,
-			path:           r.URL.Path,
-			idempotencyKey: r.Header.Get("Idempotency-Key"),
-			fields:         fields,
-			calls:          captured.calls + 1,
+			method:          r.Method,
+			path:            r.URL.Path,
+			idempotencyKey:  r.Header.Get("Idempotency-Key"),
+			fields:          fields,
+			files:           files,
+			diagnosticNames: diagnosticNames,
+			calls:           captured.calls + 1,
 		}
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
@@ -141,6 +162,90 @@ func TestSendUnreachableRelayIsStable(t *testing.T) {
 	want := Outcome{Kind: "unreachable", Message: "反馈中继不可达，请稍后再试"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Send outcome = %+v, want %+v", got, want)
+	}
+}
+
+func TestSendUploadsScreenshotsAndDiagnosticsPack(t *testing.T) {
+	server, captured := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "已提交 #1", Number: 1, URL: "https://example.test/1"})
+	defer server.Close()
+
+	spec := sampleSpec()
+	spec.Screenshots = []Attachment{
+		{Name: "画面.png", ContentType: "image/png", Data: []byte{0x89, 'P', 'N', 'G', 1}},
+		{Name: "另一张.jpg", ContentType: "image/jpeg", Data: []byte{0xff, 0xd8, 0xff, 1}},
+	}
+	spec.DiagnosticsPack = &Attachment{Name: "diagnostics.zip", ContentType: "application/zip", Data: []byte{'P', 'K', 3, 4}}
+	if out := New(Config{RelayURL: server.URL}).Send(spec); !out.OK {
+		t.Fatalf("Send failed: %+v", out)
+	}
+
+	req := captured()
+	for name, want := range map[string][]byte{
+		"画面.png":          {0x89, 'P', 'N', 'G', 1},
+		"另一张.jpg":         {0xff, 0xd8, 0xff, 1},
+		"diagnostics.zip": {'P', 'K', 3, 4},
+	} {
+		got, ok := req.files[name]
+		if !ok || !reflect.DeepEqual(got, want) {
+			t.Fatalf("attachment %q = %v (present=%v), want %v", name, got, ok, want)
+		}
+	}
+	if len(req.diagnosticNames) != 1 || req.diagnosticNames[0] != "diagnostics.zip" {
+		t.Fatalf("diagnostics_pack files = %v", req.diagnosticNames)
+	}
+}
+
+func TestSendRejectsInvalidAttachmentsBeforeRelay(t *testing.T) {
+	cases := []struct {
+		name string
+		mut  func(*Spec)
+		want Outcome
+	}{
+		{
+			name: "format",
+			mut: func(s *Spec) {
+				s.Screenshots = []Attachment{{Name: "说明.txt", ContentType: "text/plain", Data: []byte("x")}}
+			},
+			want: Outcome{Kind: KindInvalid, Message: "截图只支持 PNG/JPG 格式，请转换后重试"},
+		},
+		{
+			name: "size",
+			mut: func(s *Spec) {
+				s.Screenshots = []Attachment{{Name: "很大.png", ContentType: "image/png", Data: make([]byte, MaxScreenshotBytes+1)}}
+			},
+			want: Outcome{Kind: KindTooLarge, Message: "单张截图超过 10MB，请压缩后重试"},
+		},
+		{
+			name: "count",
+			mut: func(s *Spec) {
+				for i := 0; i <= MaxScreenshots; i++ {
+					s.Screenshots = append(s.Screenshots, Attachment{Name: "shot.png", ContentType: "image/png", Data: []byte("x")})
+				}
+			},
+			want: Outcome{Kind: KindInvalid, Message: "截图最多 5 张，请删掉多余的再发送"},
+		},
+		{
+			name: "diagnostics",
+			mut: func(s *Spec) {
+				s.DiagnosticsPack = &Attachment{Name: "diagnostics.zip", ContentType: "application/zip", Data: make([]byte, maxDiagnosticsPackBytes+1)}
+			},
+			want: Outcome{Kind: KindTooLarge, Message: "诊断包过大，请重新生成后再发送"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server, captured := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Number: 1})
+			defer server.Close()
+			spec := sampleSpec()
+			tc.mut(&spec)
+			got := New(Config{RelayURL: server.URL}).Send(spec)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("Send outcome = %+v, want %+v", got, tc.want)
+			}
+			if captured().calls != 0 {
+				t.Fatalf("invalid attachment should not reach relay, got %d calls", captured().calls)
+			}
+		})
 	}
 }
 

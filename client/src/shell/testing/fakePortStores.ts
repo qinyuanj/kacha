@@ -4,7 +4,7 @@ import type { ImportOptions, ImportResult } from "../../core/boardPack";
 import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, UpdatePort, UsagePort } from "../types";
 import { emptySnapshot, type UpdateSnapshot } from "../../core/update";
 import { PortError, type BoardStore, type DataRootMoveResult, type DataRootStatus, type DataRootStore, type FeatureId, type FileStore, type MediaStore, type MetaStore, type PackStore, type PortFailureKind, type UiStore } from "../port";
-import type { DiagnosticsOutcome } from "../port";
+import type { DiagnosticsOutcome, DiagnosticsPackOutcome } from "../port";
 import type { FakeBoard, FakeCalls, FakeImportOutcome, FakePortOptions } from "./fakePortTypes";
 
 /** 造一个端口失败（界面按 kind 分支）。 */
@@ -278,6 +278,10 @@ export function fakeUiStore(calls: FakeCalls, options: FakePortOptions): UiStore
     exportDiagnostics: async (): Promise<DiagnosticsOutcome> => {
       calls.exportDiagnostics += 1;
       return options.diagnosticsOutcome ?? { kind: "saved", bytes: 0 };
+    },
+    diagnosticsPack: async (): Promise<DiagnosticsPackOutcome> => {
+      calls.diagnosticsPack += 1;
+      return options.diagnosticsPackOutcome ?? { kind: "saved", name: "diagnostics.zip", contentType: "application/zip", data: "UEsDBA==" };
     },
     isEditableTarget: (target) => target instanceof Element && target.closest("input, textarea, select, [contenteditable='true']") !== null,
     installInputTakeover: () => () => undefined,

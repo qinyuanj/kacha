@@ -36,6 +36,24 @@ const (
 	MessageRejected    = "反馈被中继拒绝，请稍后再试"
 	MessageInvalid     = "反馈内容不合法，请修改后重试"
 	MessageTooLarge    = "反馈内容过大，请精简后重试"
+	MessageTooMany     = "截图最多 5 张，请删掉多余的再发送"
+	MessageFormat      = "截图只支持 PNG/JPG 格式，请转换后重试"
+	MessageBigShot     = "单张截图超过 10MB，请压缩后重试"
+	MessageBigPack     = "诊断包过大，请重新生成后再发送"
+)
+
+// Attachment 是页面经 base64 JSON 交来的附件；Go 侧直接以字节写 multipart。
+type Attachment struct {
+	Name        string `json:"name"`
+	ContentType string `json:"content_type"`
+	Data        []byte `json:"data"`
+}
+
+// 附件上限与 relay 一致：0–5 张 PNG/JPG，单张 ≤10MB；诊断包复用允许清单的 4MB 上限。
+const (
+	MaxScreenshots          = 5
+	MaxScreenshotBytes      = 10 << 20
+	maxDiagnosticsPackBytes = 4 << 20
 )
 
 // Spec 是 ShellPort.feedback.send(spec) 的 Go 侧形状。
@@ -50,6 +68,9 @@ type Spec struct {
 	Contact   string `json:"contact,omitempty"`
 	// RelayURL 是可选的本次调用覆盖；空值使用 Config.RelayURL。
 	RelayURL string `json:"relay_url,omitempty"`
+	// Screenshots 与 DiagnosticsPack 是 #207 的附件，字段名与前端 spec 一致。
+	Screenshots     []Attachment `json:"screenshots,omitempty"`
+	DiagnosticsPack *Attachment  `json:"diagnostics_pack,omitempty"`
 }
 
 // Outcome 与中继回执、前端 FeedbackOutcome 同形。
@@ -102,18 +123,21 @@ func redact(text string) string {
 // idempotencyKey 按脱敏后的内容算稳定键：相同内容在去重窗口内只开一张 issue。
 func idempotencyKey(spec Spec) string {
 	payload, _ := json.Marshal(struct {
-		Title     string `json:"title"`
-		Category  string `json:"category"`
-		Body      string `json:"body"`
-		Version   string `json:"version"`
-		Build     string `json:"build"`
-		OS        string `json:"os"`
-		BoardName string `json:"board_name"`
-		Contact   string `json:"contact,omitempty"`
+		Title           string       `json:"title"`
+		Category        string       `json:"category"`
+		Body            string       `json:"body"`
+		Version         string       `json:"version"`
+		Build           string       `json:"build"`
+		OS              string       `json:"os"`
+		BoardName       string       `json:"board_name"`
+		Contact         string       `json:"contact,omitempty"`
+		Screenshots     []Attachment `json:"screenshots,omitempty"`
+		DiagnosticsPack *Attachment  `json:"diagnostics_pack,omitempty"`
 	}{
 		Title: spec.Title, Category: spec.Category, Body: spec.Body,
 		Version: spec.Version, Build: spec.Build, OS: spec.OS,
 		BoardName: spec.BoardName, Contact: spec.Contact,
+		Screenshots: spec.Screenshots, DiagnosticsPack: spec.DiagnosticsPack,
 	})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
@@ -127,6 +151,10 @@ func (s *Service) Send(spec Spec) Outcome {
 	}
 	if relay == "" {
 		return Outcome{Kind: KindUnavailable, Message: MessageUnavailable}
+	}
+
+	if oc := validateAttachments(spec); oc != nil {
+		return *oc
 	}
 
 	safe := spec
@@ -148,6 +176,16 @@ func (s *Service) Send(spec Spec) Outcome {
 	}
 	for _, field := range fields {
 		if err := writer.WriteField(field.name, field.value); err != nil {
+			return Outcome{Kind: KindRejected, Message: MessageRejected}
+		}
+	}
+	for _, shot := range spec.Screenshots {
+		if err := writeAttachment(writer, "screenshots[]", shot); err != nil {
+			return Outcome{Kind: KindRejected, Message: MessageRejected}
+		}
+	}
+	if spec.DiagnosticsPack != nil {
+		if err := writeAttachment(writer, "diagnostics_pack", *spec.DiagnosticsPack); err != nil {
 			return Outcome{Kind: KindRejected, Message: MessageRejected}
 		}
 	}
@@ -174,6 +212,38 @@ func (s *Service) Send(spec Spec) Outcome {
 		return Outcome{Kind: KindRejected, Message: MessageRejected}
 	}
 	return mapOutcome(resp.StatusCode, relayOutcome)
+}
+
+// validateAttachments 在发请求前拦下明显不合规的附件，给出可操作的稳定文案。
+func validateAttachments(spec Spec) *Outcome {
+	if len(spec.Screenshots) > MaxScreenshots {
+		return &Outcome{Kind: KindInvalid, Message: MessageTooMany}
+	}
+	for _, shot := range spec.Screenshots {
+		if !strings.EqualFold(shot.ContentType, "image/png") && !strings.EqualFold(shot.ContentType, "image/jpeg") {
+			return &Outcome{Kind: KindInvalid, Message: MessageFormat}
+		}
+		if len(shot.Data) > MaxScreenshotBytes {
+			return &Outcome{Kind: KindTooLarge, Message: MessageBigShot}
+		}
+	}
+	if spec.DiagnosticsPack != nil && len(spec.DiagnosticsPack.Data) > maxDiagnosticsPackBytes {
+		return &Outcome{Kind: KindTooLarge, Message: MessageBigPack}
+	}
+	return nil
+}
+
+func writeAttachment(writer *multipart.Writer, field string, attachment Attachment) error {
+	name := attachment.Name
+	if strings.TrimSpace(name) == "" {
+		name = "attachment"
+	}
+	part, err := writer.CreateFormFile(field, name)
+	if err != nil {
+		return err
+	}
+	_, err = part.Write(attachment.Data)
+	return err
 }
 
 func mapOutcome(status int, relay Outcome) Outcome {

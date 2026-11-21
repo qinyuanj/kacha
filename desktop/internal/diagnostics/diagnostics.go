@@ -45,6 +45,10 @@ var (
 	sensitiveField = regexp.MustCompile(`(?i)(authorization|api[-_]?key|token|secret|password|credential)`)
 	// 鉴权头里的 Bearer 串即使字段名没命中也要遮掉。
 	bearerToken = regexp.MustCompile(`(?i)(bearer\s+)\S+`)
+	// 主机名与本机绝对路径不属于排障事实：即便调用方误写进日志也不带出去。
+	windowsPath = regexp.MustCompile(`[A-Za-z]:[\\/][^\s，。；,;]+`)
+	uncPath     = regexp.MustCompile(`\\[^\s，。；,;]+`)
+	unixPath    = regexp.MustCompile(`(^|[\s(（])(/(?:Users|home|tmp|var|mnt)/[^\s，。；,;]+)`)
 )
 
 // logFileName 是落盘脱敏日志的文件名：固定常量，不含用户内容，也不含任何秘密。
@@ -127,6 +131,12 @@ func truncate(s string, max int) string {
 // redact 对一段即将落进包里的文本做三层脱敏：
 // 当前密钥、本进程见过的旧密钥（替换或清除后仍要遮）、以及鉴权头里的 Bearer 串。
 func (s *Service) redact(text string) string {
+	if host, err := os.Hostname(); err == nil && host != "" {
+		text = strings.ReplaceAll(text, host, redacted)
+	}
+	text = windowsPath.ReplaceAllString(text, redacted)
+	text = uncPath.ReplaceAllString(text, redacted)
+	text = unixPath.ReplaceAllString(text, "1"+redacted)
 	for _, secret := range s.knownSecrets() {
 		if secret != "" {
 			text = strings.ReplaceAll(text, secret, redacted)
@@ -386,6 +396,25 @@ func (s *Service) bundle() ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// BundleOutcome 给反馈附件用：同一份允许清单和脱敏逻辑，但只在内存里返回字节，不弹另存为。
+type BundleOutcome struct {
+	OK      bool   `json:"ok"`
+	Kind    string `json:"kind"`
+	Message string `json:"message,omitempty"`
+	Name    string `json:"name"`
+	Data    []byte `json:"data"`
+	Bytes   int    `json:"bytes"`
+}
+
+// Bundle 为「附带脱敏诊断包」生成安全附件；失败给明确文案，不写本机文件。
+func (s *Service) Bundle() BundleOutcome {
+	data, err := s.bundle()
+	if err != nil {
+		return BundleOutcome{Kind: "failed", Message: "采集诊断信息失败：" + err.Error()}
+	}
+	return BundleOutcome{OK: true, Kind: "saved", Name: "diagnostics.zip", Data: data, Bytes: len(data)}
 }
 
 // Export 让用户选本机目标并写出诊断包：取消不写文件，目标不可写或采集失败都给明确结局。

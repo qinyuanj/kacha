@@ -12,6 +12,8 @@ export const FEEDBACK_SPEC: FeedbackSpec = {
   board_name: "角色设定",
   contact: "artist@example.com",
   relay_url: "http://relay.test",
+  screenshots: [{ name: "画面.png", content_type: "image/png", data: "iVBORw0KGgo=" }],
+  diagnostics_pack: { name: "diagnostics.zip", content_type: "application/zip", data: "UEsDBA==" },
 };
 
 export const FEEDBACK_SUCCESS: FeedbackOutcome = {
@@ -47,6 +49,13 @@ export function feedbackPortContract(name: string, createHarness: (outcome: Feed
         expect(typeof got.kind).toBe("string");
         expect(typeof got.message).toBe("string");
       }
+    });
+
+    it("send(spec) 把截图与诊断包附件原样交下去", async () => {
+      const harness = await createHarness(FEEDBACK_SUCCESS);
+      await harness.port.feedback.send(FEEDBACK_SPEC);
+      expect(harness.lastSpec()?.screenshots).toEqual(FEEDBACK_SPEC.screenshots);
+      expect(harness.lastSpec()?.diagnostics_pack).toEqual(FEEDBACK_SPEC.diagnostics_pack);
     });
 
     it("send(spec) 把标题、分类、正文、环境、画板名、联系方式与覆盖地址原样交下去", async () => {

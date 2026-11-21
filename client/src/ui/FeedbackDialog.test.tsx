@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { ShellProvider } from "./shell";
 import { FeedbackDialog } from "./FeedbackDialog";
+import type { FeedbackAttachment, FeedbackSpec } from "../shell/port";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -82,6 +83,73 @@ describe("反馈对话框（#206）", () => {
     expect(link.href).toBe("https://gitea.test/kacha-feedback/issues/17");
   });
 
+  it("选择截图后预览列出图片并随 Feedback 端口发送", async () => {
+    const shot = new File([new Uint8Array([137, 80, 78, 71])], "画面.png", { type: "image/png" });
+    const port = createFakePort({ pickImages: [[shot]] });
+    await show(port);
+    await setInput("正文", "截图里的错误");
+    await click("选择截图");
+    expect(container.textContent).toContain("画面.png");
+    await click("预览");
+    await click("确认发送");
+    const sent = port.calls.feedback[0] as FeedbackSpec & { screenshots?: FeedbackAttachment[] };
+    expect(sent.screenshots?.map((a) => a.name)).toEqual(["画面.png"]);
+    expect(sent.screenshots?.[0]?.data).toMatch(/^[A-Za-z0-9+/=]+$/);
+  });
+
+  it("粘贴剪贴板截图后也能附上", async () => {
+    const shot = new File([new Uint8Array([137, 80, 78, 71])], "剪贴板.png", { type: "image/png" });
+    const port = createFakePort();
+    await show(port);
+    await setInput("正文", "粘贴截图");
+    const dialog = container.querySelector("[role=dialog]")!;
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { files: [shot], items: [] } });
+    await act(async () => dialog.dispatchEvent(event));
+    await click("预览");
+    await click("确认发送");
+    const sent = port.calls.feedback[0] as FeedbackSpec & { screenshots?: FeedbackAttachment[] };
+    expect(sent.screenshots?.map((a) => a.name)).toEqual(["剪贴板.png"]);
+  });
+
+  it("非图片、超过 10MB 与超过 5 张都有可操作提示", async () => {
+    const notImage = new File(["x"], "说明.txt", { type: "text/plain" });
+    const big = new File(["x"], "很大.png", { type: "image/png" });
+    Object.defineProperty(big, "size", { value: 10 * 1024 * 1024 + 1 });
+    const many = Array.from({ length: 6 }, (_, i) => new File(["x"], `shot-${i}.png`, { type: "image/png" }));
+    const port = createFakePort({ pickImages: [[notImage], [big], many] });
+    await show(port);
+    await setInput("正文", "检查附件");
+    await click("选择截图");
+    expect(container.textContent).toContain("只支持 PNG/JPG");
+    await click("选择截图");
+    expect(container.textContent).toContain("超过 10MB");
+    await click("选择截图");
+    expect(container.textContent).toContain("最多 5 张");
+    expect(port.calls.feedback).toHaveLength(0);
+  });
+
+  it("勾选诊断包时附上脱敏包并在失败时明确报错", async () => {
+    const pack = { kind: "saved" as const, name: "diagnostics.zip", contentType: "application/zip", data: "UEsDBA==" };
+    const port = createFakePort({ diagnosticsPackOutcome: pack });
+    await show(port);
+    await setInput("正文", "需要诊断包");
+    await click("附带脱敏诊断包");
+    await click("预览");
+    await click("确认发送");
+    const sent = port.calls.feedback[0] as FeedbackSpec & { diagnostics_pack?: FeedbackAttachment };
+    expect(sent.diagnostics_pack).toEqual({ name: pack.name, content_type: pack.contentType, data: pack.data });
+
+  });
+
+  it("诊断包生成失败时明确报错且不发送", async () => {
+    const failed = createFakePort({ diagnosticsPackOutcome: { kind: "failed", message: "采集失败" } });
+    await show(failed);
+    await setInput("正文", "需要诊断包");
+    await click("附带脱敏诊断包");
+    expect(container.textContent).toContain("采集失败");
+    expect(failed.calls.feedback).toHaveLength(0);
+  });
   it("端口未配置时显示暂不可用并可重新发送", async () => {
     const port = createFakePort({ missing: ["feedback"] });
     await show(port);

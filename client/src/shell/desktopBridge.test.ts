@@ -112,7 +112,7 @@ describe("本机用量句柄（#159）", () => {
   });
 });
 
-describe("反馈句柄（#205）", () => {
+describe("反馈句柄（#205 / #207）", () => {
   it("feedback.send() 调 Feedback.Send——与 Go 侧 BindAs(\"Feedback\", ...) 一致", async () => {
     const calls: { method: string; args: unknown[] }[] = [];
     const direct = mygoBridge((method, ...args) => {
@@ -122,5 +122,23 @@ describe("反馈句柄（#205）", () => {
     });
     await expect(direct.feedback!.send(FEEDBACK_SPEC)).resolves.toEqual(FEEDBACK_SUCCESS);
     expect(calls).toEqual([{ method: "Feedback.Send", args: [FEEDBACK_SPEC] }]);
+  });
+
+  it("附件随 spec 原样交给 Feedback.Send，诊断包由 Diagnostics.Bundle 生成", async () => {
+    const calls: { method: string; args: unknown[] }[] = [];
+    const spec = { ...FEEDBACK_SPEC, screenshots: [{ name: "a.png", content_type: "image/png", data: "iVBORw==" }] };
+    const pack = { kind: "saved" as const, name: "diagnostics.zip", contentType: "application/zip", data: "UEsDBA==" };
+    const direct = mygoBridge((method, ...args) => {
+      calls.push({ method, args });
+      if (method === "Feedback.Send") return Promise.resolve(FEEDBACK_SUCCESS);
+      if (method === "Diagnostics.Bundle") return Promise.resolve(pack);
+      return Promise.reject(new Error("没实现：" + method));
+    });
+    await direct.feedback!.send(spec);
+    await expect(direct.diagnostics!.pack()).resolves.toEqual(pack);
+    expect(calls).toEqual([
+      { method: "Feedback.Send", args: [spec] },
+      { method: "Diagnostics.Bundle", args: [] },
+    ]);
   });
 });

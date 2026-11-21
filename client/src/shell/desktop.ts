@@ -7,7 +7,7 @@
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
 // 各组实现（画板、文件、元数据、媒体、画板包、用量）在 shell/desktopStores.ts（#137），这里只做接线。
-import { FEEDBACK_UNAVAILABLE, PortError, portFailureOf, type ClipboardContent, type DataRootStore, type DiagnosticsOutcome, type FeedbackOutcome, type FeedbackPort, type FeedbackSpec, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort, type UpdatePort } from "./port";
+import { FEEDBACK_UNAVAILABLE, PortError, portFailureOf, type ClipboardContent, type DataRootStore, type DiagnosticsOutcome, type DiagnosticsPackOutcome, type FeedbackOutcome, type FeedbackPort, type FeedbackSpec, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort, type UpdatePort } from "./port";
 import type { PackEntryFact, PackExportSpec } from "../core/boardPack";
 import type { BoardMeasure } from "../core/tidy";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
@@ -291,9 +291,19 @@ export interface DesktopUpdateStatus {
 }
 
 /** Go 侧诊断服务（Diagnostics 服务，#162）：脱敏日志入有界缓冲，导出交给本机对话框。 */
+export interface DesktopDiagnosticsBundle {
+  ok: boolean;
+  kind: string;
+  message?: string;
+  name: string;
+  data: string;
+  bytes: number;
+}
+
 export interface DesktopDiagnosticsBridge {
   log(kind: string, fields: Record<string, string>): void;
   export(): Promise<DesktopDiagnosticsOutcome>;
+  pack(): Promise<DesktopDiagnosticsBundle>;
 }
 
 /** 数据位置（Storage 服务，Go 侧 internal/storage）：键名与 Go 的 json tag 对齐。 */
@@ -557,6 +567,14 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     exportDiagnostics: (): Promise<DiagnosticsOutcome> => {
       if (!bridge.diagnostics) return Promise.reject(unavailable("diagnostics"));
       return bridge.diagnostics.export().then(diagnosticsOutcomeOf);
+    },
+    diagnosticsPack: async (): Promise<DiagnosticsPackOutcome> => {
+      if (!bridge.diagnostics) return Promise.reject(unavailable("diagnostics"));
+      const result = await bridge.diagnostics.pack();
+      if (!result.ok || result.kind !== "saved" || !result.data) {
+        return { kind: "failed", message: result.message || "诊断包生成失败，请重试" };
+      }
+      return { kind: "saved", name: result.name || "diagnostics.zip", contentType: "application/zip", data: result.data };
     },
     isEditableTarget,
     installInputTakeover: installPageInputTakeover,
