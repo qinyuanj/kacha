@@ -24,8 +24,8 @@ const (
 
 // windowBackgroundColor 是冷启动窗口底色：页面首绘之前窗口用的颜色。
 //
-// 两色必须与 client/src/styles/tokens.css 的 --app-bg 亮 / 暗一致（那边也有指向这里的注释），
-// 否则冷启动到首帧之间会闪一下另一种底色。light-dark(亮, 暗) 由 MyGo 按当前外观选。
+// 两色取 client/src/styles/tokens.css 的 --app-bg 亮 / 暗值：不一致时冷启动到首帧之间会闪一下
+// 另一种底色。light-dark(亮, 暗) 由 MyGo 按当前外观选。
 const windowBackgroundColor = "light-dark(#f6f7f9, #111318)"
 
 // themeSourceOf 把前端档位映射成 MyGo 主题源。

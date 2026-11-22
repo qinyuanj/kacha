@@ -296,6 +296,54 @@ describe("工作台", () => {
     const close = [...container.querySelectorAll("button")].find((button) => button.textContent === "关闭");
     await act(async () => close?.click());
   });
+
+  // 画板级动作（关闭标签页、从列表删除 / 归档）是工作台最外一层的接线：
+  // 每个动作都要真的落到壳端口上，不能只在 appActions 的单测里连过。
+  /** 壳里已有的一块画板：列表与动作都按它走。 */
+  const seededBoard = { path: "/~/a.ugcboard.json", main: null, version: null, bytes: 10 };
+
+  /** 打开画板列表，等到第一行出来。 */
+  async function openBoardList(): Promise<void> {
+    await act(async () => container.querySelector<HTMLElement>(".tab-list")?.click());
+    await vi.waitFor(() => expect(container.querySelector(".board-list-open")).not.toBeNull());
+  }
+
+  /** 确认框里的那个动作按钮（删除框里也有一个「删除」，只在这一层找）。 */
+  async function confirmIn(label: string, action: string): Promise<void> {
+    const dialog = document.querySelector(`[aria-label='${label}']`);
+    const button = [...(dialog?.querySelectorAll("button") ?? [])].find((item) => item.textContent === action);
+    await act(async () => button?.click());
+  }
+
+  it("关掉一张标签：另一块画板还在", async () => {
+    const port = createFakePort();
+    await show(port);
+    await vi.waitFor(() => expect(container.querySelectorAll(".tab").length).toBe(1));
+    await act(async () => container.querySelector<HTMLElement>(".tab-new")?.click());
+    await vi.waitFor(() => expect(container.querySelectorAll(".tab").length).toBe(2));
+    await act(async () => container.querySelector<HTMLElement>(".tab-close")?.click());
+    await vi.waitFor(() => expect(container.querySelectorAll(".tab").length).toBe(1));
+  });
+
+  it("从列表删除画板：壳端收到删除请求，列表里也不再列出它", async () => {
+    const port = createFakePort({ boards: [seededBoard] });
+    await show(port);
+    await openBoardList();
+    await act(async () => container.querySelector<HTMLElement>("[aria-label='删除「a」']")?.click());
+    await confirmIn("删除画板", "删除");
+    await vi.waitFor(() => expect(port.calls.remove.map((call) => call.path)).toEqual([seededBoard.path]));
+    await vi.waitFor(() => expect(container.querySelector("[aria-label='删除「a」']")).toBeNull());
+  });
+
+  it("从列表归档画板：壳端收到归档请求，列表里转进已归档", async () => {
+    const port = createFakePort({ boards: [seededBoard] });
+    await show(port);
+    await openBoardList();
+    await act(async () => container.querySelector<HTMLElement>("[aria-label='归档「a」']")?.click());
+    await confirmIn("归档画板", "归档");
+    await vi.waitFor(() => expect(port.calls.archive.map((call) => call.from)).toEqual([seededBoard.path]));
+    await vi.waitFor(() => expect(container.textContent).toContain("已归档"));
+  });
 });
 
 // #221：顶栏主题切换入口——即时生效、首帧镜像、通知宿主壳、写回设置，且不覆盖受保护的设置文件。
@@ -353,6 +401,7 @@ describe("主题切换", () => {
     await settingsReady();
     // 拿到设置后先同步一次真源档位（默认暗色）。
     await vi.waitFor(() => expect(port.calls.nativeTheme).toEqual(["dark"]));
+    const boardWrites = port.calls.write.length;
 
     await act(async () => option("浅色").click());
 
@@ -363,6 +412,8 @@ describe("主题切换", () => {
     expect(port.calls.nativeTheme.at(-1)).toBe("light");
     // 主题字段写进 v1 设置文件，不升格式版本。
     expect(JSON.parse(writes[0]).format_version).toBe(1);
+    // 切主题不碰画板：壳端口没有多出任何画板写入（也就不进撤销栈）。
+    expect(port.calls.write.length).toBe(boardWrites);
   });
 
   it("跟随系统：系统配色变化时界面跟着变，宿主拿到的是 system 而不是被钉死的暗色", async () => {
@@ -388,6 +439,48 @@ describe("主题切换", () => {
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(port.calls.nativeTheme.at(-1)).toBe("system");
     expect(localStorage.getItem("kacha.theme")).toBe("system");
+  });
+
+  it("设置还没读到就切换：先不动磁盘，读到设置后补写一条", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    // 把读设置停在半路：切换发生在「磁盘内容还未知」的那一段。
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const readSettings = port.core.settingsPorts.readSettings;
+    port.core.settingsPorts.readSettings = async () => {
+      await gate;
+      return readSettings();
+    };
+    const writes = recordSettingsWrites(port);
+    await show(port);
+
+    // 不等设置载入：这时界面照常可切，但不能拿默认值去覆盖用户真实的设置文件。
+    await act(async () => option("浅色").click());
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(localStorage.getItem("kacha.theme")).toBe("light");
+    expect(writes).toEqual([]);
+
+    await act(async () => release());
+
+    // 载入完成后补写一次：写的是读到的设置加上本次选的档位。
+    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["light"]));
+    expect(JSON.parse(writes[0]).format_version).toBe(1);
+  });
+
+  it("宿主拒绝同步原生主题：界面照常切换，错误不冒出来", async () => {
+    const port = createFakePort({ nativeThemeFailure: true });
+    port.board.list = async () => listing();
+    const writes = recordSettingsWrites(port);
+    await show(port);
+    await settingsReady();
+
+    await act(async () => option("浅色").click());
+
+    expect(document.documentElement.dataset.theme).toBe("light");
+    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["light"]));
+    expect(port.calls.nativeTheme.at(-1)).toBe("light");
+    expect(container.querySelector(".bar-error")).toBeNull();
   });
 
   it("设置文件版本过新：切换只在本会话生效，磁盘保持原样", async () => {

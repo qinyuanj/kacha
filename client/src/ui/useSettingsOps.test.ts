@@ -10,6 +10,7 @@ import {
   loadedState,
   saveProblemOf,
   saveSettingsState,
+  setThemeState,
 } from "./useSettingsOps";
 import { SETTINGS_UNREADABLE_TEXT, settingsNewerText } from "./settingsText";
 
@@ -155,5 +156,44 @@ describe("保存设置", () => {
     const current = { ...initialSettingsState(), loaded: true };
     const result = await saveSettingsState(ports, current, DEFAULT_SETTINGS, "sk-x");
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("切换主题", () => {
+  /** 这一组只关心写盘：其它端口用不到。 */
+  function ports(writes: string[]): SettingsPorts {
+    return { writeSettings: async (text: string) => void writes.push(text) } as unknown as SettingsPorts;
+  }
+
+  it("设置还没读到：只改内存，绝不拿默认值覆盖磁盘", async () => {
+    const writes: string[] = [];
+    const current = initialSettingsState();
+    expect(current.loaded).toBe(false);
+
+    const next = await setThemeState(ports(writes), current, "light");
+
+    expect(next.settings.theme).toBe("light");
+    expect(writes).toEqual([]);
+  });
+
+  it("设置已读到：写一条 v1 设置，只换主题", async () => {
+    const writes: string[] = [];
+    const current = { ...initialSettingsState(), loaded: true, settings: { ...DEFAULT_SETTINGS, base_url: "http://gw.example:3001" } };
+
+    await setThemeState(ports(writes), current, "system");
+
+    expect(writes).toHaveLength(1);
+    const written = JSON.parse(writes[0]);
+    expect(written.theme).toBe("system");
+    expect(written.format_version).toBe(1);
+    expect(written.base_url).toBe("http://gw.example:3001");
+  });
+
+  it("文件版本过新或读不出来：只改内存", async () => {
+    for (const file of ["newer", "unreadable"] as const) {
+      const writes: string[] = [];
+      await setThemeState(ports(writes), { ...initialSettingsState(), loaded: true, file }, "light");
+      expect(writes, file).toEqual([]);
+    }
   });
 });

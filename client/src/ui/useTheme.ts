@@ -34,6 +34,8 @@ export function useTheme(input: {
   const [choice, setChoice] = useState<ThemeChoice>(() => input.saved ?? readMirroredTheme(themeStorage()));
   // 本次会话里亲手切过的，就别被随后读到的旧设置盖回去。
   const chosenHere = useRef(false);
+  // 设置载入之前点过切换：那时不能写盘（磁盘内容还没读到），载入完成后补写一次。
+  const writeAfterLoad = useRef(false);
   // 回调放在 ref 里：调用方内联箭头函数不会让下面的副作用每次都重跑。
   const latest = useRef(input);
   latest.current = input;
@@ -56,10 +58,16 @@ export function useTheme(input: {
   useEffect(() => {
     if (saved === null) return;
     void latest.current.syncNative(choice).catch(() => undefined);
+    // 载入前点过的档位这时才写回：此前 setThemeState 只改内存，免得把没读到的真实设置冲掉。
+    if (writeAfterLoad.current) {
+      writeAfterLoad.current = false;
+      latest.current.persist(choice);
+    }
   }, [choice, saved]);
 
   const choose = useCallback((next: ThemeChoice) => {
     chosenHere.current = true;
+    if (latest.current.saved === null) writeAfterLoad.current = true;
     setChoice(next);
     mirrorTheme(themeStorage(), next);
     latest.current.persist(next);

@@ -245,10 +245,16 @@
   --media-shadow: rgb(0 0 0 / 90%);
   --guide-outline: #ff3333;
   --guide-fill: rgb(255 0 0 / 20%);
+  /* 定稿金填充上的文字色（供 #223 的定稿角标使用）：深棕 #3d2b00 在两种金上实测
+   * 浅色 #d4a017 → 5.68:1、暗色 #d9a521 → 6.04:1，都 ≥4.5:1；白字在同样的金上只有约 2.4:1。 */
+  --text-on-final: #3d2b00;
 }
 
 :root,
 :root[data-theme="dark"] {
+  /* 填充用主色（#221 补充）：带白字的小号角标要 ≥4.5:1，--accent 的 #4c8dff 只有 3.2:1，
+   * 所以另给一枚更深的填充色（白字 4.63:1）。浅色的 --accent 本身是 5.22:1，与之同值。 */
+  --accent-fill: #1f6feb;
   --success-fill-pressed: #196c2e;
   --success-border-pressed: #238636;
   --accent-soft-strong: rgb(76 141 255 / 24%);
@@ -257,6 +263,8 @@
 }
 
 :root[data-theme="light"] {
+  /* 填充用主色：浅色下 --accent 本身已有 5.22:1，不再分叉。 */
+  --accent-fill: #0969da;
   --success-fill-pressed: #176f2f;
   --success-border-pressed: #176f2f;
   --accent-soft-strong: rgb(221 244 255 / 90%);
