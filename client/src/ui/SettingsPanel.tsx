@@ -101,6 +101,54 @@ function closeOnBackdrop(event: React.MouseEvent, onClose: () => void): void {
   if (event.target === event.currentTarget) onClose();
 }
 
+/** 面板上的三个动作：测试连接、保存、清除密钥。状态归面板所有，这里只收流程与「成功才关窗」。 */
+function panelActions(input: {
+  settings: ReturnType<typeof useSettings>;
+  view: ReturnType<typeof settingsPanelView>;
+  baseUrl: string;
+  feedbackRelayUrl: string;
+  concurrencyDraft: string;
+  apiKeyDraft: string;
+  setApiKeyDraft(value: string): void;
+  setTesting(value: boolean): void;
+  setTestResult(value: ConnectionResult | null): void;
+  setSaving(value: boolean): void;
+  setError(value: string | null): void;
+  onClose(): void;
+}) {
+  const { settings, view, baseUrl, feedbackRelayUrl, concurrencyDraft, apiKeyDraft } = input;
+  const { setApiKeyDraft, setTesting, setTestResult, setSaving, setError, onClose } = input;
+
+  const test = async () => {
+    setTesting(true);
+    setTestResult(null);
+    setTestResult(await settings.testConnection(normalizeBaseUrl(baseUrl), apiKeyDraft));
+    setTesting(false);
+  };
+
+  const submit = async () => {
+    if (view.urlError || view.feedbackRelayUrlError) return;
+    setSaving(true);
+    setError(null);
+    const problem = await settings.save(settingsToSave(settings.settings, baseUrl, concurrencyDraft, feedbackRelayUrl), apiKeyDraft);
+    setSaving(false);
+    if (problem) return setError(problem);
+    onClose();
+  };
+
+  // 清除是显式动作：立即用空密钥保存，同时清掉草稿；不留下「看起来清了、盘上还有」的状态。
+  const clearKey = async () => {
+    setSaving(true);
+    setError(null);
+    const problem = await settings.save(settings.settings, "");
+    setSaving(false);
+    if (problem) return setError(problem);
+    setApiKeyDraft("");
+  };
+
+  return { test, submit, clearKey };
+}
+
 export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
   const port = useShell();
   const [baseUrl, setBaseUrl] = useState(settings.settings.base_url);
@@ -130,33 +178,20 @@ export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
     saving,
   });
   const { discovery } = settings;
-
-  const test = async () => {
-    setTesting(true);
-    setTestResult(null);
-    setTestResult(await settings.testConnection(normalizeBaseUrl(baseUrl), apiKeyDraft));
-    setTesting(false);
-  };
-
-  const submit = async () => {
-    if (view.urlError || view.feedbackRelayUrlError) return;
-    setSaving(true);
-    setError(null);
-    const problem = await settings.save(settingsToSave(settings.settings, baseUrl, concurrencyDraft, feedbackRelayUrl), apiKeyDraft);
-    setSaving(false);
-    if (problem) return setError(problem);
-    onClose();
-  };
-
-  // 清除是显式动作：立即用空密钥保存，同时清掉草稿；不留下「看起来清了、盘上还有」的状态。
-  const clearKey = async () => {
-    setSaving(true);
-    setError(null);
-    const problem = await settings.save(settings.settings, "");
-    setSaving(false);
-    if (problem) return setError(problem);
-    setApiKeyDraft("");
-  };
+  const { test, submit, clearKey } = panelActions({
+    settings,
+    view,
+    baseUrl,
+    feedbackRelayUrl,
+    concurrencyDraft,
+    apiKeyDraft,
+    setApiKeyDraft,
+    setTesting,
+    setTestResult,
+    setSaving,
+    setError,
+    onClose,
+  });
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => closeOnBackdrop(e, onClose)}>

@@ -1,4 +1,5 @@
 // 放大预览弹窗的状态（#137）：从 ui/PreviewDialog.tsx 拆出的模块级函数，便于单测。
+import { toggled } from "../core/collections";
 import type { Point01, Rect01 } from "./rects";
 import { dragHandleOf, rectsAfterDrag, regionSetting, startDrag, type Drag } from "./previewRegion";
 import type { RegionTarget } from "./PreviewDialog";
@@ -48,12 +49,7 @@ export function pointInStage(box: { left: number; top: number; width: number; he
 }
 
 /** 勾选的图层集合：点一下加上，再点一下去掉。 */
-export function toggleChecked(checked: ReadonlySet<number>, index: number): Set<number> {
-  const next = new Set(checked);
-  if (next.has(index)) next.delete(index);
-  else next.add(index);
-  return next;
-}
+export const toggleChecked = (checked: ReadonlySet<number>, index: number): Set<number> => toggled(checked, index);
 
 /** 单层显示：点同一张再点取消。 */
 export const toggleSolo = (solo: number | null, index: number): number | null => (solo === index ? null : index);
