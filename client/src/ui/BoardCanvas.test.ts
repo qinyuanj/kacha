@@ -1033,11 +1033,12 @@ describe("画布结构", () => {
       zoomable: true,
       bgColor: "var(--rf-minimap-bg)",
       maskColor: "var(--rf-minimap-mask)",
+      maskStrokeColor: "var(--rf-controls-border)",
+      maskStrokeWidth: 1,
       nodeColor: "var(--rf-minimap-node)",
     });
     // 同一个画布换主题再渲染：色彩模式跟着有效主题走，背景 token 引用不变。
-    await act(async () => root.render(createElement(ShellProvider, { port, children: createElement(BoardCanvas, makeProps({ theme: "dark" }).props) })));
-    await flush();
+    await renderCanvas({ theme: "dark" });
     expect(flowProps().colorMode).toBe("dark");
     expect(xyflow.captured.plugin.background).toMatchObject({ bgColor: "var(--rf-background)" });
   });

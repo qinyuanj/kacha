@@ -13,7 +13,17 @@ import { App } from "../App";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // 画布太重（React Flow），测试里替掉：断言工作台这一层的接线。
-vi.mock("./BoardCanvas", () => ({ BoardCanvas: () => createElement("div", { className: "canvas" }) }));
+// 替身同时记下收到的 props —— 「App 把解析后的有效主题交给画布」这条链只能在这里观测。
+const canvas = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
+vi.mock("./BoardCanvas", async () => {
+  const { createElement: h } = await import("react");
+  return {
+    BoardCanvas: (props: Record<string, unknown>) => {
+      canvas.props = props;
+      return h("div", { className: "canvas" });
+    },
+  };
+});
 
 let container: HTMLDivElement;
 let dom: ReactRoot;
@@ -439,6 +449,24 @@ describe("主题切换", () => {
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(port.calls.nativeTheme.at(-1)).toBe("system");
     expect(localStorage.getItem("kacha.theme")).toBe("system");
+  });
+
+  it("跟随系统 + 系统深色：画布拿到的是解析后的有效主题，不是档位", async () => {
+    // jsdom 没有 matchMedia：系统配色钉成深色。
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    const port = createFakePort();
+    port.core.settingsPorts.readSettings = async () => JSON.stringify({ format_version: 1, base_url: "http://gw.example:3001", theme: "system" });
+    await show(port);
+    await settingsReady();
+
+    await vi.waitFor(() => expect(canvas.props?.theme).toBe("dark"));
+    // 交给画布的是有效主题（暗色），不是三档里的 system。
+    expect(canvas.props?.theme).not.toBe("system");
   });
 
   it("设置还没读到就切换：先不动磁盘，读到设置后补写一条", async () => {
