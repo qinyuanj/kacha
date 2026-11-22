@@ -279,8 +279,10 @@
 .canvas.tidying .react-flow__node-result .node-image.node-suggest:not(.node-final) {
   opacity: 1;
 }
+/* 主色填充 + 反白文字一律用填充主色（--accent 只管文字 / 描边 / 焦点环）：暗色下 #4c8dff 配白字只有 3.20:1。
+ * 填充主色由 #221 补进 tokens；合并顺序上还没到时退回 --accent，外观与改动前一致。 */
 .node-suggest .image-badges .badge:first-child {
-  background: var(--accent);
+  background: var(--accent-fill, var(--accent));
   color: var(--text-on-accent);
   font-weight: 600;
 }
@@ -584,10 +586,12 @@ body[data-port-drag="ok"] * {
 }
 .status-running {
   background: var(--accent-soft);
-  color: var(--accent);
+  /* 柔和底上用提亮一档的主色：暗色下 --accent 只有 4.06:1，--accent-hover 到 5.17:1。 */
+  color: var(--accent-hover);
 }
 .status-failed {
-  background: var(--red);
+  /* 白字放在危险填充色上（暗色 --red 只有 3.35:1，--danger-fill 到 4.61:1）。 */
+  background: var(--danger-fill);
   color: var(--text-on-accent);
 }
 .spinner {
@@ -684,7 +688,7 @@ body[data-port-drag="ok"] * {
   min-width: 12px;
   padding: 0 3px;
   border-radius: 6px;
-  background: var(--accent);
+  background: var(--accent-fill, var(--accent));
   color: var(--text-on-accent);
   font-size: 9px;
   line-height: 12px;
