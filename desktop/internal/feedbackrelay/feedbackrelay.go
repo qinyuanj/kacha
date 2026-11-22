@@ -413,11 +413,15 @@ func (s *Service) labelMap(token string) map[string]int64 {
 		ID   int64  `json:"id"`
 		Name string `json:"name"`
 	}
-	m := map[string]int64{}
-	if err := s.doJSON(http.MethodGet, fmt.Sprintf("/repos/%s/labels?limit=50", s.cfg.OwnerRepo), token, nil, &rows); err == nil {
-		for _, r := range rows {
-			m[r.Name] = r.ID
-		}
+	if err := s.doJSON(http.MethodGet, fmt.Sprintf("/repos/%s/labels?limit=50", s.cfg.OwnerRepo), token, nil, &rows); err != nil {
+		// 拉取失败（例如坏 token 的 401）只对本次请求生效：返回空标签，绝不写缓存。
+		// 否则一次失败会被当成「该仓库没有标签」缓存十分钟，之后所有正常请求都丢标签（#215）。
+		return map[string]int64{}
+	}
+	// 只有成功结果才入缓存；成功的空结果（仓库确实没有标签）也是可信的，可以缓存。
+	m := make(map[string]int64, len(rows))
+	for _, r := range rows {
+		m[r.Name] = r.ID
 	}
 	s.mu.Lock()
 	s.labels = m

@@ -47,6 +47,8 @@ type fakeGitea struct {
 	failAsset      int
 	failPatch      int
 	authorizations []string
+	rejectToken    string
+	labelAttempts  int
 }
 
 func newFakeGitea(t *testing.T) *fakeGitea {
@@ -110,7 +112,15 @@ func newFakeGitea(t *testing.T) *fakeGitea {
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.authorizations = append(f.authorizations, r.Header.Get("Authorization"))
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/labels") {
+			f.labelAttempts++
+		}
+		reject := f.rejectToken
 		f.mu.Unlock()
+		if reject != "" && r.Header.Get("Authorization") == "token "+reject {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(f.Close)
@@ -148,6 +158,20 @@ func (f *fakeGitea) setFailPatchStatus(status int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.failPatch = status
+}
+
+// setRejectToken 让假 Gitea 对携带该 token 的任意请求返回 401，模拟真实 Gitea 的坏 token 行为。
+func (f *fakeGitea) setRejectToken(token string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rejectToken = token
+}
+
+// labelAttemptCount 返回对标签接口的请求次数（含被 401 拒绝的尝试），用于观察缓存是否生效。
+func (f *fakeGitea) labelAttemptCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.labelAttempts
 }
 
 func newSvc(f *fakeGitea, mutate func(*Config)) *Service {
@@ -697,5 +721,65 @@ func TestGiteaUnauthorizedReturnsTypedUnauthorized(t *testing.T) {
 		if strings.Contains(raw, "alice") {
 			t.Fatalf("error response contains token: %q", raw)
 		}
+	}
+}
+
+// TestLabelFetchFailureIsNotCached 覆盖 issue #215：一次坏 token 触发的标签拉取失败
+// 不能把「没有标签」写进缓存。同一进程里坏 token 之后再拿真 token 提交，issue 必须带上标签；
+// 而且标签接口会被重新请求（失败没有被缓存成命中）。
+func TestLabelFetchFailureIsNotCached(t *testing.T) {
+	f := newFakeGitea(t)
+	f.setRejectToken("bad-token")
+	h := newSvc(f, nil).Handler()
+
+	badBody, badCT := multipartBody(t, map[string]string{"category": "bug", "body": "坏 token 反馈", "gitea_token": "bad-token"}, nil, nil)
+	badStatus, badOutcome := postFeedback(t, h, badBody, badCT, "bad-token-key", "")
+	if badStatus != http.StatusUnauthorized || badOutcome.OK || badOutcome.Kind != "unauthorized" {
+		t.Fatalf("坏 token status=%d outcome=%+v", badStatus, badOutcome)
+	}
+
+	goodBody, goodCT := multipartBody(t, map[string]string{"category": "bug", "body": "好 token 反馈", "gitea_token": "good-token"}, nil, nil)
+	goodStatus, goodOutcome := postFeedback(t, h, goodBody, goodCT, "good-token-key", "")
+	if goodStatus != http.StatusOK || !goodOutcome.OK || goodOutcome.Kind != "created" {
+		t.Fatalf("好 token status=%d outcome=%+v", goodStatus, goodOutcome)
+	}
+
+	issues, _, _ := f.snapshot()
+	if len(issues) != 1 {
+		t.Fatalf("issues=%d want 1（只有好 token 那次建成）", len(issues))
+	}
+	if got := labelNames(issues[0].Labels); got != "type/bug,source/app" {
+		t.Fatalf("好 token 的 issue 标签=%q want=type/bug,source/app（失败被缓存会让这里为空）", got)
+	}
+	if got := f.labelAttemptCount(); got != 2 {
+		t.Fatalf("标签接口被请求 %d 次，want 2（坏 token 一次 + 好 token 重新拉取一次；若失败被缓存则只有 1 次）", got)
+	}
+}
+
+// TestLabelCacheSharedAcrossSuccessfulTokens 覆盖 issue #215 验收 3：成功结果按仓库共享，
+// 第二个成功请求（即便换了 token）不再重复拉取标签，且两个 issue 都带标签，互不污染。
+func TestLabelCacheSharedAcrossSuccessfulTokens(t *testing.T) {
+	f := newFakeGitea(t)
+	h := newSvc(f, nil).Handler()
+
+	for i, token := range []string{"alice", "bob"} {
+		body, ct := multipartBody(t, map[string]string{"category": "bug", "body": fmt.Sprintf("反馈 %d", i), "gitea_token": token}, nil, nil)
+		status, outcome := postFeedback(t, h, body, ct, fmt.Sprintf("shared-key-%d", i), "")
+		if status != http.StatusOK || !outcome.OK || outcome.Kind != "created" {
+			t.Fatalf("token=%s status=%d outcome=%+v", token, status, outcome)
+		}
+	}
+
+	issues, _, _ := f.snapshot()
+	if len(issues) != 2 {
+		t.Fatalf("issues=%d want 2", len(issues))
+	}
+	for i, issue := range issues {
+		if got := labelNames(issue.Labels); got != "type/bug,source/app" {
+			t.Fatalf("issue %d 标签=%q want=type/bug,source/app", i, got)
+		}
+	}
+	if got := f.labelAttemptCount(); got != 1 {
+		t.Fatalf("标签接口被请求 %d 次，want 1（第二个成功请求应命中缓存）", got)
 	}
 }
