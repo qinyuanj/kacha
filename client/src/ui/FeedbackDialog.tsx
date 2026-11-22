@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DiagnosticsPackOutcome, FeedbackAttachment, FeedbackKind, FeedbackOutcome, FeedbackSpec } from '../shell/port';
-import { FEEDBACK_CATEGORIES, FEEDBACK_FAILURE_MESSAGES as FEEDBACK_MESSAGES, FEEDBACK_MAX_SCREENSHOT_BYTES as MAX_SCREENSHOT_BYTES, FEEDBACK_MAX_SCREENSHOTS as MAX_SCREENSHOTS, feedbackCategoryLabel } from '../core/feedback';
+import { FEEDBACK_CATEGORIES, FEEDBACK_FAILURE_MESSAGES as FEEDBACK_MESSAGES, FEEDBACK_MAX_SCREENSHOT_BYTES as MAX_SCREENSHOT_BYTES, FEEDBACK_MAX_SCREENSHOTS as MAX_SCREENSHOTS, FEEDBACK_TOKEN_NOTICE, feedbackCategoryLabel } from '../core/feedback';
 import { useShell } from './shell';
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg'];
@@ -9,7 +9,8 @@ const IMAGE_TYPES = ['image/png', 'image/jpeg'];
 export function redactFeedbackText(text: string): string {
   return text
     .replace(/(?:[A-Za-z]:)?[\\/](?:[^\s:："'<>|*?]+[\\/])+[^\s:："'<>|*?]*/g, '<本地路径>')
-    .replace(/(?:sk-[A-Za-z0-9_-]+|api[_-]?key\s*[:=]\s*\S+|token\s*[:=]\s*\S+)/gi, '<已隐藏>');
+    .replace(/(?:sk-[A-Za-z0-9_-]{6,}|gh[pousr]_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,})/g, '<已隐藏>')
+    .replace(/(?:api[_-]?key|gateway[_-]?key|token|secret|authorization|bearer)\s*[:=]\s*(?:"[^"]+"|'[^']+'|\S+)/gi, '<已隐藏>');
 }
 
 /** 画板名只取最后一段，绝不把路径带进反馈。 */
@@ -89,6 +90,7 @@ interface FeedbackSpecInput {
   boardName: string;
   relayUrl?: string;
   contact: string;
+  token: string;
   screenshots: FeedbackAttachment[];
   diagnosticsPack: FeedbackAttachment | null;
 }
@@ -105,6 +107,7 @@ function feedbackSpecOf(input: FeedbackSpecInput): FeedbackSpec {
     board_name: feedbackBoardName(input.boardName),
     ...(input.relayUrl ? { relay_url: input.relayUrl } : {}),
     ...(contact ? { contact } : {}),
+    ...(input.token.trim() ? { gitea_token: input.token.trim() } : {}),
     ...(input.screenshots.length ? { screenshots: input.screenshots } : {}),
     ...(input.diagnosticsPack ? { diagnostics_pack: input.diagnosticsPack } : {}),
   };
@@ -190,6 +193,7 @@ interface FeedbackFormProps {
   category: string; setCategory: Setter<string>;
   body: string; setBody: Setter<string>;
   contact: string; setContact: Setter<string>;
+  token: string; setToken: Setter<string>; tokenVisible: boolean; setTokenVisible: Setter<boolean>;
   screenshots: FeedbackAttachment[]; setScreenshots: Setter<FeedbackAttachment[]>;
   diagnosticsPack: FeedbackAttachment | null; attachmentError: string;
   diagnosticsAvailable: boolean;
@@ -204,6 +208,11 @@ function FeedbackForm(props: FeedbackFormProps) {
       <label className='form-row'>分类<select value={props.category} onChange={(event) => props.setCategory(event.target.value)}>{FEEDBACK_CATEGORIES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>
       <label className='form-row'>正文<textarea value={props.body} onChange={(event) => props.setBody(event.target.value)} rows={8} /></label>
       <label className='form-row'>称呼或联系方式（可选，默认匿名）<input value={props.contact} placeholder='匿名' onChange={(event) => props.setContact(event.target.value)} /></label>
+      <label className='form-row'>Gitea token（仅本次提交）<input type={props.tokenVisible ? 'text' : 'password'} value={props.token} placeholder='粘贴你的 Gitea token' onChange={(event) => props.setToken(event.target.value)} /></label>
+      <div className='form-row'>
+        <button type='button' onClick={() => props.setTokenVisible(!props.tokenVisible)}>{props.tokenVisible ? '隐藏 token' : '显示 token'}</button>
+        <span className='muted small'>仅本次提交给 kacha-feedback 的中继，不保存、不进预览。</span>
+      </div>
       <div className='form-row'>
         <span>截图（可粘贴，0–5 张 PNG/JPG，单张 ≤10MB）</span>
         <button type='button' onClick={props.onPick}>选择截图</button>
@@ -256,6 +265,7 @@ function FeedbackPreview(props: FeedbackPreviewProps) {
         <p>分类：{feedbackCategoryLabel(props.spec.category)}</p>
         <p>正文：{props.spec.body}</p>
         <p className='feedback-preview-meta'>自动元数据：版本 {props.spec.version}（build {props.spec.build || '未知'}）、系统 {props.spec.os}、当前画板 {props.spec.board_name || '（未打开画板）'}；只含画板名字，不含路径或密钥。</p>
+        <p className='feedback-token-notice'>{FEEDBACK_TOKEN_NOTICE}</p>
         <p>提交者：{props.spec.contact ?? '匿名'}</p>
         <p>附件摘要：{props.attachmentSummary}。</p>
       </div>
@@ -318,6 +328,8 @@ export function FeedbackDialog({ version, build, boardName, relayUrl, onClose }:
   const [category, setCategory] = useState<string>(FEEDBACK_CATEGORIES[0].code);
   const [body, setBody] = useState('');
   const [contact, setContact] = useState('');
+  const [token, setToken] = useState('');
+  const [tokenVisible, setTokenVisible] = useState(false);
   const [screenshots, setScreenshots] = useState<FeedbackAttachment[]>([]);
   const [diagnosticsPack, setDiagnosticsPack] = useState<FeedbackAttachment | null>(null);
   const [attachmentError, setAttachmentError] = useState('');
@@ -332,7 +344,7 @@ export function FeedbackDialog({ version, build, boardName, relayUrl, onClose }:
     closeRef.current?.focus();
   }, []);
 
-  const spec = feedbackSpecOf({ title, category, body, version, build, boardName, relayUrl, contact, screenshots, diagnosticsPack });
+  const spec = feedbackSpecOf({ title, category, body, version, build, boardName, relayUrl, contact, token, screenshots, diagnosticsPack });
   const attachmentSummary = [
     screenshots.length ? `截图 ${screenshots.length} 张（${screenshots.map((a) => a.name).join('、')}）` : '截图 0 张（无）',
     `诊断包 ${diagnosticsPack?.name ?? '未附带'}`,
@@ -352,7 +364,7 @@ export function FeedbackDialog({ version, build, boardName, relayUrl, onClose }:
           <h2 id='feedback-title'>反馈</h2>
           <button ref={closeRef} className='icon-button' aria-label='关闭反馈' onClick={onClose}>✕</button>
         </div>
-        {step === 'form' && <FeedbackForm title={title} setTitle={setTitle} category={category} setCategory={setCategory} body={body} setBody={setBody} contact={contact} setContact={setContact} screenshots={screenshots} setScreenshots={setScreenshots} diagnosticsPack={diagnosticsPack} attachmentError={attachmentError} diagnosticsAvailable={!!port.features.diagnostics} onPick={() => void pick()} onToggleDiagnostics={(pressed) => void toggle(pressed)} onClose={onClose} onPreview={() => setStep('preview')} />}
+        {step === 'form' && <FeedbackForm title={title} setTitle={setTitle} category={category} setCategory={setCategory} body={body} setBody={setBody} contact={contact} setContact={setContact} screenshots={screenshots} setScreenshots={setScreenshots} diagnosticsPack={diagnosticsPack} attachmentError={attachmentError} diagnosticsAvailable={!!port.features.diagnostics} onPick={() => void pick()} onToggleDiagnostics={(pressed) => void toggle(pressed)} token={token} setToken={setToken} tokenVisible={tokenVisible} setTokenVisible={setTokenVisible} onClose={onClose} onPreview={() => setStep('preview')} />}
         {step === 'preview' && <FeedbackPreview title={title} setTitle={setTitle} category={category} setCategory={setCategory} body={body} setBody={setBody} spec={spec} attachmentSummary={attachmentSummary} sending={sending} onBack={() => setStep('form')} onClose={onClose} onSend={() => void send(spec)} />}
         {step === 'receipt' && outcome && <FeedbackReceipt outcome={outcome} copied={copied} sending={sending} onClose={onClose} onEditAgain={editAgain} onCopy={() => void copyContent()} onRetry={() => void send(submittedSpec ?? spec)} />}
       </div>

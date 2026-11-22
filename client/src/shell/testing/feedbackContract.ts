@@ -11,6 +11,7 @@ export const FEEDBACK_SPEC: FeedbackSpec = {
   os: "Windows 11",
   board_name: "角色设定",
   contact: "artist@example.com",
+  gitea_token: "user-token-from-spec",
   relay_url: "http://relay.test",
   screenshots: [{ name: "画面.png", content_type: "image/png", data: "iVBORw0KGgo=" }],
   diagnostics_pack: { name: "diagnostics.zip", content_type: "application/zip", data: "UEsDBA==" },
@@ -32,6 +33,14 @@ export const FEEDBACK_FAILURE: FeedbackOutcome = {
   url: undefined,
 };
 
+export const FEEDBACK_UNAUTHORIZED: FeedbackOutcome = {
+  ok: false,
+  kind: "unauthorized",
+  message: "Gitea token 无效或权限不足",
+  number: undefined,
+  url: undefined,
+};
+
 export interface FeedbackPortHarness {
   port: ShellPort;
   lastSpec(): FeedbackSpec | undefined;
@@ -41,7 +50,7 @@ export interface FeedbackPortHarness {
 export function feedbackPortContract(name: string, createHarness: (outcome: FeedbackOutcome) => Promise<FeedbackPortHarness> | FeedbackPortHarness): void {
   describe(`${name} 的 Feedback.send 端口契约（#205）`, () => {
     it("成功与失败都返回 ok/kind/message/number/url 同形结局", async () => {
-      for (const outcome of [FEEDBACK_SUCCESS, FEEDBACK_FAILURE]) {
+      for (const outcome of [FEEDBACK_SUCCESS, FEEDBACK_FAILURE, FEEDBACK_UNAUTHORIZED]) {
         const { port } = await createHarness(outcome);
         const got = await port.feedback.send(FEEDBACK_SPEC);
         expect(got).toEqual(outcome);

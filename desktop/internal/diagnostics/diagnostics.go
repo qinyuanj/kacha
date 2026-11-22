@@ -42,7 +42,9 @@ const (
 
 var (
 	// 字段名命中即整值替换，不依赖值长什么样。
-	sensitiveField = regexp.MustCompile(`(?i)(authorization|api[-_]?key|token|secret|password|credential)`)
+	sensitiveField   = regexp.MustCompile(`(?i)(authorization|api[-_]?key|gateway[-_]?key|access[-_]?key|private[-_]?key|token|secret|password|credential|client[-_]?secret)`)
+	standaloneSecret   = regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{6,}|gh[pousr]_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,})\b`)
+	credentialAssignment = regexp.MustCompile(`(?i)\b(api[_-]?key|gateway[_-]?key|token|secret|authorization|bearer)\s*[:=]\s*(?:"[^"]+"|'[^']+'|[^\s,;]+)`)
 	// 鉴权头里的 Bearer 串即使字段名没命中也要遮掉。
 	bearerToken = regexp.MustCompile(`(?i)(bearer\s+)\S+`)
 	// 主机名与本机绝对路径不属于排障事实：即便调用方误写进日志也不带出去。
@@ -142,6 +144,8 @@ func (s *Service) redact(text string) string {
 			text = strings.ReplaceAll(text, secret, redacted)
 		}
 	}
+	text = credentialAssignment.ReplaceAllString(text, "$1="+redacted)
+	text = standaloneSecret.ReplaceAllString(text, redacted)
 	text = bearerToken.ReplaceAllString(text, "${1}"+redacted)
 	return truncate(text, maxFieldBytes)
 }

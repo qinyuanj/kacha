@@ -110,8 +110,8 @@ func New(cfg Config) *Service {
 }
 
 var (
-	credentialAssignment = regexp.MustCompile(`(?i)\b(api[_-]?key|token|secret|authorization|bearer)\s*[:=]\s*("[^"]+"|'[^']+'|[^\s,;]+)`)
-	standaloneKey        = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{8,}\b`)
+	credentialAssignment = regexp.MustCompile(`(?i)\b(api[_-]?key|gateway[_-]?key|token|secret|authorization|bearer)\s*[:=]\s*("[^"]+"|'[^']+'|[^\s,;]+)`)
+	standaloneKey        = regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{6,}|gh[pousr]_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,})\b`)
 	windowsPath          = regexp.MustCompile(`[A-Za-z]:[\\/][^\s，。；,;]+`)
 	uncPath              = regexp.MustCompile(`\\\\[^\s，。；,;]+`)
 	unixPath             = regexp.MustCompile(`(^|[\s(（])(/(?:Users|home|tmp|var|mnt)/[^\s，。；,;]+)`)

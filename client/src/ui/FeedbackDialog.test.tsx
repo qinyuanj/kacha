@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { ShellProvider } from "./shell";
-import { FeedbackDialog } from "./FeedbackDialog";
+import { FeedbackDialog, redactFeedbackText } from "./FeedbackDialog";
 import type { FeedbackAttachment, FeedbackOutcome, FeedbackSpec } from "../shell/port";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -237,6 +237,7 @@ describe("反馈预览、结局与重试（#208）", () => {
   };
   const FAILURE_CASES = [
     { kind: "unreachable" as const, expected: "反馈中继不可达" },
+    { kind: "unauthorized" as const, expected: "Gitea token 无效或权限不足" },
     { kind: "rejected" as const, expected: "反馈被中继拒绝" },
     { kind: "invalid" as const, expected: "反馈内容不合法" },
     { kind: "too_large" as const, expected: "反馈内容过大" },
@@ -282,7 +283,7 @@ describe("反馈预览、结局与重试（#208）", () => {
     }
   });
 
-  it("失败后返回修改保留标题、分类、正文与附件", async () => {
+  it("失败后返回修改保留标题、分类、正文、附件与 token", async () => {
     const shot = new File([new Uint8Array([137, 80, 78, 71])], "画面.png", { type: "image/png" });
     const port = createFakePort({
       pickImages: [[shot]],
@@ -292,6 +293,7 @@ describe("反馈预览、结局与重试（#208）", () => {
     await show(port);
     await setInput("标题", "原样标题");
     await setInput("正文", "原样正文");
+    await setInput("Gitea token", "keep-this-token");
     await setSelectByVisibleLabel("分类", "建议");
     await click("选择截图");
     await click("附带脱敏诊断包");
@@ -306,12 +308,13 @@ describe("反馈预览、结局与重试（#208）", () => {
     expect((await field("标题") as HTMLInputElement).value).toBe("原样标题");
     expect((await field("分类") as HTMLSelectElement).value).toBe("suggestion");
     expect((await field("正文") as HTMLTextAreaElement).value).toBe("原样正文");
+    expect((await field("Gitea token") as HTMLInputElement).value).toBe("keep-this-token");
     expect(container.textContent).toContain("画面.png");
     expect(findButton("取消附带脱敏诊断包")).not.toBeUndefined();
     expect(port.calls.feedback).toHaveLength(1);
   });
 
-  it("重试直接复用首次提交的完整内容", async () => {
+  it("重试直接复用首次提交的完整内容和 token", async () => {
     let call = 0;
     const port = createFakePort({
       feedbackSend: async () => (call++ === 0 ? { ok: false, kind: "unreachable", message: "不可达" } : SUCCESS),
@@ -319,9 +322,11 @@ describe("反馈预览、结局与重试（#208）", () => {
     await show(port);
     await setInput("标题", "重试标题");
     await setInput("正文", "重试正文");
+    await setInput("Gitea token", "retry-token");
     await click("预览");
     await click("确认发送");
     expect(port.calls.feedback).toHaveLength(1);
+    expect(port.calls.feedback[0].gitea_token).toBe("retry-token");
 
     await click("重试");
     expect(port.calls.feedback).toHaveLength(2);
@@ -329,11 +334,12 @@ describe("反馈预览、结局与重试（#208）", () => {
     expect(byText<HTMLAnchorElement>("a", "#17").href).toBe(SUCCESS.url);
   });
 
-  it("失败后一键复制脱敏内容并禁用已复制按钮", async () => {
+  it("失败后一键复制脱敏内容、绝不复制 token 并禁用已复制按钮", async () => {
     const port = createFakePort({ feedbackOutcome: { ok: false, kind: "unreachable", message: "不可达" } });
     await show(port);
     await setInput("标题", "可复制标题");
-    await setInput("正文", "打开 C:/secret/项目 失败，api_key: sk-abcdef");
+    await setInput("正文", "打开 C:/secret/项目 失败，api_key: user-api-key-abc");
+    await setInput("Gitea token", "copy-must-not-include-this");
     await click("预览");
     await click("确认发送");
     await click("复制内容");
@@ -343,7 +349,8 @@ describe("反馈预览、结局与重试（#208）", () => {
     expect(copied).toContain("可复制标题");
     expect(copied).toContain("<本地路径>");
     expect(copied).not.toContain("C:/secret/项目");
-    expect(copied).not.toContain("sk-abcdef");
+    expect(copied).not.toContain("user-api-key-abc");
+    expect(copied).not.toContain("copy-must-not-include-this");
     expect(findButton("已复制内容")?.disabled).toBe(true);
   });
 
@@ -375,5 +382,38 @@ describe("反馈预览、结局与重试（#208）", () => {
     await click("关闭");
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(port.calls.feedback).toHaveLength(1);
+  });
+});
+
+describe("用户自带 Gitea token（#213）", () => {
+  it("token 输入默认隐藏，可切换显示", async () => {
+    await show(createFakePort());
+    const token = await field("Gitea token") as HTMLInputElement;
+    expect(token.type).toBe("password");
+    await click("显示 token");
+    expect((await field("Gitea token") as HTMLInputElement).type).toBe("text");
+    await click("隐藏 token");
+    expect((await field("Gitea token") as HTMLInputElement).type).toBe("password");
+  });
+
+  it("预览只说明 token 去向，绝不显示 token 值", async () => {
+    const port = createFakePort();
+    await show(port);
+    await setInput("正文", "带 token 的反馈");
+    await setInput("Gitea token", "preview-must-not-show-this");
+    await click("预览");
+    expect(container.textContent).toContain("使用你的 Gitea token 提交到 kacha-feedback");
+    expect(container.textContent).not.toContain("preview-must-not-show-this");
+    await click("确认发送");
+    expect(port.calls.feedback[0].gitea_token).toBe("preview-must-not-show-this");
+    expect(container.textContent).not.toContain("preview-must-not-show-this");
+  });
+
+  it("正文脱敏隐藏 token、API key、gateway key 与常见密钥模式", () => {
+    const redacted = redactFeedbackText("token=abc123 api_key=def456 gateway_key=ghi789 sk-synthetic5678 ghp_synthetic1234567890");
+    for (const secret of ["abc123", "def456", "ghi789", "sk-synthetic5678", "ghp_synthetic1234567890"]) {
+      expect(redacted).not.toContain(secret);
+    }
+    expect(redacted).toContain("<已隐藏>");
   });
 });

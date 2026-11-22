@@ -28,3 +28,6 @@ export const FEEDBACK_FAILURE_MESSAGES = {
   unavailable: "反馈暂不可用：未配置中继地址",
 } as const;
 
+/** 预览只说明 token 的去向，不展示 token 值。 */
+export const FEEDBACK_TOKEN_NOTICE = "使用你的 Gitea token 提交到 kacha-feedback";
+
