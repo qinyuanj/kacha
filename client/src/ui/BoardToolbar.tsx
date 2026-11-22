@@ -71,10 +71,10 @@ export function BoardToolbar({
         </span>
       </div>
       <div className="toolbar-group">
-        <HoverButton onClick={onUndo} disabled={disabled || !undoLabel} info={hint(undoHint(undoLabel))} aria-label="撤销">
+        <HoverButton className="toolbar-icon" onClick={onUndo} disabled={disabled || !undoLabel} info={hint(undoHint(undoLabel))} aria-label="撤销">
           ↶
         </HoverButton>
-        <HoverButton onClick={onRedo} disabled={disabled || !redoLabel} info={hint(redoHint(redoLabel))} aria-label="重做">
+        <HoverButton className="toolbar-icon" onClick={onRedo} disabled={disabled || !redoLabel} info={hint(redoHint(redoLabel))} aria-label="重做">
           ↷
         </HoverButton>
       </div>
