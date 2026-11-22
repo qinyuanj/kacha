@@ -36,7 +36,7 @@ export function UsageLimitRow({ limitBytes, onSaved }: Props) {
   return (
     <>
       <label className="form-row">
-        <span>容量提醒阈值（MiB）</span>
+        <span className="form-row-label">容量提醒阈值（MiB）</span>
         <input data-testid="usage-limit-input" type="number" min="0" step="0.1" value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={false} />
         <button data-testid="usage-limit-save" onClick={() => void save()} disabled={busy}>保存阈值</button>
       </label>

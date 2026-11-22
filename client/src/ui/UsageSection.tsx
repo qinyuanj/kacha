@@ -31,8 +31,8 @@ function UnreferencedRow({ usage, busy, onClean }: { usage: Usage; busy: boolean
   return (
     <>
       <div className="form-row">
-        <span>未引用任务目录</span>
-        <span className="muted small" data-testid="usage-unreferenced-summary">
+        <span className="form-row-label">未引用任务目录</span>
+        <span className="form-row-hint" data-testid="usage-unreferenced-summary">
           {unreferencedSummary(dirs)}
         </span>
         <button onClick={onClean} disabled={!canClean(usage, busy)}>
@@ -140,7 +140,7 @@ export function UsageSection() {
 function UsageTotal({ usage }: { usage: Usage | null }) {
   return (
     <div className="form-row">
-      <span>用量</span>
+      <span className="form-row-label">用量</span>
       {usage ? (
         <span data-testid="usage-total" className="mono">
           {formatBytes(usage.total_bytes)}
