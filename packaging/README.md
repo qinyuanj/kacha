@@ -43,7 +43,7 @@ python packaging\deploy_feedbackrelay.py `
 
 默认服务名是 `kacha-feedbackrelay`，默认监听 `:3005`；`--service-name` 可按需覆盖。脚本只把 `FEEDBACK_GITEA_URL`、`FEEDBACK_GITEA_REPO`、`FEEDBACK_ADDR` 写进服务的 nssm 环境；服务端不配置统一写 token，提交者 token 只在单次反馈请求中传递。失败信息不回显命令输出，测试用假 runner，不接触真实服务。
 
-需要人工交接的是：① `lzxsvn` 上能放置发行资产、安装并启动 Windows 服务的账户与 `nssm.exe`；② 用户自行提供对 `kacha-feedback` 仓库有建 issue、写评论/标签与上传附件权限的 Gitea token，服务端不持有统一写 token。真实 token、密码、凭据文件不写入仓库、更新说明、测试夹具或客户端产物。实际安装、`GET /healthz`、发一条验证反馈与重启后复查由 #210 的人工验收完成。
+需要人工交接的是：① `lzxsvn` 上能放置发行资产、安装并启动 Windows 服务的账户与 `nssm.exe`；② 用户自带对 `kacha-feedback` 仓库有建 issue、写评论/标签与上传附件权限的 Gitea token；服务端不持有统一写 token。真实 token、密码、凭据文件不写入仓库、更新说明、测试夹具或客户端产物。实际安装、`GET /healthz`、发一条验证反馈与重启后复查由 #210 的人工验收完成。
 
 客户端内置默认中继地址 `http://lzxsvn:3005`；高级设置的「反馈中继地址」可覆盖，留空或无效值回退默认值，有效覆盖值优先生效。接线层用 `resolveFeedbackRelayAddress(settings)` 取得该地址，并把结果放进每次 `Feedback.Send` 的 `relay_url`；Go 服务再用本次覆盖优先于自身默认配置。
 
