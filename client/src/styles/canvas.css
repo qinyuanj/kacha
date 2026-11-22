@@ -2,6 +2,53 @@
   position: absolute;
   inset: 0;
 }
+
+/* ---- React Flow 覆盖层（#223）：点阵背景、缩放控制条、迷你地图、框选、缩放手柄 ----
+ * xyflow 自己的 .dark / .light 只提供内置默认值；这里把 tokens 的 --rf-* 映射到它读的同一批变量上，
+ * 于是两套主题都只由 data-theme 决定（colorMode 只负责让 xyflow 选对内置默认）。
+ * 颜色一律引用变量，域模块不写具体色号。 */
+.canvas .react-flow {
+  --xy-background-color: var(--rf-background);
+  --xy-background-pattern-color: var(--rf-dot);
+  --xy-edge-stroke-default: var(--rf-edge-default);
+  --xy-connectionline-stroke-default: var(--rf-edge-default);
+  --xy-selection-background-color: var(--rf-selection-bg);
+  --xy-selection-border: 1px dashed var(--rf-selection-border);
+  --xy-controls-button-background-color: var(--rf-controls-bg);
+  --xy-controls-button-background-color-hover: var(--control-hover);
+  --xy-controls-button-color: var(--rf-controls-icon);
+  --xy-controls-button-color-hover: var(--text-1);
+  --xy-controls-button-border-color: var(--rf-controls-border);
+  --xy-controls-box-shadow: var(--shadow-2);
+  --xy-minimap-background-color: var(--rf-minimap-bg);
+  --xy-minimap-mask-background-color: var(--rf-minimap-mask);
+  --xy-minimap-node-background-color: var(--rf-minimap-node);
+  --xy-attribution-background-color: var(--rf-attribution-bg);
+  --xy-resize-background-color: var(--accent);
+}
+.react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--rf-controls-border);
+  border-radius: var(--radius-md);
+}
+/* 外框已经有一条边线：最后一个按钮不再重复画底线。 */
+.react-flow__controls-button:last-child {
+  border-bottom: none;
+}
+.react-flow__minimap {
+  overflow: hidden;
+  border: 1px solid var(--rf-controls-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+}
+.react-flow__selection,
+.react-flow__nodesselection-rect {
+  border-radius: var(--radius-xs);
+}
+.react-flow__resize-control.handle {
+  border-color: var(--surface);
+  box-shadow: var(--shadow-3);
+}
 .node {
   position: relative;
   width: 260px;
@@ -10,20 +57,34 @@
   border-radius: 8px;
   padding: 8px;
   box-shadow: var(--shadow-1);
+  /* 卡片自己不裁剪：端口手柄、参数浮层与比例下拉列表要露到卡片外（#223）。 */
+  overflow: visible;
 }
 .react-flow__node.selected .node {
   outline: 2px solid var(--accent-strong);
 }
+/* 标题栏贴齐卡片顶部并独立处理顶部圆角：正文靠 .node 的 8px 内边距，标题栏用负外边距铺满整行。 */
 .node-title {
+  margin: -8px -8px 8px;
+  padding: 5px 8px;
+  border-radius: 7px 7px 0 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--app-chrome-soft);
   font-weight: 600;
-  margin-bottom: 6px;
+}
+/* 警告 / 错误态是 2px 边框，标题栏少让 1px 才不压在边框上。 */
+.node-warn .node-title,
+.node-error .node-title {
+  margin: -7px -7px 8px;
 }
 .node-error {
   border: 2px solid var(--red);
+  box-shadow: var(--shadow-2);
 }
 .node-warn {
   border: 2px solid var(--yellow);
   background: var(--warning-soft-weak);
+  box-shadow: var(--shadow-2);
 }
 .prompt-text {
   width: 100%;
@@ -167,9 +228,40 @@
 .stage-count {
   color: var(--text-2);
 }
-.stage-header button {
-  padding: 0 6px;
+/* 阶段标题栏与整理条里的按钮：画布域自己的一套外观（base 只给了 primary / danger 变体）。 */
+.stage-header button,
+.tidy-bar button:not(.primary) {
+  padding: 1px 8px;
   font-size: 12px;
+  color: var(--text-1);
+  background: var(--control-bg);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.stage-header button:hover:not(:disabled),
+.tidy-bar button:not(.primary):hover:not(:disabled) {
+  background: var(--control-hover);
+  border-color: var(--border-3);
+}
+.stage-header button:disabled,
+.tidy-bar button:not(.primary):disabled {
+  color: var(--text-3);
+  background: var(--surface-sunken);
+  border-color: var(--border-1);
+  cursor: default;
+}
+.stage-name-input {
+  min-width: 96px;
+  padding: 1px 4px;
+  font-weight: 600;
+}
+/* 整理态两个动作的色调分开：建议保留跟主色（正向），收掉未定稿跟警告色（会删结果）。 */
+.stage-header button.stage-keep {
+  color: var(--accent);
+}
+.stage-header button.stage-prune {
+  color: var(--warning-text);
 }
 /* 整理模式（#92）：阶段框加深、标出体量；未定稿结果半透明；顶部浮着整理前后对比。 */
 .stage-frame.tidying {
@@ -187,8 +279,10 @@
 .canvas.tidying .react-flow__node-result .node-image.node-suggest:not(.node-final) {
   opacity: 1;
 }
+/* 主色填充 + 反白文字一律用填充主色（--accent 只管文字 / 描边 / 焦点环）：暗色下 #4c8dff 配白字只有 3.20:1。
+ * 填充主色由 #221 补进 tokens；合并顺序上还没到时退回 --accent，外观与改动前一致。 */
 .node-suggest .image-badges .badge:first-child {
-  background: var(--accent);
+  background: var(--accent-fill, var(--accent));
   color: var(--text-on-accent);
   font-weight: 600;
 }
@@ -492,10 +586,12 @@ body[data-port-drag="ok"] * {
 }
 .status-running {
   background: var(--accent-soft);
-  color: var(--accent);
+  /* 柔和底上用提亮一档的主色：暗色下 --accent 只有 4.06:1，--accent-hover 到 5.17:1。 */
+  color: var(--accent-hover);
 }
 .status-failed {
-  background: var(--red);
+  /* 白字放在危险填充色上（暗色 --red 只有 3.35:1，--danger-fill 到 4.61:1）。 */
+  background: var(--danger-fill);
   color: var(--text-on-accent);
 }
 .spinner {
@@ -526,6 +622,8 @@ body[data-port-drag="ok"] * {
   justify-content: flex-end;
   gap: 6px;
   margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
 }
 .fork-choice {
   display: flex;
@@ -590,7 +688,7 @@ body[data-port-drag="ok"] * {
   min-width: 12px;
   padding: 0 3px;
   border-radius: 6px;
-  background: var(--accent);
+  background: var(--accent-fill, var(--accent));
   color: var(--text-on-accent);
   font-size: 9px;
   line-height: 12px;

@@ -22,6 +22,7 @@ import { lineage } from "../core/iterate";
 import { connectablePorts, type DragFrom, type DragState } from "../core/ports";
 import type { NodeRunState } from "../core/runner";
 import type { Discovery } from "../core/settings";
+import type { EffectiveTheme } from "../core/theme";
 import { canvasBoardActions } from "./canvasBoardActions";
 import { canvasCommands, canvasDragCreate, type CanvasCommandDeps } from "./canvasCommands";
 import { addImportedReferences, importImages, importPastedImages } from "./canvasDrop";
@@ -50,6 +51,7 @@ import { canvasNodes } from "./canvasNodes";
 import { CanvasActionBar, CanvasOverlays } from "./canvasOverlays";
 import { useCanvasPaste } from "./canvasPaste";
 import { canvasClassName, posOf } from "./canvasPoint";
+import { canvasThemeProps } from "./canvasTheme";
 import { CanvasToolbar } from "./canvasToolbar";
 import { BoardContext, primeImageInfo, type BoardActions } from "./context";
 import { useShell } from "./shell";
@@ -119,6 +121,8 @@ interface Props {
   readOnly?: boolean;
   /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框）：粘贴放行给它们，不落到背后的画板（#96）。 */
   modalOpen?: boolean;
+  /** 当前有效主题（暗色 / 浅色）：画布点阵背景、迷你地图与 React Flow 色彩模式跟着它走（#223）。 */
+  theme: EffectiveTheme;
 }
 
 export function BoardCanvas({
@@ -149,6 +153,7 @@ export function BoardCanvas({
   onMoveOutStage,
   readOnly = false,
   modalOpen = false,
+  theme,
 }: Props) {
   const port = useShell();
   const flow = useReactFlow();
@@ -289,6 +294,7 @@ export function BoardCanvas({
   useEffect(() => handlers.focusNode(focus), [focus]);
 
   const menuView = menuViewFor(readOnly);
+  const canvasTheme = canvasThemeProps(theme);
   const barView = actionBarView({ hovered: actionBar.hovered, nodes: board.nodes, menuOpen: overlays.menu !== null, menuView, facts: menuFacts(selectedNodes) });
 
   return (
@@ -325,6 +331,7 @@ export function BoardCanvas({
             />
             <ReactFlow
               {...nav.flowProps}
+              colorMode={canvasTheme.colorMode}
               nodes={nodes}
               edges={edges}
               nodeTypes={nodeTypes}
@@ -360,7 +367,7 @@ export function BoardCanvas({
               onEdgeMouseLeave={(_, fe) => hover.controller.leave(`edge:${fe.id}`)}
               minZoom={0.1}
             >
-              <Background />
+              <Background {...canvasTheme.background} />
               <StageLayer
                 readOnly={readOnly}
                 boxes={stageView.boxes}
@@ -371,7 +378,7 @@ export function BoardCanvas({
                 tidy={stageView.stageTidy}
               />
               <Controls />
-              <MiniMap pannable zoomable />
+              <MiniMap {...canvasTheme.minimap} />
               <CanvasActionBar
                 present={barView.present}
                 nodes={barView.nodes}

@@ -271,3 +271,8 @@
   --border-subtle: rgb(140 149 159 / 6%);
   --warning-strong: #bc4c00;
 }
+
+/* ---- 补充（#223 画布）：迷你地图里的节点方块色，跟三级边框走 ---- */
+:root {
+  --rf-minimap-node: var(--border-3);
+}
