@@ -22,12 +22,14 @@ describe("画布主题接线", () => {
     expect(canvasThemeProps("light").background).toEqual(canvasThemeProps("dark").background);
   });
 
-  it("迷你地图可平移缩放，底色、遮罩与节点方块色按 token 取", () => {
+  it("迷你地图可平移缩放、视口遮罩带描边，底色、遮罩与节点方块色按 token 取", () => {
     expect(canvasThemeProps("light").minimap).toEqual({
       pannable: true,
       zoomable: true,
       bgColor: "var(--rf-minimap-bg)",
       maskColor: "var(--rf-minimap-mask)",
+      maskStrokeColor: "var(--rf-controls-border)",
+      maskStrokeWidth: 1,
       nodeColor: "var(--rf-minimap-node)",
     });
   });

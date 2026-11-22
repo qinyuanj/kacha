@@ -19,6 +19,8 @@ export interface CanvasMinimapProps {
   zoomable: true;
   bgColor: string;
   maskColor: string;
+  maskStrokeColor: string;
+  maskStrokeWidth: number;
   nodeColor: string;
 }
 
@@ -43,6 +45,8 @@ const MINIMAP: CanvasMinimapProps = {
   zoomable: true,
   bgColor: "var(--rf-minimap-bg)",
   maskColor: "var(--rf-minimap-mask)",
+  maskStrokeColor: "var(--rf-controls-border)",
+  maskStrokeWidth: 1,
   nodeColor: "var(--rf-minimap-node)",
 };
 
