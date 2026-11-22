@@ -83,11 +83,11 @@
   border-radius: 6px 6px 0 0;
 }
 .node-error {
-  border: 2px solid var(--red);
+  border: 2px solid var(--danger);
   box-shadow: var(--shadow-2);
 }
 .node-warn {
-  border: 2px solid var(--yellow);
+  border: 2px solid var(--warning);
   background: var(--warning-soft-weak);
   box-shadow: var(--shadow-2);
 }
@@ -170,7 +170,7 @@
 }
 /* 参考图警告态：红框，原因进悬浮信息。 */
 .node.node-image.node-warn {
-  border: 2px solid var(--red);
+  border: 2px solid var(--danger);
   background: var(--surface);
 }
 .image-badges {
@@ -287,9 +287,9 @@
   opacity: 1;
 }
 /* 主色填充 + 反白文字一律用填充主色（--accent 只管文字 / 描边 / 焦点环）：暗色下 #4c8dff 配白字只有 3.20:1。
- * 填充主色由 #221 补进 tokens；合并顺序上还没到时退回 --accent，外观与改动前一致。 */
+ * 填充主色见 tokens.css 的 --accent-fill：暗色 #1f6feb 配白字 4.63:1、浅色 #0969da 配白字 5.19:1。 */
 .node-suggest .image-badges .badge:first-child {
-  background: var(--accent-fill, var(--accent));
+  background: var(--accent-fill);
   color: var(--text-on-accent);
   font-weight: 600;
 }
@@ -324,7 +324,7 @@
   height: 100px;
   display: grid;
   place-items: center;
-  color: var(--red);
+  color: var(--danger);
 }
 .badge {
   display: inline-block;
@@ -345,7 +345,7 @@
   color: var(--warning-text);
 }
 .error-list {
-  color: var(--red);
+  color: var(--danger);
 }
 .hint-list {
   color: var(--text-2);
@@ -495,7 +495,7 @@ body[data-port-drag="ok"] * {
 }
 .port-required .react-flow__handle.port::after {
   background: var(--surface);
-  border: 2px solid var(--red);
+  border: 2px solid var(--danger);
   box-shadow: none;
 }
 /* 拖线中：合法端口放大发光，悬停其上再放大一档；非法端口去强调（节点、连线由 .dimmed 去强调）。 */
@@ -597,7 +597,7 @@ body[data-port-drag="ok"] * {
   color: var(--accent-hover);
 }
 .status-failed {
-  /* 白字放在危险填充色上（暗色 --red 只有 3.35:1，--danger-fill 到 4.61:1）。 */
+  /* 白字放在危险填充色上（暗色 --danger 只有 3.35:1，--danger-fill 到 4.61:1）。 */
   background: var(--danger-fill);
   color: var(--text-on-accent);
 }
@@ -622,7 +622,7 @@ body[data-port-drag="ok"] * {
 }
 .port-unreferenced {
   background: var(--warning-soft);
-  box-shadow: inset 3px 0 0 var(--yellow);
+  box-shadow: inset 3px 0 0 var(--warning);
 }
 .task-actions {
   display: flex;
@@ -695,7 +695,7 @@ body[data-port-drag="ok"] * {
   min-width: 12px;
   padding: 0 3px;
   border-radius: 6px;
-  background: var(--accent-fill, var(--accent));
+  background: var(--accent-fill);
   color: var(--text-on-accent);
   font-size: 9px;
   line-height: 12px;
@@ -725,7 +725,7 @@ body[data-port-drag="ok"] * {
   padding: 0 4px;
   border-radius: 4px;
   background: var(--warning-soft);
-  border: 1px solid var(--yellow);
+  border: 1px solid var(--warning);
 }
 .context-menu {
   position: fixed;
@@ -839,7 +839,7 @@ body[data-port-drag="ok"] * {
   overflow: hidden;
 }
 .hover-error {
-  color: var(--red);
+  color: var(--danger);
 }
 .hover-warn {
   color: var(--warning-text);
@@ -883,8 +883,8 @@ body[data-port-drag="ok"] * {
 }
 .ratio-unsupported,
 .ratio-unsupported input {
-  color: var(--red);
-  border-color: var(--red);
+  color: var(--danger);
+  border-color: var(--danger);
 }
 .ratio-combo-list {
   position: absolute;

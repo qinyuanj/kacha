@@ -44,11 +44,6 @@ func themeSourceOf(choice string) mygo.ThemeSource {
 	}
 }
 
-// applyTheme 把档位转给注入的 apply：生产是 mygo.Theme.SetSource，测试里是记录函数（不需要窗口）。
-func applyTheme(apply func(mygo.ThemeSource), choice string) {
-	apply(themeSourceOf(choice))
-}
-
 // settingsPath 返回 settings.json 在数据根里的位置（localstore 的元数据目录）。
 func settingsPath(root string) string {
 	return filepath.Join(root, localstore.MetaDir, "settings.json")

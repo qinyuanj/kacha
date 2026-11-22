@@ -208,13 +208,11 @@
 
 /* ---- 补充（#221 之前被引用却未定义、以及历史别名的落点）---- */
 
-/* 历史变量名继续可用：域模块里已有的 var(--red/--yellow/--green/--border/--muted) 不再各自兜底。 */
+/* 历史变量名继续可用：域模块里已有的 var(--border/--muted) 不再各自兜底。
+ * 历史红 / 黄 / 绿别名已全部迁到语义名 --danger / --warning / --success，别再加回来。 */
 :root,
 :root[data-theme="dark"],
 :root[data-theme="light"] {
-  --red: var(--danger);
-  --yellow: var(--warning);
-  --green: var(--success);
   --border: var(--border-1);
   /* 之前三处引用未定义：--muted（参考图说明）、--accent / --danger（更新入口）。 */
   --muted: var(--text-3);

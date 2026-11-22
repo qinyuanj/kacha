@@ -21,5 +21,5 @@ func (s shellService) Info() (shellapp.Info, error) {
 // 页面的主题已经在本页生效，这条通知只影响原生窗口外观：非法档位兜底为默认暗色，不 panic、
 // 不往回抛错（前端的调用方也不因此阻塞切换）。
 func (s shellService) SetTheme(choice string) {
-	applyTheme(mygo.Theme.SetSource, choice)
+	mygo.Theme.SetSource(themeSourceOf(choice))
 }

@@ -32,10 +32,8 @@ export function useTheme(input: {
 }): ThemeControl {
   const [systemPrefersDark, setSystemPrefersDark] = useState(() => colorSchemeQuery()?.matches ?? false);
   const [choice, setChoice] = useState<ThemeChoice>(() => input.saved ?? readMirroredTheme(themeStorage()));
-  // 本次会话里亲手切过的，就别被随后读到的旧设置盖回去。
+  // 本次会话里亲手切过的：既不被随后读到的旧设置盖回去，也只有它才是值得写回设置的值。
   const chosenHere = useRef(false);
-  // 设置载入之前点过切换：那时不能写盘（磁盘内容还没读到），载入完成后补写一次。
-  const writeAfterLoad = useRef(false);
   // 回调放在 ref 里：调用方内联箭头函数不会让下面的副作用每次都重跑。
   const latest = useRef(input);
   latest.current = input;
@@ -54,23 +52,32 @@ export function useTheme(input: {
     applyTheme(document.documentElement, effective);
   }, [effective]);
 
+  // 首帧镜像：当前档位一确定就写一份。用户点选与「设置载入后应用」都走这一处，格式天然一致。
+  // 用户没选过、设置也还没到时什么都不写：那时的档位只是默认值，写下去会在迁移场景里
+  // 留下与设置冲突的猜测（首帧反而按猜错的那一档画）。
+  useEffect(() => {
+    if (saved === null && !chosenHere.current) return;
+    mirrorTheme(themeStorage(), choice);
+  }, [choice, saved]);
+
+  // 持久化只有这一条路径：只写本次会话亲手选过、且与设置真源不一致的档位。
+  // 没选过时 saved 是载入的真相（或还没载入）：把内存里的值抄回去毫无意义，还会和上面那条
+  // 「载入后以设置为准」的同步互相打架。能不能真正落盘再由 setThemeState 的「已载入 / 不覆盖受保护文件」判定。
+  useEffect(() => {
+    if (!chosenHere.current || saved === null || choice === saved) return;
+    latest.current.persist(choice);
+  }, [choice, saved]);
+
   // 拿到设置后（以及每次切换）通知宿主壳一次：覆盖「设置读到前只按镜像显示」的那一段。
   useEffect(() => {
     if (saved === null) return;
     void latest.current.syncNative(choice).catch(() => undefined);
-    // 载入前点过的档位这时才写回：此前 setThemeState 只改内存，免得把没读到的真实设置冲掉。
-    if (writeAfterLoad.current) {
-      writeAfterLoad.current = false;
-      latest.current.persist(choice);
-    }
   }, [choice, saved]);
 
   const choose = useCallback((next: ThemeChoice) => {
+    // 只改内存：镜像、宿主壳与写盘都由上面三个「档位变了」的副作用统一处理。
     chosenHere.current = true;
-    if (latest.current.saved === null) writeAfterLoad.current = true;
     setChoice(next);
-    mirrorTheme(themeStorage(), next);
-    latest.current.persist(next);
   }, []);
 
   return { choice, effective, choose };

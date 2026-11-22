@@ -34,24 +34,6 @@ func TestThemeSourceOf(t *testing.T) {
 	}
 }
 
-// applyTheme 只转一次：非法档位也走同一个兜底，不抛错、不跳过。
-func TestApplyThemePassesMappedSource(t *testing.T) {
-	var got []mygo.ThemeSource
-	apply := func(source mygo.ThemeSource) { got = append(got, source) }
-	for _, choice := range []string{"dark", "light", "system", "bogus"} {
-		applyTheme(apply, choice)
-	}
-	want := []mygo.ThemeSource{mygo.ThemeDark, mygo.ThemeLight, mygo.ThemeSystem, mygo.ThemeDark}
-	if len(got) != len(want) {
-		t.Fatalf("apply 调用次数 = %d，想要 %d", len(got), len(want))
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("第 %d 次 apply = %q，想要 %q", i+1, got[i], want[i])
-		}
-	}
-}
-
 // 冷启动底色必须是 light-dark(亮, 暗) 形式：MyGo 按当前外观在两色之间选。
 func TestWindowBackgroundColorIsLightDark(t *testing.T) {
 	if !strings.HasPrefix(windowBackgroundColor, "light-dark(") || !strings.HasSuffix(windowBackgroundColor, ")") {
@@ -111,5 +93,54 @@ func TestStartupThemeReadsOnlyThemeField(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// tokensAppBg 取 client/src/styles/tokens.css 里某个主题块的 --app-bg 值。
+//
+// 同一份 tokens.css 里 :root[data-theme="light"] 出现多次（还有只覆盖个别变量的补充小节），
+// 所以按块扫，取第一个真的定义了 --app-bg 的那块。
+func tokensAppBg(t *testing.T, css, theme string) string {
+	t.Helper()
+	selector := ":root[data-theme=\"" + theme + "\"]"
+	const marker = "--app-bg:"
+	rest := css
+	for {
+		i := strings.Index(rest, selector)
+		if i < 0 {
+			t.Fatalf("client/src/styles/tokens.css 的 %s 块里找不到 --app-bg", selector)
+		}
+		rest = rest[i+len(selector):]
+		open := strings.Index(rest, "{")
+		end := strings.Index(rest, "}")
+		if open < 0 || end < open {
+			continue
+		}
+		block := rest[open+1 : end]
+		rest = rest[end+1:]
+		j := strings.Index(block, marker)
+		if j < 0 {
+			continue
+		}
+		value := block[j+len(marker):]
+		if k := strings.Index(value, ";"); k >= 0 {
+			value = value[:k]
+		}
+		return strings.TrimSpace(value)
+	}
+}
+
+// 窗口底色与前端 --app-bg 是同一契约的两处写法（#221）：tokens.css 改了而这里没跟上，
+// 冷启动到首帧之间就会闪一下另一种底色。值仍由 tokens.css 决定，这里只拦住漂移。
+func TestWindowBackgroundColorMatchesTokens(t *testing.T) {
+	body, err := os.ReadFile("../client/src/styles/tokens.css")
+	if err != nil {
+		t.Fatalf("读 client/src/styles/tokens.css: %v", err)
+	}
+	css := string(body)
+	light, dark := tokensAppBg(t, css, "light"), tokensAppBg(t, css, "dark")
+	want := "light-dark(" + light + ", " + dark + ")"
+	if windowBackgroundColor != want {
+		t.Fatalf("windowBackgroundColor = %q，tokens.css 的 --app-bg 拼出来是 %q：\n改了 client/src/styles/tokens.css 的 --app-bg 就要同步 desktop/theme.go 的 windowBackgroundColor（两处是同一契约）。", windowBackgroundColor, want)
 	}
 }

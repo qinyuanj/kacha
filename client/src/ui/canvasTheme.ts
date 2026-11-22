@@ -3,26 +3,15 @@
 // 只有色彩模式是「随主题变的 props」；点阵背景、迷你地图的颜色全是指向 styles/tokens.css
 // 里 --rf-* 映射的引用，换主题时由 data-theme 在样式侧解析，接线不重算色号。
 // 判定收在这里（不塞进 BoardCanvas），画布只展开给 React Flow。
+// 两个覆盖层的 shape 直接用库的 props 类型：手抄属性名与字面量类型会随库版本悄悄漂移。
+import type { BackgroundProps, MiniMapProps } from "@xyflow/react";
 import type { EffectiveTheme } from "../core/theme";
 
 /** 点阵背景：间距与点径是形状，不随主题；颜色是 token 引用。 */
-export interface CanvasBackgroundProps {
-  gap: number;
-  size: number;
-  color: string;
-  bgColor: string;
-}
+export type CanvasBackgroundProps = BackgroundProps;
 
 /** 迷你地图：可平移缩放，遮罩与节点方块同样是 token 引用。 */
-export interface CanvasMinimapProps {
-  pannable: true;
-  zoomable: true;
-  bgColor: string;
-  maskColor: string;
-  maskStrokeColor: string;
-  maskStrokeWidth: number;
-  nodeColor: string;
-}
+export type CanvasMinimapProps = MiniMapProps;
 
 export interface CanvasThemeProps {
   colorMode: EffectiveTheme;

@@ -543,4 +543,52 @@ describe("主题切换", () => {
     await vi.waitFor(() => expect(port.calls.nativeTheme.at(-1)).toBe("dark"));
     expect(writes).toEqual([]);
   });
+
+  it("设置说浅色而首帧镜像为空：载入后补写镜像，下次首帧不再从暗色翻过来", async () => {
+    // 迁移配置目录 / 清过本地存储：settings.json 说浅色，镜像却是空的。
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    port.core.settingsPorts.readSettings = async () => JSON.stringify({ format_version: 1, base_url: "http://gw.example:3001", theme: "light" });
+    await show(port);
+    await settingsReady();
+
+    await vi.waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
+    expect(localStorage.getItem("kacha.theme")).toBe("light");
+  });
+
+  it("设置还没读到、用户也没选过：不往镜像里写默认值", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const readSettings = port.core.settingsPorts.readSettings;
+    port.core.settingsPorts.readSettings = async () => {
+      await gate;
+      return readSettings();
+    };
+    await show(port);
+
+    // 此刻界面按默认暗色显示，但磁盘上是什么还不知道：写下去就成了与设置冲突的猜测值。
+    expect(localStorage.getItem("kacha.theme")).toBeNull();
+
+    await act(async () => release());
+    await settingsReady();
+    // 载入后才写：写的是设置里的档位（默认设置的暗色）。
+    await vi.waitFor(() => expect(localStorage.getItem("kacha.theme")).toBe("dark"));
+  });
+
+  it("点当前已选的档位：值没变就不重复写盘", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    const writes = recordSettingsWrites(port);
+    await show(port);
+    await settingsReady();
+
+    // 设置里本来就是暗色（默认），再点一次暗色没有要改的东西。
+    await act(async () => option("暗色").click());
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem("kacha.theme")).toBe("dark");
+    expect(writes).toEqual([]);
+  });
 });
