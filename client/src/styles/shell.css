@@ -47,39 +47,22 @@
   --bar-tone: var(--danger);
   background: var(--danger-soft-weak);
 }
-/* 横条里的动作：紧凑次级按钮，与正文同一条基线。 */
+/* 横条里的动作：外观（边框 / 圆角 / 底色 / 悬停 / 禁用）全由 base 的中性按钮承担，
+ * 这里只收尺寸，让它与正文同一条基线。 */
 .bar button {
   flex: none;
   height: 24px;
   padding: 0 8px;
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-sm);
-  background: var(--control-bg);
-  color: var(--text-1);
   line-height: 22px;
   white-space: nowrap;
-  cursor: pointer;
 }
-.bar button:hover:not(:disabled):not([aria-disabled="true"]) {
-  background: var(--control-hover);
-  border-color: var(--border-2);
-}
-.bar button:disabled,
-.bar button[aria-disabled="true"] {
-  color: var(--text-3);
-  cursor: default;
-}
-/* 「关闭」这类轻量动作走链接样式，不与动作按钮抢位置。 */
+/* 「关闭」这类轻量动作走 base 的链接样式，只收掉横条按钮的盒尺寸。 */
 .bar button.link {
   height: auto;
-  padding: 0;
-  border: none;
-  background: none;
+  padding: 0 4px;
   line-height: inherit;
-  color: var(--link);
 }
 .bar button.link:hover {
-  background: none;
   color: var(--accent-hover);
 }
 
@@ -166,7 +149,6 @@
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   background: none;
   color: var(--text-2);
-  cursor: pointer;
   white-space: nowrap;
 }
 .tabs .tab-new:hover,
@@ -182,7 +164,7 @@
 .tab-close {
   flex: none;
   border-radius: var(--radius-sm);
-  color: var(--text-3);
+  color: var(--text-2);
   line-height: 1;
 }
 .tab-close:hover {
@@ -203,26 +185,25 @@
  * 图标按钮（撤销 / 重做）靠语义类名 toolbar-icon 区分，不再用中文 aria-label 当样式钩子。 */
 .board-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  row-gap: 6px;
   padding: 6px 10px;
   background: var(--toolbar-bg);
   border-bottom: 1px solid var(--border-1);
 }
+/* 外观（边框 / 圆角 / 底色 / 文字 / 悬停 / 按下 / 原生禁用）来自 base 的中性按钮与下拉，
+ * 这里只声明工具栏自己的尺寸与「永不被压窄」。
+ * flex: none 是窄窗口的护栏：放不下就整组换行，绝不把按钮缩到文字被裁、互相压住。 */
 .board-toolbar button,
 .board-toolbar select {
-  appearance: none;
-  -webkit-appearance: none;
+  flex: none;
   box-sizing: border-box;
   height: 28px;
   padding: 0 10px;
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md);
-  background-color: var(--control-bg);
-  color: var(--text-1);
   line-height: 26px;
   white-space: nowrap;
-  cursor: pointer;
 }
 .board-toolbar button {
   display: inline-flex;
@@ -230,19 +211,9 @@
   justify-content: center;
   gap: 4px;
 }
-.board-toolbar button:hover:not(:disabled):not([aria-disabled="true"]) {
-  background-color: var(--control-hover);
-  border-color: var(--border-2);
-}
-.board-toolbar button:active:not(:disabled):not([aria-disabled="true"]) {
-  background-color: var(--control-active);
-}
-.board-toolbar button:disabled,
-.board-toolbar button[aria-disabled="true"],
-.board-toolbar select:disabled {
-  color: var(--text-3);
+/* 工具栏按钮的「不可用」有原生 disabled 与 aria-disabled 两种表达，都要看得出置灰。 */
+.board-toolbar button[aria-disabled="true"] {
   background-color: var(--surface-sunken);
-  cursor: default;
 }
 .board-toolbar button.primary {
   background: var(--success-fill);
@@ -257,19 +228,22 @@
 /* 箭头由 base 层统一给（随主题换描边色），这里只留工具栏的加宽内边距。 */
 .board-toolbar select {
   padding-right: 26px;
+  text-overflow: ellipsis;
 }
+/* 槽位不许被压到 0：留出工具组的真实宽度，工具栏才知道该换行而不是硬挤。 */
 .board-toolbar-slot {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
 }
 .board-toolbar-left {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  min-width: 0;
+  row-gap: 6px;
 }
 .toolbar-group {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 4px;
 }
@@ -298,46 +272,32 @@
   margin-left: -1px;
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
 }
+/* 右侧组：放不下时整组落到第二行并靠右；自己一行也放不下时内部再换行。 */
 .board-toolbar-right {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  row-gap: 6px;
+  margin-left: auto;
 }
 .board-toolbar-right .run-indicator {
   margin: 0;
 }
-.topbar-button {
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md);
-  background: var(--control-bg);
-  color: var(--text-1);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.topbar-button:hover:not(:disabled):not([aria-disabled="true"]) {
-  background: var(--control-hover);
-  border-color: var(--border-2);
-}
-.topbar-button:disabled {
-  color: var(--text-3);
-  background: var(--surface-sunken);
-  cursor: default;
-}
+/* 顶栏按钮（.topbar-button）：都长在画板工具栏里，外观与 .board-toolbar button 同一条，
+ * 状态色只由各自的 tone 类（如 .topbar-update-*）叠加，不再另起一套盒子。 */
 
 /* ---- 更新入口（#181） ----
- * 外层只负责排版：旧成功态的绿底 + 绿边已删除，状态色一律由按钮本体
- * topbar-update-latest / -action / -bad 承担，避免外层与内层抢着配色。 */
+ * 「已更新」提示条：外层只负责排版与成功底色，语气条只由 .bar-error / -warn / -alert / -info
+ * 这些语义类承担（本提示条不加）；状态色一律由按钮本体 topbar-update-latest / -action / -bad
+ * 承担，避免外层与内层抢着配色。 */
 .update-notice {
-  --bar-tone: var(--success);
   flex-shrink: 0;
   flex-wrap: wrap;
   background: var(--success-soft);
 }
 .update-notice > span {
   flex: 1 1 130px;
-}
-.update-notice button {
-  min-height: 24px;
 }
 /* 更新状态提示条（#180）：与「已更新」提示条同一套位置与观感，只多一条阶段标记。 */
 .update-status {
@@ -463,12 +423,13 @@
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   background: var(--surface-sunken);
-  color: var(--text-3);
+  color: var(--text-2);
   text-align: left;
 }
-/* 空态里的动作：主要动作走 button.primary，其余按次级按钮排，层次不靠大小区分。 */
+/* 空态里的动作：主要动作走 button.primary，其余是 base 的次级按钮，这里只定尺寸与语气。 */
 .empty-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
   margin-top: 4px;
@@ -476,20 +437,6 @@
 .empty-actions button:not(.primary) {
   height: 28px;
   padding: 0 12px;
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md);
-  background: var(--control-bg);
-  color: var(--text-1);
-  cursor: pointer;
-}
-.empty-actions button:not(.primary):hover:not(:disabled) {
-  background: var(--control-hover);
-  border-color: var(--border-2);
-}
-.empty-actions button:not(.primary):disabled {
-  color: var(--text-3);
-  background: var(--surface-sunken);
-  cursor: default;
 }
 
 /* ---- toast 浮层 ----
@@ -516,7 +463,7 @@
 .theme-switch {
   display: inline-flex;
   align-items: stretch;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   background: var(--control-bg);
   overflow: hidden;
@@ -526,14 +473,13 @@
   height: 26px;
   padding: 0 8px;
   border: none;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--border-1);
   border-radius: 0;
   background: none;
   color: var(--text-2);
   font-size: 12px;
   line-height: 24px;
   white-space: nowrap;
-  cursor: pointer;
 }
 .theme-switch .theme-switch-option:first-child {
   border-left: none;
@@ -544,6 +490,6 @@
 }
 .theme-switch .theme-switch-option[aria-pressed="true"] {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-hover);
   font-weight: 600;
 }

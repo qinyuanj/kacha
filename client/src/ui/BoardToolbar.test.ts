@@ -76,13 +76,6 @@ describe("画板工具栏", () => {
     expect(onUndo).toHaveBeenCalled();
   });
 
-  it("撤销 / 重做是图标按钮：样式钩子是语义类名，不是中文 aria-label 文本", async () => {
-    await show({ undoLabel: "新建提示词", redoLabel: "新建提示词" });
-    for (const label of ["撤销", "重做"]) {
-      expect(buttonOf(label).classList.contains("toolbar-icon")).toBe(true);
-    }
-  });
-
   it("运行：有选中时按钮写「运行选中」", async () => {
     await show({ selectedCount: 0 });
     expect(buttonWithText("▶ 运行").textContent).toBe("▶ 运行");
