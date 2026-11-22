@@ -33,7 +33,7 @@ func newFakeRelay(t *testing.T, status int, outcome Outcome) (*httptest.Server, 
 			t.Errorf("ParseMultipartForm: %v", err)
 		}
 		fields := map[string]string{}
-		for _, key := range []string{"title", "category", "body", "version", "build", "os", "board_name", "contact"} {
+		for _, key := range []string{"title", "category", "body", "version", "build", "os", "board_name", "contact", "gitea_token"} {
 			fields[key] = r.FormValue(key)
 		}
 		files := map[string][]byte{}
@@ -85,6 +85,7 @@ func sampleSpec() Spec {
 		OS:        "Windows 11",
 		BoardName: "战斗草稿",
 		Contact:   "artist@example.com",
+		GiteaToken: "alice",
 	}
 }
 
@@ -120,6 +121,12 @@ func TestSendMapsFakeRelayOutcomesToStableKinds(t *testing.T) {
 			want:   Outcome{Kind: "too_large", Message: "反馈内容过大，请精简后重试"},
 		},
 		{
+			name:   "unauthorized",
+			status: http.StatusUnauthorized,
+			relay:  Outcome{Kind: "unauthorized", Message: "Gitea token 无效或权限不足"},
+			want:   Outcome{Kind: "unauthorized", Message: "Gitea token 无效或权限不足"},
+		},
+		{
 			name:   "rejected",
 			status: http.StatusBadGateway,
 			relay:  Outcome{Kind: "failed", Message: "创建 issue 失败：服务器无法写入 Gitea"},
@@ -144,6 +151,27 @@ func TestSendMapsFakeRelayOutcomesToStableKinds(t *testing.T) {
 				t.Fatal("relay did not receive an Idempotency-Key")
 			}
 		})
+	}
+}
+
+func TestSendForwardsRequestGiteaToken(t *testing.T) {
+	server, captured := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "已提交 #1", Number: 1, URL: "http://fake/1"})
+	defer server.Close()
+
+	spec := sampleSpec()
+	spec.GiteaToken = "alice"
+	got := New(Config{RelayURL: server.URL}).Send(spec)
+	if !got.OK || got.Kind != "ok" {
+		t.Fatalf("Send outcome = %+v", got)
+	}
+	req := captured()
+	if req.fields["gitea_token"] != "alice" {
+		t.Fatalf("relay gitea_token = %q", req.fields["gitea_token"])
+	}
+	for key, value := range req.fields {
+		if key != "gitea_token" && strings.Contains(value, "alice") {
+			t.Fatalf("token leaked into field %s: %q", key, value)
+		}
 	}
 }
 
@@ -276,7 +304,6 @@ func TestChineseCategoryLabelReachesRelayAsStableCode(t *testing.T) {
 			relay := httptest.NewServer(feedbackrelay.New(feedbackrelay.Config{
 				GiteaBase: gitea.URL,
 				OwnerRepo: "o/r",
-				Token:     "test-token",
 			}).Handler())
 			defer relay.Close()
 

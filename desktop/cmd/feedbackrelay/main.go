@@ -2,7 +2,6 @@
 package main
 
 import (
-	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -22,18 +21,13 @@ func main() {
 	}
 }
 
-// loadConfig 只从环境变量读取运行参数；Gitea 写 token 在运行时注入，不进入二进制。
+// loadConfig 只从环境变量读取运行参数；Gitea token 由每次反馈请求自带，服务端不读取也不保存。
 func loadConfig(getenv func(string) string) (feedbackrelay.Config, error) {
-	cfg := feedbackrelay.Config{
+	return feedbackrelay.Config{
 		GiteaBase: envOr(getenv, "FEEDBACK_GITEA_URL", "http://lzxsvn:3000"),
 		OwnerRepo: envOr(getenv, "FEEDBACK_GITEA_REPO", "qinyuanj/kacha-feedback"),
-		Token:     getenv("FEEDBACK_GITEA_TOKEN"),
 		Address:   envOr(getenv, "FEEDBACK_ADDR", ":3005"),
-	}
-	if cfg.Token == "" {
-		return cfg, errors.New("缺少环境变量 FEEDBACK_GITEA_TOKEN")
-	}
-	return cfg, nil
+	}, nil
 }
 
 func envOr(getenv func(string) string, key, def string) string {

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -37,13 +39,14 @@ var labelIDNames = map[int64]string{
 // fakeGitea 是测试用的假 Gitea：记录创建 issue、回写正文与附件上传，可注入创建失败。
 type fakeGitea struct {
 	*httptest.Server
-	mu            sync.Mutex
-	issues        []issueRequest
-	patchedBodies []string
-	assets        []assetUpload
-	failStatus    int
-	failAsset     int
-	failPatch     int
+	mu             sync.Mutex
+	issues         []issueRequest
+	patchedBodies  []string
+	assets         []assetUpload
+	failStatus     int
+	failAsset      int
+	failPatch      int
+	authorizations []string
 }
 
 func newFakeGitea(t *testing.T) *fakeGitea {
@@ -104,7 +107,12 @@ func newFakeGitea(t *testing.T) *fakeGitea {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"browser_download_url":"http://fake/assets/`+name+`"}`)
 	})
-	f.Server = httptest.NewServer(mux)
+	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.authorizations = append(f.authorizations, r.Header.Get("Authorization"))
+		f.mu.Unlock()
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(f.Close)
 	return f
 }
@@ -116,6 +124,12 @@ func (f *fakeGitea) snapshot() ([]issueRequest, []string, []assetUpload) {
 	bodies := append([]string(nil), f.patchedBodies...)
 	assets := append([]assetUpload(nil), f.assets...)
 	return issues, bodies, assets
+}
+
+func (f *fakeGitea) authorizationSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.authorizations...)
 }
 
 func (f *fakeGitea) setFailStatus(status int) {
@@ -137,7 +151,7 @@ func (f *fakeGitea) setFailPatchStatus(status int) {
 }
 
 func newSvc(f *fakeGitea, mutate func(*Config)) *Service {
-	c := Config{GiteaBase: f.URL, OwnerRepo: "o/r", Token: "runtime-token"}
+	c := Config{GiteaBase: f.URL, OwnerRepo: "o/r"}
 	if mutate != nil {
 		mutate(&c)
 	}
@@ -150,6 +164,9 @@ func multipartBody(t *testing.T, fields map[string]string, screenshots map[strin
 	mw := multipart.NewWriter(&buf)
 	for k, v := range fields {
 		_ = mw.WriteField(k, v)
+	}
+	if _, ok := fields["gitea_token"]; !ok {
+		_ = mw.WriteField("gitea_token", "alice")
 	}
 	for name, data := range screenshots {
 		fw, err := mw.CreateFormFile("screenshots[]", name)
@@ -175,6 +192,12 @@ func pngBytes() []byte {
 
 func postFeedback(t *testing.T, handler http.Handler, body io.Reader, ct, key, remoteAddr string) (int, Outcome) {
 	t.Helper()
+	status, outcome, _ := postFeedbackRaw(t, handler, body, ct, key, remoteAddr)
+	return status, outcome
+}
+
+func postFeedbackRaw(t *testing.T, handler http.Handler, body io.Reader, ct, key, remoteAddr string) (int, Outcome, string) {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/feedback", body)
 	req.Header.Set("Content-Type", ct)
 	if key != "" {
@@ -191,7 +214,7 @@ func postFeedback(t *testing.T, handler http.Handler, body io.Reader, ct, key, r
 	if err := json.NewDecoder(resp.Body).Decode(&outcome); err != nil {
 		t.Fatalf("decode outcome: %v (body %q)", err, rr.Body.String())
 	}
-	return resp.StatusCode, outcome
+	return resp.StatusCode, outcome, rr.Body.String()
 }
 
 func labelNames(ids []int64) string {
@@ -574,5 +597,105 @@ func TestGiteaUnreachableReturnsTypedOutcome(t *testing.T) {
 	status, outcome := postFeedback(t, newSvc(f, nil).Handler(), body, ct, "gitea-down", "")
 	if status != http.StatusBadGateway || outcome.Kind != "failed" || outcome.OK {
 		t.Fatalf("status=%d outcome=%+v", status, outcome)
+	}
+}
+func TestFeedbackRequiresNonEmptyGiteaToken(t *testing.T) {
+	for _, token := range []string{"", "   "} {
+		f := newFakeGitea(t)
+		body, ct := multipartBody(t, map[string]string{"body": "需要 token", "gitea_token": token}, nil, nil)
+		status, outcome, raw := postFeedbackRaw(t, newSvc(f, nil).Handler(), body, ct, "missing-token", "")
+		if status != http.StatusBadRequest || outcome.Kind != "invalid" || outcome.OK {
+			t.Fatalf("token=%q status=%d outcome=%+v", token, status, outcome)
+		}
+		if strings.TrimSpace(token) != "" && strings.Contains(raw, strings.TrimSpace(token)) {
+			t.Fatalf("response echoed token: %q", raw)
+		}
+		if got := f.authorizationSnapshot(); len(got) != 0 {
+			t.Fatalf("Gitea requests with missing token: %v", got)
+		}
+	}
+}
+
+func TestEachFeedbackUsesItsOwnGiteaToken(t *testing.T) {
+	t.Setenv("FEEDBACK_GITEA_TOKEN", "environment-only")
+	f := newFakeGitea(t)
+
+	firstBody, firstCT := multipartBody(t, map[string]string{"body": "first feedback", "gitea_token": "alice"}, map[string][]byte{"shot.png": pngBytes()}, nil)
+	firstStatus, firstOutcome, firstRaw := postFeedbackRaw(t, newSvc(f, nil).Handler(), firstBody, firstCT, "alice-key", "")
+	if firstStatus != http.StatusOK || !firstOutcome.OK || firstOutcome.Kind != "created" {
+		t.Fatalf("first status=%d outcome=%+v", firstStatus, firstOutcome)
+	}
+	if strings.Contains(firstRaw, "alice") {
+		t.Fatalf("first response contains token: %q", firstRaw)
+	}
+
+	secondBody, secondCT := multipartBody(t, map[string]string{"body": "second feedback", "gitea_token": "bob"}, map[string][]byte{"shot.png": pngBytes()}, nil)
+	secondStatus, secondOutcome, secondRaw := postFeedbackRaw(t, newSvc(f, nil).Handler(), secondBody, secondCT, "bob-key", "")
+	if secondStatus != http.StatusOK || !secondOutcome.OK || secondOutcome.Kind != "created" {
+		t.Fatalf("second status=%d outcome=%+v", secondStatus, secondOutcome)
+	}
+	if strings.Contains(secondRaw, "bob") {
+		t.Fatalf("second response contains token: %q", secondRaw)
+	}
+
+	got := f.authorizationSnapshot()
+	want := []string{"token alice", "token alice", "token alice", "token alice", "token bob", "token bob", "token bob", "token bob"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("authorizations=%v want=%v", got, want)
+	}
+	issues, bodies, assets := f.snapshot()
+	if len(issues) != 2 || len(bodies) != 2 || len(assets) != 2 {
+		t.Fatalf("issues=%d patches=%d assets=%d", len(issues), len(bodies), len(assets))
+	}
+	for _, issue := range issues {
+		if strings.Contains(issue.Body, "alice") || strings.Contains(issue.Body, "bob") || strings.Contains(issue.Body, "environment-only") {
+			t.Fatalf("issue body contains a token: %q", issue.Body)
+		}
+	}
+	for _, body := range bodies {
+		if strings.Contains(body, "alice") || strings.Contains(body, "bob") || strings.Contains(body, "environment-only") {
+			t.Fatalf("patched body contains a token: %q", body)
+		}
+	}
+	for _, asset := range assets {
+		if strings.Contains(asset.Name, "alice") || strings.Contains(asset.Name, "bob") {
+			t.Fatalf("asset name contains a token: %q", asset.Name)
+		}
+	}
+}
+
+func TestGiteaTokenIsNotLoggedOrEchoed(t *testing.T) {
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	const token = "log-only-value"
+	f := newFakeGitea(t)
+	body, ct := multipartBody(t, map[string]string{"body": "检查日志", "gitea_token": token}, nil, nil)
+	status, outcome, raw := postFeedbackRaw(t, newSvc(f, nil).Handler(), body, ct, "log-key", "")
+	if status != http.StatusOK || !outcome.OK {
+		t.Fatalf("status=%d outcome=%+v", status, outcome)
+	}
+	if strings.Contains(logs.String(), token) {
+		t.Fatalf("token logged: %q", logs.String())
+	}
+	if strings.Contains(raw, token) {
+		t.Fatalf("token echoed in response: %q", raw)
+	}
+}
+
+func TestGiteaUnauthorizedReturnsTypedUnauthorized(t *testing.T) {
+	for _, code := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		f := newFakeGitea(t)
+		f.setFailStatus(code)
+		body, ct := multipartBody(t, map[string]string{"body": "无权", "gitea_token": "alice"}, nil, nil)
+		status, outcome, raw := postFeedbackRaw(t, newSvc(f, nil).Handler(), body, ct, fmt.Sprintf("unauthorized-%d", code), "")
+		if status != http.StatusUnauthorized || outcome.OK || outcome.Kind != "unauthorized" {
+			t.Fatalf("gitea=%d status=%d outcome=%+v", code, status, outcome)
+		}
+		if strings.Contains(raw, "alice") {
+			t.Fatalf("error response contains token: %q", raw)
+		}
 	}
 }

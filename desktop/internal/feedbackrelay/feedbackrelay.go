@@ -1,8 +1,8 @@
 // Package feedbackrelay 是部署在服务端的反馈中继：接收客户端提交的文字与截图，
-// 用服务器侧的 Gitea token 在 kacha-feedback 仓库创建 issue 并把截图挂成附件。
+// 用本次请求自带的 Gitea token 在 kacha-feedback 仓库创建 issue 并把截图挂成附件。
 //
 // 它是可选的联网能力（ADR 0027）：不鉴权（局域网内部工具），只做 per-IP 限流、
-// 体积上限与只写一个仓库；写 token 只在服务端，客户端二进制不含，核心画板能力与它无关。
+// 体积上限与只写一个仓库；token 只在本请求内传递，不保存、不缓存、不记录，核心画板能力与它无关。
 package feedbackrelay
 
 import (
@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -33,7 +34,6 @@ var categoryLabel = map[string]string{"bug": "缺陷", "feature": "需求", "sug
 type Config struct {
 	GiteaBase          string
 	OwnerRepo          string
-	Token              string
 	Address            string
 	RatePerMinute      int
 	MaxRequestBytes    int64
@@ -151,6 +151,11 @@ func (s *Service) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		writeOutcome(w, http.StatusBadRequest, Outcome{Kind: "invalid", Message: "正文不能为空"})
 		return
 	}
+	giteaToken := strings.TrimSpace(r.FormValue("gitea_token"))
+	if giteaToken == "" {
+		writeOutcome(w, http.StatusBadRequest, Outcome{Kind: "invalid", Message: "缺少 Gitea token"})
+		return
+	}
 
 	shots, oc := s.collectFiles(r, []string{"screenshots[]", "screenshots"}, s.cfg.MaxScreenshots, s.cfg.MaxScreenshotBytes, true)
 	if oc != nil {
@@ -193,18 +198,18 @@ func (s *Service) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		contact:   strings.TrimSpace(r.FormValue("contact")),
 	})
 
-	created, err := s.createIssue(title, issueBody, category)
+	created, err := s.createIssue(title, issueBody, category, giteaToken)
 	if err != nil {
-		writeOutcome(w, http.StatusBadGateway, Outcome{Kind: "failed", Message: "创建 issue 失败：服务器无法写入 Gitea"})
+		writeGiteaFailure(w, err, "创建 issue 失败：服务器无法写入 Gitea")
 		return
 	}
 
 	var links []string
 	for _, u := range append(shots, packs...) {
-		assetURL, uerr := s.uploadAsset(created.Number, u.name, u.data, u.contentType)
+		assetURL, uerr := s.uploadAsset(created.Number, u.name, u.data, u.contentType, giteaToken)
 		if uerr != nil {
 			// 附件没传上去就不算成功：明确告诉客户端，别让它把半条反馈当已提交。
-			writeOutcome(w, http.StatusBadGateway, Outcome{Kind: "failed", Message: "上传附件失败：服务器无法写入 Gitea"})
+			writeGiteaFailure(w, uerr, "上传附件失败：服务器无法写入 Gitea")
 			return
 		}
 		if strings.HasPrefix(u.contentType, "image/") {
@@ -214,9 +219,9 @@ func (s *Service) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(links) > 0 {
-		if perr := s.patchIssue(created.Number, issueBody+"\n\n---\n\n"+strings.Join(links, "\n\n")); perr != nil {
+		if perr := s.patchIssue(created.Number, issueBody+"\n\n---\n\n"+strings.Join(links, "\n\n"), giteaToken); perr != nil {
 			// 附件链接没写回 issue 也算失败：用户拿到成功回执却看不到附件同样是坏结局。
-			writeOutcome(w, http.StatusBadGateway, Outcome{Kind: "failed", Message: "附件链接回写失败：服务器无法更新 Gitea issue"})
+			writeGiteaFailure(w, perr, "附件链接回写失败：服务器无法更新 Gitea issue")
 			return
 		}
 	}
@@ -310,6 +315,25 @@ func composeBody(body string, m metadata) string {
 
 // ---- Gitea 客户端 ----
 
+// giteaStatusError 只保留状态码，不携带响应体或请求头，避免把凭据带进错误链。
+type giteaStatusError struct{ status int }
+
+func (e *giteaStatusError) Error() string { return fmt.Sprintf("Gitea 返回 %d", e.status) }
+
+func isGiteaUnauthorized(err error) bool {
+	var statusErr *giteaStatusError
+	return errors.As(err, &statusErr) && (statusErr.status == http.StatusUnauthorized || statusErr.status == http.StatusForbidden)
+}
+
+// writeGiteaFailure 只输出稳定的类型化结局，不回显底层错误或 token。
+func writeGiteaFailure(w http.ResponseWriter, err error, fallback string) {
+	if isGiteaUnauthorized(err) {
+		writeOutcome(w, http.StatusUnauthorized, Outcome{Kind: "unauthorized", Message: "Gitea token 无效或权限不足"})
+		return
+	}
+	writeOutcome(w, http.StatusBadGateway, Outcome{Kind: "failed", Message: fallback})
+}
+
 type createdIssue struct {
 	Number  int    `json:"number"`
 	HTMLURL string `json:"html_url"`
@@ -319,7 +343,7 @@ func (s *Service) apiURL(path string) string {
 	return strings.TrimRight(s.cfg.GiteaBase, "/") + "/api/v1" + path
 }
 
-func (s *Service) doJSON(method, path string, in any, out any) error {
+func (s *Service) doJSON(method, path, token string, in any, out any) error {
 	var rdr io.Reader
 	if in != nil {
 		raw, _ := json.Marshal(in)
@@ -329,7 +353,7 @@ func (s *Service) doJSON(method, path string, in any, out any) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "token "+s.cfg.Token)
+	req.Header.Set("Authorization", "token "+token)
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -340,7 +364,7 @@ func (s *Service) doJSON(method, path string, in any, out any) error {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("Gitea 返回 %d", resp.StatusCode)
+		return &giteaStatusError{status: resp.StatusCode}
 	}
 	if out != nil {
 		if err := json.Unmarshal(data, out); err != nil {
@@ -350,23 +374,23 @@ func (s *Service) doJSON(method, path string, in any, out any) error {
 	return nil
 }
 
-func (s *Service) createIssue(title, body, category string) (createdIssue, error) {
+func (s *Service) createIssue(title, body, category, token string) (createdIssue, error) {
 	opt := map[string]any{"title": title, "body": body}
-	if ids := s.labelIDs(category); len(ids) > 0 {
+	if ids := s.labelIDs(category, token); len(ids) > 0 {
 		opt["labels"] = ids
 	}
 	var out createdIssue
-	err := s.doJSON(http.MethodPost, fmt.Sprintf("/repos/%s/issues", s.cfg.OwnerRepo), opt, &out)
+	err := s.doJSON(http.MethodPost, fmt.Sprintf("/repos/%s/issues", s.cfg.OwnerRepo), token, opt, &out)
 	return out, err
 }
 
-func (s *Service) patchIssue(number int, body string) error {
-	return s.doJSON(http.MethodPatch, fmt.Sprintf("/repos/%s/issues/%d", s.cfg.OwnerRepo, number), map[string]string{"body": body}, nil)
+func (s *Service) patchIssue(number int, body, token string) error {
+	return s.doJSON(http.MethodPatch, fmt.Sprintf("/repos/%s/issues/%d", s.cfg.OwnerRepo, number), token, map[string]string{"body": body}, nil)
 }
 
 // labelIDs 取该分类要打的 label 的数据库 ID；标签缓存失败时返回空（issue 仍建成，只是没标签）。
-func (s *Service) labelIDs(category string) []int64 {
-	m := s.labelMap()
+func (s *Service) labelIDs(category, token string) []int64 {
+	m := s.labelMap(token)
 	var ids []int64
 	for _, name := range []string{"type/" + category, "source/app"} {
 		if id, ok := m[name]; ok && id != 0 {
@@ -376,7 +400,7 @@ func (s *Service) labelIDs(category string) []int64 {
 	return ids
 }
 
-func (s *Service) labelMap() map[string]int64 {
+func (s *Service) labelMap(token string) map[string]int64 {
 	s.mu.Lock()
 	if s.labels != nil && s.now().Sub(s.labelAt) < 10*time.Minute {
 		m := s.labels
@@ -390,7 +414,7 @@ func (s *Service) labelMap() map[string]int64 {
 		Name string `json:"name"`
 	}
 	m := map[string]int64{}
-	if err := s.doJSON(http.MethodGet, fmt.Sprintf("/repos/%s/labels?limit=50", s.cfg.OwnerRepo), nil, &rows); err == nil {
+	if err := s.doJSON(http.MethodGet, fmt.Sprintf("/repos/%s/labels?limit=50", s.cfg.OwnerRepo), token, nil, &rows); err == nil {
 		for _, r := range rows {
 			m[r.Name] = r.ID
 		}
@@ -403,7 +427,7 @@ func (s *Service) labelMap() map[string]int64 {
 }
 
 // uploadAsset 把一张附件挂到 issue 上；字段名是 Gitea 的 attachment，文件名走 query name。
-func (s *Service) uploadAsset(number int, name string, data []byte, contentType string) (string, error) {
+func (s *Service) uploadAsset(number int, name string, data []byte, contentType, token string) (string, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	h := make(textproto.MIMEHeader)
@@ -423,7 +447,7 @@ func (s *Service) uploadAsset(number int, name string, data []byte, contentType 
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "token "+s.cfg.Token)
+	req.Header.Set("Authorization", "token "+token)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -432,7 +456,7 @@ func (s *Service) uploadAsset(number int, name string, data []byte, contentType 
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("上传附件 Gitea 返回 %d", resp.StatusCode)
+		return "", &giteaStatusError{status: resp.StatusCode}
 	}
 	var out struct {
 		BrowserDownloadURL string `json:"browser_download_url"`

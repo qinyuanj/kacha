@@ -21,27 +21,29 @@ const DefaultRelayURL = "http://lzxsvn:3005"
 
 // 稳定结局类别：页面与端口替身共用同一组字符串。
 const (
-	KindOK          = "ok"
-	KindDuplicate   = "duplicate"
-	KindUnreachable = "unreachable"
-	KindRejected    = "rejected"
-	KindInvalid     = "invalid"
-	KindTooLarge    = "too_large"
-	KindUnavailable = "unavailable"
+	KindOK           = "ok"
+	KindDuplicate    = "duplicate"
+	KindUnreachable  = "unreachable"
+	KindRejected     = "rejected"
+	KindInvalid      = "invalid"
+	KindTooLarge     = "too_large"
+	KindUnauthorized = "unauthorized"
+	KindUnavailable  = "unavailable"
 )
 
 // 稳定文案：中继的原始服务器错误不直接暴露给页面。
 // 客户端同一批文案在 client/src/core/feedback.ts，由 test_feedback_contract_sync.py 逐字核对。
 const (
-	MessageUnavailable = "反馈暂不可用：未配置中继地址"
-	MessageUnreachable = "反馈中继不可达，请稍后再试"
-	MessageRejected    = "反馈被中继拒绝，请稍后再试"
-	MessageInvalid     = "反馈内容不合法，请修改后重试"
-	MessageTooLarge    = "反馈内容过大，请精简后重试"
-	MessageTooMany     = "截图最多 5 张，请删掉多余的再发送"
-	MessageFormat      = "截图只支持 PNG/JPG 格式，请转换后重试"
-	MessageBigShot     = "单张截图超过 10MB，请压缩后重试"
-	MessageBigPack     = "诊断包过大，请重新生成后再发送"
+	MessageUnavailable  = "反馈暂不可用：未配置中继地址"
+	MessageUnreachable  = "反馈中继不可达，请稍后再试"
+	MessageUnauthorized = "Gitea token 无效或权限不足"
+	MessageRejected     = "反馈被中继拒绝，请稍后再试"
+	MessageInvalid      = "反馈内容不合法，请修改后重试"
+	MessageTooLarge     = "反馈内容过大，请精简后重试"
+	MessageTooMany      = "截图最多 5 张，请删掉多余的再发送"
+	MessageFormat       = "截图只支持 PNG/JPG 格式，请转换后重试"
+	MessageBigShot      = "单张截图超过 10MB，请压缩后重试"
+	MessageBigPack      = "诊断包过大，请重新生成后再发送"
 )
 
 // Attachment 是页面经 base64 JSON 交来的附件；Go 侧直接以字节写 multipart。
@@ -69,6 +71,8 @@ type Spec struct {
 	OS        string `json:"os"`
 	BoardName string `json:"board_name"`
 	Contact   string `json:"contact,omitempty"`
+	// GiteaToken 是本次提交自带的写凭据；只转交中继，不保存、不写正文、不进入幂等键。
+	GiteaToken string `json:"gitea_token,omitempty"`
 	// RelayURL 是可选的本次调用覆盖；空值使用 Config.RelayURL（界面只在显式非默认覆盖时填）。
 	RelayURL string `json:"relay_url,omitempty"`
 	// Screenshots 与 DiagnosticsPack 是 #207 的附件，字段名与前端 spec 一致。
@@ -164,6 +168,7 @@ func (s *Service) Send(spec Spec) Outcome {
 	safe.Title = redact(spec.Title)
 	safe.Body = redact(spec.Body)
 	safe.RelayURL = ""
+	safe.GiteaToken = ""
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -176,6 +181,7 @@ func (s *Service) Send(spec Spec) Outcome {
 		{"os", strings.TrimSpace(spec.OS)},
 		{"board_name", strings.TrimSpace(spec.BoardName)},
 		{"contact", strings.TrimSpace(spec.Contact)},
+		{"gitea_token", spec.GiteaToken},
 	}
 	for _, field := range fields {
 		if err := writer.WriteField(field.name, field.value); err != nil {
@@ -262,6 +268,9 @@ func mapOutcome(status int, relay Outcome) Outcome {
 			message = fmt.Sprintf("刚刚已提交过 #%d", relay.Number)
 		}
 		return Outcome{OK: true, Kind: KindDuplicate, Message: message, Number: relay.Number, URL: relay.URL}
+	}
+	if status == http.StatusUnauthorized || relay.Kind == "unauthorized" {
+		return Outcome{Kind: KindUnauthorized, Message: MessageUnauthorized}
 	}
 	if status == http.StatusBadRequest || relay.Kind == "invalid" {
 		return Outcome{Kind: KindInvalid, Message: MessageInvalid}
