@@ -41,6 +41,7 @@ describe("首屏反馈入口（#206）", () => {
       onOpenSettings: vi.fn(),
       update: { snapshot: { status: "idle" }, state: { preparing: false, prepareError: "", installError: "" }, check: vi.fn(), install: vi.fn() } as unknown as UpdateControl,
       onOpenFeedback,
+      theme: { choice: "dark", effective: "dark", choose: vi.fn() },
     }) })));
     const button = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("反馈"));
     expect(button).not.toBeUndefined();
@@ -65,6 +66,7 @@ describe("首屏反馈入口（#206）", () => {
       update: { snapshot: { status: "idle" }, state: { preparing: false, prepareError: "", installError: "" }, check: vi.fn(), install: vi.fn() } as unknown as UpdateControl,
       onOpenFeedback,
       feedbackAvailable: false,
+      theme: { choice: "dark", effective: "dark", choose: vi.fn() },
     }) })));
     const button = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("反馈"));
     expect(button?.textContent).toContain("暂不可用");

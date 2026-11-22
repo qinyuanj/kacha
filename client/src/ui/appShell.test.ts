@@ -8,6 +8,7 @@ import type { Board } from "../core/board";
 import { emptyHistory } from "../core/history";
 import { AppNotices, type AppNoticesProps } from "./appNotices";
 import { emptySnapshot, type UpdateSnapshot } from "../core/update";
+import type { ThemeControl } from "./useTheme";
 import type { UpdateControl } from "./useUpdate";
 import { IDLE_AUTO_VIEW, type AutoInstallView } from "../core/updateAutoInstall";
 import { updateStatusView } from "./updateStatusView";
@@ -35,6 +36,9 @@ afterEach(async () => {
 });
 
 const board = { title: "a", format_version: 2, viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges: [], extra: {} } as unknown as Board;
+
+// 主题切换入口的替身（#221）：工具栏只负责把档位与切换动作摆出来。
+const themeControl = (patch: Partial<ThemeControl> = {}): ThemeControl => ({ choice: "dark", effective: "dark", choose: vi.fn(), ...patch });
 
 // 更新入口的替身（#181）：首页版本号旁的那一份，快照与动作都可直接调用。
 const updateControl = (patch: Partial<UpdateSnapshot> = {}): UpdateControl => ({
@@ -261,7 +265,7 @@ describe("工具栏", () => {
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
           onOpenSettings: vi.fn(),
-          onOpenFeedback: vi.fn(), update: updateControl(),
+          onOpenFeedback: vi.fn(), update: updateControl(), theme: themeControl(),
         }) }),
       ),
     );
@@ -285,7 +289,7 @@ describe("工具栏", () => {
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
           onOpenSettings: vi.fn(),
-          onOpenFeedback: vi.fn(), update: updateControl(),
+          onOpenFeedback: vi.fn(), update: updateControl(), theme: themeControl(),
         }) }),
       ),
     );
@@ -315,6 +319,7 @@ describe("工具栏", () => {
           onOpenSettings: vi.fn(),
           onOpenFeedback: vi.fn(),
           update: updateControl({ phase: "ready", version: "1.6.7", verified: true, installable: true, downloaded: 100, total: 100 }),
+          theme: themeControl(),
         }) }),
       ),
     );
@@ -335,7 +340,7 @@ describe("工作台外壳的接线", () => {
   const shell = (patch: Partial<ComponentProps<typeof AppShell>> = {}): ComponentProps<typeof AppShell> => ({
     view: viewOf(), sessions: [], activeKey: null, userRoot: "/root", ready: true, version: "1.0",
     updateNotice: null, packMenu: null, boardListOpen: false, manageBoards: false, settingsLoaded: true,
-    runIndicator: indicator, updateStatus: updateStatusView({ snapshot: emptySnapshot(), auto: IDLE_AUTO_VIEW }), onOpenFeedback: vi.fn(), update: updateControl(),
+    runIndicator: indicator, updateStatus: updateStatusView({ snapshot: emptySnapshot(), auto: IDLE_AUTO_VIEW }), onOpenFeedback: vi.fn(), update: updateControl(), theme: themeControl(),
     onDeferUpdate: vi.fn(), tableError: null, settingsFileProblem: null, settingsOpen: false,
     usageNotice: null, canvasProps: {} as never,
     onActivate: vi.fn(), onCloseTab: vi.fn(), onRename: vi.fn(), onCreate: vi.fn(), onOpenList: vi.fn(),

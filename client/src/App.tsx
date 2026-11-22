@@ -9,6 +9,7 @@ import { shouldShowUpdateNotice } from "./core/changelog";
 import { useUsageLimit } from "./ui/useUsageLimit";
 import { useRunner } from "./ui/useRunner";
 import { useSettings } from "./ui/useSettings";
+import { useTheme } from "./ui/useTheme";
 import { resolveFeedbackRelayAddress } from "./core/settings";
 import { useBoardPack } from "./ui/useBoardPack";
 import { useRunCallbacks } from "./ui/appRunHooks";
@@ -87,6 +88,12 @@ export function App({ version }: AppProps) {
   const store = useAppState();
   const { state } = store;
   const settings = useSettings();
+  // 主题（#221）：设置读到前按首帧镜像显示，读到后以设置真源为准；切换即时生效并异步写回。
+  const theme = useTheme({
+    saved: settings.loaded ? settings.settings.theme : null,
+    syncNative: (choice) => port.ui.setNativeTheme(choice),
+    persist: (choice) => void settings.setTheme(choice),
+  });
   const [table, setTable] = useState<CapabilityTable>(BUILTIN_TABLE);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -453,6 +460,7 @@ export function App({ version }: AppProps) {
         importDisabled={view.importDisabled}
         onOpenFeedback={() => setFeedbackOpen(true)}
         feedbackAvailable={port.features.feedback}
+        theme={theme}
         onToolbarSlot={setToolbarSlot}
       />
       <AppOverlays

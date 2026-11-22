@@ -7,6 +7,7 @@ import { DEFAULT_SETTINGS } from "../core/settings";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { ShellProvider } from "./shell";
 import { SettingsPanel } from "./SettingsPanel";
+import type { ThemeChoice } from "../core/theme";
 import type { SettingsState } from "./useSettingsOps";
 
 // React 19 的 act() 要在测试环境里显式打开。
@@ -29,6 +30,7 @@ afterEach(async () => {
 type PanelSettings = SettingsState & {
   save(next: unknown, apiKey: string): Promise<string | null>;
   testConnection(baseUrl: string, apiKey: string): Promise<{ ok: true; count: number } | { ok: false; message: string }>;
+  setTheme(choice: ThemeChoice): Promise<void>;
 };
 
 function settings(overrides: Partial<SettingsState> = {}): PanelSettings {
@@ -42,6 +44,7 @@ function settings(overrides: Partial<SettingsState> = {}): PanelSettings {
     discovery: { source: "none" },
     save: vi.fn(async () => null),
     testConnection: vi.fn(async () => ({ ok: true as const, count: 3 })),
+    setTheme: vi.fn(async () => undefined),
     ...overrides,
   } as unknown as PanelSettings;
 }

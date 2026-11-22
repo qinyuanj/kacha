@@ -297,3 +297,129 @@ describe("工作台", () => {
     await act(async () => close?.click());
   });
 });
+
+// #221：顶栏主题切换入口——即时生效、首帧镜像、通知宿主壳、写回设置，且不覆盖受保护的设置文件。
+describe("主题切换", () => {
+  /** 文档根与本地存储都没有全局 reset：本组用例自己清，别串到别的用例。 */
+  function clearThemeState(): void {
+    localStorage.clear();
+    delete document.documentElement.dataset.theme;
+    document.documentElement.style.colorScheme = "";
+  }
+
+  beforeEach(clearThemeState);
+  afterEach(() => {
+    clearThemeState();
+    vi.unstubAllGlobals();
+  });
+
+  /** 等设置载入完成：高级设置按钮解禁就是信号（主题的宿主同步也在这一刻之后）。 */
+  async function settingsReady(): Promise<void> {
+    await vi.waitFor(() => {
+      const button = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes("高级设置"));
+      expect(button?.disabled).toBe(false);
+    });
+  }
+
+  function option(label: string): HTMLButtonElement {
+    const button = container.querySelector<HTMLButtonElement>(`[aria-label='${label}']`);
+    if (!button) throw new Error("没有找到主题档位：" + label);
+    return button;
+  }
+
+  /** 记下写进 settings.json 的原文（替身默认也写内存，这里换成可断言的记录）。 */
+  function recordSettingsWrites(port: FakePort): string[] {
+    const writes: string[] = [];
+    port.core.settingsPorts.writeSettings = async (text) => void writes.push(text);
+    return writes;
+  }
+
+  it("三档常驻在顶栏，不用打开高级设置", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    await show(port);
+    await settingsReady();
+    expect(container.querySelector("[aria-label='主题']")).not.toBeNull();
+    for (const label of ["暗色", "浅色", "跟随系统"]) expect(option(label)).not.toBeNull();
+    // 没有打开设置面板。
+    expect(container.querySelector("[aria-label='高级设置']")).toBeNull();
+  });
+
+  it("点浅色：文档根、首帧镜像、宿主壳与设置文件都跟着变", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    const writes = recordSettingsWrites(port);
+    await show(port);
+    await settingsReady();
+    // 拿到设置后先同步一次真源档位（默认暗色）。
+    await vi.waitFor(() => expect(port.calls.nativeTheme).toEqual(["dark"]));
+
+    await act(async () => option("浅色").click());
+
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.documentElement.style.colorScheme).toBe("light");
+    expect(localStorage.getItem("kacha.theme")).toBe("light");
+    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["light"]));
+    expect(port.calls.nativeTheme.at(-1)).toBe("light");
+    // 主题字段写进 v1 设置文件，不升格式版本。
+    expect(JSON.parse(writes[0]).format_version).toBe(1);
+  });
+
+  it("跟随系统：系统配色变化时界面跟着变，宿主拿到的是 system 而不是被钉死的暗色", async () => {
+    const listeners: ((event: { matches: boolean }) => void)[] = [];
+    // jsdom 没有 matchMedia：注入一个可控的媒体查询，系统配色变化由本用例触发。
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => void listeners.push(listener),
+      removeEventListener: () => undefined,
+    }));
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    await show(port);
+    await settingsReady();
+
+    await act(async () => option("跟随系统").click());
+    expect(document.documentElement.dataset.theme).toBe("light");
+
+    await act(async () => {
+      for (const listener of listeners) listener({ matches: true });
+    });
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(port.calls.nativeTheme.at(-1)).toBe("system");
+    expect(localStorage.getItem("kacha.theme")).toBe("system");
+  });
+
+  it("设置文件版本过新：切换只在本会话生效，磁盘保持原样", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    port.core.settingsPorts.readSettings = async () => JSON.stringify({ format_version: 2, base_url: "http://gw.example:3001" });
+    const writes = recordSettingsWrites(port);
+    await show(port);
+    await settingsReady();
+
+    await act(async () => option("浅色").click());
+
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(localStorage.getItem("kacha.theme")).toBe("light");
+    await vi.waitFor(() => expect(port.calls.nativeTheme.at(-1)).toBe("light"));
+    expect(writes).toEqual([]);
+  });
+
+  it("设置文件读不出来：切换只在本会话生效，磁盘保持原样", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    port.core.settingsPorts.readSettings = async () => {
+      throw new Error("拒绝访问");
+    };
+    const writes = recordSettingsWrites(port);
+    await show(port);
+    await settingsReady();
+
+    await act(async () => option("暗色").click());
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    await vi.waitFor(() => expect(port.calls.nativeTheme.at(-1)).toBe("dark"));
+    expect(writes).toEqual([]);
+  });
+});

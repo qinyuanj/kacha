@@ -10,6 +10,7 @@
 import { FEEDBACK_UNAVAILABLE, PortError, portFailureOf, type ClipboardContent, type DataRootStore, type DiagnosticsOutcome, type DiagnosticsPackOutcome, type FeedbackOutcome, type FeedbackPort, type FeedbackSpec, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort, type UpdatePort } from "./port";
 import type { PackEntryFact, PackExportSpec } from "../core/boardPack";
 import type { BoardMeasure } from "../core/tidy";
+import type { ThemeChoice } from "../core/theme";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
 import type { BrowserOptions, ImageInfo, RecycleEntry, UsageCandidate, UsagePort } from "./types";
 import type { LogKind } from "./log";
@@ -337,6 +338,8 @@ export interface DesktopFeedbackBridge {
 /** MyGo 桥：Go 侧绑定与测试替身都满足它。 */
 export interface DesktopBridge {
   info(): Promise<DesktopInfo>;
+  /** 原生主题同步（#221）：Go 侧 Shell.SetTheme；没有这一项的桥按「宿主不跟随」处理。 */
+  setTheme?(choice: ThemeChoice): Promise<void>;
   local: DesktopLocalBridge;
   /** 系统剪贴板（#129）；没有这一项的替身按读不到处理。 */
   clipboard?: DesktopClipboardBridge;
@@ -599,6 +602,10 @@ function desktopUi(bridge: DesktopBridge, info: DesktopInfo, desktopPack: Deskto
     ...desktopDiagnosticsUi(bridge),
     isEditableTarget,
     installInputTakeover: installPageInputTakeover,
+    // 原生主题（#221）：宿主不跟随也没有界面后果（本页已经按自己解析出的主题画好了）。
+    setNativeTheme: async (choice: ThemeChoice): Promise<void> => {
+      await bridge.setTheme?.(choice);
+    },
   };
 }
 

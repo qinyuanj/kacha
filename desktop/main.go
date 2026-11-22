@@ -47,6 +47,10 @@ func main() {
 	// 内置了发布者公钥的构建才能验证更新签名：能力开关据此决定更新入口是否开放。
 	shell := shellapp.NewFollowing(version(), roots).WithPublisherKey(updateservice.PublisherKey() != "")
 
+	// 冷启动外观（#221）：先按上次的档位设原生主题源，再建窗口——窗口底色与标题栏都跟着它走。
+	// 读的只是 settings.json 里的 theme 字段（窗口外观的首帧缓存），真源在前端 core/settings.ts。
+	mygo.Theme.SetSource(startupTheme(root))
+
 	// 页面经这些服务读取壳信息、操作本地文件和系统剪贴板、导入画板包、迁移数据位置。
 	bindServices(shell, roots)
 
@@ -59,6 +63,9 @@ func main() {
 			MinWidth:  960,
 			MinHeight: 640,
 			StateKey:  "main",
+			// 冷启动窗口底色（#221）：页面首绘前不出现白底闪屏。
+			// 两色与 client/src/styles/tokens.css 的 --app-bg 亮 / 暗一致。
+			BackgroundColor: windowBackgroundColor,
 		})
 	})
 

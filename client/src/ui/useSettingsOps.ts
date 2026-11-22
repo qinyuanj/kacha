@@ -3,9 +3,11 @@ import {
   DEFAULT_SETTINGS,
   discoveryFromCache,
   loadSettings,
+  mayOverwriteSettings,
   normalizeBaseUrl,
   refreshModels as refreshModelsWith,
   saveSettings,
+  serializeSettings,
   type Discovery,
   type KeyPersistence,
   type LoadedSettings,
@@ -13,6 +15,7 @@ import {
   type Settings,
   type SettingsPorts,
 } from "../core/settings";
+import type { ThemeChoice } from "../core/theme";
 import { settingsFileProblem } from "./settingsText";
 
 /** 连接测试的结果。 */
@@ -45,6 +48,19 @@ export const initialSettingsState = (): SettingsState => ({
 export function fileProblemOf(loaded: LoadedSettings): string | null {
   if (loaded.kind === "corrupt") return settingsFileProblem("corrupt", undefined, loaded.reason);
   return settingsFileProblem(loaded.kind, loaded.kind === "newer" ? loaded.version : undefined);
+}
+
+/**
+ * 切换主题（#221）：内存状态立刻生效；设置文件为 newer / unreadable 时只改内存，
+ * 绝不覆盖磁盘——能不能写只看 mayOverwriteSettings 这一处判定。
+ */
+export async function setThemeState(ports: SettingsPorts, current: SettingsState, choice: ThemeChoice): Promise<SettingsState> {
+  const next: Settings = { ...current.settings, theme: choice };
+  const state: SettingsState = { ...current, settings: next };
+  if (!mayOverwriteSettings(current.file)) return state;
+  // 写盘失败不回滚界面：本次会话的主题已经生效，下次打开再写一次。
+  await ports.writeSettings(serializeSettings(next)).catch(() => undefined);
+  return state;
 }
 
 /** 刷新模型后要不要把发现结果写回界面：网关地址换了就不写（那是另一个网关的模型）。 */

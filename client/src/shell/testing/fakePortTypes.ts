@@ -101,4 +101,6 @@ export interface FakeCalls {
   moveTargets?: string[];
   /** 替身认为的当前数据根；迁移成功后换成新位置。 */
   dataRootRoot?: string;
+  /** 通知宿主壳的主题档位（按顺序，#221）。 */
+  nativeTheme: string[];
 }
