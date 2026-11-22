@@ -79,7 +79,7 @@ func TestExportUsesAllowlistAndRedactsSecrets(t *testing.T) {
 	svc.Log("task", map[string]string{
 		"model":         "test-model",
 		"authorization": "Bearer " + testSecret,
-		"note":          "网关返回 " + testSecret,
+		"note":        "gateway_key=gw-synthetic-secret {{SECRET_9p7w668j}}",
 	})
 	dest := filepath.Join(t.TempDir(), "diag.zip")
 	withDialog(t, func(mygo.SaveDialogOptions) (string, error) { return dest, nil })
@@ -159,7 +159,7 @@ func TestBundleExcludesSecretsCredentialsHostnameAndPaths(t *testing.T) {
 	svc.Log("connection", map[string]string{
 		"authorization": "Bearer " + testSecret,
 		"api_key":       testSecret,
-		"note":          "无法连接 " + host + " 上的 C:/Users/me/secret/board.md",
+		"note":        "gateway_key=gw-synthetic-secret {{SECRET_9p7w668j}}",
 	})
 
 	out := svc.Bundle()
@@ -178,6 +178,43 @@ func TestBundleExcludesSecretsCredentialsHostnameAndPaths(t *testing.T) {
 				t.Fatalf("%s leaked %q: %s", name, secret, body)
 			}
 		}
+	}
+}
+
+func TestBundleRedactsGatewayAndCommonSecretPatterns(t *testing.T) {
+	root := t.TempDir()
+	boards := filepath.Join(root, localstore.BoardsDir)
+	if err := os.MkdirAll(boards, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	svc := newService(root)
+	svc.Log("gateway", map[string]string{
+		"gateway_key": "gw-synthetic-secret",
+		"note":        "gateway_key=gw-synthetic-secret sk-synthetic5678",
+	})
+
+	out := svc.Bundle()
+	if !out.OK || out.Kind != "saved" || len(out.Data) == 0 {
+		t.Fatalf("Bundle outcome = %+v", out)
+	}
+	zipPath := filepath.Join(t.TempDir(), "bundle.zip")
+	if err := os.WriteFile(zipPath, out.Data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := readZip(t, zipPath)
+	foundRedaction := false
+	for name, body := range entries {
+		for _, secret := range []string{"gw-synthetic-secret", "sk-synthetic5678"} {
+			if strings.Contains(body, secret) {
+				t.Fatalf("%s leaked %q: %s", name, secret, body)
+			}
+		}
+		if strings.Contains(body, "[REDACTED]") {
+			foundRedaction = true
+		}
+	}
+	if !foundRedaction {
+		t.Fatal("diagnostics bundle has no redaction marker")
 	}
 }
 

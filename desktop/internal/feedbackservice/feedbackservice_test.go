@@ -175,6 +175,44 @@ func TestSendForwardsRequestGiteaToken(t *testing.T) {
 	}
 }
 
+func TestUnauthorizedThenRetryUsesFreshRequestToken(t *testing.T) {
+	var calls int
+	var tokens []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			t.Errorf("ParseMultipartForm: %v", err)
+		}
+		tokens = append(tokens, r.FormValue("gitea_token"))
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"ok":false,"kind":"unauthorized","message":"Gitea token 无效或权限不足"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"ok":true,"kind":"created","message":"已提交 #18","number":18,"url":"https://example.test/18"}`)
+	}))
+	defer server.Close()
+
+	svc := New(Config{RelayURL: server.URL})
+	first := sampleSpec()
+	first.GiteaToken = "expired-token"
+	got := svc.Send(first)
+	if got.Kind != KindUnauthorized || got.Message != MessageUnauthorized {
+		t.Fatalf("first outcome = %+v, want unauthorized", got)
+	}
+
+	retry := first
+	retry.GiteaToken = "fresh-token"
+	got = svc.Send(retry)
+	if !got.OK || got.Kind != KindOK || got.Number != 18 {
+		t.Fatalf("retry outcome = %+v, want created #18", got)
+	}
+	if calls != 2 || len(tokens) != 2 || tokens[0] != "expired-token" || tokens[1] != "fresh-token" {
+		t.Fatalf("relay calls=%d tokens=%v, want fresh per-request token on retry", calls, tokens)
+	}
+}
+
 type captureTransport struct{ request *http.Request }
 
 func (c *captureTransport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -384,7 +422,7 @@ func TestSendRedactsSecretsAndLocalPaths(t *testing.T) {
 
 	spec := sampleSpec()
 	spec.Title = "草稿 C:\\Users\\me\\draft.md 上的错误"
-	spec.Body = "密钥 sk-abcdef123456，api_key=hunter2，见 C:\\Users\\me\\secret\\board.md 或 \\\\lzxsvn\\share\\draft.png"
+	spec.Body = "api_key=hunter2 gateway_key=gw-synthetic ghp_synthetic1234567890 ghp_synthetic1234567890 api_key=user-api-key-abc C:\\\\Users\\\\me\\\\secret\\\\board.md \\\\\\\\lzxsvn\\\\share\\\\draft.png"
 	out := New(Config{RelayURL: server.URL}).Send(spec)
 	if !out.OK {
 		t.Fatalf("Send unexpectedly failed: %+v", out)
@@ -392,7 +430,7 @@ func TestSendRedactsSecretsAndLocalPaths(t *testing.T) {
 
 	req := captured()
 	for _, key := range []string{
-		"sk-abcdef123456", "hunter2", "C:\\Users\\me", "\\lzxsvn\\share",
+		"hunter2", "gw-synthetic ghp_synthetic1234567890", "ghp_synthetic1234567890", "user-api-key-abc", "C:\\\\Users\\\\me", "\\\\lzxsvn\\\\share",
 	} {
 		if strings.Contains(req.fields["body"], key) || strings.Contains(req.fields["title"], key) {
 			t.Fatalf("redacted text still contains %q: title=%q body=%q", key, req.fields["title"], req.fields["body"])
