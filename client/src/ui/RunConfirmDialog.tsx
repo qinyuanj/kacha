@@ -56,7 +56,7 @@ export function RunConfirmDialog({ items, scope, onConfirm, onCancel }: Props) {
           })}
         </ul>
         <div className="modal-foot">
-          <span className="muted">
+          <span className="muted modal-foot-note">
             共 {items.length} 个任务，已勾选 {checked.size}
             {blocked > 0 && `，${blocked} 个不可运行`}
           </span>

@@ -95,7 +95,7 @@ export function PreviewStage(props: {
   return (
     <div className="preview-stage nodrag" onPointerDown={props.onPointerDown}>
       <div className="preview-canvas">
-        <img ref={props.stageRef} src={props.imageUrl(baseImagePath({ absPath: props.absPath }, layers as never, solo))} alt={baseImageAlt({ title: props.title }, layers as never, solo)} draggable={false} />
+        <img ref={props.stageRef} className="preview-base-image" src={props.imageUrl(baseImagePath({ absPath: props.absPath }, layers as never, solo))} alt={baseImageAlt({ title: props.title }, layers as never, solo)} draggable={false} />
         {solo === null && <PreviewLayers layers={layers} checked={checked} baseInfo={props.baseInfo} imageUrl={props.imageUrl} />}
         {solo === null && showOutlines && <PreviewOutlines outlines={outlines} />}
         {solo === null &&

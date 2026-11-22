@@ -70,8 +70,8 @@ export function UsageRecycle({ onChanged }: Props) {
   return (
     <div className="usage-recycle" data-testid="usage-recycle">
       <div className="form-row">
-        <span>回收区</span>
-        <span className="muted small">清理内容保留 14 天；期内不提前删除，归档画板不按时间清理。</span>
+        <span className="form-row-label">回收区</span>
+        <span className="form-row-hint">清理内容保留 14 天；期内不提前删除，归档画板不按时间清理。</span>
         <button data-testid="recycle-purge" onClick={() => void purge()} disabled={!hasExpired || busy}>清理期满项</button>
       </div>
       {entries.length === 0 && <div className="muted small form-hint" data-testid="recycle-empty">回收区为空</div>}

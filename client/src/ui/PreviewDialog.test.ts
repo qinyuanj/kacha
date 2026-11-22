@@ -151,4 +151,15 @@ describe("放大预览弹窗", () => {
     await act(async () => buttonWithText("图1").click());
     expect(container.textContent).toContain("编辑区域：图1");
   });
+
+  it("图层识别文字是独立文本块，页脚说明也是独立元素而不是靠位置占位", async () => {
+    const port = createFakePort();
+    const record = { ...layerRecord(), text_recognition: { text: "促销文案", lines: [{ runs: [{ text: "促销文案", style: { bold: true } }] }] } } as unknown as LayerRecord;
+    await show({ title: "预览", absPath: "/~/a.png", layers: [{ record, absPath: "/~/l0.png" }] }, port);
+    const ocr = container.querySelector<HTMLElement>(".ocr-text")!;
+    expect(ocr.textContent).toContain("促销文案");
+    expect(ocr.querySelectorAll(".badge").length).toBeGreaterThan(0);
+    const foot = container.querySelector(".modal-foot")!;
+    expect(foot.querySelector(".modal-foot-note")).not.toBeNull();
+  });
 });

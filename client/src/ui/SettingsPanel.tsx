@@ -22,7 +22,7 @@ function GatewayRow({ baseUrl, urlError, plainHttp, onChange }: { baseUrl: strin
   return (
     <>
       <label className="form-row">
-        <span>网关基础地址</span>
+        <span className="form-row-label">网关基础地址</span>
         <input value={baseUrl} onChange={(e) => onChange(e.target.value)} placeholder={DEFAULT_SETTINGS.base_url} spellCheck={false} />
       </label>
       {urlError && <div className="form-error">{urlError}</div>}
@@ -36,9 +36,9 @@ function RelayRow({ value, error, onChange }: { value: string; error: string | n
   return (
     <>
       <label className="form-row">
-        <span>反馈中继地址</span>
+        <span className="form-row-label">反馈中继地址</span>
         <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={DEFAULT_FEEDBACK_RELAY_URL} spellCheck={false} />
-        <span className="muted small">留空使用 {DEFAULT_FEEDBACK_RELAY_URL}；覆盖值优先</span>
+        <span className="form-row-hint">留空使用 {DEFAULT_FEEDBACK_RELAY_URL}；覆盖值优先</span>
       </label>
       {error && <div className="form-error">{error}</div>}
     </>
@@ -60,7 +60,7 @@ function ConnectionRow({
   return (
     <>
       <div className="form-row">
-        <span>连接测试</span>
+        <span className="form-row-label">连接测试</span>
         <button onClick={onTest} disabled={!canTest}>{testLabel}</button>
         {testResult && <span className={testResult.ok ? "ok-text" : "form-error"}>{connectionText(testResult)}</span>}
       </div>
@@ -87,9 +87,9 @@ function ConcurrencyRow({
   return (
     <>
       <label className="form-row">
-        <span>并发上限</span>
+        <span className="form-row-label">并发上限</span>
         <input type="number" min={MIN_CONCURRENCY} max={MAX_CONCURRENCY} value={draft} onChange={(e) => onChange(e.target.value)} onBlur={onBlur} />
-        <span className="muted small">{concurrencyHint}</span>
+        <span className="form-row-hint">{concurrencyHint}</span>
       </label>
       {highConcurrency && <div className="muted small form-hint">qwen 模型曾在 6 个以上并发时触发网关限流；限流时整条队列会暂停等待。</div>}
       <span hidden data-concurrency={concurrency} />
@@ -160,7 +160,7 @@ export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => closeOnBackdrop(e, onClose)}>
-      <div className="modal" role="dialog" aria-label="高级设置">
+      <div className="modal settings-dialog" role="dialog" aria-label="高级设置">
         <div className="modal-head">
           <strong>高级设置</strong>
           {version && <span className="muted small">版本 {version}</span>}
@@ -168,34 +168,54 @@ export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
         </div>
         {settings.fileProblem && <div className="notice notice-warn">{settings.fileProblem}</div>}
 
-        <GatewayRow baseUrl={baseUrl} urlError={view.urlError} plainHttp={view.plainHttp} onChange={setBaseUrl} />
-        <RelayRow value={feedbackRelayUrl} error={view.feedbackRelayUrlError} onChange={setFeedbackRelayUrl} />
+        <div className="settings-section">
+          <GatewayRow baseUrl={baseUrl} urlError={view.urlError} plainHttp={view.plainHttp} onChange={setBaseUrl} />
+        </div>
+        <div className="settings-section">
+          <RelayRow value={feedbackRelayUrl} error={view.feedbackRelayUrlError} onChange={setFeedbackRelayUrl} />
+        </div>
 
-        <label className="form-row">
-          <span>API 密钥</span>
-          <input type="password" value={apiKeyDraft} onChange={(e) => setApiKeyDraft(e.target.value)} placeholder="粘贴团队网关 API 密钥" autoComplete="off" spellCheck={false} />
-          <button onClick={() => void clearKey()} disabled={saving || !apiKeyDraft.trim()}>清除密钥</button>
-        </label>
-        <div className="muted small form-hint">密钥保存在本机并受 Windows 系统保护，不写入设置文件或诊断；更换或清除密钥不会改变本机画板身份。</div>
+        <div className="settings-section">
+          <label className="form-row">
+            <span className="form-row-label">API 密钥</span>
+            <input type="password" value={apiKeyDraft} onChange={(e) => setApiKeyDraft(e.target.value)} placeholder="粘贴团队网关 API 密钥" autoComplete="off" spellCheck={false} />
+            <button onClick={() => void clearKey()} disabled={saving || !apiKeyDraft.trim()}>清除密钥</button>
+          </label>
+          <div className="muted small form-hint">密钥保存在本机并受 Windows 系统保护，不写入设置文件或诊断；更换或清除密钥不会改变本机画板身份。</div>
+        </div>
 
-        <ConnectionRow testResult={testResult} canTest={view.canTest} testLabel={view.testLabel} onTest={() => void test()} />
-        <div className="muted small form-hint">{discoveryText(discovery)}</div>
+        <div className="settings-section">
+          <ConnectionRow testResult={testResult} canTest={view.canTest} testLabel={view.testLabel} onTest={() => void test()} />
+          <div className="muted small form-hint">{discoveryText(discovery)}</div>
+        </div>
 
-        <ConcurrencyRow
-          draft={concurrencyDraft}
-          concurrency={view.concurrency}
-          highConcurrency={view.highConcurrency}
-          concurrencyHint={view.concurrencyHint}
-          onChange={setConcurrencyDraft}
-          onBlur={() => setConcurrencyDraft(concurrencyOnBlur(concurrencyDraft, settings.settings.concurrency))}
-        />
+        <div className="settings-section">
+          <ConcurrencyRow
+            draft={concurrencyDraft}
+            concurrency={view.concurrency}
+            highConcurrency={view.highConcurrency}
+            concurrencyHint={view.concurrencyHint}
+            onChange={setConcurrencyDraft}
+            onBlur={() => setConcurrencyDraft(concurrencyOnBlur(concurrencyDraft, settings.settings.concurrency))}
+          />
+        </div>
 
-        {dataRoot && <DataRootSection actions={dataRoot} />}
+        {dataRoot && (
+          <div className="settings-section">
+            <DataRootSection actions={dataRoot} />
+          </div>
+        )}
 
-        <DiagnosticsSection />
+        {port.features.diagnostics && (
+          <div className="settings-section">
+            <DiagnosticsSection />
+          </div>
+        )}
 
-        <UsageSection />
-        {error && <div className="form-error">{error}</div>}
+        <div className="settings-section">
+          <UsageSection />
+        </div>
+        {error && <div className="form-alert form-alert-error">{error}</div>}
         <div className="modal-foot">
           <button onClick={onClose}>取消</button>
           <button className="primary" onClick={() => void submit()} disabled={!view.canSave}>保存</button>

@@ -1,57 +1,179 @@
-.pack-progress {
-  width: 100%;
-  height: 8px;
+/* 弹窗模块（#219）：模态遮罩与容器、标题栏与底部动作栏、表单行与校验提示，
+ * 以及高级设置、画板列表、画板包、运行确认、发送文本、放大预览、更新说明与反馈弹窗。
+ *
+ * 两套主题共用同一套间距、圆角、边框与层级：这里只引用 tokens.css 的语义变量。
+ * 反馈弹窗的字段行是纵向排布（标签在上、控件在下），不再用「第一个 span」「类型排除法」
+ * 这类位置/属性选择器绕行；.form-row-label / .form-row-hint / .modal-foot-note 是那些绕行的替代。
+ * 名字特意不用 .field-label：canvas.css 里那一个是节点卡片的窄标签（28px 固定宽），同名会串味。
+ * 层叠顺序：tokens → base → shell → canvas → dialogs。
+ */
+
+/* ---- 模态：遮罩与容器 ---- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--scrim);
 }
-.changelog-dialog {
-  overflow: hidden;
+.modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  padding: 18px 20px;
+  overflow: auto;
+  color: var(--text-1);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-modal);
 }
-.changelog-dialog .modal-head {
+.modal-wide {
+  width: min(760px, calc(100vw - 48px));
+}
+/* 直接把 h2 放在容器里的弹窗（画板列表、删除确认、归档确认）。 */
+.modal > h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+/* ---- 标题栏与底部动作栏 ---- */
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-1);
+}
+.modal-head h2,
+.modal-head strong {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-1);
+}
+/* 动作栏左侧的说明（取代「第一个 .muted 当弹性占位」）。 */
+.modal-foot-note {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ---- 表单行：标签在上、控件在下 ----
+ * 竖向排布让长中文标签（截图说明、密钥说明）占满整行，不再被固定标签列压成窄条；
+ * 对齐靠这条布局本身，不需要给提示文案写 margin-left 或挑「第一个 span」。 */
+.form-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+}
+.form-row > button {
+  align-self: flex-start;
+}
+/* 标签整行铺开：不设固定宽度与收缩，长中文标签自然折行。 */
+.form-row-label {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.4;
+}
+/* 行内小字说明（跟在控件或按钮旁），与行下方的块级 .form-hint 分开。 */
+.form-row-hint {
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.5;
+}
+/* 一行里并排的动作 + 说明：按钮与说明同一行，说明过长时换行。 */
+.feedback-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- 说明与校验提示 ---- */
+.form-hint {
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.form-error {
+  color: var(--danger-text);
+  font-size: 12px;
+}
+/* 块级提示：整块可读（不是挤在动作栏里的一行红字）。 */
+.form-alert {
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.form-alert p {
+  margin: 0;
+}
+.form-alert-error {
+  color: var(--danger-text);
+  background: var(--danger-soft-weak);
+  border-color: var(--danger-soft);
+}
+.ok-text {
+  color: var(--success);
+}
+/* 警告框：暗色下用半透明琥珀底 + 常规文字色，不用低对比的浅黄。 */
+.notice {
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.notice-warn {
+  color: var(--text-1);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning);
+}
+
+/* ---- 高级设置：按功能分区 ---- */
+.settings-dialog .modal-head {
   flex-shrink: 0;
 }
-.changelog-dialog .modal-head button {
-  min-height: 40px;
-  min-width: 40px;
-}
-.changelog-releases {
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  min-height: 0;
-  line-height: 1.8;
-}
-.changelog-release {
-  scroll-margin-top: 8px;
-}
-.changelog-release + .changelog-release {
-  border-top: 1px solid var(--border);
-  margin-top: 20px;
-  padding-top: 16px;
-}
-.changelog-release h2 {
+.settings-section {
   display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin: 0 0 8px;
-  font-size: 18px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
-.changelog-release h2 span {
-  font-weight: normal;
+.settings-section + .settings-section {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
 }
-.changelog-group h3 {
-  font-size: 13px;
-  margin: 12px 0 4px;
-}
-.changelog-group ul {
-  margin: 0;
-  padding-left: 22px;
-}
-.changelog-group li + li {
-  margin-top: 6px;
-}
-.changelog-notice {
-  color: var(--warning-text);
-  background: var(--warning-soft);
-  border-radius: 3px;
+
+/* ---- 用量与回收区（高级设置的存储段） ---- */
+.usage-section,
+.usage-recycle {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 .usage-candidates {
   max-height: 260px;
@@ -60,82 +182,153 @@
   padding-left: 18px;
   font-size: 12px;
 }
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--scrim);
+
+/* ---- 画板列表：打开画板与「管理画板」共用同一套样式 ---- */
+.tab-list {
+  align-self: center;
+  margin-left: 6px;
+  font-size: 12px;
+  white-space: nowrap;
 }
-.modal {
+.board-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  width: min(560px, calc(100vw - 48px));
-  max-height: calc(100vh - 48px);
-  padding: 16px;
+  gap: 4px;
+  max-height: 50vh;
   overflow: auto;
-  background: var(--surface-raised);
-  border-radius: 8px;
-  box-shadow: var(--shadow-modal);
 }
-.modal-wide {
-  width: min(760px, calc(100vw - 48px));
-}
-.modal-head,
-.modal-foot {
+.board-list li {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 32px;
+  padding: 4px 8px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
 }
-.modal-head strong {
-  flex: 1;
-  font-size: 15px;
+.board-list li:hover {
+  background: var(--control-hover);
+  border-color: var(--border-2);
 }
-.modal-foot {
-  justify-content: flex-end;
-  margin-top: 8px;
-}
-.modal-foot > .muted {
-  flex: 1;
-}
-.form-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.form-row > span:first-child {
-  width: 88px;
-  flex-shrink: 0;
-}
-.form-row input:not([type="checkbox"]) {
+.board-list-open {
   flex: 1;
   min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  color: var(--text-1);
+  background: none;
+  border: none;
+  cursor: pointer;
 }
-.form-row input[type="number"] {
-  flex: 0 0 72px;
+.board-list-open:hover {
+  color: var(--accent);
 }
-.form-hint,
-.form-error {
-  margin-left: 96px;
+.board-list .board-list-size {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
 }
-.form-error {
-  color: var(--red);
-}
-.ok-text {
-  color: var(--success);
-}
-.notice {
-  padding: 6px 10px;
-  border-radius: 6px;
-}
-.notice-warn {
+/* 画板体量越过提醒线（#87）：黄线标黄、红线标红，只提醒。 */
+.board-list .board-list-size.size-warn {
+  color: var(--warning-text);
   background: var(--warning-soft);
-  border: 1px solid var(--yellow);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+}
+.board-list .board-list-size.size-alert {
+  color: var(--text-on-accent);
+  background: var(--red);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+}
+/* 危险动作：危险色文字 + 悬停实心，突出但不刺眼。 */
+.board-list .board-list-delete {
+  color: var(--danger-text);
+}
+.board-list .board-list-delete:hover {
+  color: var(--text-on-accent);
+  background: var(--danger-fill);
+  border-color: var(--danger-fill);
+}
+.board-list-group {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+/* 画板位用量（#89）：满了标红；超出的老用户另起一句提示。 */
+.board-list-slots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+  font-size: 12px;
+}
+.board-list-slots .board-list-slots-full {
+  color: var(--red);
+  font-weight: 600;
+}
+.board-list-slots .board-list-over {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+}
+/* 归档确认与删除确认的说明段。 */
+.archive-confirm-text {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-1);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-md);
+}
+.delete-notes {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-2);
+  line-height: 1.7;
 }
 
+/* ---- 画板包：阶段文案、体量预估与进度 ---- */
+.pack-phase {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.pack-estimate {
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+}
+.pack-progress {
+  width: 100%;
+  height: 8px;
+}
+/* 画板包的警告段（含完整提示词、导入冲突说明）：整块可读，不挤成一行徽标。 */
+.pack-warning {
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-1);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-md);
+}
+
+/* ---- 运行确认与发送文本 ---- */
 .confirm-list {
   margin: 0;
   padding: 0;
@@ -143,10 +336,11 @@
   overflow: auto;
 }
 .confirm-list > li {
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  margin-bottom: 6px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
 }
 .confirm-list > li.confirm-bad {
   border-color: var(--red);
@@ -164,18 +358,26 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 发送文本：等宽、有边界、可滚动，便于逐字核对。 */
 .send-text {
   margin: 4px 0 0;
-  padding: 6px 8px;
-  max-height: 200px;
+  padding: 10px 12px;
+  max-height: 220px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-1);
   background: var(--surface-sunken);
-  border-radius: 4px;
-  font-family: inherit;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
 }
-/* ---- 放大预览 / 区域指示 ---- */
+
+/* ---- 放大预览 / 区域指示 ----
+ * 区域指示的紫 / 黄 / 洋红是发给模型的颜色指代契约（core/overlay.ts 的 REGION_COLORS）：
+ * 这里的 --region-1 只是同一个 RGB 的具名引用，字面值不随主题改。 */
 .modal-preview {
   width: min(860px, calc(100vw - 48px));
 }
@@ -192,10 +394,11 @@
   min-width: 0;
   display: grid;
   place-items: center;
+  padding: 12px;
   overflow: auto;
   background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 16px 16px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   touch-action: none;
 }
 .preview-canvas {
@@ -204,7 +407,7 @@
   max-width: 100%;
   line-height: 0;
 }
-.preview-canvas > img:first-child {
+.preview-base-image {
   max-width: 100%;
   max-height: calc(100vh - 260px);
   user-select: none;
@@ -247,7 +450,7 @@
   height: 10px;
   background: var(--text-on-media);
   border: 2px solid var(--region-1);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 .preview-handle-nw {
   left: -6px;
@@ -269,12 +472,15 @@
   bottom: -6px;
   cursor: nwse-resize;
 }
+/* 图层侧栏：与舞台之间用一条分隔边界，不靠底色硬切。 */
 .preview-side {
   width: 220px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border-1);
   overflow: auto;
 }
 .layer-list {
@@ -287,7 +493,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 0;
+  padding: 4px 0;
 }
 .layer-list label {
   flex: 1;
@@ -302,87 +508,223 @@
   height: 40px;
   object-fit: contain;
   background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 10px 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .layer-list img.layer-solo {
   outline: 2px solid var(--accent);
 }
+/* 富文本 OCR 文本区：与图层名分开成块，不再和名字挤在一行。 */
+.ocr-text {
+  margin-top: 2px;
+  padding: 4px 6px;
+  word-break: break-word;
+  line-height: 1.5;
+  color: var(--text-2);
+  background: var(--surface-sunken);
+  border-left: 2px solid var(--border-2);
+  border-radius: var(--radius-sm);
+}
+.ocr-text .badge {
+  margin-left: 4px;
+}
 .preview-pick,
 .preview-export {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
-/* 画板列表（Web 版打开本机存储已有画板） */
-.tab-list {
-  align-self: center;
-  margin-left: 6px;
-  font-size: 12px;
-  white-space: nowrap;
+.preview-pick,
+.preview-export {
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
 }
-.board-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+
+/* ---- 更新说明（changelog）：版本 → 分组 → 条目三级层次 ---- */
+.changelog-dialog {
+  overflow: hidden;
+}
+.changelog-dialog .modal-head {
+  flex-shrink: 0;
+}
+.changelog-dialog .modal-head button {
+  min-height: 40px;
+  min-width: 40px;
+}
+.changelog-releases {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  padding-right: 4px;
+  line-height: 1.75;
+}
+.changelog-release {
+  scroll-margin-top: 8px;
+}
+.changelog-release + .changelog-release {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-1);
+}
+.changelog-release h2 {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 50vh;
-  overflow: auto;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 0 4px;
+  font-size: 18px;
+  letter-spacing: 0.2px;
 }
-.board-list li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.changelog-release h2 span {
+  font-weight: normal;
 }
-.board-list .board-list-size {
-  margin-left: auto;
+.changelog-group h3 {
+  margin: 14px 0 6px;
   font-size: 12px;
-  color: var(--text-2);
-  white-space: nowrap;
-}
-/* 画板体量越过提醒线（#87）：黄线标黄、红线标红，只提醒。 */
-.board-list .board-list-size.size-warn {
-  color: var(--warning-text);
-  background: var(--warning-soft);
-  border-radius: 4px;
-  padding: 0 4px;
-}
-.board-list .board-list-size.size-alert {
-  color: var(--text-on-accent);
-  background: var(--red);
-  border-radius: 4px;
-  padding: 0 4px;
-}
-.board-list .board-list-delete {
-  color: var(--red);
-}
-.board-list-group {
-  margin: 8px 0 4px;
-  font-size: 12px;
-}
-/* 画板位用量（#89）：满了标红；超出的老用户另起一句提示。 */
-.board-list-slots {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 4px 0 8px;
-  font-size: 12px;
-}
-.board-list-slots .board-list-slots-full {
-  color: var(--red);
   font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--text-2);
 }
-.board-list-slots .board-list-over {
-  color: var(--warning-text);
-  background: var(--warning-soft);
-  border-radius: 4px;
-  padding: 0 4px;
-}
-.delete-notes {
+.changelog-group ul {
   margin: 0;
   padding-left: 20px;
+}
+.changelog-group li {
+  line-height: 1.7;
+}
+.changelog-group li + li {
+  margin-top: 6px;
+}
+.changelog-notice {
+  margin-right: 6px;
+  padding: 0 6px;
+  color: var(--warning-text);
+  background: var(--warning-soft);
+  border-radius: var(--radius-xs);
+}
+
+/* ---- 反馈弹窗：纵向字段行、截图附件、脱敏预览、令牌提示与回执 ---- */
+.feedback-dialog .modal-head h2 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+}
+/* 图标按钮（关闭）：只有图标，不占标题栏的横向空间。
+ * 布局与状态色归这里；普通按钮的默认外观归 base.css 的按钮体系。 */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   color: var(--text-2);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.icon-button:hover {
+  color: var(--text-1);
+  background: var(--control-hover);
+}
+.feedback-pick-row {
+  align-items: flex-start;
+}
+.feedback-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.feedback-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 3px 4px 3px 10px;
+  font-size: 12px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-pill);
+}
+.feedback-attachment-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feedback-attachment-remove {
+  padding: 1px 6px;
+  font-size: 11px;
+}
+.feedback-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+/* 脱敏预览：一条边界内按行核对，和可修改的表单行分开。 */
+.feedback-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+}
+.feedback-line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.feedback-preview-meta {
+  margin: 0;
+  color: var(--text-2);
+}
+/* 令牌去向与权限范围：两条独立提示，不与正文混在一起。 */
+.feedback-token-notice,
+.feedback-token-scope {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  border-radius: var(--radius-sm);
+}
+.feedback-token-notice {
+  color: var(--text-1);
+  background: var(--accent-soft);
+}
+.feedback-token-scope {
+  color: var(--text-2);
+  border: 1px dashed var(--border-2);
+}
+.feedback-receipt {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: var(--success-soft);
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-md);
+}
+.feedback-receipt-title {
+  margin: 0;
+  font-size: 14px;
+}
+.feedback-url {
+  margin: 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  word-break: break-all;
+  color: var(--text-2);
+}
+.feedback-return-link {
+  margin: 0;
 }
