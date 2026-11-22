@@ -1,11 +1,13 @@
 // 高级设置面板的可见判定（#137）：从 ui/SettingsPanel.tsx 拆出的纯逻辑，便于单测。
 // 组件只留接线与 DOM 摆放。
-import { DEFAULT_SETTINGS, isPlainHttp, MAX_CONCURRENCY, mayOverwriteSettings, parseConcurrency, settingsFromForm, validateBaseUrl, type LoadedSettings, type Settings } from "../core/settings";
+import { DEFAULT_SETTINGS, isPlainHttp, MAX_CONCURRENCY, mayOverwriteSettings, parseConcurrency, settingsFromForm, validateBaseUrl, validateFeedbackRelayUrl, type LoadedSettings, type Settings } from "../core/settings";
 
 /** 面板此刻的样子：哪些提示要显示、保存能不能点。 */
 export interface SettingsPanelView {
   /** 网关地址的输入错误；null 表示合法。 */
   urlError: string | null;
+  /** 反馈中继覆盖地址的输入错误；null 表示合法或留空。 */
+  feedbackRelayUrlError: string | null;
   /** 明文 HTTP 的风险提示要不要显示。 */
   plainHttp: boolean;
   /** settings.json 不能被本次覆盖（newer / unreadable）：保存置灰。 */
@@ -27,6 +29,7 @@ export interface SettingsPanelView {
 /** 面板此刻的样子：输入的地址与并发草稿、设置文件状态、是否有密钥、是否正在测 / 存。 */
 export function settingsPanelView(input: {
   baseUrl: string;
+  feedbackRelayUrl?: string;
   concurrencyDraft: string;
   savedConcurrency: number;
   file: LoadedSettings["kind"];
@@ -35,10 +38,12 @@ export function settingsPanelView(input: {
   saving: boolean;
 }): SettingsPanelView {
   const urlError = validateBaseUrl(input.baseUrl);
+  const feedbackRelayUrlError = validateFeedbackRelayUrl(input.feedbackRelayUrl ?? DEFAULT_SETTINGS.feedback_relay_url);
   const concurrency = parseConcurrency(input.concurrencyDraft, input.savedConcurrency);
   const canTest = !input.testing && !urlError && !!input.apiKey.trim();
   return {
     urlError,
+    feedbackRelayUrlError,
     plainHttp: !urlError && isPlainHttp(input.baseUrl),
     readOnly: !mayOverwriteSettings(input.file),
     concurrency,
@@ -46,7 +51,7 @@ export function settingsPanelView(input: {
     concurrencyHint: `1～${MAX_CONCURRENCY}，默认 ${DEFAULT_SETTINGS.concurrency}；按页面各自计算，同一密钥开多个页面时互不共享`,
     canTest,
     testLabel: input.testing ? "测试中…" : "测试连接并刷新模型",
-    canSave: !input.saving && !urlError && mayOverwriteSettings(input.file),
+    canSave: !input.saving && !urlError && !feedbackRelayUrlError && mayOverwriteSettings(input.file),
   };
 }
 
@@ -69,6 +74,6 @@ export function discoveryText(discovery: { source: "live" | "cached" | "none"; f
 }
 
 /** 保存时要写入的设置：在已存设置上套用表单。 */
-export function settingsToSave(saved: Settings, baseUrl: string, concurrencyDraft: string): Settings {
-  return settingsFromForm(saved, { baseUrl, concurrencyDraft });
+export function settingsToSave(saved: Settings, baseUrl: string, concurrencyDraft: string, feedbackRelayUrl?: string): Settings {
+  return settingsFromForm(saved, { baseUrl, concurrencyDraft, feedbackRelayUrl });
 }

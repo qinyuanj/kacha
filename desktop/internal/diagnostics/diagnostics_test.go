@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo"
+
+	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
 // 合成密钥：与前端夹具同一个占位值，真值由运行环境填入，不写死在仓库里。
@@ -77,7 +79,7 @@ func TestExportUsesAllowlistAndRedactsSecrets(t *testing.T) {
 	svc.Log("task", map[string]string{
 		"model":         "test-model",
 		"authorization": "Bearer " + testSecret,
-		"note":          "网关返回 " + testSecret,
+		"note":        "gateway_key=gw-synthetic-secret {{SECRET_9p7w668j}}",
 	})
 	dest := filepath.Join(t.TempDir(), "diag.zip")
 	withDialog(t, func(mygo.SaveDialogOptions) (string, error) { return dest, nil })
@@ -143,6 +145,79 @@ func TestExportUsesAllowlistAndRedactsSecrets(t *testing.T) {
 }
 
 // 已保存 → 已替换 → 已清除：三种状态下的日志与包内全部内容都不能出现任一密钥。
+func TestBundleExcludesSecretsCredentialsHostnameAndPaths(t *testing.T) {
+	root := t.TempDir()
+	boards := filepath.Join(root, localstore.BoardsDir)
+	if err := os.MkdirAll(boards, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		t.Fatalf("hostname: %v", err)
+	}
+	svc := newService(root, testSecret)
+	svc.Log("connection", map[string]string{
+		"authorization": "Bearer " + testSecret,
+		"api_key":       testSecret,
+		"note":        "gateway_key=gw-synthetic-secret {{SECRET_9p7w668j}}",
+	})
+
+	out := svc.Bundle()
+	if !out.OK || out.Kind != "saved" || len(out.Data) == 0 {
+		t.Fatalf("Bundle outcome = %+v", out)
+	}
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "bundle.zip")
+	if err := os.WriteFile(zipPath, out.Data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := readZip(t, zipPath)
+	for name, body := range entries {
+		for _, secret := range []string{testSecret, host, "C:/Users/me", `\\lzxsvn\share`} {
+			if strings.Contains(body, secret) {
+				t.Fatalf("%s leaked %q: %s", name, secret, body)
+			}
+		}
+	}
+}
+
+func TestBundleRedactsGatewayAndCommonSecretPatterns(t *testing.T) {
+	root := t.TempDir()
+	boards := filepath.Join(root, localstore.BoardsDir)
+	if err := os.MkdirAll(boards, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	svc := newService(root)
+	svc.Log("gateway", map[string]string{
+		"gateway_key": "gw-synthetic-secret",
+		"note":        "gateway_key=gw-synthetic-secret sk-synthetic5678",
+	})
+
+	out := svc.Bundle()
+	if !out.OK || out.Kind != "saved" || len(out.Data) == 0 {
+		t.Fatalf("Bundle outcome = %+v", out)
+	}
+	zipPath := filepath.Join(t.TempDir(), "bundle.zip")
+	if err := os.WriteFile(zipPath, out.Data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := readZip(t, zipPath)
+	foundRedaction := false
+	for name, body := range entries {
+		for _, secret := range []string{"gw-synthetic-secret", "sk-synthetic5678"} {
+			if strings.Contains(body, secret) {
+				t.Fatalf("%s leaked %q: %s", name, secret, body)
+			}
+		}
+		if strings.Contains(body, "[REDACTED]") {
+			foundRedaction = true
+		}
+	}
+	if !foundRedaction {
+		t.Fatal("diagnostics bundle has no redaction marker")
+	}
+}
+
 func TestExportRedactsSavedReplacedAndClearedKeys(t *testing.T) {
 	root := t.TempDir()
 	saved := testSecret

@@ -9,6 +9,7 @@ import { shouldShowUpdateNotice } from "./core/changelog";
 import { useUsageLimit } from "./ui/useUsageLimit";
 import { useRunner } from "./ui/useRunner";
 import { useSettings } from "./ui/useSettings";
+import { resolveFeedbackRelayAddress } from "./core/settings";
 import { useBoardPack } from "./ui/useBoardPack";
 import { useRunCallbacks } from "./ui/appRunHooks";
 import { useBoardSessions } from "./ui/useBoardSessions";
@@ -88,6 +89,7 @@ export function App({ version }: AppProps) {
   const settings = useSettings();
   const [table, setTable] = useState<CapabilityTable>(BUILTIN_TABLE);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   // 编辑环境随渲染更新（能力表、网关发现），锁定集按画板现取运行器的最新快照；sessions 在每次画板变更时取。
   const envRef = useRef({ table, discovery: settings.discovery });
   envRef.current = { table, discovery: settings.discovery };
@@ -352,6 +354,7 @@ export function App({ version }: AppProps) {
     confirmOpen: state.confirm !== null,
     sendTextOpen: state.sendText !== null,
     packDialogOpen: pack.dialog !== null,
+    feedbackOpen,
   });
   return (
 
@@ -373,6 +376,7 @@ export function App({ version }: AppProps) {
         settingsOpen={state.settingsOpen}
         usageNotice={usageNotice}
         updateStatus={updateStatus}
+        update={update}
         onDeferUpdate={autoInstall.defer}
         runIndicator={{
           active: runState.active,
@@ -447,6 +451,8 @@ export function App({ version }: AppProps) {
         onCloseMissing={(key) => void discardMissingBoard(key)}
         onImportPack={() => void pack.importPack()}
         importDisabled={view.importDisabled}
+        onOpenFeedback={() => setFeedbackOpen(true)}
+        feedbackAvailable={port.features.feedback}
         onToolbarSlot={setToolbarSlot}
       />
       <AppOverlays
@@ -456,6 +462,13 @@ export function App({ version }: AppProps) {
         changelogOpen={state.changelogOpen}
         version={versionOrEmpty(version)}
         onChangelogClose={() => store.setChangelogOpen(false)}
+        // 构建标识来自唯一产品版本源（mygo.config.ts → Shell.Info.Version / build-info.json 的 version）；
+        // 不再传空字符串，否则预览永远显示「未知」。源码运行退回 dev 也是真实构建身份。
+        build={versionOrEmpty(version)}
+        feedbackOpen={feedbackOpen}
+        onFeedbackClose={() => setFeedbackOpen(false)}
+        feedbackBoardName={activeKey ? view.titleOf(activeKey) : ""}
+        feedbackRelayUrl={resolveFeedbackRelayAddress(settings.settings)}
         confirm={state.confirm}
         onConfirmCancel={() => store.setConfirm(null)}
         onConfirm={(ids) => void runNow(state.confirm!.boardKey, state.confirm!.board, ids)}
@@ -464,7 +477,6 @@ export function App({ version }: AppProps) {
         onSendTextClose={() => store.setSendText(null)}
         packDialog={pack.dialog}
         toastText={state.toastText}
-        update={update}
         dataRoot={dataRootActions}
       />
     </>

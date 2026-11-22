@@ -3,6 +3,7 @@
 // 或在调用时返回 kind: "unavailable"，界面据此隐藏入口而不是失败得很晚。
 import { errorText } from "../core/errors";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
+import { FEEDBACK_FAILURE_MESSAGES } from "../core/feedback";
 import type { ImportOptions, ImportResult, PackEntryFact, PackExportSpec, PackFs, PackIo } from "../core/boardPack";
 import type { DirEntry, RelocateFs } from "../core/relocate";
 import type { RunDeps } from "../core/run";
@@ -20,7 +21,7 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics" | "update" | "dataRoot";
+export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics" | "update" | "dataRoot" | "feedback";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
@@ -53,6 +54,8 @@ export interface ShellFeatures {
    * 未声明时按不可用处理——没有实现就不能出现「迁移」入口。
    */
   readonly dataRoot?: boolean;
+  /** 反馈（#205）：只有配置了中继地址才为 true；未声明时按不可用处理。 */
+  readonly feedback: boolean;
 }
 
 /** 端口失败的类别：界面只按它分支。 */
@@ -143,6 +146,7 @@ export const FEATURE_LABELS: Record<FeatureId, string> = {
   diagnostics: "诊断包导出",
   update: "自动更新",
   dataRoot: "本机数据位置",
+  feedback: "反馈",
 };
 
 // ---- 端口分组 ----
@@ -252,6 +256,68 @@ export interface PackStore {
   exportPack(target: string, spec: PackExportSpec): Promise<{ task_dirs: number; bytes: number; target?: string }>;
 }
 
+/**
+ * 反馈提交（#205）：输入是用户填写的文字与环境元数据，relayUrl 由接线层从设置解析后填入。
+ * 桌面与内存替身用同一份形状，UI 只按 kind 分支。
+ */
+export interface FeedbackAttachment {
+  /** 附件的显示名；截图用原文件名，诊断包用固定名。 */
+  name: string;
+  /** MIME 类型；Go 侧 []byte JSON 以 base64 传输。 */
+  content_type: string;
+  data: string;
+}
+
+/** 反馈可附带的脱敏诊断包生成结局；失败带可显示原因。 */
+export type DiagnosticsPackOutcome =
+  | { kind: "saved"; name: string; contentType: string; data: string }
+  | { kind: "failed"; message: string };
+
+export interface FeedbackSpec {
+  title: string;
+  category: string;
+  body: string;
+  version: string;
+  build: string;
+  os: string;
+  board_name: string;
+  contact?: string;
+  /** 本次提交自带的 Gitea token；只在本次请求中转交中继，不保存、不预览。 */
+  gitea_token?: string;
+  /** 高级设置的覆盖地址；空值走 Go 侧默认配置。 */
+  relay_url?: string;
+  /** 0–5 张 PNG/JPG 截图；base64 字节经 Feedback.Send 原样交到 Go 服务。 */
+  screenshots?: FeedbackAttachment[];
+  /** 可选脱敏诊断包；由 Diagnostics.Bundle 生成，不写本机文件也随反馈一起上传。 */
+  diagnostics_pack?: FeedbackAttachment;
+}
+
+/** 反馈的稳定结局类别；与 Go feedbackservice 的 kind 逐字一致。 */
+export type FeedbackKind = "ok" | "duplicate" | "unreachable" | "unauthorized" | "rejected" | "invalid" | "too_large" | "unavailable";
+
+/** 反馈结局：成功带 issue 编号与链接；失败是可显示的类型化文案，不靠异常。 */
+export interface FeedbackOutcome {
+  ok: boolean;
+  kind: FeedbackKind;
+  message: string;
+  number?: number;
+  url?: string;
+}
+
+/** 没有 Feedback 绑定或没有配置中继地址时的统一结局。 */
+export const FEEDBACK_UNAVAILABLE: FeedbackOutcome = {
+  ok: false,
+  kind: "unavailable",
+  message: FEEDBACK_FAILURE_MESSAGES.unavailable,
+  number: undefined,
+  url: undefined,
+};
+
+/** 反馈端口：单一 Send(spec) 方法（#205）。 */
+export interface FeedbackPort {
+  send(spec: FeedbackSpec): Promise<FeedbackOutcome>;
+}
+
 /** 诊断包导出的类型化结局：取消没有成功提示，失败带可显示的原因。 */
 export type DiagnosticsOutcome =
   | { kind: "saved"; bytes: number }
@@ -269,6 +335,8 @@ export interface UiStore {
   log(kind: LogKind, fields: Record<string, unknown>): void;
   /** 导出脱敏诊断包，目标由本机「另存为」对话框选。 */
   exportDiagnostics(): Promise<DiagnosticsOutcome>;
+  /** 为反馈生成内存中的脱敏诊断包；复用同一套允许清单和脱敏逻辑。 */
+  diagnosticsPack(): Promise<DiagnosticsPackOutcome>;
   /** 焦点 / 点击是否落在可编辑控件里（方向键与编辑类快捷键留给控件）。 */
   isEditableTarget(target: EventTarget | null): boolean;
   /** 装上页面级输入接管（#97），返回卸载函数。 */
@@ -349,4 +417,6 @@ export interface ShellPort {
   readonly core: CorePorts;
   /** 本机数据位置迁移（#161）；没有这一项的实现在 features.dataRoot 上明确关掉。 */
   readonly dataRoot: DataRootStore;
+  /** 反馈提交（#205）；没有绑定或没配中继时返回 unavailable 结局。 */
+  readonly feedback: FeedbackPort;
 }

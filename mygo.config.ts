@@ -5,7 +5,7 @@ export default {
   name: "Kacha",
   slug: "kacha",
   identifier: "app.kacha.desktop",
-  version: "1.6.5",
+  version: "1.6.10",
   // 相对仓库根；"desktop" 会被 go list 当成标准库包名，必须带 ./。
   main: "./desktop",
   // 构建前先构建现有前端；frontendDist 随后被嵌进可执行文件。

@@ -2,6 +2,7 @@
 import type { ConfirmItem } from "../core/submission";
 import { BoardPackDialog, type BoardPackDialogProps } from "./BoardPackDialog";
 import { ChangelogDialog } from "./ChangelogDialog";
+import { FeedbackDialog } from "./FeedbackDialog";
 import { RunConfirmDialog } from "./RunConfirmDialog";
 import { SendTextDialog } from "./SendTextDialog";
 import type { DataRootActions } from "./dataRootMove";
@@ -56,6 +57,11 @@ export function AppOverlays({
   changelogOpen,
   version,
   onChangelogClose,
+  build,
+  feedbackOpen,
+  onFeedbackClose,
+  feedbackBoardName,
+  feedbackRelayUrl,
   confirm,
   onConfirmCancel,
   onConfirm,
@@ -72,6 +78,11 @@ export function AppOverlays({
   changelogOpen: boolean;
   version: string;
   onChangelogClose(): void;
+  build: string;
+  feedbackOpen: boolean;
+  onFeedbackClose(): void;
+  feedbackBoardName: string;
+  feedbackRelayUrl: string;
   confirm: { items: ConfirmItem[]; scope: "selection" | "board"; boardKey: string; board: import("../core/board").Board } | null;
   onConfirmCancel(): void;
   onConfirm(ids: string[]): void;
@@ -80,7 +91,6 @@ export function AppOverlays({
   onSendTextClose(): void;
   packDialog: BoardPackDialogProps | null;
   toastText: string | null;
-  /** 更新那一段的快照与动作（#164、#180）。 */
   /** 数据位置迁移的接线（#161）。 */
   dataRoot?: DataRootActions;
 }) {
@@ -88,6 +98,7 @@ export function AppOverlays({
     <>
       {settingsOpen && <AppSettingsPanel settings={settings} onClose={onSettingsClose} dataRoot={dataRoot} />}
       {changelogOpen && <AppChangelogDialog version={version} onClose={onChangelogClose} />}
+      {feedbackOpen && <FeedbackDialog version={version} build={build} boardName={feedbackBoardName} relayUrl={feedbackRelayUrl} onClose={onFeedbackClose} />}
       {confirm && (
         <AppRunConfirm
           items={confirm.items}

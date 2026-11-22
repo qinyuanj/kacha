@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BUILTIN_TABLE } from "./capabilities";
 import {
   availableModels,
+  DEFAULT_FEEDBACK_RELAY_URL,
   DEFAULT_SETTINGS,
   defaultEditModel,
   defaultTaskModel,
@@ -13,11 +14,13 @@ import {
   parseModelsCache,
   parseSettings,
   refreshModels,
+  resolveFeedbackRelayAddress,
   saveSettings,
   serializeModelsCache,
   serializeSettings,
   settingsFromForm,
   validateBaseUrl,
+  validateFeedbackRelayUrl,
   type SettingsPorts,
 } from "./settings";
 
@@ -293,7 +296,7 @@ describe("载入设置", () => {
 
   it("settings.json 不存在：用服务端给的默认网关地址合成默认设置", async () => {
     const { ports } = memoryPorts({ readSettings: async () => null, defaultBaseUrl: async () => "http://gw.example:3001" });
-    expect((await loadSettings(ports)).file).toEqual({ kind: "ok", settings: { format_version: 1, base_url: "http://gw.example:3001", concurrency: 4, extra: {} } });
+    expect((await loadSettings(ports)).file).toEqual({ kind: "ok", settings: { format_version: 1, base_url: "http://gw.example:3001", feedback_relay_url: "", concurrency: 4, extra: {} } });
   });
 
   it("settings.json 不存在且拿不到默认网关地址：按 unreadable 处理", async () => {
@@ -397,5 +400,40 @@ describe("刷新模型列表", () => {
     const result = await refreshModels(ports, BASE, "sk", null);
     expect(result).toEqual({ ok: false, message: null, discovery: { source: "none", failed: true } });
     expect(logs[0].fields).toMatchObject({ ok: false, category: "unknown" });
+  });
+});
+
+describe("反馈中继地址（#209）", () => {
+  it("内置默认地址是 lzxsvn 的 3005 服务，但默认设置不把它当显式覆盖", () => {
+    expect(DEFAULT_FEEDBACK_RELAY_URL).toBe("http://lzxsvn:3005");
+    expect(DEFAULT_SETTINGS.feedback_relay_url).toBe("");
+    expect(resolveFeedbackRelayAddress(DEFAULT_SETTINGS)).toBe("");
+  });
+
+  it("只有显式且非默认的合法覆盖才发给端口；空白、非法与相同默认值都不覆盖", () => {
+    expect(resolveFeedbackRelayAddress({ ...DEFAULT_SETTINGS, feedback_relay_url: " http://relay.test:3105/ " })).toBe("http://relay.test:3105");
+    expect(resolveFeedbackRelayAddress({ ...DEFAULT_SETTINGS, feedback_relay_url: "" })).toBe("");
+    expect(resolveFeedbackRelayAddress({ ...DEFAULT_SETTINGS, feedback_relay_url: "不是地址" })).toBe("");
+    expect(resolveFeedbackRelayAddress({ ...DEFAULT_SETTINGS, feedback_relay_url: DEFAULT_FEEDBACK_RELAY_URL })).toBe("");
+  });
+
+  it("覆盖值随高级设置往返保存", () => {
+    const saved = { ...DEFAULT_SETTINGS };
+    const next = settingsFromForm(saved, { baseUrl: saved.base_url, concurrencyDraft: "4", feedbackRelayUrl: "  http://relay.test:3105/ " });
+    expect(next.feedback_relay_url).toBe("http://relay.test:3105");
+    expect(parseSettings(serializeSettings(next))).toEqual({ kind: "ok", settings: next });
+    expect(settingsFromForm(saved, { baseUrl: saved.base_url, concurrencyDraft: "4", feedbackRelayUrl: "" }).feedback_relay_url).toBe("");
+  });
+
+  it("覆盖地址校验：空白表示默认，只接受无凭据的 http / https URL", () => {
+    expect(validateFeedbackRelayUrl("")).toBeNull();
+    expect(validateFeedbackRelayUrl("http://relay.test:3005")).toBeNull();
+    expect(validateFeedbackRelayUrl("https://relay.test/")).toBeNull();
+    expect(validateFeedbackRelayUrl("ftp://relay.test")).not.toBeNull();
+    expect(validateFeedbackRelayUrl("http://user:secret@relay.test")).not.toBeNull();
+  });
+
+  it("类型错误的覆盖字段按损坏设置处理", () => {
+    expect(parseSettings(JSON.stringify({ format_version: 1, feedback_relay_url: 12 }))).toMatchObject({ kind: "corrupt" });
   });
 });

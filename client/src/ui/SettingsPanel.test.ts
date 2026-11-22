@@ -57,6 +57,13 @@ function keyInput(): HTMLInputElement {
   return el as HTMLInputElement;
 }
 
+/** 反馈中继覆盖输入框（占位符即默认地址）。 */
+function relayInput(): HTMLInputElement {
+  const el = [...container.querySelectorAll("input")].find((input) => input.placeholder?.includes(":3005"));
+  if (!el) throw new Error("没有找到反馈中继地址输入框");
+  return el as HTMLInputElement;
+}
+
 /** 按文字找按钮。 */
 function buttonWithText(text: string): HTMLButtonElement {
   const el = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === text);
@@ -105,6 +112,16 @@ describe("API 密钥管理（#152）", () => {
     await typeInto(keyInput(), "sk-replacement");
     await act(async () => buttonWithText("保存").click());
     expect(state.save).toHaveBeenCalledWith(DEFAULT_SETTINGS, "sk-replacement");
+  });
+
+  it("反馈中继：高级设置用默认地址作占位，覆盖值优先生效", async () => {
+    const state = settings({ apiKey: "sk-old" });
+    await show(createFakePort(), state);
+    expect(relayInput().value).toBe("");
+    expect(relayInput().placeholder).toBe("http://lzxsvn:3005");
+    await typeInto(relayInput(), "http://relay.test:3105");
+    await act(async () => buttonWithText("保存").click());
+    expect(state.save).toHaveBeenCalledWith(expect.objectContaining({ feedback_relay_url: "http://relay.test:3105" }), "sk-old");
   });
 
   it("清除密钥：显式调用 save 写入空密钥", async () => {

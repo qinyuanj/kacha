@@ -7,7 +7,7 @@
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
 // 各组实现（画板、文件、元数据、媒体、画板包、用量）在 shell/desktopStores.ts（#137），这里只做接线。
-import { PortError, portFailureOf, type ClipboardContent, type DataRootStore, type DiagnosticsOutcome, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort, type UpdatePort } from "./port";
+import { FEEDBACK_UNAVAILABLE, PortError, portFailureOf, type ClipboardContent, type DataRootStore, type DiagnosticsOutcome, type DiagnosticsPackOutcome, type FeedbackOutcome, type FeedbackPort, type FeedbackSpec, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort, type UpdatePort } from "./port";
 import type { PackEntryFact, PackExportSpec } from "../core/boardPack";
 import type { BoardMeasure } from "../core/tidy";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
@@ -46,7 +46,7 @@ export interface DesktopInfo {
   version: string;
   user_data_root: string;
   board_root: string;
-  features: { generation: boolean; usage: boolean; pack_export: boolean; archive?: boolean; tidy?: boolean; update?: boolean };
+  features: { generation: boolean; usage: boolean; pack_export: boolean; archive?: boolean; tidy?: boolean; update?: boolean; feedback?: boolean };
 }
 
 /** Go 侧本地能力（Local 服务）：方法名与 Go 侧绑定名一致。 */
@@ -291,9 +291,19 @@ export interface DesktopUpdateStatus {
 }
 
 /** Go 侧诊断服务（Diagnostics 服务，#162）：脱敏日志入有界缓冲，导出交给本机对话框。 */
+export interface DesktopDiagnosticsBundle {
+  ok: boolean;
+  kind: string;
+  message?: string;
+  name: string;
+  data: string;
+  bytes: number;
+}
+
 export interface DesktopDiagnosticsBridge {
   log(kind: string, fields: Record<string, string>): void;
   export(): Promise<DesktopDiagnosticsOutcome>;
+  pack(): Promise<DesktopDiagnosticsBundle>;
 }
 
 /** 数据位置（Storage 服务，Go 侧 internal/storage）：键名与 Go 的 json tag 对齐。 */
@@ -319,6 +329,11 @@ export interface DesktopDataRootBridge {
   move(target: string): Promise<DesktopDataRootOutcome>;
 }
 
+/** Go 侧反馈服务（Feedback.Send）：把文字反馈交给配置的中继。 */
+export interface DesktopFeedbackBridge {
+  send(spec: FeedbackSpec): Promise<FeedbackOutcome>;
+}
+
 /** MyGo 桥：Go 侧绑定与测试替身都满足它。 */
 export interface DesktopBridge {
   info(): Promise<DesktopInfo>;
@@ -337,6 +352,8 @@ export interface DesktopBridge {
   update?: DesktopUpdateBridge;
   /** 本机数据位置迁移（#161）；没有这一项时能力关闭、入口不出现。 */
   dataRoot?: DesktopDataRootBridge;
+  /** 反馈（#205）；没有这一项或 Go 没配中继时能力关闭。 */
+  feedback?: DesktopFeedbackBridge;
 }
 
 /** 本切片还没有的能力：以 kind: "unavailable" 拒绝。 */
@@ -493,6 +510,8 @@ export function desktopFeatures(bridge: DesktopBridge, info: DesktopInfo): Shell
     update: bridge.update !== undefined && (info.features.update ?? false),
     // 数据位置迁移（#161）：桥上有真实 Storage 服务才开放，否则入口不出现。
     dataRoot: bridge.dataRoot !== undefined,
+    // 反馈（#205）：桥上有服务还不够，Go 侧必须明确配置了中继地址。
+    feedback: bridge.feedback !== undefined && (info.features.feedback ?? false),
   };
 }
 
@@ -529,7 +548,39 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
 
   const pack = desktopPack.store;
 
-  const ui = {
+  const ui = desktopUi(bridge, info, desktopPack);
+
+  // 网关配置、系统保护的密钥与模型发现（#152）：经 Gateway 绑定走 Go 服务。
+  const gatewayPorts = createGatewayPorts(bridge);
+
+  const { usage, update, dataRoot, feedback } = desktopOptionalPorts(bridge, info, features);
+
+  const port: ShellPort = {
+    userRoot: info.user_data_root,
+    features,
+    board,
+    files,
+    meta,
+    media,
+    pack,
+    ui,
+    usage,
+    update,
+    dataRoot,
+    feedback,
+    core: desktopCore(info, files, meta, gatewayPorts, bridge),
+  };
+
+  return { port, info };
+}
+
+
+/** 画板包导入端口（createDesktopPack 的返回）。 */
+type DesktopPackPort = ReturnType<typeof createDesktopPack>;
+
+/** 桌面窗口的 UI 能力：确认框、提示框、进度订阅、打开外链、版本与日志；诊断包导出另见 desktopDiagnosticsUi。 */
+function desktopUi(bridge: DesktopBridge, info: DesktopInfo, desktopPack: DesktopPackPort): ShellPort["ui"] {
+  return {
     // 确认框与提示框由桌面窗口的 WebView 提供。
     ask: (message: string, _options?: BrowserOptions): Promise<boolean> => Promise.resolve(window.confirm(message)),
     message: (text: string, _options?: BrowserOptions): Promise<void> => {
@@ -545,74 +596,82 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     log: (kind: LogKind, fields: Record<string, unknown>): void => {
       bridge.diagnostics?.log(kind, logFields(fields));
     },
+    ...desktopDiagnosticsUi(bridge),
+    isEditableTarget,
+    installInputTakeover: installPageInputTakeover,
+  };
+}
+
+/** 诊断包（#162）：导出与随反馈上传两条出口；没有 Diagnostics 绑定时明确不可用。 */
+function desktopDiagnosticsUi(bridge: DesktopBridge): Pick<ShellPort["ui"], "exportDiagnostics" | "diagnosticsPack"> {
+  return {
     exportDiagnostics: (): Promise<DiagnosticsOutcome> => {
       if (!bridge.diagnostics) return Promise.reject(unavailable("diagnostics"));
       return bridge.diagnostics.export().then(diagnosticsOutcomeOf);
     },
-    isEditableTarget,
-    installInputTakeover: installPageInputTakeover,
+    diagnosticsPack: async (): Promise<DiagnosticsPackOutcome> => {
+      if (!bridge.diagnostics) return Promise.reject(unavailable("diagnostics"));
+      const result = await bridge.diagnostics.pack();
+      if (!result.ok || result.kind !== "saved" || !result.data) {
+        return { kind: "failed", message: result.message || "诊断包生成失败，请重试" };
+      }
+      return { kind: "saved", name: result.name || "diagnostics.zip", contentType: "application/zip", data: result.data };
+    },
   };
+}
 
+/** 用量、自动更新、数据位置迁移与反馈：没有绑定时都以同形 unavailable 结局关掉入口。 */
+function desktopOptionalPorts(bridge: DesktopBridge, info: DesktopInfo, features: ShellFeatures): {
+  usage: UsagePort; update: UpdatePort; dataRoot: DataRootStore; feedback: FeedbackPort;
+} {
   const usage: UsagePort = info.features.usage && bridge.usage ? desktopUsageStore(bridge.usage) : unavailableUsageStore();
-
   // 自动更新（#164）：信任判定在 Go 侧，这里只做类型化转发；没有绑定时明确不可用。
   const update: UpdatePort = features.update && bridge.update ? desktopUpdateStore(bridge.update) : unavailableUpdateStore();
-
   // 数据位置迁移（#161）：没有 Storage 绑定时调用以 unavailable 拒绝，界面按能力开关不显示入口。
   const dataRoot: DataRootStore = bridge.dataRoot ? desktopDataRootStore(bridge.dataRoot) : {
     status: async (): Promise<never> => unavailable("dataRoot"),
     pick: async (): Promise<never> => unavailable("dataRoot"),
     move: async (): Promise<never> => unavailable("dataRoot"),
   };
+  // 反馈（#205）：没有绑定就返回同形 unavailable 结局，界面按能力开关隐藏入口。
+  const feedback: FeedbackPort = bridge.feedback
+    ? { send: (spec) => bridge.feedback!.send(spec) }
+    : { send: async () => FEEDBACK_UNAVAILABLE };
+  return { usage, update, dataRoot, feedback };
+}
 
-  // 网关配置、系统保护的密钥与模型发现（#152）：经 Gateway 绑定走 Go 服务。
-  const gatewayPorts = createGatewayPorts(bridge);
-
-  const port: ShellPort = {
-    userRoot: info.user_data_root,
-    features,
-    board,
-    files,
-    meta,
-    media,
-    pack,
-    ui,
-    usage,
-    update,
-    dataRoot,
-    core: {
-      taskFs: { writeNewFile: files.writeNewFile, readFile: files.readFile },
-      runDeps: {
-        imageCodec,
-        composeOverlay,
-        writeNewFile: files.writeNewFile,
-        readFile: files.readFile,
-        isFile: files.isFile,
-        // 生成请求与模型发现共用 #152 接通的 Gateway 绑定；没有绑定时由 gatewayPorts 明确报不可用。
-        fetch: info.features.generation ? gatewayPorts.fetch : async (): Promise<never> => unavailable("generation"),
-        now: () => new Date(),
-        schedule: (ms: number, fn: () => void) => {
-          const timer = setTimeout(fn, ms);
-          return () => clearTimeout(timer);
-        },
-      },
-      relocateFs: { listDir: files.listDir, isFile: files.isFile, sha256: files.sha256 },
-      packFs: { isFile: files.isFile, sha256: files.sha256 },
-      imageProbe: { inspectImage: files.inspectImage },
-      settingsPorts: {
-        ...gatewayPorts,
-        readSettings: meta.readSettings,
-        // 没有 settings.json 时用 core 的唯一默认地址，不让首次启动变成空网关。
-        defaultBaseUrl: (): Promise<string> => Promise.resolve(DEFAULT_SETTINGS.base_url),
-        writeSettings: meta.writeSettings,
-        readModelsCache: meta.readModelsCache,
-        writeModelsCache: meta.writeModelsCache,
-        now: () => new Date(),
-        // 网关连接日志（#162）：走同一条脱敏采集通道，连接测试失败这类信息才能进诊断包。
-        log: (kind, fields) => bridge.diagnostics?.log(kind, logFields(fields)),
+/** 画板核心端口：任务文件、生成请求、重定位、画板包与设置经本机绑定接通。 */
+function desktopCore(info: DesktopInfo, files: ReturnType<typeof desktopFileStore>, meta: ReturnType<typeof desktopMetaStore>, gatewayPorts: ReturnType<typeof createGatewayPorts>, bridge: DesktopBridge): ShellPort["core"] {
+  return {
+    taskFs: { writeNewFile: files.writeNewFile, readFile: files.readFile },
+    runDeps: {
+      imageCodec,
+      composeOverlay,
+      writeNewFile: files.writeNewFile,
+      readFile: files.readFile,
+      isFile: files.isFile,
+      // 生成请求与模型发现共用 #152 接通的 Gateway 绑定；没有绑定时由 gatewayPorts 明确报不可用。
+      fetch: info.features.generation ? gatewayPorts.fetch : async (): Promise<never> => unavailable("generation"),
+      now: () => new Date(),
+      schedule: (ms: number, fn: () => void) => {
+        const timer = setTimeout(fn, ms);
+        return () => clearTimeout(timer);
       },
     },
+    relocateFs: { listDir: files.listDir, isFile: files.isFile, sha256: files.sha256 },
+    packFs: { isFile: files.isFile, sha256: files.sha256 },
+    imageProbe: { inspectImage: files.inspectImage },
+    settingsPorts: {
+      ...gatewayPorts,
+      readSettings: meta.readSettings,
+      // 没有 settings.json 时用 core 的唯一默认地址，不让首次启动变成空网关。
+      defaultBaseUrl: (): Promise<string> => Promise.resolve(DEFAULT_SETTINGS.base_url),
+      writeSettings: meta.writeSettings,
+      readModelsCache: meta.readModelsCache,
+      writeModelsCache: meta.writeModelsCache,
+      now: () => new Date(),
+      // 网关连接日志（#162）：走同一条脱敏采集通道，连接测试失败这类信息才能进诊断包。
+      log: (kind, fields) => bridge.diagnostics?.log(kind, logFields(fields)),
+    },
   };
-
-  return { port, info };
 }

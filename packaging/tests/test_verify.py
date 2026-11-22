@@ -19,6 +19,7 @@ from verify import (
     commands,
     dependency_problems,
     dependencies_preflight,
+    documentation_problems,
     integrity_problems,
     main,
     preflight,
@@ -85,6 +86,123 @@ def client_tree(root: Path, locked: dict, installed: dict | None, on_disk: tuple
         manifest.parent.mkdir(parents=True, exist_ok=True)
         manifest.write_text("{}", encoding="utf-8")
     return root
+
+
+class DocumentationGateTest(unittest.TestCase):
+    """#211：文档与唯一版本源必须一起变更。"""
+
+    @staticmethod
+    def make_tree(root: Path, *, version: str = "2.0.0", changelog_version: str | None = None,
+                  feedback_note: bool = True, adr: bool = True, glossary: bool = True,
+                  token_docs: bool = True, legacy_server_token: bool = False,
+                  changelog_token: bool = True) -> None:
+        (root / "mygo.config.ts").write_text(
+            f'export default {{\n  version: "{version}",\n}};\n', encoding="utf-8")
+        heading = changelog_version or version
+        item = "- 用户可从首屏提交反馈并附带脱敏诊断包。" if feedback_note else "- 修复了本地画板保存问题。"
+        if changelog_token:
+            item += " 本次提交使用用户自带的 Gitea token。"
+        (root / "docs" / "release").mkdir(parents=True, exist_ok=True)
+        (root / "docs" / "release" / "changelog.md").write_text(
+            f"<!-- 当前版本在最前 -->\n\n# {heading}\n\n## 新增\n\n{item}\n", encoding="utf-8")
+        (root / "docs" / "adr").mkdir(parents=True, exist_ok=True)
+        if adr:
+            adr_text = (
+                "# 0027\n反馈是可选联网能力，核心画板离线可用，不新增远端应用服务依赖；反馈中继只转发用户主动提交的内容。\n"
+            )
+            if token_docs:
+                adr_text += "提交反馈时由用户自带 Gitea token，权限限于 kacha-feedback 仓库的建 issue、评论/标签与附件；中继只在本次请求里转交，不保存、不缓存、不复用，核心画板仍离线可用。\n"
+            (root / "docs" / "adr" / "0027-feedback-is-optional.md").write_text(adr_text, encoding="utf-8")
+        glossary_text = (
+            "# Kacha\n\n**反馈**：用户主动提交的内容。\n_Avoid_：工单、报障\n\n"
+            "**反馈中继**：转发反馈的可选服务。\n_Avoid_：反馈服务器、客服系统\n"
+        )
+        if token_docs:
+            glossary_text += (
+                "\n**用户自带 token**：用户本人的 Gitea 写凭据，权限限于 kacha-feedback 仓库的建 issue、"
+                "写评论/标签与上传附件；中继不保存、不缓存、不复用它，服务端不持有统一写 token。\n"
+                "_Avoid_：服务端 token、统一写凭据\n"
+            )
+        if not glossary:
+            glossary_text = "# Kacha\n"
+        (root / "GLOSSARY.md").write_text(glossary_text, encoding="utf-8")
+        readme_text = "# Kacha\n\n## 反馈\n\n首屏反馈入口可附带脱敏诊断包。\n"
+        if token_docs:
+            readme_text += (
+                "提交反馈时使用用户自带的 Gitea token，需要它对 kacha-feedback 仓库有建 issue、"
+                "写评论/标签与上传附件的权限；中继只在这一次请求里转交，服务端不持有统一写 token，核心画板离线可用。\n"
+            )
+        if legacy_server_token:
+            readme_text += "服务端必须配置统一写 token 才能接收反馈。\n"
+        (root / "README.md").write_text(readme_text, encoding="utf-8")
+
+    def test_current_docs_pass_the_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make_tree(root)
+            self.assertEqual(documentation_problems(root), [])
+
+    def test_version_drift_from_the_single_declaration_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make_tree(root, changelog_version="2.0.1")
+            problems = documentation_problems(root)
+            self.assertTrue(any("2.0.0" in problem and "2.0.1" in problem for problem in problems), problems)
+
+    def test_changelog_without_user_visible_feedback_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make_tree(root, feedback_note=False)
+            self.assertTrue(any("反馈" in problem for problem in documentation_problems(root)))
+
+    def test_missing_user_owned_token_statements_are_reported(self):
+        """#214：文档必须说清 token 由用户自带、服务端不持有、权限范围与核心仍离线。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make_tree(root, token_docs=False)
+            problems = documentation_problems(root)
+            self.assertTrue(any("GLOSSARY.md" in problem for problem in problems), problems)
+            self.assertTrue(any("README.md" in problem for problem in problems), problems)
+            self.assertTrue(any("ADR 0027" in problem for problem in problems), problems)
+
+    def test_server_side_token_requirement_is_reported(self):
+        """#214：服务端统一写 token 的要求不再成立，出现即失败。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make_tree(root, legacy_server_token=True)
+            problems = documentation_problems(root)
+            self.assertTrue(any("统一写 token" in problem for problem in problems), problems)
+
+    def test_changelog_without_token_change_is_reported(self):
+        """#214：当前版本的更新说明必须写明 token 变更。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make_tree(root, changelog_token=False)
+            problems = documentation_problems(root)
+            self.assertTrue(any("token" in problem for problem in problems), problems)
+
+    def test_missing_adr_and_glossary_terms_are_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make_tree(root, adr=False, glossary=False)
+            problems = documentation_problems(root)
+            self.assertTrue(any("ADR 0027" in problem for problem in problems), problems)
+            self.assertTrue(any("GLOSSARY.md" in problem for problem in problems), problems)
+
+    def test_documentation_gate_stops_the_suite_before_any_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make_tree(root, changelog_version="9.9.9")
+            with (
+                mock.patch.object(verify, "ROOT", root),
+                mock.patch.object(verify, "integrity_problems", return_value=[]),
+                mock.patch.object(verify, "dependencies_preflight", return_value=0),
+                mock.patch("subprocess.run", side_effect=AssertionError("不应继续跑命令")),
+                mock.patch("sys.stderr", new_callable=mock.MagicMock) as stderr,
+                mock.patch("sys.stdout", new_callable=mock.MagicMock),
+            ):
+                self.assertEqual(main([]), 2)
+            self.assertIn("文档与版本门禁失败", "".join(str(call.args[0]) for call in stderr.write.call_args_list))
 
 
 class DependencyPreflightTest(unittest.TestCase):

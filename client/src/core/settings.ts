@@ -2,6 +2,9 @@
 import { type CapabilityTable, type ModelCapability, modelsByTier } from "./capabilities";
 import { ERROR_CATEGORY_LABELS, GatewayError, listModels, type FetchLike } from "./gateway";
 import { errorText } from "./errors";
+import { DEFAULT_FEEDBACK_RELAY_URL } from "./feedback";
+
+export { DEFAULT_FEEDBACK_RELAY_URL } from "./feedback";
 
 export const SETTINGS_FORMAT_VERSION = 1;
 export const MIN_CONCURRENCY = 1;
@@ -12,6 +15,8 @@ type Json = Record<string, unknown>;
 export interface Settings {
   format_version: number;
   base_url: string;
+  /** 反馈中继地址覆盖；空字符串表示使用内置默认地址。 */
+  feedback_relay_url: string;
   /** 全局队列的并发上限。 */
   concurrency: number;
   extra: Json;
@@ -20,6 +25,8 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   format_version: SETTINGS_FORMAT_VERSION,
   base_url: "http://lzxsvn:3001",
+  // 空字符串是「没有显式覆盖」；内置默认由 Go 壳的环境变量/常量决定（#205/#209）。
+  feedback_relay_url: "",
   concurrency: 4,
   extra: {},
 };
@@ -47,7 +54,7 @@ export function mayOverwriteSettings(kind: LoadedSettings["kind"]): boolean {
   }
 }
 
-const KNOWN_KEYS = ["format_version", "base_url", "concurrency"];
+const KNOWN_KEYS = ["format_version", "base_url", "feedback_relay_url", "concurrency"];
 const isObject = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function corrupt(reason: string): LoadedSettings {
@@ -75,13 +82,20 @@ function parseSettingsFields(raw: Json): LoadedSettings {
   const baseUrl = raw.base_url ?? DEFAULT_SETTINGS.base_url;
   const concurrency = raw.concurrency ?? DEFAULT_SETTINGS.concurrency;
   if (typeof baseUrl !== "string") return corrupt("base_url 必须是字符串");
+  if (raw.feedback_relay_url !== undefined && typeof raw.feedback_relay_url !== "string") return corrupt("feedback_relay_url 必须是字符串");
   if (!Number.isInteger(concurrency) || (concurrency as number) < MIN_CONCURRENCY || (concurrency as number) > MAX_CONCURRENCY) {
     return corrupt(`concurrency 必须是 ${MIN_CONCURRENCY}～${MAX_CONCURRENCY} 的整数`);
   }
   const extra = Object.fromEntries(Object.entries(raw).filter(([k]) => !KNOWN_KEYS.includes(k)));
   return {
     kind: "ok",
-    settings: { format_version: SETTINGS_FORMAT_VERSION, base_url: baseUrl, concurrency: concurrency as number, extra },
+    settings: {
+      format_version: SETTINGS_FORMAT_VERSION,
+      base_url: baseUrl,
+      feedback_relay_url: normalizeFeedbackRelayUrl(raw.feedback_relay_url ?? ""),
+      concurrency: concurrency as number,
+      extra,
+    },
   };
 }
 
@@ -96,11 +110,18 @@ export function parseConcurrency(draft: string, fallback: number): number {
 export interface SettingsForm {
   baseUrl: string;
   concurrencyDraft: string;
+  /** 可选，兼容未暴露该字段的旧调用点；缺省沿用已存覆盖值。 */
+  feedbackRelayUrl?: string;
 }
 
 /** 点保存时写入的设置：在已存设置上套用表单。并发草稿此刻才钳制——不失焦直接保存也不会存进空值或越界值。 */
 export function settingsFromForm(saved: Settings, form: SettingsForm): Settings {
-  return { ...saved, base_url: normalizeBaseUrl(form.baseUrl), concurrency: parseConcurrency(form.concurrencyDraft, saved.concurrency) };
+  return {
+    ...saved,
+    base_url: normalizeBaseUrl(form.baseUrl),
+    feedback_relay_url: normalizeFeedbackRelayUrl(form.feedbackRelayUrl ?? saved.feedback_relay_url ?? ""),
+    concurrency: parseConcurrency(form.concurrencyDraft, saved.concurrency),
+  };
 }
 
 export function serializeSettings(settings: Settings): string {
@@ -108,10 +129,9 @@ export function serializeSettings(settings: Settings): string {
   return `${JSON.stringify({ ...known, format_version: SETTINGS_FORMAT_VERSION, ...extra }, null, 2)}\n`;
 }
 
-/** 返回错误说明；合法为 null。 */
-export function validateBaseUrl(value: string): string | null {
+function validateHttpUrl(value: string, required: boolean, rejectCredentials: boolean): string | null {
   const text = value.trim();
-  if (!text) return "请填写网关基础地址";
+  if (!text) return required ? "请填写网关基础地址" : null;
   let url: URL;
   try {
     url = new URL(text);
@@ -120,7 +140,13 @@ export function validateBaseUrl(value: string): string | null {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return "只支持 http:// 或 https:// 地址";
   if (!url.hostname) return "地址缺少主机名";
+  if (rejectCredentials && (url.username || url.password)) return "中继地址不要包含用户名或密码";
   return null;
+}
+
+/** 返回错误说明；合法为 null。 */
+export function validateBaseUrl(value: string): string | null {
+  return validateHttpUrl(value, true, false);
 }
 
 /** ADR 0003：明文 HTTP 仅限可信网络，设置面板保留风险提示。 */
@@ -130,6 +156,23 @@ export function isPlainHttp(value: string): boolean {
 
 export function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
+}
+
+/** 反馈中继覆盖地址：留空表示默认；非空只允许无凭据的 http / https URL。 */
+export function validateFeedbackRelayUrl(value: string): string | null {
+  return validateHttpUrl(value, false, true);
+}
+
+export function normalizeFeedbackRelayUrl(value: string): string {
+  const normalized = normalizeBaseUrl(value);
+  // 与内置默认相同的值不算显式覆盖：它会让 Go 侧清空 KACHA_FEEDBACK_RELAY_URL 也关不掉能力。
+  return normalized === DEFAULT_FEEDBACK_RELAY_URL ? "" : normalized;
+}
+
+/** #205 SendSpec.relayUrl 与 #206 接线层的唯一覆盖来源：只有显式且非默认的合法地址才发。 */
+export function resolveFeedbackRelayAddress(settings: Pick<Settings, "feedback_relay_url">): string {
+  const value = settings.feedback_relay_url ?? "";
+  return validateFeedbackRelayUrl(value) === null ? normalizeFeedbackRelayUrl(value) : "";
 }
 
 // ---- 模型发现 ----
