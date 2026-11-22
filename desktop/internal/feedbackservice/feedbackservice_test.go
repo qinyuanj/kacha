@@ -77,14 +77,14 @@ func newFakeRelay(t *testing.T, status int, outcome Outcome) (*httptest.Server, 
 
 func sampleSpec() Spec {
 	return Spec{
-		Title:     "登录失败",
-		Category:  "bug",
-		Body:      "点登录后没有反应",
-		Version:   "1.6.8",
-		Build:     "20261121",
-		OS:        "Windows 11",
-		BoardName: "战斗草稿",
-		Contact:   "artist@example.com",
+		Title:      "登录失败",
+		Category:   "bug",
+		Body:       "点登录后没有反应",
+		Version:    "1.6.8",
+		Build:      "20261121",
+		OS:         "Windows 11",
+		BoardName:  "战斗草稿",
+		Contact:    "artist@example.com",
 		GiteaToken: "alice",
 	}
 }
@@ -436,8 +436,9 @@ func TestSendRedactsSecretsAndLocalPaths(t *testing.T) {
 			t.Fatalf("redacted text still contains %q: title=%q body=%q", key, req.fields["title"], req.fields["body"])
 		}
 	}
-	if !strings.Contains(req.fields["body"], "<凭据>") || !strings.Contains(req.fields["body"], "<本地路径>") {
-		t.Fatalf("redaction placeholders missing: body=%q", req.fields["body"])
+	// 共享脱敏实现统一用 [REDACTED]（diagnostics 与 feedbackservice 同一语义，#216 项4）。
+	if !strings.Contains(req.fields["body"], "[REDACTED]") {
+		t.Fatalf("redaction placeholder missing: body=%q", req.fields["body"])
 	}
 	for _, key := range []string{"title", "category", "version", "build", "os", "board_name", "contact"} {
 		if req.fields[key] == "" {

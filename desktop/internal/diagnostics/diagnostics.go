@@ -25,6 +25,7 @@ import (
 
 	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
+	"github.com/qinyuanj/kacha/desktop/internal/redaction"
 )
 
 const (
@@ -37,20 +38,12 @@ const (
 	maxSeenSecrets = 8
 	// 落盘日志的字节上限：文件超过它就从头重写，容量有界。
 	maxLogFileBytes = 1 << 20
-	redacted        = "[REDACTED]"
+	redacted        = redaction.Marker
 )
 
 var (
 	// 字段名命中即整值替换，不依赖值长什么样。
-	sensitiveField   = regexp.MustCompile(`(?i)(authorization|api[-_]?key|gateway[-_]?key|access[-_]?key|private[-_]?key|token|secret|password|credential|client[-_]?secret)`)
-	standaloneSecret   = regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{6,}|gh[pousr]_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,})\b`)
-	credentialAssignment = regexp.MustCompile(`(?i)\b(api[_-]?key|gateway[_-]?key|token|secret|authorization|bearer)\s*[:=]\s*(?:"[^"]+"|'[^']+'|[^\s,;]+)`)
-	// 鉴权头里的 Bearer 串即使字段名没命中也要遮掉。
-	bearerToken = regexp.MustCompile(`(?i)(bearer\s+)\S+`)
-	// 主机名与本机绝对路径不属于排障事实：即便调用方误写进日志也不带出去。
-	windowsPath = regexp.MustCompile(`[A-Za-z]:[\\/][^\s，。；,;]+`)
-	uncPath     = regexp.MustCompile(`\\[^\s，。；,;]+`)
-	unixPath    = regexp.MustCompile(`(^|[\s(（])(/(?:Users|home|tmp|var|mnt)/[^\s，。；,;]+)`)
+	sensitiveField = regexp.MustCompile(`(?i)(authorization|api[-_]?key|gateway[-_]?key|access[-_]?key|private[-_]?key|token|secret|password|credential|client[-_]?secret)`)
 )
 
 // logFileName 是落盘脱敏日志的文件名：固定常量，不含用户内容，也不含任何秘密。
@@ -136,17 +129,12 @@ func (s *Service) redact(text string) string {
 	if host, err := os.Hostname(); err == nil && host != "" {
 		text = strings.ReplaceAll(text, host, redacted)
 	}
-	text = windowsPath.ReplaceAllString(text, redacted)
-	text = uncPath.ReplaceAllString(text, redacted)
-	text = unixPath.ReplaceAllString(text, "1"+redacted)
 	for _, secret := range s.knownSecrets() {
 		if secret != "" {
 			text = strings.ReplaceAll(text, secret, redacted)
 		}
 	}
-	text = credentialAssignment.ReplaceAllString(text, "$1="+redacted)
-	text = standaloneSecret.ReplaceAllString(text, redacted)
-	text = bearerToken.ReplaceAllString(text, "${1}"+redacted)
+	text = redaction.Redact(text)
 	return truncate(text, maxFieldBytes)
 }
 

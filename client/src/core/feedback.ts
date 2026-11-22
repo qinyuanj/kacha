@@ -31,3 +31,9 @@ export const FEEDBACK_FAILURE_MESSAGES = {
 /** 预览只说明 token 的去向，不展示 token 值。 */
 export const FEEDBACK_TOKEN_NOTICE = "使用你的 Gitea token 提交到 kacha-feedback";
 
+/** 预览/发送前必须填写 token：缺 token 时界面给出的明确提示（单一来源）。 */
+export const FEEDBACK_TOKEN_REQUIRED = "请先填写 Gitea token 再预览或发送";
+
+/** 预览里说明 token 的权限范围：只说用途，不展开实现（#216 项3）。 */
+export const FEEDBACK_TOKEN_SCOPE = "权限限于对 kacha-feedback 建 issue、评论、打标签与上传附件";
+

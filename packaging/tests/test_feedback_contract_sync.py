@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[2]
 CLIENT = ROOT / "client" / "src" / "core" / "feedback.ts"
 SERVICE = ROOT / "desktop" / "internal" / "feedbackservice" / "feedbackservice.go"
 RELAY = ROOT / "desktop" / "internal" / "feedbackrelay" / "feedbackrelay.go"
+REDACTION = ROOT / "desktop" / "internal" / "redaction" / "redaction.go"
+DIALOG = ROOT / "client" / "src" / "ui" / "FeedbackDialog.tsx"
 
 
 def text(path: Path) -> str:
@@ -110,6 +112,25 @@ class FeedbackContractSyncTest(unittest.TestCase):
         for key, value in expected.items():
             self.assertEqual(ui_messages[key], value)
             self.assertEqual(go_string(go, go_names[key]), value)
+
+
+    def test_redaction_patterns_match_js(self) -> None:
+        """#216 项4：Go 共享脱敏与 JS 预览脱敏用同一组密钥/凭据模式，防止两端漂移。"""
+        go = text(REDACTION)
+        js = text(DIALOG)
+        secret = r"sk-[A-Za-z0-9_-]{6,}|gh[pousr]_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,}"
+        credential = r"api[_-]?key|gateway[_-]?key|token|secret|authorization|bearer"
+        for pattern in (secret, credential):
+            self.assertIn(pattern, go, "Go 共享脱敏缺少模式")
+            self.assertIn(pattern, js, "JS 预览脱敏模式与 Go 不同步")
+
+    def test_token_scope_notice_lists_permissions(self) -> None:
+        """#216 项3：预览必须说明 token 权限范围（建 issue、评论、打标签、上传附件）。"""
+        block = re.search(r'export const FEEDBACK_TOKEN_SCOPE\s*=\s*"([^"]+)"', text(CLIENT))
+        self.assertIsNotNone(block, "缺少 FEEDBACK_TOKEN_SCOPE")
+        scope = block.group(1)
+        for capability in ("建 issue", "评论", "打标签", "上传附件"):
+            self.assertIn(capability, scope)
 
 
 if __name__ == "__main__":

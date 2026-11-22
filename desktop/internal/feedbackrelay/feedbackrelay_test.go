@@ -49,6 +49,8 @@ type fakeGitea struct {
 	authorizations []string
 	rejectToken    string
 	labelAttempts  int
+	// seq 为真时依次返回递增 issue 编号（默认固定 42），用来区分不同提交者各自建单。
+	seq bool
 }
 
 func newFakeGitea(t *testing.T) *fakeGitea {
@@ -74,9 +76,13 @@ func newFakeGitea(t *testing.T) *fakeGitea {
 		}
 		f.mu.Lock()
 		f.issues = append(f.issues, issue)
+		number := 42
+		if f.seq {
+			number = 42 + len(f.issues) - 1
+		}
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"number":42,"html_url":"http://fake/issues/42"}`)
+		_, _ = io.WriteString(w, fmt.Sprintf(`{"number":%d,"html_url":"http://fake/issues/%d"}`, number, number))
 	})
 	mux.HandleFunc("PATCH /api/v1/repos/{owner}/{repo}/issues/{index}", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -161,6 +167,13 @@ func (f *fakeGitea) setFailPatchStatus(status int) {
 }
 
 // setRejectToken 让假 Gitea 对携带该 token 的任意请求返回 401，模拟真实 Gitea 的坏 token 行为。
+// setSequential 让假 Gitea 依次返回递增的 issue 编号（默认固定 42），用于区分不同提交者各自建单。
+func (f *fakeGitea) setSequential() {
+	f.mu.Lock()
+	f.seq = true
+	f.mu.Unlock()
+}
+
 func (f *fakeGitea) setRejectToken(token string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -553,6 +566,50 @@ func TestDedupContentHashMatchesAcrossKeyPresence(t *testing.T) {
 	issues, _, _ := f.snapshot()
 	if len(issues) != 1 {
 		t.Fatalf("issues=%d", len(issues))
+	}
+}
+
+// #216 项1：去重身份必须按提交者区分。不同 token 提交同一内容各自建单，
+// 绝不能把 B 的相同内容判成 A 的重复而回别人的 issue 号；同一 token 同内容仍去重到自己的单。
+func TestDedupIsPerSubmitterToken(t *testing.T) {
+	f := newFakeGitea(t)
+	f.setSequential()
+	h := newSvc(f, nil).Handler()
+	send := func(token, key string) (int, Outcome, string) {
+		body, ct := multipartBody(t, map[string]string{"body": "完全相同的反馈内容", "gitea_token": token}, nil, nil)
+		return postFeedbackRaw(t, h, body, ct, key, "")
+	}
+
+	// alice 先建单：#42。
+	s1, first, raw1 := send("alice", "alice-first")
+	if s1 != http.StatusOK || first.Kind != "created" || first.Number != 42 {
+		t.Fatalf("alice first: status=%d outcome=%+v", s1, first)
+	}
+	if strings.Contains(raw1, "alice") {
+		t.Fatalf("response echoed token: %q", raw1)
+	}
+
+	// bob 提交相同内容：必须各自建单（#43），不能返回 alice 的 #42。
+	s2, second, raw2 := send("bob", "bob-first")
+	if s2 != http.StatusOK || second.Kind != "created" || second.Number != 43 {
+		t.Fatalf("bob same content must create own issue, got status=%d outcome=%+v", s2, second)
+	}
+	if second.Number == first.Number {
+		t.Fatalf("bob deduped into alice's issue #%d (cross-user leak)", first.Number)
+	}
+	if strings.Contains(raw2, "bob") {
+		t.Fatalf("response echoed token: %q", raw2)
+	}
+
+	// alice 再用相同内容提交（不同幂等键）：duplicate 且指向自己的 #42，不新建单。
+	s3, again, _ := send("alice", "alice-second")
+	if s3 != http.StatusOK || again.Kind != "duplicate" || again.Number != first.Number {
+		t.Fatalf("alice same content: status=%d outcome=%+v", s3, again)
+	}
+
+	issues, _, _ := f.snapshot()
+	if len(issues) != 2 {
+		t.Fatalf("issues=%d want 2（alice、bob 各一单；同 token 同内容不重复建单）", len(issues))
 	}
 }
 

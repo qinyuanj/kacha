@@ -8,9 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/qinyuanj/kacha/desktop/internal/redaction"
 	"mime/multipart"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -109,22 +109,9 @@ func New(cfg Config) *Service {
 	return &Service{cfg: cfg, client: cfg.Client}
 }
 
-var (
-	credentialAssignment = regexp.MustCompile(`(?i)\b(api[_-]?key|gateway[_-]?key|token|secret|authorization|bearer)\s*[:=]\s*("[^"]+"|'[^']+'|[^\s,;]+)`)
-	standaloneKey        = regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{6,}|gh[pousr]_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,})\b`)
-	windowsPath          = regexp.MustCompile(`[A-Za-z]:[\\/][^\s，。；,;]+`)
-	uncPath              = regexp.MustCompile(`\\\\[^\s，。；,;]+`)
-	unixPath             = regexp.MustCompile(`(^|[\s(（])(/(?:Users|home|tmp|var|mnt)/[^\s，。；,;]+)`)
-)
-
 // redact 去掉正文中会泄露身份的绝对路径与常见凭据形态；主机名不主动采集。
 func redact(text string) string {
-	out := credentialAssignment.ReplaceAllString(text, "$1=<凭据>")
-	out = standaloneKey.ReplaceAllString(out, "<凭据>")
-	out = windowsPath.ReplaceAllString(out, "<本地路径>")
-	out = uncPath.ReplaceAllString(out, "<本地路径>")
-	out = unixPath.ReplaceAllString(out, "$1<本地路径>")
-	return strings.TrimSpace(out)
+	return strings.TrimSpace(redaction.Redact(text))
 }
 
 // idempotencyKey 按脱敏后的内容算稳定键：相同内容在去重窗口内只开一张 issue。
@@ -278,5 +265,8 @@ func mapOutcome(status int, relay Outcome) Outcome {
 	if status == http.StatusRequestEntityTooLarge || relay.Kind == "too_large" {
 		return Outcome{Kind: KindTooLarge, Message: MessageTooLarge}
 	}
+	// 中继对非 401 的 Gitea 写入失败回 failed(502)：服务端暂时写不进去，不是内容问题。
+	// 折成既有的 rejected（“反馈被中继拒绝，请稍后再试”）提示用户稍后重试，不引入新的 kind，
+	// 也不把底层错误或 token 暴露给页面（#216 项5）。其余未知结局同样归到这一稳定类别。
 	return Outcome{Kind: KindRejected, Message: MessageRejected}
 }
