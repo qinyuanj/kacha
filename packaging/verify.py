@@ -23,6 +23,25 @@ LOCKFILE = CLIENT / "package-lock.json"
 INSTALL_RECORD = CLIENT / "node_modules" / ".package-lock.json"
 INSTALL_HINT = "npm --prefix client ci"
 REPORTED_PACKAGES = 3
+
+# #214：token 归属的唯一事实——用户自带、服务端不持有统一写 token、核心画板离线。
+TOKEN_DOC_REQUIREMENTS = {
+    "adr": ("用户自带", "不保存", "权限", "离线"),
+    "glossary": ("用户自带", "权限", "服务端不持有"),
+    "readme": ("用户自带", "权限", "服务端不持有", "离线"),
+}
+# 服务端统一写 token 的要求已经作废：文档里再出现「服务端……必须/需要……token」就是回归。
+SERVER_TOKEN_REQUIREMENT = re.compile(r"(?:服务端|服务器|中继)[^。\n]{0,16}?(?:必须|需要|要求)[^。\n]{0,16}token", re.IGNORECASE)
+LEGACY_TOKEN_NAMES = ("FEEDBACK_GITEA_TOKEN",)
+TOKEN_SOURCE_FILES = (
+    Path("client/src/core/feedback.ts"),
+    Path("desktop/cmd/feedbackrelay/main.go"),
+    Path("desktop/internal/feedbackrelay/feedbackrelay.go"),
+    Path("desktop/internal/feedbackservice/feedbackservice.go"),
+    Path("packaging/build_desktop.py"),
+    Path("packaging/deploy_feedbackrelay.py"),
+    Path("packaging/publish_release.py"),
+)
 QUALITY = [sys.executable, "packaging/quality.py"]
 COMMANDS = (
     [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"],
@@ -167,20 +186,22 @@ def documentation_problems(root: Path) -> list[str]:
         if "反馈" not in "\n".join(section):
             problems.append(f"{release_gate.CHANGELOG.as_posix()} 中 {version} 一节没有用户可见的反馈能力")
 
+    adr_text = ""
     adr_files = sorted((root / "docs" / "adr").glob("0027-*.md"))
     if len(adr_files) != 1:
         problems.append("缺少 ADR 0027：docs/adr/0027-*.md")
     else:
-        adr = adr_files[0].read_text(encoding="utf-8")
+        adr_text = adr_files[0].read_text(encoding="utf-8")
         for phrase, label in (
             ("反馈中继", "反馈中继"),
             ("可选", "可选联网能力"),
             ("离线", "核心画板离线可用"),
             ("远端应用服务", "不新增远端应用服务依赖"),
         ):
-            if phrase not in adr:
+            if phrase not in adr_text:
                 problems.append(f"ADR 0027 未说明{label}")
 
+    glossary_text = ""
     glossary = root / "GLOSSARY.md"
     if not glossary.is_file():
         problems.append("缺少 GLOSSARY.md")
@@ -190,6 +211,7 @@ def documentation_problems(root: Path) -> list[str]:
             if re.search(rf"\*\*{term}\*\*[\s\S]*?_Avoid_[:：]", glossary_text) is None:
                 problems.append(f"GLOSSARY.md 缺少「{term}」及避免使用的近义词")
 
+    readme_text = ""
     readme = root / "README.md"
     if not readme.is_file():
         problems.append("缺少 README.md")
@@ -197,6 +219,51 @@ def documentation_problems(root: Path) -> list[str]:
         readme_text = readme.read_text(encoding="utf-8")
         if "## 反馈" not in readme_text or "诊断包" not in readme_text:
             problems.append("README.md 缺少反馈入口或诊断包使用说明")
+
+    problems += token_boundary_problems(root, adr_text, glossary_text, readme_text, section)
+    return problems
+
+
+def token_boundary_problems(root: Path, adr_text: str, glossary_text: str, readme_text: str,
+                            changelog_section: list[str] | None) -> list[str]:
+    """#214：文档与代码都不能再要求服务端统一写 token。
+
+    文档必须同时说清三件事：token 由用户自带、服务端不持有统一写 token、核心画板仍离线可用；
+    出现「服务端……必须/需要……token」这类旧要求即判失败。
+    """
+    problems: list[str] = []
+    documents = {
+        "ADR 0027": ("adr", adr_text),
+        "GLOSSARY.md": ("glossary", glossary_text),
+        "README.md": ("readme", readme_text),
+    }
+    for name, (key, text) in documents.items():
+        if not text:
+            continue
+        for phrase in TOKEN_DOC_REQUIREMENTS[key]:
+            if phrase not in text:
+                problems.append(f"{name} 未说明「{phrase}」")
+        if SERVER_TOKEN_REQUIREMENT.search(text):
+            problems.append(f"{name} 仍要求服务端统一写 token")
+        for legacy in LEGACY_TOKEN_NAMES:
+            if legacy in text:
+                problems.append(f"{name} 仍写着服务端统一写 token 的环境变量 {legacy}")
+
+    if changelog_section is not None:
+        changelog_text = "\n".join(changelog_section)
+        if "token" not in changelog_text:
+            problems.append("docs/release/changelog.md 中当前版本一节没有写明 token 变更")
+        if SERVER_TOKEN_REQUIREMENT.search(changelog_text):
+            problems.append("docs/release/changelog.md 当前版本一节仍要求服务端统一写 token")
+
+    for relative in TOKEN_SOURCE_FILES:
+        path = root / relative
+        if not path.is_file():
+            continue
+        source = path.read_text(encoding="utf-8", errors="replace")
+        for legacy in LEGACY_TOKEN_NAMES:
+            if legacy in source:
+                problems.append(f"{relative.as_posix()} 仍读取服务端统一写 token 的环境变量 {legacy}")
     return problems
 
 

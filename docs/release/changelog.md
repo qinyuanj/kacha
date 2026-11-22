@@ -3,6 +3,13 @@ Kacha 的更新说明：界面「更新内容」的唯一来源。当前版本�
 版本按新在前排列，同号只合并为一节；格式见 client/src/core/changelog.ts，来源与核对结果见 docs/release/changelog-sources.md。
 -->
 
+# 1.6.10
+
+## 改进
+
+- 反馈改用提交者自带的 Gitea token：它的权限限于对 `kacha-feedback` 仓库建 issue、写评论/标签与上传附件；中继只在本次请求里转交，不保存、不缓存、不复用，服务端不持有统一写 token。
+- 反馈随附的脱敏诊断包仍不含 token、API 密钥或凭据；反馈不可用时画板核心仍离线可用。
+
 # 1.6.9
 
 ## 新增
