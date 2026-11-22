@@ -47,18 +47,14 @@
   --bar-tone: var(--danger);
   background: var(--danger-soft-weak);
 }
-/* 横条里的动作：外观仍来自 base 的中性按钮，这里只收尺寸与更轻的边框语气。 */
+/* 横条里的动作：外观（边框 / 圆角 / 底色 / 悬停 / 禁用）全由 base 的中性按钮承担，
+ * 这里只收尺寸，让它与正文同一条基线。 */
 .bar button {
   flex: none;
   height: 24px;
   padding: 0 8px;
-  border-color: var(--border-1);
-  border-radius: var(--radius-sm);
   line-height: 22px;
   white-space: nowrap;
-}
-.bar button:hover:not(:disabled):not([aria-disabled="true"]) {
-  border-color: var(--border-2);
 }
 /* 「关闭」这类轻量动作走 base 的链接样式，只收掉横条按钮的盒尺寸。 */
 .bar button.link {
@@ -163,7 +159,7 @@
 .tab-close {
   flex: none;
   border-radius: var(--radius-sm);
-  color: var(--text-3);
+  color: var(--text-2);
   line-height: 1;
 }
 .tab-close:hover {
@@ -192,8 +188,8 @@
   background: var(--toolbar-bg);
   border-bottom: 1px solid var(--border-1);
 }
-/* 外观（底色 / 文字 / 悬停 / 按下 / 原生禁用）来自 base 的中性按钮与下拉；
- * 这里只声明工具栏自己的尺寸、更轻的边框语气与「永不被压窄」。
+/* 外观（边框 / 圆角 / 底色 / 文字 / 悬停 / 按下 / 原生禁用）来自 base 的中性按钮与下拉，
+ * 这里只声明工具栏自己的尺寸与「永不被压窄」。
  * flex: none 是窄窗口的护栏：放不下就整组换行，绝不把按钮缩到文字被裁、互相压住。 */
 .board-toolbar button,
 .board-toolbar select {
@@ -201,7 +197,6 @@
   box-sizing: border-box;
   height: 28px;
   padding: 0 10px;
-  border-color: var(--border-1);
   line-height: 26px;
   white-space: nowrap;
 }
@@ -288,10 +283,10 @@
  * 状态色只由各自的 tone 类（如 .topbar-update-*）叠加，不再另起一套盒子。 */
 
 /* ---- 更新入口（#181） ----
- * 外层只负责排版：旧成功态的绿底 + 绿边已删除，状态色一律由按钮本体
- * topbar-update-latest / -action / -bad 承担，避免外层与内层抢着配色。 */
+ * 「已更新」提示条：外层只负责排版与成功底色，语气条只由 .bar-error / -warn / -alert / -info
+ * 这些语义类承担（本提示条不加）；状态色一律由按钮本体 topbar-update-latest / -action / -bad
+ * 承担，避免外层与内层抢着配色。 */
 .update-notice {
-  --bar-tone: var(--success);
   flex-shrink: 0;
   flex-wrap: wrap;
   background: var(--success-soft);
@@ -423,7 +418,7 @@
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   background: var(--surface-sunken);
-  color: var(--text-3);
+  color: var(--text-2);
   text-align: left;
 }
 /* 空态里的动作：主要动作走 button.primary，其余是 base 的次级按钮，这里只定尺寸与语气。 */
@@ -437,10 +432,6 @@
 .empty-actions button:not(.primary) {
   height: 28px;
   padding: 0 12px;
-  border-color: var(--border-1);
-}
-.empty-actions button:not(.primary):hover:not(:disabled) {
-  border-color: var(--border-2);
 }
 
 /* ---- toast 浮层 ----
@@ -467,7 +458,7 @@
 .theme-switch {
   display: inline-flex;
   align-items: stretch;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   background: var(--control-bg);
   overflow: hidden;
@@ -477,14 +468,13 @@
   height: 26px;
   padding: 0 8px;
   border: none;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--border-1);
   border-radius: 0;
   background: none;
   color: var(--text-2);
   font-size: 12px;
   line-height: 24px;
   white-space: nowrap;
-  cursor: pointer;
 }
 .theme-switch .theme-switch-option:first-child {
   border-left: none;
@@ -495,6 +485,6 @@
 }
 .theme-switch .theme-switch-option[aria-pressed="true"] {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-hover);
   font-weight: 600;
 }
