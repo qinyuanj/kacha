@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -10,7 +9,7 @@ func envLookup(values map[string]string) func(string) string {
 }
 
 func TestLoadConfigUsesEnvironmentDefaults(t *testing.T) {
-	cfg, err := loadConfig(envLookup(map[string]string{"FEEDBACK_GITEA_TOKEN": "runtime-token"}))
+	cfg, err := loadConfig(envLookup(nil))
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
 	}
@@ -23,16 +22,12 @@ func TestLoadConfigUsesEnvironmentDefaults(t *testing.T) {
 	if cfg.Address != ":3005" {
 		t.Fatalf("Address=%q", cfg.Address)
 	}
-	if cfg.Token != "runtime-token" {
-		t.Fatalf("Token=%q", cfg.Token)
-	}
 }
 
 func TestLoadConfigReadsEnvironmentOverrides(t *testing.T) {
 	cfg, err := loadConfig(envLookup(map[string]string{
 		"FEEDBACK_GITEA_URL":   "http://gitea.example:3000",
 		"FEEDBACK_GITEA_REPO":  "team/feedback",
-		"FEEDBACK_GITEA_TOKEN": "runtime-token",
 		"FEEDBACK_ADDR":        "127.0.0.1:4005",
 	}))
 	if err != nil {
@@ -43,10 +38,25 @@ func TestLoadConfigReadsEnvironmentOverrides(t *testing.T) {
 	}
 }
 
-func TestLoadConfigRequiresEnvironmentToken(t *testing.T) {
-	_, err := loadConfig(envLookup(nil))
-	if err == nil || !strings.Contains(err.Error(), "FEEDBACK_GITEA_TOKEN") {
-		t.Fatalf("err=%v", err)
+func TestLoadConfigStartsWithoutEnvironmentToken(t *testing.T) {
+	cfg, err := loadConfig(envLookup(nil))
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.GiteaBase == "" || cfg.OwnerRepo == "" || cfg.Address == "" {
+		t.Fatalf("cfg=%+v", cfg)
+	}
+}
+
+func TestLoadConfigDoesNotReadLegacyTokenEnvironment(t *testing.T) {
+	lookup := func(key string) string {
+		if key == "FEEDBACK_GITEA_TOKEN" {
+			t.Fatal("loadConfig read legacy token environment")
+		}
+		return ""
+	}
+	if _, err := loadConfig(lookup); err != nil {
+		t.Fatalf("loadConfig: %v", err)
 	}
 }
 

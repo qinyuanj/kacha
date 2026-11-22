@@ -88,6 +88,7 @@ class FeedbackContractSyncTest(unittest.TestCase):
     def test_failure_messages_match_service_constants(self) -> None:
         expected = {
             "unreachable": "反馈中继不可达，请稍后再试",
+            "unauthorized": "Gitea token 无效或权限不足",
             "rejected": "反馈被中继拒绝，请稍后再试",
             "invalid": "反馈内容不合法，请修改后重试",
             "too_large": "反馈内容过大，请精简后重试",
@@ -100,6 +101,7 @@ class FeedbackContractSyncTest(unittest.TestCase):
         go = text(SERVICE)
         go_names = {
             "unreachable": "MessageUnreachable",
+            "unauthorized": "MessageUnauthorized",
             "rejected": "MessageRejected",
             "invalid": "MessageInvalid",
             "too_large": "MessageTooLarge",

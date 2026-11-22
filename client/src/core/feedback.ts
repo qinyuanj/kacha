@@ -20,6 +20,7 @@ export function feedbackCategoryLabel(code: string): string {
 /** 失败文案的客户端单一来源；与 Go feedbackservice 的 Message* 常量逐字一致。 */
 export const FEEDBACK_FAILURE_MESSAGES = {
   unreachable: "反馈中继不可达，请稍后再试",
+  unauthorized: "Gitea token 无效或权限不足",
   rejected: "反馈被中继拒绝，请稍后再试",
   invalid: "反馈内容不合法，请修改后重试",
   too_large: "反馈内容过大，请精简后重试",

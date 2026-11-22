@@ -282,6 +282,8 @@ export interface FeedbackSpec {
   os: string;
   board_name: string;
   contact?: string;
+  /** 本次提交自带的 Gitea token；只在本次请求中转交中继，不保存、不预览。 */
+  gitea_token?: string;
   /** 高级设置的覆盖地址；空值走 Go 侧默认配置。 */
   relay_url?: string;
   /** 0–5 张 PNG/JPG 截图；base64 字节经 Feedback.Send 原样交到 Go 服务。 */
@@ -291,7 +293,7 @@ export interface FeedbackSpec {
 }
 
 /** 反馈的稳定结局类别；与 Go feedbackservice 的 kind 逐字一致。 */
-export type FeedbackKind = "ok" | "duplicate" | "unreachable" | "rejected" | "invalid" | "too_large" | "unavailable";
+export type FeedbackKind = "ok" | "duplicate" | "unreachable" | "unauthorized" | "rejected" | "invalid" | "too_large" | "unavailable";
 
 /** 反馈结局：成功带 issue 编号与链接；失败是可显示的类型化文案，不靠异常。 */
 export interface FeedbackOutcome {

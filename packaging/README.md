@@ -22,7 +22,7 @@ python packaging\build_desktop.py --debug --skip-install
 python packaging\build_desktop.py
 ~~~
 
-输出为 `build/windows-amd64/Kacha.exe`、版本化反馈中继 `kacha-feedbackrelay-<版本>-windows-amd64.exe`、MyGo 当前用户 NSIS 安装器 `kacha-setup-<版本>-amd64.exe` 与 `build-info.json`。debug 仍用 `-skip-installer`，不生成安装器。发布构建不上传 Release；签名、Gitea 发布与更新描述门禁见 [安装器与发布链](RELEASE_163.md)。`build-info.json` 记录应用版本、profile、MyGo / Go / WebView2 版本、安装器与产物路径。WebView2 Runtime 版本读不到时记 null。反馈中继从 `./desktop/cmd/feedbackrelay` 单独编译；Gitea 基址、仓库、写 token 与监听地址只从 `FEEDBACK_GITEA_URL`、`FEEDBACK_GITEA_REPO`、`FEEDBACK_GITEA_TOKEN`、`FEEDBACK_ADDR` 读取，token 不参与编译。
+输出为 `build/windows-amd64/Kacha.exe`、版本化反馈中继 `kacha-feedbackrelay-<版本>-windows-amd64.exe`、MyGo 当前用户 NSIS 安装器 `kacha-setup-<版本>-amd64.exe` 与 `build-info.json`。debug 仍用 `-skip-installer`，不生成安装器。发布构建不上传 Release；签名、Gitea 发布与更新描述门禁见 [安装器与发布链](RELEASE_163.md)。`build-info.json` 记录应用版本、profile、MyGo / Go / WebView2 版本、安装器与产物路径。WebView2 Runtime 版本读不到时记 null。反馈中继从 `./desktop/cmd/feedbackrelay` 单独编译；Gitea 基址、仓库与监听地址只从 `FEEDBACK_GITEA_URL`、`FEEDBACK_GITEA_REPO`、`FEEDBACK_ADDR` 读取。服务端不配置统一写 token，提交者 token 随单次反馈请求传递，不参与编译。
 
 两个 profile 都先检查版本与更新说明：`mygo.config.ts` 是唯一产品版本源；`docs/release/changelog.md` 必须包含与它同号的一级标题，且该节「新增 / 改进 / 修复」至少一组下有条目。当前版本在最前，历史版本可查并保留当时语境，历史恢复来源见 `docs/release/changelog-sources.md`；完整索引与弹窗可见范围由前端守护测试检查。检查失败即退出，不运行构建命令。MyGo CLI 随后执行配置中的前端 `buildCommand`，再将 `client/dist` 嵌入程序；Go 模块位于仓库根，源码入口为 `./desktop`。
 
@@ -33,7 +33,6 @@ release 资产清单与桌面客户端共用 `mygo.config.ts` 的唯一产品版
 本仓库没有 kacha-cd 检出，因此这里只交付可复核的安装脚本与测试，不声称已经部署。运维在 `lzxsvn` 上拿到对应版本的版本化中继资产和 `nssm.exe` 后，在受控会话中按下面形式执行；脚本会查询服务状态，服务不存在则安装，已存在则停止并重启，重复执行不会安装第二个服务：
 
 ~~~powershell
-$env:FEEDBACK_GITEA_TOKEN = "<由运维在安全会话注入；不要写入仓库或 CI 日志>"
 python packaging\deploy_feedbackrelay.py `
   --relay-binary C:\deploy\kacha-feedbackrelay-<版本>-windows-amd64.exe `
   --gitea-base-url http://lzxsvn:3000 `
@@ -42,9 +41,9 @@ python packaging\deploy_feedbackrelay.py `
   --nssm C:\tools\nssm.exe
 ~~~
 
-默认服务名是 `kacha-feedbackrelay`，默认监听 `:3005`；`--service-name`、`--token-env` 可按需覆盖。脚本把 `FEEDBACK_GITEA_URL`、`FEEDBACK_GITEA_REPO`、`FEEDBACK_GITEA_TOKEN`、`FEEDBACK_ADDR` 写进服务的 nssm 环境，凭据只从环境变量读取，失败信息不回显命令输出；测试用假 runner 与占位 token，不接触真实服务。
+默认服务名是 `kacha-feedbackrelay`，默认监听 `:3005`；`--service-name` 可按需覆盖。脚本只把 `FEEDBACK_GITEA_URL`、`FEEDBACK_GITEA_REPO`、`FEEDBACK_ADDR` 写进服务的 nssm 环境；服务端不配置统一写 token，提交者 token 只在单次反馈请求中传递。失败信息不回显命令输出，测试用假 runner，不接触真实服务。
 
-需要人工交接的是：① `lzxsvn` 上能放置发行资产、安装并启动 Windows 服务的账户与 `nssm.exe`；② 对 `kacha-feedback` 仓库有建 issue、写评论/标签与上传附件权限的 Gitea 写 token，由持有人在部署会话注入 `FEEDBACK_GITEA_TOKEN`。真实 token、密码、凭据文件不写入仓库、更新说明、测试夹具或客户端产物。实际安装、`GET /healthz`、发一条验证反馈与重启后复查由 #210 的人工验收完成。
+需要人工交接的是：① `lzxsvn` 上能放置发行资产、安装并启动 Windows 服务的账户与 `nssm.exe`；② 用户自行提供对 `kacha-feedback` 仓库有建 issue、写评论/标签与上传附件权限的 Gitea token，服务端不持有统一写 token。真实 token、密码、凭据文件不写入仓库、更新说明、测试夹具或客户端产物。实际安装、`GET /healthz`、发一条验证反馈与重启后复查由 #210 的人工验收完成。
 
 客户端内置默认中继地址 `http://lzxsvn:3005`；高级设置的「反馈中继地址」可覆盖，留空或无效值回退默认值，有效覆盖值优先生效。接线层用 `resolveFeedbackRelayAddress(settings)` 取得该地址，并把结果放进每次 `Feedback.Send` 的 `relay_url`；Go 服务再用本次覆盖优先于自身默认配置。
 
