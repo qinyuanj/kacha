@@ -415,6 +415,7 @@ export function App({ version }: AppProps) {
           onRegenerate: doRegenerate,
           onViewSendText: (id) => void viewSendText(id),
           toolbarSlot,
+          theme: theme.effective,
           readOnly: view.activeArchived,
           modalOpen,
           focus: focusFor(state.focus, view.active),
