@@ -30,8 +30,10 @@ function byText<T extends Element>(selector: string, text: string): T {
   return el;
 }
 
-async function show(port: FakePort, onClose: () => void = () => undefined, relayUrl?: string): Promise<void> {
+async function show(port: FakePort, onClose: () => void = () => undefined, relayUrl?: string, token: string | null = "test-token"): Promise<void> {
   await act(async () => root.render(createElement(ShellProvider, { port, children: createElement(FeedbackDialog, { version: "1.8.0", build: "42", boardName: "/tmp/boards/项目 A.kacha", relayUrl, onClose }) })));
+  // 反馈已要求提交前必须有 Gitea token（#216 项2）：默认预填一个，token 相关的用例再显式覆盖。
+  if (token !== null) await setInput("Gitea token", token);
 }
 
 async function setInput(label: string, value: string): Promise<void> {
@@ -415,5 +417,31 @@ describe("用户自带 Gitea token（#213）", () => {
       expect(redacted).not.toContain(secret);
     }
     expect(redacted).toContain("<已隐藏>");
+  });
+
+  it("空 token 时预览按钮禁用并给出明确提示，不发送", async () => {
+    const port = createFakePort();
+    await show(port, undefined, undefined, null);
+    await setInput("正文", "没有 token 的正文");
+    expect(findButton("预览")!.disabled).toBe(true);
+    expect(container.textContent).toContain("请先填写 Gitea token");
+    expect(port.calls.feedback).toHaveLength(0);
+  });
+
+  it("填写 token 后预览按钮可用", async () => {
+    const port = createFakePort();
+    await show(port);
+    await setInput("正文", "有 token 的正文");
+    expect(findButton("预览")!.disabled).toBe(false);
+  });
+
+  it("预览显示 token 权限范围（建 issue、评论、打标签、上传附件）", async () => {
+    await show(createFakePort());
+    await setInput("正文", "权限说明");
+    await click("预览");
+    expect(container.textContent).toContain("建 issue");
+    expect(container.textContent).toContain("评论");
+    expect(container.textContent).toContain("打标签");
+    expect(container.textContent).toContain("上传附件");
   });
 });

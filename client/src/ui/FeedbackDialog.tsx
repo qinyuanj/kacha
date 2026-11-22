@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DiagnosticsPackOutcome, FeedbackAttachment, FeedbackKind, FeedbackOutcome, FeedbackSpec } from '../shell/port';
-import { FEEDBACK_CATEGORIES, FEEDBACK_FAILURE_MESSAGES as FEEDBACK_MESSAGES, FEEDBACK_MAX_SCREENSHOT_BYTES as MAX_SCREENSHOT_BYTES, FEEDBACK_MAX_SCREENSHOTS as MAX_SCREENSHOTS, FEEDBACK_TOKEN_NOTICE, feedbackCategoryLabel } from '../core/feedback';
+import { FEEDBACK_CATEGORIES, FEEDBACK_FAILURE_MESSAGES as FEEDBACK_MESSAGES, FEEDBACK_MAX_SCREENSHOT_BYTES as MAX_SCREENSHOT_BYTES, FEEDBACK_MAX_SCREENSHOTS as MAX_SCREENSHOTS, FEEDBACK_TOKEN_NOTICE, FEEDBACK_TOKEN_REQUIRED, FEEDBACK_TOKEN_SCOPE, feedbackCategoryLabel } from '../core/feedback';
 import { useShell } from './shell';
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg'];
@@ -241,8 +241,9 @@ function FeedbackForm(props: FeedbackFormProps) {
       </div>
       {props.attachmentError && <div className='form-error' role='alert'>{props.attachmentError}</div>}
       <div className='modal-foot'>
+        {!props.token.trim() && <span className='form-error' role='alert'>{FEEDBACK_TOKEN_REQUIRED}</span>}
         <button onClick={props.onClose}>取消</button>
-        <button className='primary' onClick={props.onPreview} disabled={!props.body.trim()}>预览</button>
+        <button className='primary' onClick={props.onPreview} disabled={!props.body.trim() || !props.token.trim()}>预览</button>
       </div>
     </>
   );
@@ -266,6 +267,7 @@ function FeedbackPreview(props: FeedbackPreviewProps) {
         <p>正文：{props.spec.body}</p>
         <p className='feedback-preview-meta'>自动元数据：版本 {props.spec.version}（build {props.spec.build || '未知'}）、系统 {props.spec.os}、当前画板 {props.spec.board_name || '（未打开画板）'}；只含画板名字，不含路径或密钥。</p>
         <p className='feedback-token-notice'>{FEEDBACK_TOKEN_NOTICE}</p>
+        <p className='feedback-token-scope'>{FEEDBACK_TOKEN_SCOPE}</p>
         <p>提交者：{props.spec.contact ?? '匿名'}</p>
         <p>附件摘要：{props.attachmentSummary}。</p>
       </div>

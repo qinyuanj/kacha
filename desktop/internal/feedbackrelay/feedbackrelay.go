@@ -169,7 +169,9 @@ func (s *Service) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	fingerprint := contentKey(body, shots, packs)
+	// 去重身份把提交者身份算进指纹：不同 token 的相同内容各自建单，绝不共用别人的 issue 号。
+	// 只把 sha256(token) 喂进内存里的指纹，token 及其哈希都不落日志/响应/正文/附件名（#216 项1）。
+	fingerprint := contentKey(submitterFingerprint(giteaToken), body, shots, packs)
 	if key != "" {
 		if e, ok := s.lookupDup(key); ok {
 			if e.fingerprint != fingerprint {
@@ -536,8 +538,18 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-func contentKey(body string, groups ...[]upload) string {
+// submitterFingerprint 是提交者 token 的内存指纹：只喂进去重哈希，不保存明文、不出现在任何输出里。
+func submitterFingerprint(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// contentKey 把提交者身份、正文与附件一起算成内容指纹。
+// 提交者身份参与哈希，因此不同 token 的相同内容得到不同指纹、各自建单。
+func contentKey(submitter, body string, groups ...[]upload) string {
 	h := sha256.New()
+	h.Write([]byte(submitter))
+	h.Write([]byte{0})
 	h.Write([]byte(body))
 	for _, group := range groups {
 		for _, u := range group {
