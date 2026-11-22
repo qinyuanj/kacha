@@ -449,10 +449,13 @@ describe("用户自带 Gitea token（#213）", () => {
 });
 
 describe("弹窗语义结构（#219）", () => {
-  it("反馈弹窗有独立的根类名与语义字段标签，不依赖位置选择器", async () => {
+  it("反馈弹窗用可见标题作为无障碍名称，字段标签走语义类名而不是位置选择器", async () => {
     await show(createFakePort());
     const dialog = container.querySelector<HTMLElement>("[role=dialog]")!;
-    expect(dialog.classList.contains("feedback-dialog")).toBe(true);
+    const labelledBy = dialog.getAttribute("aria-labelledby")!;
+    const heading = container.querySelector<HTMLElement>(`#${labelledBy}`)!;
+    expect(heading.textContent).toBe("反馈");
+    expect(dialog.contains(heading)).toBe(true);
     const labels = [...dialog.querySelectorAll(".form-row > .form-row-label")].map((el) => el.textContent);
     expect(labels).toEqual(expect.arrayContaining(["标题（可选）", "分类", "正文", "Gitea token（仅本次提交）"]));
   });

@@ -126,7 +126,7 @@ describe("工作台", () => {
     await act(async () => settingsButton?.click());
     const settingsPanel = container.querySelector("[aria-label='高级设置']");
     expect(settingsPanel).not.toBeNull();
-    const close = [...(settingsPanel?.querySelectorAll("button") ?? [])].find((button) => button.textContent === "关闭");
+    const close = [...(settingsPanel?.querySelectorAll("button") ?? [])].find((button) => button.getAttribute("aria-label") === "关闭");
     await act(async () => close?.click());
     expect(container.querySelector("[aria-label='高级设置']")).toBeNull();
   });
@@ -293,7 +293,7 @@ describe("工作台", () => {
     await show(port, { version: "1.2.3" });
     const versionButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Kacha 1.2.3"));
     await act(async () => versionButton?.click());
-    const close = [...container.querySelectorAll("button")].find((button) => button.textContent === "关闭");
+    const close = [...container.querySelectorAll("button")].find((button) => button.getAttribute("aria-label") === "关闭");
     await act(async () => close?.click());
   });
 

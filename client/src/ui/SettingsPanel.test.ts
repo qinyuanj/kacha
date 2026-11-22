@@ -249,13 +249,19 @@ describe("诊断包导出（#162）", () => {
 });
 
 describe("弹窗语义结构（#219）", () => {
-  it("高级设置按功能分区，表单行用语义标签类名而不是位置选择器", async () => {
+  it("高级设置每个字段落在自己的分区里，分区之间不混装", async () => {
     const port = createFakePort({ userRoot: "C:\\data" });
     await show(port, settings(), { prepare: async () => undefined, finish: () => undefined, guard: () => ({ pending: 0, packBusy: false, moving: false }) });
     const panel = container.querySelector("[aria-label='高级设置']")!;
-    expect(panel.querySelectorAll(".settings-section").length).toBeGreaterThanOrEqual(6);
-    const labels = [...panel.querySelectorAll(".form-row > .form-row-label")].map((el) => el.textContent?.trim());
-    expect(labels).toEqual(expect.arrayContaining(["网关基础地址", "反馈中继地址", "API 密钥", "连接测试", "并发上限", "数据位置"]));
+    const sectionOf = (text: string) => {
+      const label = [...panel.querySelectorAll(".form-row > .form-row-label")].find((el) => el.textContent?.trim() === text);
+      expect(label).toBeTruthy();
+      return label!.closest(".settings-section");
+    };
+    const sections = ["网关基础地址", "反馈中继地址", "API 密钥", "连接测试", "并发上限", "数据位置"].map(sectionOf);
+    sections.forEach((section) => expect(section).not.toBeNull());
+    // 六个字段分属六个不同分区：不是一整个大表单，也没有两段被并成一段。
+    expect(new Set(sections).size).toBe(sections.length);
   });
 
   it("说明与警告挂在各自区段里，作为独立块而不是靠固定左缩进对齐", async () => {

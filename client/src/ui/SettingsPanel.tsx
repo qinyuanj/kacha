@@ -164,7 +164,7 @@ export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
         <div className="modal-head">
           <strong>高级设置</strong>
           {version && <span className="muted small">版本 {version}</span>}
-          <button className="link" onClick={onClose}>关闭</button>
+          <button className="icon-button" aria-label="关闭" onClick={onClose}>✕</button>
         </div>
         {settings.fileProblem && <div className="notice notice-warn">{settings.fileProblem}</div>}
 

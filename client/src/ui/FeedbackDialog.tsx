@@ -387,7 +387,7 @@ export function FeedbackDialog({ version, build, boardName, relayUrl, onClose }:
 
   return (
     <div className='modal-backdrop' onMouseDown={(event) => closeOnBackdrop(event, onClose)}>
-      <div className='modal feedback-dialog' role='dialog' aria-modal='true' aria-labelledby='feedback-title' onKeyDown={(event) => closeOnEscape(event, onClose)} onPaste={(event) => void paste(event)}>
+      <div className='modal' role='dialog' aria-modal='true' aria-labelledby='feedback-title' onKeyDown={(event) => closeOnEscape(event, onClose)} onPaste={(event) => void paste(event)}>
         <div className='modal-head'>
           <h2 id='feedback-title'>反馈</h2>
           <button ref={closeRef} className='icon-button' aria-label='关闭反馈' onClick={onClose}>✕</button>

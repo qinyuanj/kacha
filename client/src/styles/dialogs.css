@@ -37,14 +37,10 @@
   width: min(760px, calc(100vw - 48px));
 }
 /* 直接把 h2 放在容器里的弹窗（画板列表、删除确认、归档确认）。 */
-.modal > h2 {
-  margin: 0;
-  font-size: 16px;
-}
-
 /* ---- 标题栏与底部动作栏 ---- */
 .modal-head {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 8px;
   padding-bottom: 10px;
@@ -148,13 +144,15 @@
 .notice-warn {
   color: var(--text-1);
   background: var(--warning-soft);
-  border: 1px solid var(--warning);
+  border: 1px solid var(--warning-strong);
+}
+/* 弹窗里的次级说明：.muted(=--text-3) 在 11–12px 下暗色只有 3.39:1，弹窗域提到 --text-2。
+ * 只覆盖弹窗作用域，base 的 .muted 全局语义不动。 */
+.modal .muted {
+  color: var(--text-2);
 }
 
 /* ---- 高级设置：按功能分区 ---- */
-.settings-dialog .modal-head {
-  flex-shrink: 0;
-}
 .settings-section {
   display: flex;
   flex-direction: column;
@@ -184,12 +182,6 @@
 }
 
 /* ---- 画板列表：打开画板与「管理画板」共用同一套样式 ---- */
-.tab-list {
-  align-self: center;
-  margin-left: 6px;
-  font-size: 12px;
-  white-space: nowrap;
-}
 .board-list {
   list-style: none;
   margin: 0;
@@ -245,7 +237,7 @@
 }
 .board-list .board-list-size.size-alert {
   color: var(--text-on-accent);
-  background: var(--red);
+  background: var(--danger-fill);
   border-radius: var(--radius-sm);
   padding: 0 4px;
 }
@@ -272,7 +264,7 @@
   font-size: 12px;
 }
 .board-list-slots .board-list-slots-full {
-  color: var(--red);
+  color: var(--danger-text);
   font-weight: 600;
 }
 .board-list-slots .board-list-over {
@@ -289,7 +281,7 @@
   line-height: 1.6;
   color: var(--text-1);
   background: var(--warning-soft);
-  border: 1px solid var(--warning);
+  border: 1px solid var(--warning-strong);
   border-radius: var(--radius-md);
 }
 .delete-notes {
@@ -324,7 +316,7 @@
   line-height: 1.6;
   color: var(--text-1);
   background: var(--warning-soft);
-  border: 1px solid var(--warning);
+  border: 1px solid var(--warning-strong);
   border-radius: var(--radius-md);
 }
 
@@ -534,9 +526,6 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-.preview-pick,
-.preview-export {
   padding-top: 8px;
   border-top: 1px solid var(--border-subtle);
 }
@@ -544,13 +533,6 @@
 /* ---- 更新说明（changelog）：版本 → 分组 → 条目三级层次 ---- */
 .changelog-dialog {
   overflow: hidden;
-}
-.changelog-dialog .modal-head {
-  flex-shrink: 0;
-}
-.changelog-dialog .modal-head button {
-  min-height: 40px;
-  min-width: 40px;
 }
 .changelog-releases {
   overflow-y: auto;
@@ -605,12 +587,6 @@
 }
 
 /* ---- 反馈弹窗：纵向字段行、截图附件、脱敏预览、令牌提示与回执 ---- */
-.feedback-dialog .modal-head h2 {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 15px;
-}
 /* 图标按钮（关闭）：只有图标，不占标题栏的横向空间。
  * 布局与状态色归这里；普通按钮的默认外观归 base.css 的按钮体系。 */
 .icon-button {
