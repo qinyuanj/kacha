@@ -247,3 +247,21 @@ describe("诊断包导出（#162）", () => {
   });
 
 });
+
+describe("弹窗语义结构（#219）", () => {
+  it("高级设置按功能分区，表单行用语义标签类名而不是位置选择器", async () => {
+    const port = createFakePort({ userRoot: "C:\\data" });
+    await show(port, settings(), { prepare: async () => undefined, finish: () => undefined, guard: () => ({ pending: 0, packBusy: false, moving: false }) });
+    const panel = container.querySelector("[aria-label='高级设置']")!;
+    expect(panel.querySelectorAll(".settings-section").length).toBeGreaterThanOrEqual(6);
+    const labels = [...panel.querySelectorAll(".form-row > .form-row-label")].map((el) => el.textContent?.trim());
+    expect(labels).toEqual(expect.arrayContaining(["网关基础地址", "反馈中继地址", "API 密钥", "连接测试", "并发上限", "数据位置"]));
+  });
+
+  it("说明与警告挂在各自区段里，作为独立块而不是靠固定左缩进对齐", async () => {
+    await show(createFakePort(), settings({ fileProblem: "settings.json 已损坏" }));
+    const panel = container.querySelector("[aria-label='高级设置']")!;
+    expect(panel.querySelector(".notice-warn")?.textContent).toContain("settings.json 已损坏");
+    expect(panel.querySelector(".settings-section .form-hint")).not.toBeNull();
+  });
+});

@@ -12,9 +12,9 @@ export type { DataRootActions } from "./dataRootMove";
 function RootRow({ root, busy, onMove }: { root: string | null; busy: boolean; onMove(): void }) {
 	return (
 		<div className="form-row">
-			<span>数据位置</span>
+			<span className="form-row-label">数据位置</span>
 			<button onClick={onMove} disabled={busy}>{busy ? "迁移中…" : "迁移到其他位置…"}</button>
-			<span className="muted small">{root ?? "读取中…"}</span>
+			<span className="form-row-hint">{root ?? "读取中…"}</span>
 		</div>
 	);
 }
