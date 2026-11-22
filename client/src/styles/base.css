@@ -60,7 +60,31 @@ a:hover {
   word-break: break-all;
 }
 
-/* ---- 按钮变体：主要 / 危险（默认与图标按钮的基座在各自域内，视觉沿用迁移前的规则）---- */
+/* ---- 按钮体系：普通按钮的中性外观 ----
+ * 此前普通 button 完全靠系统外观：暗色下就是一块系统浅灰按钮，弹窗里的取消 / 刷新 / 关闭都是它。
+ * 选择器用 :where() 把权重压到 0，主要 / 危险 / 图标 / 轻量链接四种变体与各域模块自己的按钮规则
+ * （.board-toolbar button、.context-menu button、.theme-switch 等）都仍然盖得住，不必重复定义外观。 */
+:where(button) {
+  padding: 4px 10px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  background: var(--control-bg);
+  color: var(--text-1);
+  cursor: pointer;
+}
+:where(button:hover:not(:disabled):not([aria-disabled="true"])) {
+  background: var(--control-hover);
+}
+:where(button:active:not(:disabled):not([aria-disabled="true"])) {
+  background: var(--control-active);
+}
+:where(button:disabled) {
+  background: var(--surface-sunken);
+  color: var(--text-3);
+  cursor: default;
+}
+
+/* ---- 按钮变体：主要 / 危险（图标与轻量链接的基座在下面）---- */
 button.primary {
   background: var(--success-fill);
   border: 1px solid var(--success);
@@ -129,8 +153,9 @@ select {
   color: var(--text-1);
   cursor: pointer;
 }
-/* 暗色下的同一枚箭头：只换描边色，形状与位置不变。 */
-:root[data-theme="dark"] select {
+/* 暗色下的同一枚箭头：只换描边色，形状与位置不变。
+ * 用 :not([data-theme="light"]) 而不是 =["dark"]：没有属性时就是暗色，与 tokens 的口径一致。 */
+:root:not([data-theme="light"]) select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23a6b0bb' stroke-width='1.5'/%3E%3C/svg%3E");
 }
 

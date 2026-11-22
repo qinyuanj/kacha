@@ -51,12 +51,17 @@ export function fileProblemOf(loaded: LoadedSettings): string | null {
 }
 
 /**
- * 切换主题（#221）：内存状态立刻生效；设置文件为 newer / unreadable 时只改内存，
- * 绝不覆盖磁盘——能不能写只看 mayOverwriteSettings 这一处判定。
+ * 切换主题（#221）：内存状态立刻生效；写不写盘看两道门。
+ *
+ * 1. 设置还没读到（loaded=false）：此刻磁盘上是什么内容完全未知，写下去会把用户真实的
+ *    网关地址 / 并发 / 中继与全部未知字段冲成默认值，所以只改内存；载入完成后由
+ *    ui/useTheme 补写一次。
+ * 2. mayOverwriteSettings：文件是 newer / unreadable 时只改内存，不覆盖别人的版本。
  */
 export async function setThemeState(ports: SettingsPorts, current: SettingsState, choice: ThemeChoice): Promise<SettingsState> {
   const next: Settings = { ...current.settings, theme: choice };
   const state: SettingsState = { ...current, settings: next };
+  if (!current.loaded) return state;
   if (!mayOverwriteSettings(current.file)) return state;
   // 写盘失败不回滚界面：本次会话的主题已经生效，下次打开再写一次。
   await ports.writeSettings(serializeSettings(next)).catch(() => undefined);

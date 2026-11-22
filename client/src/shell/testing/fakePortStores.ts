@@ -286,8 +286,10 @@ export function fakeUiStore(calls: FakeCalls, options: FakePortOptions): UiStore
     isEditableTarget: (target) => target instanceof Element && target.closest("input, textarea, select, [contenteditable='true']") !== null,
     installInputTakeover: () => () => undefined,
     // 主题同步（#221）：记下每次通知宿主壳的档位；替身里没有原生窗口，外观由文档根承担。
+    // 选项要求时按真实适配器的样子 reject：原生窗口失败不该拖住界面切换。
     setNativeTheme: async (choice) => {
       calls.nativeTheme.push(choice);
+      if (options.nativeThemeFailure) throw new Error("原生主题同步失败");
     },
   };
 }
