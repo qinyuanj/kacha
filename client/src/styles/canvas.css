@@ -1,0 +1,822 @@
+.canvas {
+  position: absolute;
+  inset: 0;
+}
+.node {
+  position: relative;
+  width: 260px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: var(--shadow-1);
+}
+.react-flow__node.selected .node {
+  outline: 2px solid var(--accent-strong);
+}
+.node-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.node-error {
+  border: 2px solid var(--red);
+}
+.node-warn {
+  border: 2px solid var(--yellow);
+  background: var(--warning-soft-weak);
+}
+.prompt-text {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+}
+.reference-guide {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.reference-guide-task + .reference-guide-task {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.reference-guide-task-label {
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+.reference-guide-help {
+  color: var(--muted);
+  margin-bottom: 5px;
+}
+.reference-guide-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.reference-guide-thumb {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.reference-guide-thumb img {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  display: block;
+}
+.reference-guide-thumb:hover img {
+  border-color: var(--accent-strong);
+}
+.reference-guide-rect {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--guide-outline);
+  background: var(--guide-fill);
+  pointer-events: none;
+}
+.reference-guide-port {
+  color: var(--muted);
+}
+/* 精简图片节点：只有图片、端口与角标；尺寸由 React Flow 节点宽高给出（画布按 size 与图片比例计算）。 */
+.node.node-image {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  overflow: visible;
+}
+.node-image > .thumb {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border-radius: 7px;
+}
+.node-image > .thumb-missing {
+  height: auto;
+}
+/* 参考图警告态：红框，原因进悬浮信息。 */
+.node.node-image.node-warn {
+  border: 2px solid var(--red);
+  background: var(--surface);
+}
+.image-badges {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  display: flex;
+  gap: 4px;
+  pointer-events: none;
+}
+.image-badges .badge {
+  margin: 0;
+  background: var(--accent-soft-strong);
+}
+/* 定稿：金色描边，角标排在最前。 */
+.node.node-image.node-final {
+  outline: 3px solid var(--final);
+  outline-offset: 1px;
+}
+.node-final .image-badges .badge:first-child {
+  background: var(--final);
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+/* 阶段框：画在节点之下，框不挡指针，只有标题栏可点。 */
+.stage-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  border: 2px dashed var(--border-3);
+  border-radius: 8px;
+  background: var(--border-subtle);
+  pointer-events: none;
+}
+.stage-frame.collapsed {
+  border-style: solid;
+  background: var(--surface-sunken);
+}
+.stage-header {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 4px;
+  white-space: nowrap;
+  font-size: 13px;
+  pointer-events: auto;
+}
+.stage-frame.collapsed .stage-header {
+  position: static;
+  padding: 4px 8px;
+}
+.stage-name {
+  font-weight: 600;
+  cursor: text;
+}
+.stage-count {
+  color: var(--text-2);
+}
+.stage-header button {
+  padding: 0 6px;
+  font-size: 12px;
+}
+/* 整理模式（#92）：阶段框加深、标出体量；未定稿结果半透明；顶部浮着整理前后对比。 */
+.stage-frame.tidying {
+  border: 2px solid var(--accent);
+  background: var(--lineage-soft);
+}
+.stage-size {
+  color: var(--accent);
+  font-weight: 600;
+}
+.canvas.tidying .react-flow__node-result .node-image:not(.node-final) {
+  opacity: 0.4;
+}
+/* 建议保留（#144）：系统推断该留的那一张不跟着未定稿一起压暗，标记也排在角标最前。 */
+.canvas.tidying .react-flow__node-result .node-image.node-suggest:not(.node-final) {
+  opacity: 1;
+}
+.node-suggest .image-badges .badge:first-child {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+.tidy-bar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-2);
+  white-space: nowrap;
+}
+.board-toolbar button.toolbar-tidy.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.thumb {
+  display: block;
+  width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+  background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 16px 16px;
+}
+.thumb-missing {
+  height: 100px;
+  display: grid;
+  place-items: center;
+  color: var(--red);
+}
+.badge {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  font-size: 11px;
+}
+.warn-list,
+.error-list,
+.hint-list {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-size: 11px;
+}
+.warn-list {
+  color: var(--warning-text);
+}
+.error-list {
+  color: var(--red);
+}
+.hint-list {
+  color: var(--text-2);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.field-label {
+  flex-shrink: 0;
+  width: 28px;
+  color: var(--text-2);
+}
+.field select {
+  flex: 1;
+  min-width: 0;
+}
+.toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.toggles .disabled {
+  color: var(--text-3);
+}
+.popover {
+  position: absolute;
+  z-index: 20;
+  left: 100%;
+  top: 0;
+  margin-left: 8px;
+  width: 240px;
+  padding: 8px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-popover);
+}
+.popover ul {
+  margin: 2px 0 6px;
+  padding-left: 16px;
+}
+.popover-head {
+  display: flex;
+  justify-content: space-between;
+}
+
+.ports {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 -8px;
+}
+.port-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 12px;
+  min-height: 22px;
+}
+.port-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.port-required .port-label {
+  color: var(--warning-strong);
+}
+.port-empty .port-label {
+  color: var(--text-3);
+}
+.port-filled {
+  cursor: grab;
+}
+.port-dragging {
+  opacity: 0.45;
+}
+.port-drop {
+  background: var(--accent-soft);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+body[data-port-drag],
+body[data-port-drag] * {
+  cursor: no-drop !important;
+  user-select: none;
+}
+body[data-port-drag="ok"],
+body[data-port-drag="ok"] * {
+  cursor: grabbing !important;
+}
+.grip {
+  color: var(--text-3);
+}
+
+/* ---- 端口与连线：颜色见 :root 的 --port-* ---- */
+/*
+ * 端口框保持 16px 不缩放（React Flow 按端口框测连线端点，缩放会让端点偏移）；
+ * 可见圆点画在 ::after 上，放大 / 发光只作用于它。热区 24px 由 ::before 扩出。
+ */
+.react-flow__handle.port {
+  --port-color: var(--port-image);
+  width: 16px;
+  height: 16px;
+  background: transparent;
+  border: none;
+  transition: opacity 0.12s ease;
+}
+.react-flow__handle.port-positive {
+  --port-color: var(--port-positive);
+}
+.react-flow__handle.port-negative {
+  --port-color: var(--port-negative);
+}
+.react-flow__handle.port::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+}
+.react-flow__handle.port::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: var(--port-color);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--port-color);
+  pointer-events: none;
+  transition: scale 0.12s ease, box-shadow 0.12s ease;
+}
+/* 悬浮节点时端口放大到 20px。 */
+.react-flow__node:hover .react-flow__handle.port::after {
+  scale: 1.25;
+}
+/* 空图片端口 = 虚线空心圆；正向提示词未接 = 红色空心圆（错误态红，不是负向色）。 */
+.port-empty .react-flow__handle.port::after {
+  background: var(--surface);
+  border: 2px dashed var(--port-color);
+  box-shadow: none;
+}
+.port-required .react-flow__handle.port::after {
+  background: var(--surface);
+  border: 2px solid var(--red);
+  box-shadow: none;
+}
+/* 拖线中：合法端口放大发光，悬停其上再放大一档；非法端口去强调（节点、连线由 .dimmed 去强调）。 */
+.react-flow__handle.port.port-valid::after {
+  scale: 1.5;
+  box-shadow: 0 0 0 1px var(--port-color), 0 0 10px 3px var(--port-color);
+}
+.react-flow__handle.port.port-valid.connectingto::after {
+  scale: 1.9;
+}
+.react-flow__handle.port.port-invalid {
+  opacity: 0.35;
+}
+
+.react-flow__edge-path,
+.react-flow__connection-path {
+  stroke-width: 2.5;
+  transition: stroke-width 0.12s ease, filter 0.12s ease;
+}
+.react-flow__edge-interaction {
+  stroke-width: 24;
+}
+.react-flow__edge.edge-image .react-flow__edge-path {
+  stroke: var(--port-image);
+}
+.react-flow__edge.edge-positive .react-flow__edge-path {
+  stroke: var(--port-positive);
+}
+.react-flow__edge.edge-negative .react-flow__edge-path {
+  stroke: var(--port-negative);
+}
+.react-flow__edge.edge-system .react-flow__edge-path {
+  stroke: var(--edge-system);
+  stroke-dasharray: 5 4;
+}
+/* 谱系 = 加粗 + 外发光，保留类型色。 */
+.react-flow__edge.edge-lineage .react-flow__edge-path {
+  stroke-width: 3.5;
+  filter: drop-shadow(0 0 3px var(--lineage-glow));
+}
+/* 悬浮加粗提亮；选中更粗。 */
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke-width: 4;
+  filter: brightness(1.2);
+}
+.react-flow__edge.edge-lineage:hover .react-flow__edge-path {
+  filter: brightness(1.2) drop-shadow(0 0 3px var(--lineage-glow));
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 4.5;
+}
+.edge-midpoint {
+  position: absolute;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  pointer-events: all;
+}
+.canvas.connecting .edge-midpoint {
+  opacity: 0.35;
+}
+/* 区域徽标：线上的矩形。 */
+.edge-badge {
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--surface);
+  border: 1.5px solid var(--port-image);
+  font-size: 11px;
+}
+.edge-cut {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--danger);
+  background: var(--surface);
+  color: var(--danger);
+  line-height: 18px;
+  cursor: pointer;
+}
+/* ---- 任务状态徽标 ---- */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: normal;
+}
+.status-queued {
+  background: var(--control-active);
+  color: var(--text-2);
+}
+.status-running {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.status-failed {
+  background: var(--red);
+  color: var(--text-on-accent);
+}
+.spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- 运行编排 ---- */
+.status-backoff {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+.port-unreferenced {
+  background: var(--warning-soft);
+  box-shadow: inset 3px 0 0 var(--yellow);
+}
+.task-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}
+.fork-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 180px;
+}
+.thumb-missing {
+  height: auto;
+  min-height: 100px;
+  align-content: center;
+  gap: 4px;
+  padding: 8px;
+  text-align: center;
+  overflow: hidden;
+}
+.thumb-missing .mono {
+  color: var(--text-2);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.relocate {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+/* 选中 = 实线亮色描边（.selected）；谱系 = 柔和外发光，可叠加；有选中时非谱系降透明度。 */
+.react-flow__node.in-lineage .node {
+  box-shadow: 0 0 14px 4px var(--lineage-edge);
+}
+.react-flow__node.dimmed,
+.react-flow__edge.dimmed {
+  opacity: 0.35;
+}
+.port-thumb {
+  position: relative;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: none;
+  line-height: 0;
+  cursor: pointer;
+}
+/* 区域指示入口：贴在拖动柄旁；有区域时右上角角标显示数量。 */
+.port-region {
+  position: relative;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.port-region[aria-disabled="true"] {
+  color: var(--text-3);
+  cursor: default;
+}
+.port-region-count {
+  position: absolute;
+  top: -4px;
+  right: -2px;
+  min-width: 12px;
+  padding: 0 3px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: 9px;
+  line-height: 12px;
+  text-align: center;
+}
+.port-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 8px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.port-thumb-rect {
+  position: absolute;
+  background: var(--region-1-half);
+  border: 1px solid var(--region-1);
+  pointer-events: none;
+}
+.port-overlay {
+  color: var(--text-2);
+  background: var(--surface-sunken);
+  /* 从属于上一行原图：缩进，不像独立的用户端口。 */
+  padding-left: 24px;
+}
+.badge-warn {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--warning-soft);
+  border: 1px solid var(--yellow);
+}
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 160px;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-popover);
+}
+.context-menu button {
+  padding: 6px 14px;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.context-menu button:hover:not([aria-disabled="true"]) {
+  background: var(--control-hover);
+}
+.context-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+.context-menu button[aria-disabled="true"] {
+  color: var(--text-3);
+  cursor: default;
+}
+
+/* ---- 精简任务节点 ---- */
+.task-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.task-title .status {
+  margin-left: 4px;
+}
+.expand-toggle {
+  width: 18px;
+  padding: 0;
+}
+.task-summary {
+  margin-bottom: 6px;
+  color: var(--text-2);
+}
+.task-summary > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.port-hint {
+  color: var(--text-3);
+  font-size: 11px;
+}
+/* ---- 悬浮动作条（NodeToolbar 内，固定屏幕像素） ---- */
+.action-bar {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-2);
+}
+.action-bar button {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 4px;
+  font-size: 15px;
+  border-radius: 4px;
+}
+.action-bar button:hover:not([aria-disabled="true"]) {
+  background: var(--control-hover);
+}
+
+/* ---- 悬浮信息（窗口坐标，不随画布缩放） ---- */
+.hover-info {
+  position: fixed;
+  z-index: 1100;
+  max-width: 320px;
+  padding: 6px 8px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-popover);
+  font-size: 12px;
+  pointer-events: none;
+}
+.hover-line {
+  display: flex;
+  gap: 6px;
+}
+.hover-label {
+  flex: none;
+  color: var(--text-2);
+}
+.hover-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.hover-text[data-clamp] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.hover-error {
+  color: var(--red);
+}
+.hover-warn {
+  color: var(--warning-text);
+}
+.region-limit-exceeded {
+  color: var(--danger);
+}
+
+/* ---- 任务节点常驻的尺寸行：分辨率档 + 宽高比（组合框 / 下拉）+ 发送像素 ---- */
+.size-field > select:first-child {
+  flex: 0 0 auto;
+}
+.size-pixels {
+  flex-shrink: 0;
+  color: var(--text-2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.ratio-combo {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.ratio-combo input {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+  padding-right: 18px;
+  text-overflow: ellipsis;
+}
+.ratio-combo-toggle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+}
+.ratio-unsupported,
+.ratio-unsupported input {
+  color: var(--red);
+  border-color: var(--red);
+}
+.ratio-combo-list {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  top: 100%;
+  min-width: 100%;
+  max-height: 200px;
+  margin: 2px 0 0;
+  padding: 2px 0;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-popover);
+}
+.ratio-combo-list li {
+  padding: 2px 8px;
+  white-space: nowrap;
+  cursor: default;
+}
+.ratio-combo-list li:hover,
+.ratio-combo-list li.selected {
+  background: var(--accent-soft);
+}
+.ratio-combo-hint {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  top: 100%;
+  margin-top: 2px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  color: var(--warning-text);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning);
+  border-radius: 6px;
+  font-size: 11px;
+}

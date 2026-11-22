@@ -1,0 +1,12 @@
+/* 样式入口（#221）：五个模块按固定层叠顺序加载，顺序就是层叠优先级。
+ *
+ * 只在这里声明一次顺序：main.tsx 与 e2e/boot.tsx 都只 import 这一个文件，
+ * 谁也别再单独 import 域模块——漏掉一个模块时页面不会报错，只会少一部分样式。
+ *
+ *   tokens（变量） → base（全局基础） → shell（工作台外壳） → canvas（节点图画布） → dialogs（弹窗）
+ */
+@import "./tokens.css";
+@import "./base.css";
+@import "./shell.css";
+@import "./canvas.css";
+@import "./dialogs.css";

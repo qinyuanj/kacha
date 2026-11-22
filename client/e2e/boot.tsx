@@ -2,7 +2,7 @@
 // 与 src/main.tsx 的唯一区别是端口来源——src/shell/boot.ts 只会走 MyGo 桌面桥，
 // 浏览器里没有它，所以 e2e 自己造一个替身（同一个 createFakePort 单测已在用）。
 import "@xyflow/react/dist/style.css";
-import "../src/styles.css";
+import "../src/styles/index.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createFakePort, type FakePortOptions } from "../src/shell/testing/fakePort";
