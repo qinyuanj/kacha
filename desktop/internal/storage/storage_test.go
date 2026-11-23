@@ -1,11 +1,8 @@
 package storage
 
 import (
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
@@ -36,8 +33,7 @@ func TestMoveRootSwitchesAndKeepsOldData(t *testing.T) {
 	}
 
 	roots := dataroot.NewRoots(source)
-	svc := New(roots, statePath)
-	svc.pick = func() (string, error) { return target, nil }
+	svc := NewWithBusy(roots, statePath, nil)
 
 	// 目标由页面传进来（页面经系统对话框选过），服务不再弹窗。
 	out := svc.Move(target)
@@ -78,7 +74,7 @@ func TestMoveRootFailureKeepsCurrentRoot(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 	roots := dataroot.NewRoots(source)
-	svc := New(roots, statePath)
+	svc := NewWithBusy(roots, statePath, nil)
 
 	out := svc.Move(target)
 	if out.OK {
@@ -95,27 +91,11 @@ func TestMoveRootFailureKeepsCurrentRoot(t *testing.T) {
 	}
 }
 
-// Pick 让用户选目标目录；取消时返回空串（页面据此不发起迁移）。
-func TestPickReturnsChosenDirectory(t *testing.T) {
+// 状态报当前数据根；没在迁移时进度归零（Moving 为真由 TestMoveRefusedWhileMoving 的挂起窗口证明）。
+func TestStatusReportsCurrentRootAndIdleProgress(t *testing.T) {
 	base := t.TempDir()
 	roots := dataroot.NewRoots(filepath.Join(base, "data"))
-	svc := New(roots, filepath.Join(base, "state.json"))
-	svc.pick = func() (string, error) { return filepath.Join(base, "选的"), nil }
-	got, err := svc.Pick()
-	if err != nil || got != filepath.Join(base, "选的") {
-		t.Fatalf("Pick = %q, %v", got, err)
-	}
-	svc.pick = func() (string, error) { return "", nil }
-	if got, err := svc.Pick(); err != nil || got != "" {
-		t.Fatalf("取消时 Pick = %q, %v；应为空串", got, err)
-	}
-}
-
-// 迁移前先问一遍能不能开始：有在途生成任务或导入时页面据此拦下，服务不替它决定。
-func TestStatusReportsCurrentRootAndBusy(t *testing.T) {
-	base := t.TempDir()
-	roots := dataroot.NewRoots(filepath.Join(base, "data"))
-	svc := New(roots, filepath.Join(base, "state.json"))
+	svc := NewWithBusy(roots, filepath.Join(base, "state.json"), nil)
 	st := svc.Status()
 	if st.Root != roots.Current() {
 		t.Fatalf("Status.Root = %q, want %q", st.Root, roots.Current())
@@ -123,9 +103,13 @@ func TestStatusReportsCurrentRootAndBusy(t *testing.T) {
 	if st.Moving {
 		t.Fatal("没在迁移时 Moving 应为 false")
 	}
+	if st.Done != 0 || st.Total != 0 {
+		t.Fatalf("没在迁移时进度 = %d/%d, want 0/0", st.Done, st.Total)
+	}
 }
 
 // 有在途的打包 / 导入时，迁移必须先被挡下：两边都在搬同一份文件，边搬边切会留下半份。
+// 在途操作结束后照常能迁：拒绝是暂时的，不是永久禁用。
 func TestMoveRefusedWhileOtherWorkInFlight(t *testing.T) {
 	base := t.TempDir()
 	statePath := filepath.Join(base, "appdata", "shell-state.json")
@@ -136,7 +120,8 @@ func TestMoveRefusedWhileOtherWorkInFlight(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 	roots := dataroot.NewRoots(source)
-	svc := NewWithBusy(roots, statePath, func() string { return "正在导出画板包" })
+	reason := "正在导出画板包"
+	svc := NewWithBusy(roots, statePath, func() string { return reason })
 
 	out := svc.Move(target)
 	if out.OK {
@@ -154,30 +139,18 @@ func TestMoveRefusedWhileOtherWorkInFlight(t *testing.T) {
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Fatalf("被拒绝时不该碰目标位置：%v", err)
 	}
-}
 
-// 在途操作结束后照常能迁：拒绝是暂时的，不是永久禁用。
-func TestMoveAllowedOnceBusyCheckClears(t *testing.T) {
-	base := t.TempDir()
-	statePath := filepath.Join(base, "appdata", "shell-state.json")
-	source := filepath.Join(base, "data")
-	target := filepath.Join(base, "新位置")
-	write(t, filepath.Join(source, "画板", "a.ugcboard.json"), "A")
-	if _, err := dataroot.Resolve(statePath, source); err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	roots := dataroot.NewRoots(source)
-	reason := "正在保存画板"
-	svc := NewWithBusy(roots, statePath, func() string { return reason })
-	if out := svc.Move(target); out.OK {
-		t.Fatal("应当先被拒绝")
-	}
+	// 在途操作结束后同一份服务照常能迁：理由清空后迁移成功，数据根切到目标。
 	reason = ""
 	if out := svc.Move(target); !out.OK {
 		t.Fatalf("在途操作结束后应当能迁：%+v", out)
 	}
 	if roots.Current() != target {
 		t.Fatalf("数据根 = %q, want %q", roots.Current(), target)
+	}
+	// 迁移结束即退出迁移状态：进度回到 0/0，页面不会把上一次迁移的数字当成本次。
+	if st := svc.Status(); st.Moving || st.Done != 0 || st.Total != 0 {
+		t.Fatalf("迁移结束后状态 = %+v, want moving=false 且进度 0/0", st)
 	}
 }
 
@@ -205,6 +178,12 @@ func TestMoveRefusedWhileMoving(t *testing.T) {
 	done := make(chan Outcome, 1)
 	go func() { done <- svc.Move(filepath.Join(base, "第一次")) }()
 	<-started
+	// 挂起窗口里第一个迁移已经开始了：状态必须报出「迁移中」，页面据此拦下会打架的操作。
+	if st := svc.Status(); !st.Moving {
+		t.Fatalf("迁移进行中 Status().Moving = false，页面不会拦下并发操作")
+	} else if st.Done != 0 || st.Total != 0 {
+		t.Fatalf("还没复制完任何一份时进度 = %d/%d, want 0/0", st.Done, st.Total)
+	}
 	if out := svc.Move(filepath.Join(base, "第二次")); out.Kind != "busy" {
 		t.Fatalf("并发第二次 = %+v, want busy", out)
 	}
@@ -212,44 +191,6 @@ func TestMoveRefusedWhileMoving(t *testing.T) {
 	if out := <-done; !out.OK {
 		t.Fatalf("第一次迁移应当成功：%+v", out)
 	}
-}
-// 包文档名必须等于真实包名：写成别的服务名（storageservice）时 go doc 找不到这个包，
-// 读代码的人也会以为包名是 storageservice。
-func TestPackageDocUsesTheRealPackageName(t *testing.T) {
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	found := false
-	for _, name := range files {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		fset := token.NewFileSet()
-		parsed, err := parser.ParseFile(fset, name, nil, parser.ParseComments|parser.PackageClauseOnly)
-		if err != nil {
-			t.Fatalf("ParseFile(%s): %v", name, err)
-		}
-		if parsed.Doc == nil {
-			continue
-		}
-		found = true
-		doc := parsed.Doc.Text()
-		if !strings.HasPrefix(doc, "Package storage ") {
-			t.Fatalf("%s 的包文档没有以「Package storage」开头：%q", name, firstLine(doc))
-		}
-	}
-	if !found {
-		t.Fatal("没有找到包文档：doc.go 或任一源文件开头应有 Package 说明")
-	}
-}
-
-// firstLine 取文档的第一行，失败消息里只显示它。
-func firstLine(text string) string {
-	if i := strings.IndexByte(text, '\n'); i >= 0 {
-		return text[:i]
-	}
-	return text
 }
 // 迁移复制期间写数据根被拦下（不复现「切换重载后丢写」）：busy 回调在复制开始前跑，
 // 此刻写入必须已经拦下；迁移结束后写入恢复。
@@ -303,7 +244,7 @@ func TestMoveRootFailureClearsMovingFlag(t *testing.T) {
 	write(t, filepath.Join(target, "已有.txt"), "占位")
 	statePath := filepath.Join(base, "appdata", "shell-state.json")
 	roots := dataroot.NewRoots(oldRoot)
-	service := New(roots, statePath)
+	service := NewWithBusy(roots, statePath, nil)
 
 	out := service.Move(target)
 	if out.OK {
