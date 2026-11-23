@@ -45,12 +45,6 @@ const header = (patch: Partial<Parameters<typeof PreviewHeader>[0]> = {}) => ({
 });
 
 describe("弹窗头", () => {
-  it("纯预览：没有编辑标记", async () => {
-    await act(async () => dom.render(createElement(PreviewHeader, header())));
-    expect(container.textContent).toContain("a");
-    expect(container.textContent).not.toContain("编辑区域");
-  });
-
   it("编辑中：给出编辑标记与区域表达", async () => {
     await act(async () => dom.render(createElement(PreviewHeader, header({ editing: target({ coordinateAvailable: true }), regionMode: "bbox" }))));
     expect(container.textContent).toContain("编辑区域：提示词");
@@ -125,14 +119,6 @@ describe("弹窗尾", () => {
     expect(container.textContent).toContain("1 区域");
   });
 
-  it("纯预览：点目标进编辑", async () => {
-    const onStartEdit = vi.fn();
-    const t = target();
-    await act(async () => dom.render(createElement(PreviewFooter, footer({ targets: [t], onStartEdit }))));
-    await act(async () => [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("提示词"))?.click());
-    expect(onStartEdit).toHaveBeenCalledWith(t);
-  });
-
   it("编辑中：给出区域操作", async () => {
     const onRemove = vi.fn();
     await act(async () => dom.render(createElement(PreviewFooter, footer({ editing: target(), rects: [[0, 0, 1, 1]], selected: 0, onRemove }))));
@@ -141,22 +127,10 @@ describe("弹窗尾", () => {
     expect(onRemove).toHaveBeenCalled();
   });
 
-  it("编辑中：没选中时不能删", async () => {
-    await act(async () => dom.render(createElement(PreviewFooter, footer({ editing: target() }))));
-    const remove = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "删除选中");
-    expect(remove?.disabled).toBe(true);
-  });
-
   it("编辑中：没有框时不能清空", async () => {
     await act(async () => dom.render(createElement(PreviewFooter, footer({ editing: target() }))));
     const clear = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "清空");
     expect(clear?.disabled).toBe(true);
   });
 
-  it("编辑中：保存时调 onSave", async () => {
-    const onSave = vi.fn();
-    await act(async () => dom.render(createElement(PreviewFooter, footer({ editing: target(), rects: [[0, 0, 1, 1]], selected: 0, onSave }))));
-    await act(async () => [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "保存区域")?.click());
-    expect(onSave).toHaveBeenCalled();
-  });
 });

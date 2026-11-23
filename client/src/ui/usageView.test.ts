@@ -40,7 +40,10 @@ describe("用量区块", () => {
   });
 
   it("分项说明：画板、设置与缓存、最后访问", () => {
-    expect(usageBreakdown(usage())).toContain("画板 50 B");
+    const text = usageBreakdown(usage({ last_access: 1 }));
+    expect(text).toContain("画板 50 B");
+    expect(text).toContain("设置与缓存 50 B");
+    expect(text).toContain("最后访问");
   });
 
   it("按日期的用量：没有目录时说明没有", () => {

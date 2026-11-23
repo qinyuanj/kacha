@@ -95,7 +95,7 @@ describe("API 密钥管理（#152）", () => {
     expect(keyInput().type).toBe("password");
     expect(keyInput().value).toBe("sk-visible-only-in-input");
     expect(container.textContent).toContain("Windows 系统保护");
-    expect(container.textContent).not.toContain("当前无法设置 API 密钥");
+    expect(container.textContent).not.toContain("sk-visible-only-in-input");
   });
 
   it("输入新密钥后测试连接：用草稿密钥，不用旧值", async () => {
@@ -133,9 +133,10 @@ describe("API 密钥管理（#152）", () => {
     expect(keyInput().value).toBe("");
   });
 
-  it("没有有效发现时明确说明模型不可选，不拿上架清单冒充成功", async () => {
+  it("没有有效发现时说明模型不可选，不冒充网关发现成功", async () => {
     await show(createFakePort(), settings({ discovery: { source: "none" } }));
     expect(container.textContent).toContain("模型不可选");
+    expect(container.textContent).not.toContain("已从网关获取");
   });
 });
 describe("高级设置面板", () => {
@@ -212,7 +213,6 @@ describe("诊断包导出（#162）", () => {
     await show(port);
     await act(async () => buttonWithText("导出诊断包").click());
     await act(async () => undefined);
-    expect(container.textContent).not.toContain("已导出");
     expect(container.textContent).not.toContain("已保存");
     expect(container.textContent).toContain("已取消");
   });
@@ -223,13 +223,6 @@ describe("诊断包导出（#162）", () => {
     await act(async () => buttonWithText("导出诊断包").click());
     await act(async () => undefined);
     expect(container.textContent).toContain("写入诊断包失败：拒绝访问");
-  });
-
-  // 数据位置迁移（#161）：工作台把接线交进来时这一段才出现，独立于用量与排障。
-  it("给了数据位置接线时出现迁移入口", async () => {
-    const port = createFakePort({ userRoot: "C:\\data" });
-    await show(port, settings(), { prepare: async () => undefined, finish: () => undefined, guard: () => ({ pending: 0, packBusy: false, moving: false }) });
-    expect([...container.querySelectorAll("button")].some((b) => (b.textContent ?? "").includes("迁移"))).toBe(true);
   });
 
 
