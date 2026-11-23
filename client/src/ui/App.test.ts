@@ -236,6 +236,92 @@ describe("工作台", () => {
     await vi.waitFor(() => expect(container.querySelector(".canvas")).not.toBeNull());
   });
 
+  it("顶栏与用量提醒里的入口都能打开对应弹层", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    port.usage.usage = async () => ({
+      total_bytes: 200,
+      boards_bytes: 100,
+      meta_bytes: 100,
+      last_access: 0,
+      by_date: [],
+      unreferenced: null,
+      unreadable_board: null,
+      limit_bytes: 100,
+      limit_level: "alert",
+    });
+    await show(port);
+    await vi.waitFor(() => expect(container.textContent).toContain("管理画板"));
+    for (const label of ["管理画板", "高级设置", "反馈", "画板包", "检查更新"]) {
+      const button = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(label));
+      await act(async () => button?.click());
+    }
+    for (const button of [...container.querySelectorAll<HTMLButtonElement>("button[aria-label*='关闭']")]) {
+      await act(async () => button.click());
+    }
+  });
+
+  it("已归档画板：取消归档与复制入口都能点", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing([{ name: "old.ugcboard.json", path: "/~/old.ugcboard.json", archived: true, bytes: 10 }]);
+    await show(port);
+    const listButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("画板列表"));
+    await act(async () => listButton?.click());
+    await vi.waitFor(() => expect(container.textContent).toContain("old"));
+    for (const label of ["取消归档", "复制为新画板"]) {
+      const button = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(label));
+      await act(async () => button?.click());
+    }
+  });
+
+  it("版本入口打开更新说明后可关闭", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    await show(port, { version: "1.2.3" });
+    const versionButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Kacha 1.2.3"));
+    await act(async () => versionButton?.click());
+    const close = [...container.querySelectorAll("button")].find((button) => button.getAttribute("aria-label") === "关闭");
+    await act(async () => close?.click());
+  });
+
+  // 画板级动作（从列表删除 / 归档）是工作台最外一层的接线：
+  // 每个动作都要真的落到壳端口上，不能只在 appActions 的单测里连过。
+  /** 壳里已有的一块画板：列表与动作都按它走。 */
+  const seededBoard = { path: "/~/a.ugcboard.json", main: null, version: null, bytes: 10 };
+
+  /** 打开画板列表，等到第一行出来。 */
+  async function openBoardList(): Promise<void> {
+    await act(async () => container.querySelector<HTMLElement>(".tab-list")?.click());
+    await vi.waitFor(() => expect(container.querySelector(".board-list-open")).not.toBeNull());
+  }
+
+  /** 确认框里的那个动作按钮（删除框里也有一个「删除」，只在这一层找）。 */
+  async function confirmIn(label: string, action: string): Promise<void> {
+    const dialog = document.querySelector(`[aria-label='${label}']`);
+    const button = [...(dialog?.querySelectorAll("button") ?? [])].find((item) => item.textContent === action);
+    await act(async () => button?.click());
+  }
+
+  it("从列表删除画板：壳端收到删除请求，列表里也不再列出它", async () => {
+    const port = createFakePort({ boards: [seededBoard] });
+    await show(port);
+    await openBoardList();
+    await act(async () => container.querySelector<HTMLElement>("[aria-label='删除「a」']")?.click());
+    await confirmIn("删除画板", "删除");
+    await vi.waitFor(() => expect(port.calls.remove.map((call) => call.path)).toEqual([seededBoard.path]));
+    await vi.waitFor(() => expect(container.querySelector("[aria-label='删除「a」']")).toBeNull());
+  });
+
+  it("从列表归档画板：壳端收到归档请求，列表里转进已归档", async () => {
+    const port = createFakePort({ boards: [seededBoard] });
+    await show(port);
+    await openBoardList();
+    await act(async () => container.querySelector<HTMLElement>("[aria-label='归档「a」']")?.click());
+    await confirmIn("归档画板", "归档");
+    await vi.waitFor(() => expect(port.calls.archive.map((call) => call.from)).toEqual([seededBoard.path]));
+    await vi.waitFor(() => expect(container.textContent).toContain("已归档"));
+  });
+
 // #221：顶栏主题切换入口——即时生效、首帧镜像、通知宿主壳、写回设置，且不覆盖受保护的设置文件。
 });
 
