@@ -24,7 +24,7 @@ export function PreviewHeader(props: {
   const { editing, regionMode, solo, showOutlines, outlineCount } = props;
   return (
     <div className="modal-head">
-      <strong>{props.title}</strong>
+      <h2>{props.title}</h2>
       {editing && <span className="badge">编辑区域：{editing.label}</span>}
       {editing?.coordinateAvailable && (
         <label className="small">区域表达

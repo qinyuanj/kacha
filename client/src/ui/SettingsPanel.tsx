@@ -194,7 +194,7 @@ export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
     <div className="modal-backdrop" onMouseDown={(e) => closeOnBackdrop(e, onClose)}>
       <div className="modal settings-dialog" role="dialog" aria-label="高级设置">
         <div className="modal-head">
-          <strong>高级设置</strong>
+          <h2>高级设置</h2>
           {version && <span className="muted small">版本 {version}</span>}
           <button className="icon-button" aria-label="关闭" onClick={onClose}>✕</button>
         </div>

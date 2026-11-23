@@ -31,7 +31,7 @@ function Progress({ title, detail, onCancel }: { title: string; detail?: string;
   return (
     <>
       <div className="modal-head">
-        <strong>{title}</strong>
+        <h2>{title}</h2>
       </div>
       {detail && <div className="muted small pack-phase">{detail}</div>}
       <progress className="pack-progress" value={progress.done} max={progressMax(progress)} />
@@ -56,7 +56,7 @@ function ConfirmExport({ state, onExport, onClose }: { state: Extract<PackDialog
   return (
     <>
       <div className="modal-head">
-        <strong>导出画板包：{state.boardFile}</strong>
+        <h2>导出画板包：{state.boardFile}</h2>
       </div>
       <div>{exportSummary(state.plan.taskDirs.length, state.plan.files.length)}</div>
       <div className="pack-estimate">{estimateText(state.contents.bytes, state.contents.totalBytes)}</div>
@@ -88,7 +88,7 @@ function ImportDone({ state, onClose }: { state: Extract<PackDialogState, { stag
   return (
     <>
       <div className="modal-head">
-        <strong>{state.message}</strong>
+        <h2>{state.message}</h2>
       </div>
       {state.notice && <div className="badge-warn pack-warning">{state.notice}</div>}
       {state.conflicts.length > 0 && (

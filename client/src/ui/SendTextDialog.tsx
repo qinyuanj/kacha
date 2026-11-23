@@ -12,7 +12,7 @@ export function SendTextDialog({ item, onCopy, onClose }: Props) {
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal modal-wide" role="dialog" aria-label="查看发送文本">
         <div className="modal-head">
-          <strong>查看发送文本（{item.modelName}）</strong>
+          <h2>查看发送文本（{item.modelName}）</h2>
         </div>
         <ItemProblems item={item} />
         <SendTextBody item={item} />
