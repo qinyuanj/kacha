@@ -77,11 +77,18 @@ async function setSelectByVisibleLabel(labelText: string, optionText: string): P
 }
 
 describe("反馈对话框（#206）", () => {
-  it("填写正文、取消与关闭都不调用 Feedback 端口", async () => {
+  it("填写正文后取消或关闭都不调用 Feedback 端口", async () => {
     const port = createFakePort();
-    await show(port);
+    const onClose = vi.fn();
+    await show(port, onClose);
     await setInput("正文", "在 C:/secret/项目 里生成失败");
     await click("取消");
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(port.calls.feedback).toHaveLength(0);
+    onClose.mockClear();
+    await act(async () => (container.querySelector('[aria-label="关闭反馈"]') as HTMLButtonElement).click());
+    await act(async () => undefined);
+    expect(onClose).toHaveBeenCalledTimes(1);
     expect(port.calls.feedback).toHaveLength(0);
   });
 
@@ -189,7 +196,7 @@ describe("反馈对话框（#206）", () => {
     expect(port.calls.feedback).toHaveLength(0);
   });
 
-  it("勾选诊断包时附上脱敏包并在失败时明确报错", async () => {
+  it("勾选诊断包时附上脱敏包", async () => {
     const pack = { kind: "saved" as const, name: "diagnostics.zip", contentType: "application/zip", data: "UEsDBA==" };
     const port = createFakePort({ diagnosticsPackOutcome: pack });
     await show(port);
