@@ -35,7 +35,7 @@ export function writableNow(s: Session | undefined, isReadOnlyPath: (path: strin
 }
 
 /** 写失败时把错误记到会话上。 */
-export function noteSaveFailure(
+function noteSaveFailure(
   patch: (key: string, fn: (s: OkSession) => OkSession) => void,
   port: { ui: { log(kind: string, fields: Record<string, unknown>): void } },
   key: string,

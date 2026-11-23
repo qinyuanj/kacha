@@ -7,7 +7,7 @@ import type { PackDialogState } from "./BoardPackDialog";
 import type { LogKind } from "../shell/log";
 
 /** 导入的结局。 */
-export type PackImportResult =
+type PackImportResult =
   /** 一句话提示。 */
   | { kind: "toast"; text: string }
   /** 用系统提示框说明（导入包版本过新）。 */

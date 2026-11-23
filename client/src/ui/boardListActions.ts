@@ -10,7 +10,7 @@ export interface PendingAction {
 }
 
 /** 确认动作的结果。 */
-export type ConfirmResult = { ok: true } | { ok: false; error: string };
+type ConfirmResult = { ok: true } | { ok: false; error: string };
 
 /** 跑一次确认动作：成功关掉确认框，失败把错误留在框里。 */
 export async function runConfirm(
