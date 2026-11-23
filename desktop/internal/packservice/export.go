@@ -14,6 +14,19 @@ import (
 var exportSaveDialog = func(opts mygo.SaveDialogOptions) (string, error) { return mygo.Dialog.Save(opts) }
 
 // exportOverwriteDialog 问用户要不要覆盖已存在的目标；测试替换掉，不弹窗。
+//
+// 这个包级 var 是有意保留的测试接缝，不要为了「和 storage 对齐」删掉它：
+//
+//   - 覆盖确认有两条用户可见分支，必须能在单测里分别驱动。「确认覆盖」分支就是 #228 修掉的
+//     缺陷（用户确认后导出仍然失败）；「取消/未确认」分支要求原文件一个字节都不动。这两条
+//     契约只能在 PickExport 这一层观察，而系统对话框在测试里不会弹，所以需要一个可替换的
+//     接缝——它替换的是「用户的回答」，不是被测逻辑本身。
+//   - storage 的 Pick（选目标）没有对应分支契约：它只有「用户选了路径」与「用户取消」，
+//     取消由返回空路径表达，测试可以直接用真实签名走到同一个结局，没有第二条要分辨的
+//     用户意图。那里删掉 openDialog 之后，真实调用链反而更短。
+//
+// 判据是「有没有必须驱动、且无法用其它方式表达的分支」：有就留接缝，没有就直调。
+// 新增对话框时按这条判断，不要按「与其它包保持一致」来取舍。
 var exportOverwriteDialog = func(target string) (bool, error) {
 	res, err := mygo.Dialog.Message(mygo.MessageOptions{
 		Type:               mygo.MessageWarning,
