@@ -52,11 +52,11 @@ describe("桌面画板包导出", () => {
     expect(calls).toContainEqual({ method: "Pack.Facts", args: [{ task_dirs: SPEC.task_dirs, files: SPEC.files }] });
   });
 
-  it("导出前用系统对话框选目标，后台进度推送到界面，成功带回实际路径", async () => {
+  it("导出前用系统对话框选目标，确认覆盖的许可带到导出，后台进度推送到界面，成功带回实际路径", async () => {
     let snapshot = 0;
     const { bridge, calls } = bridgeOf({
       "Shell.Info": () => INFO,
-      "Pack.PickExport": (name: unknown) => (name === "画板.ugcpack" ? "C:/导出/画板.ugcpack" : ""),
+      "Pack.PickExport": (name: unknown) => (name === "画板.ugcpack" ? { path: "C:/导出/画板.ugcpack", overwrite: true } : { path: "", overwrite: false }),
       "Pack.Export": () => ({ ok: true }),
       "Pack.ExportSnapshot": () => (snapshot++ === 0 ? { ...DONE, running: true, progress: { ...DONE.progress, bytes_done: 5 }, outcome: null } : DONE),
     });
@@ -65,12 +65,12 @@ describe("桌面画板包导出", () => {
     await port.ui.onPackProgress((p) => seen.push(p));
     await expect(port.pack.exportPack("画板.ugcpack", SPEC)).resolves.toEqual({ task_dirs: 1, bytes: 12, target: "C:/导出/画板.ugcpack" });
     expect(calls).toContainEqual({ method: "Pack.PickExport", args: ["画板.ugcpack"] });
-    expect(calls).toContainEqual({ method: "Pack.Export", args: ["C:/导出/画板.ugcpack", SPEC] });
+    expect(calls).toContainEqual({ method: "Pack.Export", args: ["C:/导出/画板.ugcpack", SPEC, true] });
     expect(seen.some((p) => p.done === 5)).toBe(true);
   });
 
   it("取消系统目标选择：拒绝且不是成功，也不开始打包", async () => {
-    const { bridge, calls } = bridgeOf({ "Shell.Info": () => INFO, "Pack.PickExport": () => "" });
+    const { bridge, calls } = bridgeOf({ "Shell.Info": () => INFO, "Pack.PickExport": () => ({ path: "", overwrite: false }) });
     const { port } = await createDesktopPort(bridge);
     const failure = await port.pack.exportPack("画板.ugcpack", SPEC).then(() => null, portFailureOf);
     expect(failure?.kind).toBe("cancelled");
@@ -80,7 +80,7 @@ describe("桌面画板包导出", () => {
   it("导出中取消：调用 Pack.CancelExport，结局是取消，不报成功", async () => {
     const { bridge, calls } = bridgeOf({
       "Shell.Info": () => INFO,
-      "Pack.PickExport": () => "C:/导出/画板.ugcpack",
+      "Pack.PickExport": () => ({ path: "C:/导出/画板.ugcpack", overwrite: false }),
       "Pack.Export": () => ({ ok: true }),
       "Pack.ExportSnapshot": () => ({ ...DONE, outcome: { ok: false, kind: "cancelled", step: "pack", message: "已取消导出" } }),
     });
@@ -94,7 +94,7 @@ describe("桌面画板包导出", () => {
   it("写失败给出明确失败，不把未完成包当成功", async () => {
     const { bridge } = bridgeOf({
       "Shell.Info": () => INFO,
-      "Pack.PickExport": () => "C:/导出/画板.ugcpack",
+      "Pack.PickExport": () => ({ path: "C:/导出/画板.ugcpack", overwrite: false }),
       "Pack.Export": () => ({ ok: true }),
       "Pack.ExportSnapshot": () => ({ ...DONE, outcome: { ok: false, kind: "failed", step: "pack", message: "磁盘满了" } }),
     });

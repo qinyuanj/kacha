@@ -157,12 +157,13 @@ async function awaitExport(pack: DesktopPackBridge, publish: (progress: { bytes_
 /** 导出画板包：系统选目标 → 本机打包 → 轮询真实进度；取消与失败都不报成功。 */
 async function exportPackThroughGo(pack: DesktopPackBridge | undefined, name: string, spec: PackExportSpec, publish: (progress: { bytes_done: number; bytes_total: number }) => void): Promise<{ task_dirs: number; bytes: number; target: string }> {
   if (!pack?.pickExport || !pack.exportPack || !pack.exportSnapshot) unavailable("packExport");
-  const target = await localRun(() => pack.pickExport!(name));
-  if (!target) throw new PortError({ kind: "cancelled", code: "cancelled", message: "已取消导出", status: 0 });
-  const started = await localRun(() => pack.exportPack!(target, spec));
+  const picked = await localRun(() => pack.pickExport!(name));
+  if (!picked?.path) throw new PortError({ kind: "cancelled", code: "cancelled", message: "已取消导出", status: 0 });
+  // 覆盖许可只在用户确认过时为 true：导出 owner 据此才替换已存在的目标。
+  const started = await localRun(() => pack.exportPack!(picked.path, spec, picked.overwrite));
   if (!started.ok) throw exportFailure(started);
   const result = await awaitExport(pack, publish);
-  return { ...result, target };
+  return { ...result, target: picked.path };
 }
 
 /** 画板包那一组：导入与导出都走本机 Pack 服务。 */

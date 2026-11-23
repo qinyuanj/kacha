@@ -276,8 +276,10 @@ func (s *Service) collectFacts() ([]byte, error) {
 			}
 		}
 	}
+	// 凭据是否存在与丢弃数都在同一把锁下取值：记录日志也在改这两个字段（#229）。
 	s.mu.Lock()
 	hasSecret := len(s.knownSecrets()) > 0
+	dropped := s.dropped
 	s.mu.Unlock()
 	facts := map[string]any{
 		"version": s.version,
@@ -292,7 +294,7 @@ func (s *Service) collectFacts() ([]byte, error) {
 			"boards_readable":    err == nil,
 		},
 		"captured_at":  time.Now().UTC().Format(time.RFC3339),
-		"dropped_logs": s.dropped,
+		"dropped_logs": dropped,
 		"redaction":    "sensitive fields, known secrets and bearer tokens are replaced with " + redacted,
 	}
 	data, err := json.MarshalIndent(facts, "", "  ")

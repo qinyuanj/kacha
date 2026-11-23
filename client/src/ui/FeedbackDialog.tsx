@@ -5,11 +5,16 @@ import { useShell } from './shell';
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg'];
 
-/** #206 的脱敏只处理预览可见文本：本机路径换成占位，凭据整段移除。 */
+/** #206 / #229 的脱敏只处理预览可见文本：本机路径换成占位，凭据整段移除。
+ *  预览、提交正文与失败后复制的内容都走这一条纯函数路径，不各写一份而漂移。 */
 export function redactFeedbackText(text: string): string {
   return text
     .replace(/(?:[A-Za-z]:)?[\\/](?:[^\s:："'<>|*?]+[\\/])+[^\s:："'<>|*?]*/g, '<本地路径>')
+    // 代表真实密钥的占位符形态（如 {{SECRET_xxxxxxxx}}）：用户把它粘进正文时也当秘密处理。
+    .replace(/\{\{SECRET_[A-Za-z0-9_]+\}\}/gi, '<已隐藏>')
     .replace(/(?:sk-[A-Za-z0-9_-]{6,}|gh[pousr]_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,})/g, '<已隐藏>')
+    // 裸 Gitea token：40 位十六进制，没有 key= 前缀也要遮。
+    .replace(/\b[0-9a-f]{40}\b/gi, '<已隐藏>')
     .replace(/(?:api[_-]?key|gateway[_-]?key|token|secret|authorization|bearer)\s*[:=]\s*(?:"[^"]+"|'[^']+'|\S+)/gi, '<已隐藏>');
 }
 
@@ -98,7 +103,8 @@ interface FeedbackSpecInput {
 function feedbackSpecOf(input: FeedbackSpecInput): FeedbackSpec {
   const contact = input.contact.trim();
   return {
-    title: input.title.trim(),
+    // 标题与正文同一条脱敏路径：预览、发送与复制都取这里的值（#229）。
+    title: redactFeedbackText(input.title.trim()),
     category: input.category,
     body: redactFeedbackText(input.body.trim()),
     version: input.version,
@@ -250,8 +256,8 @@ function FeedbackForm(props: FeedbackFormProps) {
 }
 
 interface FeedbackPreviewProps {
-  title: string; setTitle: Setter<string>; category: string; setCategory: Setter<string>;
-  body: string; setBody: Setter<string>; spec: FeedbackSpec; attachmentSummary: string;
+  setTitle: Setter<string>; category: string; setCategory: Setter<string>;
+  setBody: Setter<string>; spec: FeedbackSpec; attachmentSummary: string;
   sending: boolean; onBack(): void; onClose(): void; onSend(): void;
 }
 
@@ -259,9 +265,9 @@ function FeedbackPreview(props: FeedbackPreviewProps) {
   return (
     <>
       <div className='feedback-preview'>
-        <label className='form-row'>标题（可选）<input value={props.title} onChange={(event) => props.setTitle(event.target.value)} /></label>
+        <label className='form-row'>标题（可选）<input value={props.spec.title} onChange={(event) => props.setTitle(event.target.value)} /></label>
         <label className='form-row'>分类<select value={props.category} onChange={(event) => props.setCategory(event.target.value)}>{FEEDBACK_CATEGORIES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>
-        <label className='form-row'>正文（可修改）<textarea value={redactFeedbackText(props.body)} onChange={(event) => props.setBody(event.target.value)} rows={6} /></label>
+        <label className='form-row'>正文（可修改）<textarea value={props.spec.body} onChange={(event) => props.setBody(event.target.value)} rows={6} /></label>
         <p>标题：{props.spec.title || '（无）'}</p>
         <p>分类：{feedbackCategoryLabel(props.spec.category)}</p>
         <p>正文：{props.spec.body}</p>
@@ -367,7 +373,7 @@ export function FeedbackDialog({ version, build, boardName, relayUrl, onClose }:
           <button ref={closeRef} className='icon-button' aria-label='关闭反馈' onClick={onClose}>✕</button>
         </div>
         {step === 'form' && <FeedbackForm title={title} setTitle={setTitle} category={category} setCategory={setCategory} body={body} setBody={setBody} contact={contact} setContact={setContact} screenshots={screenshots} setScreenshots={setScreenshots} diagnosticsPack={diagnosticsPack} attachmentError={attachmentError} diagnosticsAvailable={!!port.features.diagnostics} onPick={() => void pick()} onToggleDiagnostics={(pressed) => void toggle(pressed)} token={token} setToken={setToken} tokenVisible={tokenVisible} setTokenVisible={setTokenVisible} onClose={onClose} onPreview={() => setStep('preview')} />}
-        {step === 'preview' && <FeedbackPreview title={title} setTitle={setTitle} category={category} setCategory={setCategory} body={body} setBody={setBody} spec={spec} attachmentSummary={attachmentSummary} sending={sending} onBack={() => setStep('form')} onClose={onClose} onSend={() => void send(spec)} />}
+        {step === 'preview' && <FeedbackPreview setTitle={setTitle} category={category} setCategory={setCategory} setBody={setBody} spec={spec} attachmentSummary={attachmentSummary} sending={sending} onBack={() => setStep('form')} onClose={onClose} onSend={() => void send(spec)} />}
         {step === 'receipt' && outcome && <FeedbackReceipt outcome={outcome} copied={copied} sending={sending} onClose={onClose} onEditAgain={editAgain} onCopy={() => void copyContent()} onRetry={() => void send(submittedSpec ?? spec)} />}
       </div>
     </div>

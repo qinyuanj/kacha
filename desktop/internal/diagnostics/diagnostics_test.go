@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/egoist/mygo"
@@ -316,6 +318,43 @@ func TestLogIsBounded(t *testing.T) {
 	}
 	if !strings.Contains(entries["diagnostics.json"], `"dropped_logs": 10`) {
 		t.Fatalf("丢弃数没有写进事实: %s", entries["diagnostics.json"])
+	}
+}
+
+// #229：导出读 dropped_logs 与日志记录必须共用同一把锁。
+// 先填满缓冲，之后每收一条都会丢最旧一条并累加丢弃数；导出一边打包一边读它，
+// 没有锁时这条路径在 -race 下会报数据竞争。
+func TestExportConcurrentWithLoggingIsRaceFree(t *testing.T) {
+	root := t.TempDir()
+	svc := newService(root)
+	for i := 0; i < maxLogEntries; i++ {
+		svc.Log("task", map[string]string{"n": strconv.Itoa(i)})
+	}
+	dest := filepath.Join(t.TempDir(), "diag.zip")
+	withDialog(t, func(mygo.SaveDialogOptions) (string, error) { return dest, nil })
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 4*maxLogEntries; i++ {
+			svc.Log("task", map[string]string{"n": strconv.Itoa(i)})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 20; i++ {
+			if out, err := svc.Export(); err != nil || !out.OK {
+				t.Errorf("并发导出失败: %v %+v", err, out)
+				return
+			}
+		}
+	}()
+	wg.Wait()
+
+	entries, _ := readZip(t, dest)
+	if !strings.Contains(entries["diagnostics.json"], `"dropped_logs":`) {
+		t.Fatalf("诊断事实缺少丢弃数: %s", entries["diagnostics.json"])
 	}
 }
 

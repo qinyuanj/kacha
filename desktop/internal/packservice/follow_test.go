@@ -50,7 +50,7 @@ func TestPackWorkIsRejectedWhileMovingRoot(t *testing.T) {
 	if out := svc.Start(pack); out.OK || out.Kind != KindMoving {
 		t.Fatalf("迁移期间导入结局 = %+v, want kind %q", out, KindMoving)
 	}
-	if out := svc.Export(filepath.Join(base, "导出.ugcpack"), packexport.Spec{}); out.OK || out.Kind != KindMoving {
+	if out := svc.Export(filepath.Join(base, "导出.ugcpack"), packexport.Spec{}, false); out.OK || out.Kind != KindMoving {
 		t.Fatalf("迁移期间导出结局 = %+v, want kind %q", out, KindMoving)
 	}
 	if snap := svc.Snapshot(); snap.Running {
