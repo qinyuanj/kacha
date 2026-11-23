@@ -1,9 +1,12 @@
 package gateway
 
 import (
+	"bytes"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -106,5 +109,59 @@ func TestTimeoutForSeparatesGenerationFromQueries(t *testing.T) {
 	// 生成超时必须比查询宽松一个数量级，否则这次修复等于没做。
 	if generationTimeout < 10*requestTimeout {
 		t.Fatalf("生成超时 %v 与查询超时 %v 太接近", generationTimeout, requestTimeout)
+	}
+}
+
+// binaryOf 造一段覆盖全部字节值的二进制，长度按需要伸缩：截断或按 UTF-8 改写都会看得出来。
+func binaryOf(size int) []byte {
+	data := make([]byte, size)
+	for i := range data {
+		data[i] = byte(i * 7)
+	}
+	return data
+}
+
+// 结果图是二进制且可能超过旧的 2 MiB 固定读数：真实请求边界上必须完整往返。
+func TestRequestRoundTripsBinaryLargerThanTwoMiB(t *testing.T) {
+	data := binaryOf(3<<20 + 5)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(data)
+	}))
+	defer server.Close()
+
+	svc := New(t.TempDir() + "/api-key.protected")
+	res, err := svc.Request(server.URL+"/files/result.png", "GET", map[string]string{"Accept": "image/*"}, "")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	got, decodeErr := base64.StdEncoding.DecodeString(res.BodyBase64)
+	if decodeErr != nil {
+		t.Fatalf("body_base64 解不开：%v", decodeErr)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("二进制响应不完整：收到 %d 字节，要 %d 字节", len(got), len(data))
+	}
+}
+
+// 超过能力表声明的单图上限：整次请求失败，不把截断的字节当成功的结果图交回页面。
+func TestRequestRejectsResponseOverDeclaredLimit(t *testing.T) {
+	data := binaryOf(maxResponseBytes + 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(data)
+	}))
+	defer server.Close()
+
+	svc := New(t.TempDir() + "/api-key.protected")
+	res, err := svc.Request(server.URL+"/files/result.png", "GET", map[string]string{"Accept": "image/*"}, "")
+	if err == nil {
+		t.Fatalf("超过上限仍当成功返回：%d 字节的 body_base64", len(res.BodyBase64))
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(maxResponseBytes)) {
+		t.Fatalf("失败原因没说清上限：%v", err)
+	}
+	if res.BodyBase64 != "" || res.Body != "" {
+		t.Fatalf("超过上限不该留下可被当作图片的字节：%q", res.BodyBase64)
 	}
 }
