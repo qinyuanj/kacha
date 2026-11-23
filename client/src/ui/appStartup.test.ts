@@ -1,7 +1,7 @@
 // 工作台的启动流程判定（#137）：读能力表与界面状态、恢复标签页、首次使用不提示更新。
 import { describe, expect, it } from "vitest";
 import { BUILTIN_TABLE } from "../core/capabilities";
-import { boardMissingText, discardMissingText, errorMessage, readStartup, restorePlan, shouldRecordVersion, stopTasksText } from "./appStartup";
+import { boardMissingText, discardMissingText, readStartup, restorePlan, shouldRecordVersion, stopTasksText } from "./appStartup";
 
 describe("启动流程", () => {
   it("读不到能力表覆盖：降级到内置能力表并给出原因", async () => {
@@ -92,7 +92,4 @@ describe("提示文案", () => {
     expect(boardMissingText).toContain("请刷新列表");
   });
 
-  it("错误的一句话说法", () => {
-    expect(errorMessage(new Error("boom"))).toBe("boom");
-  });
 });

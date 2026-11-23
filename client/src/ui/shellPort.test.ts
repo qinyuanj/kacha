@@ -223,6 +223,7 @@ describe("打开 / 新建画板（端口驱动）", () => {
     expect(port.calls.write).toHaveLength(1);
     expect(port.calls.write[0].options).toEqual({ createOnly: true });
     expect(port.calls.write[0].path).not.toBe(BOARD_PATH);
+    expect(sessions.snapshot().sessions).toHaveLength(1);
   });
 
   it("保存冲突：端口给 conflict，标签页记成冲突并保留本页改动", async () => {

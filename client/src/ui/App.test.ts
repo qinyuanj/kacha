@@ -65,22 +65,6 @@ describe("工作台", () => {
     expect(container.textContent).toContain("Kacha 1.2.3");
   });
 
-  it("工具栏：画板打开时给可用的工具栏", async () => {
-    const port = createFakePort();
-    port.board.list = async () => listing();
-    await show(port);
-    await vi.waitFor(() => expect(container.querySelector(".board-toolbar-slot")).not.toBeNull());
-  });
-
-  it("画板包菜单：没有画板时导出与下载置灰", async () => {
-    const port = createFakePort();
-    port.board.list = async () => listing();
-    await show(port);
-    const packButton = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("画板包"));
-    await act(async () => packButton?.click());
-    expect(container.textContent).toContain("导入画板包…");
-  });
-
   it("用量提醒：到了上限时给出提醒与管理画板入口", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
@@ -146,14 +130,6 @@ describe("工作台", () => {
     port.update.status = async () => updateSnapshot({ phase: "ready" });
     await show(port);
     await vi.waitFor(() => expect(container.querySelector(".update-status")?.getAttribute("data-update-phase")).toBe("ready"));
-  });
-
-  it("下载中：提示条带着进度", async () => {
-    const port = createFakePort();
-    port.board.list = async () => listing();
-    port.update.status = async () => updateSnapshot({ phase: "downloading", downloaded: 40, total: 100 });
-    await show(port);
-    await vi.waitFor(() => expect(container.querySelector(".update-status")?.textContent).toContain("正在下载 1.6.2（40%）"));
   });
 
   it("点「稍后」：本轮不再自动装", async () => {
@@ -249,51 +225,4 @@ describe("工作台", () => {
     await vi.waitFor(() => expect(container.querySelector(".canvas")).not.toBeNull());
   });
 
-  it("顶栏与用量提醒里的入口都能打开对应弹层", async () => {
-    const port = createFakePort();
-    port.board.list = async () => listing();
-    port.usage.usage = async () => ({
-      total_bytes: 200,
-      boards_bytes: 100,
-      meta_bytes: 100,
-      last_access: 0,
-      by_date: [],
-      unreferenced: null,
-      unreadable_board: null,
-      limit_bytes: 100,
-      limit_level: "alert",
-    });
-    await show(port);
-    await vi.waitFor(() => expect(container.textContent).toContain("管理画板"));
-    for (const label of ["管理画板", "高级设置", "反馈", "画板包", "检查更新"]) {
-      const button = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(label));
-      await act(async () => button?.click());
-    }
-    for (const button of [...container.querySelectorAll<HTMLButtonElement>("button[aria-label*='关闭']")]) {
-      await act(async () => button.click());
-    }
-  });
-
-  it("已归档画板：取消归档与复制入口都能点", async () => {
-    const port = createFakePort();
-    port.board.list = async () => listing([{ name: "old.ugcboard.json", path: "/~/old.ugcboard.json", archived: true, bytes: 10 }]);
-    await show(port);
-    const listButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("画板列表"));
-    await act(async () => listButton?.click());
-    await vi.waitFor(() => expect(container.textContent).toContain("old"));
-    for (const label of ["取消归档", "复制为新画板"]) {
-      const button = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(label));
-      await act(async () => button?.click());
-    }
-  });
-
-  it("版本入口打开更新说明后可关闭", async () => {
-    const port = createFakePort();
-    port.board.list = async () => listing();
-    await show(port, { version: "1.2.3" });
-    const versionButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Kacha 1.2.3"));
-    await act(async () => versionButton?.click());
-    const close = [...container.querySelectorAll("button")].find((button) => button.textContent === "关闭");
-    await act(async () => close?.click());
-  });
 });

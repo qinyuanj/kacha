@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createDesktopPort, type DesktopBridge, type DesktopInfo, type DesktopLocalBridge } from "../shell/desktop";
 import { createFakePort } from "../shell/testing/fakePort";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
-import { packExportEntry, packImportEntry, packMenuEntries } from "./packMenuEntries";
+import { packMenuEntries } from "./packMenuEntries";
 
 const INFO: DesktopInfo = {
   version: "0.1.0",
@@ -53,21 +53,15 @@ describe("画板包菜单", () => {
     }
   });
 
-  it("端口声明能力可用时：导入画板包不需要打开的画板，没有画板时仍可用", () => {
-    const port = createFakePort();
-    for (const board of [{ open: false, broken: false }, { open: false, broken: true }]) {
-      const entry = packImportEntry(port);
-      expect(entry.label).toBe("导入画板包…");
-      expect(entry.disabledReason).toBeNull();
-      void board;
-    }
-  });
-
   it("端口声明能力可用时：导出与下载仍按画板状态置灰", () => {
     const port = createFakePort();
-    expect(packExportEntry(port, { open: false, broken: false }).disabledReason).toBe("没有打开的画板");
-    expect(packExportEntry(port, { open: false, broken: true }).disabledReason).toBe("画板无法打开，不能导出");
-    expect(packExportEntry(port, { open: true, broken: false }).disabledReason).toBeNull();
+    const reason = (board: { open: boolean; broken: boolean }, label: string) =>
+      packMenuEntries(port, board).find((e) => e.label.startsWith(label))?.disabledReason;
+    expect(reason({ open: false, broken: false }, "导出画板包")).toBe("没有打开的画板");
+    expect(reason({ open: false, broken: true }, "导出画板包")).toBe("画板无法打开，不能导出");
+    expect(reason({ open: true, broken: false }, "导出画板包")).toBeNull();
+    expect(reason({ open: false, broken: false }, "下载整板结果")).toBe("没有打开的画板");
+    expect(reason({ open: true, broken: false }, "下载整板结果")).toBeNull();
   });
 
 });

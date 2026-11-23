@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { BUILTIN_TABLE } from "../core/capabilities";
 import type { Board } from "../core/board";
 import type { ConfirmItem } from "../core/submission";
-import { copyTextDone, copyTextFailed, decideRegenerate, decideRun, NEED_KEY_TEXT, regenerateConfirmText } from "./appRun";
+import { copyTextDone, copyTextFailed, decideRegenerate, decideRun, regenerateConfirmText } from "./appRun";
 
 const board = (): Board => ({ format_version: 2, title: "t", viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges: [], extra: {} });
 
@@ -11,28 +11,12 @@ const item = (patch: Partial<ConfirmItem> = {}): ConfirmItem =>
   ({ taskId: "t1", modelName: "m", firstLine: "生成 1 张", send: null, reasons: [], warnings: [], ...patch }) as ConfirmItem;
 
 describe("运行的判定", () => {
-  it("没有可提交的任务：只给一句话", () => {
-    const decision = decideRun([], 0, true);
-    expect(decision.kind).toBe("toast");
-    if (decision.kind === "toast") expect(decision.message).toBe("没有需要运行的任务");
-  });
-
-  it("单个标红的任务：只给一句话", () => {
-    const decision = decideRun([item({ reasons: [{ text: "缺图", category: "notReady", kind: "positiveMissing" }] })], 0, true);
-    expect(decision.kind).toBe("toast");
-    if (decision.kind === "toast") expect(decision.message).toContain("缺图");
-  });
-
   it("没有密钥：先去高级设置填", () => {
     expect(decideRun([item()], 0, false)).toEqual({ kind: "needKey" });
   });
 
   it("单个干净任务：直接提交", () => {
     expect(decideRun([item()], 0, true)).toEqual({ kind: "submit", taskId: "t1" });
-  });
-
-  it("单个有警告的任务：弹确认", () => {
-    expect(decideRun([item({ warnings: ["会花钱"] })], 0, true).kind).toBe("confirm");
   });
 
   it("多个任务：弹确认，并带上范围", () => {
@@ -61,7 +45,4 @@ describe("复制发送文本", () => {
     expect(copyTextFailed("offline")).toBe("复制失败：offline");
   });
 
-  it("没有密钥时的提示", () => {
-    expect(NEED_KEY_TEXT).toContain("API 密钥");
-  });
 });

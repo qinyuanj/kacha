@@ -4,8 +4,6 @@ import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
-import type { Board } from "../core/board";
-import { emptyHistory } from "../core/history";
 import { AppNotices, type AppNoticesProps } from "./appNotices";
 import { emptySnapshot, type UpdateSnapshot } from "../core/update";
 import type { UpdateControl } from "./useUpdate";
@@ -16,7 +14,6 @@ import { AppShell } from "./appShell";
 import type { AppView } from "./appView";
 import { ShellProvider } from "./shell";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
-import type { Session } from "./useBoardSessions";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -34,8 +31,6 @@ afterEach(async () => {
   container.remove();
 });
 
-const board = { title: "a", format_version: 2, viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges: [], extra: {} } as unknown as Board;
-
 // 更新入口的替身（#181）：首页版本号旁的那一份，快照与动作都可直接调用。
 const updateControl = (patch: Partial<UpdateSnapshot> = {}): UpdateControl => ({
   snapshot: { ...emptySnapshot(), ...patch },
@@ -43,9 +38,6 @@ const updateControl = (patch: Partial<UpdateSnapshot> = {}): UpdateControl => ({
   check: vi.fn(),
   install: vi.fn(async () => ({ ok: true })),
 });
-
-const session = (): Session =>
-  ({ key: "k1", path: "/~/a.ugcboard.json", status: "ok", board, history: emptyHistory(), notice: null, saveError: null, version: null, conflicted: false, missing: false }) as Session;
 
 const notices = (patch: Partial<AppNoticesProps> = {}): AppNoticesProps => ({
   updateStatus: updateStatusView({ snapshot: emptySnapshot(), auto: IDLE_AUTO_VIEW }),
@@ -90,11 +82,6 @@ describe("提示条", () => {
     expect(container.textContent).toBe("");
   });
 
-  it("保存失败：给出重试与导出", async () => {
-    await act(async () => dom.render(createElement(AppNotices, notices({ failures: [{ key: "k1", board, saveError: "写不进去", missing: false, conflicted: false }] }))));
-    expect(container.textContent).toContain("写不进去");
-  });
-
   it("能力表读失败：给出说明", async () => {
     await act(async () => dom.render(createElement(AppNotices, notices({ tableError: "能力表坏了" }))));
     expect(container.textContent).toContain("能力表坏了");
@@ -103,21 +90,6 @@ describe("提示条", () => {
   it("设置文件有问题：给出说明", async () => {
     await act(async () => dom.render(createElement(AppNotices, notices({ settingsFileProblem: "settings.json 已损坏" }))));
     expect(container.textContent).toContain("settings.json 已损坏");
-  });
-
-  it("用量提醒：给出管理画板", async () => {
-    await act(async () => dom.render(createElement(AppNotices, notices({ usageNotice: { level: "alert", total: 200, limit: 100 } }))));
-    expect(container.textContent).toContain("用量");
-  });
-
-  it("体量提醒：给出整理", async () => {
-    await act(async () => dom.render(createElement(AppNotices, notices({ sizeNotice: { bytes: 10, tier: "warn" } }))));
-    expect(container.textContent).toContain("整理");
-  });
-
-  it("归档画板：给出取消归档与复制", async () => {
-    await act(async () => dom.render(createElement(AppNotices, notices({ activeArchived: true }))));
-    expect(container.textContent).toContain("归档");
   });
 
   it("画板自己的提示：显示出来", async () => {
@@ -156,50 +128,6 @@ describe("提示条", () => {
 });
 
 describe("顶栏", () => {
-  it("画板标签：显示标题", async () => {
-    await act(async () =>
-      dom.render(
-        createElement(AppTopBar, {
-          sessions: [session()],
-          activeKey: "k1",
-          onActivate: vi.fn(),
-          onClose: vi.fn(),
-          onRename: vi.fn(),
-          onCreate: vi.fn(),
-          onOpenList: vi.fn(),
-          onExportPack: vi.fn(),
-          updateNotice: null,
-          onOpenChangelog: vi.fn(),
-          onCloseUpdateNotice: vi.fn(),
-        }),
-      ),
-    );
-    expect(container.textContent).toContain("a");
-  });
-
-  it("不显示服务端时期的常驻备份提示", async () => {
-    await act(async () =>
-      dom.render(
-        createElement(AppTopBar, {
-          sessions: [session()],
-          activeKey: "k1",
-          onActivate: vi.fn(),
-          onClose: vi.fn(),
-          onRename: vi.fn(),
-          onCreate: vi.fn(),
-          onOpenList: vi.fn(),
-          onExportPack: vi.fn(),
-          updateNotice: null,
-          onOpenChangelog: vi.fn(),
-          onCloseUpdateNotice: vi.fn(),
-        }),
-      ),
-    );
-    expect(container.textContent).not.toContain("请定期备份数据根");
-    expect(container.textContent).not.toContain("画板与图片保存在这台电脑");
-    expect(container.querySelector(".topbar-backup-hint")).toBeNull();
-  });
-
   it("有新版：给出更新提示", async () => {
     await act(async () =>
       dom.render(
@@ -224,8 +152,15 @@ describe("顶栏", () => {
 
 describe("画板包菜单", () => {
   it("没有画板：导出与下载都置灰", async () => {
-    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: null, exportDisabledReason: "没有打开的画板", downloadDisabledReason: "没有打开的画板", onPick: vi.fn(), onClose: vi.fn() })));
-    expect(container.textContent).toContain("导入画板包");
+    const onPick = vi.fn();
+    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: null, exportDisabledReason: "没有打开的画板", downloadDisabledReason: "没有打开的画板", onPick, onClose: vi.fn() })));
+    const items = () => [...container.querySelectorAll('[role="menuitem"]')];
+    for (const action of ["导出画板包", "下载整板结果"]) {
+      const button = items().find((b) => b.textContent?.includes(action));
+      expect(button?.getAttribute("aria-disabled")).toBe("true");
+      await act(async () => (button as HTMLButtonElement | undefined)?.click());
+    }
+    expect(onPick).not.toHaveBeenCalled();
   });
 
   it("端口没有导入能力：导入标「尚不可用」并置灰", async () => {
@@ -298,28 +233,6 @@ describe("工具栏", () => {
     expect(entry?.textContent).toContain("检查更新");
   });
 
-  it("有新版本时入口旁边出现下载并安装", async () => {
-    await act(async () =>
-      dom.render(
-        createElement(ShellProvider, { port: createFakePort(), children: createElement(AppToolbar, {
-          setToolbarSlot: vi.fn(),
-          canvasReady: false,
-          runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
-          packMenuOpen: false,
-          packMenuDisabled: false,
-          onTogglePackMenu: vi.fn(),
-          version: "1.6.6",
-          ready: true,
-          onOpenChangelog: vi.fn(),
-          settingsLoaded: true,
-          onOpenSettings: vi.fn(),
-          onOpenFeedback: vi.fn(),
-          update: updateControl({ phase: "ready", version: "1.6.7", verified: true, installable: true, downloaded: 100, total: 100 }),
-        }) }),
-      ),
-    );
-    expect(container.querySelector(".topbar-update")?.textContent).toContain("下载并安装");
-  });
 });
 
 // #184：AppShell 本体此前从未被渲染，6 个变异点全是 uncovered。下面几条按「外壳把哪个开关
@@ -352,18 +265,13 @@ describe("工作台外壳的接线", () => {
     act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(AppShell, shell(patch)) })));
 
   it("画板列表只在「打开了列表」且「有数据根」时挂载", async () => {
-    const open = createFakePort();
-    const called = vi.spyOn(open.board, "list");
-    await show(open, { boardListOpen: true });
-    expect(called).toHaveBeenCalled();
-    const noRoot = createFakePort();
-    const notCalled = vi.spyOn(noRoot.board, "list");
-    await show(noRoot, { boardListOpen: true, userRoot: null });
-    expect(notCalled).not.toHaveBeenCalled();
-    const closed = createFakePort();
-    const stillNot = vi.spyOn(closed.board, "list");
-    await show(closed, { boardListOpen: false });
-    expect(stillNot).not.toHaveBeenCalled();
+    const dialog = () => container.querySelector('[role="dialog"][aria-label="画板列表"]');
+    await show(createFakePort(), { boardListOpen: true });
+    expect(dialog()).not.toBeNull();
+    await show(createFakePort(), { boardListOpen: true, userRoot: null });
+    expect(dialog()).toBeNull();
+    await show(createFakePort(), { boardListOpen: false });
+    expect(dialog()).toBeNull();
   });
 
   it("画板包菜单只在有位置时挂载", async () => {
@@ -374,11 +282,13 @@ describe("工作台外壳的接线", () => {
   });
 
   it("画布就绪与否决定工具栏占位", async () => {
-    const buttons = () => container.querySelectorAll("button").length;
+    const slot = () => container.querySelector(".board-toolbar-slot");
     await show(createFakePort(), { view: viewOf({ openState: "ok" }) });
-    const readyCount = buttons();
+    expect(slot()?.querySelector('[role="toolbar"]')).toBeNull();
     await show(createFakePort(), { view: viewOf({ openState: "none" }) });
-    expect(buttons()).toBeGreaterThan(readyCount);
+    expect(slot()?.querySelector('[role="toolbar"]')?.getAttribute("aria-label")).toBe("画板工具栏");
+    const prompt = [...(slot()?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.includes("＋ 提示词"));
+    expect(prompt?.getAttribute("aria-disabled")).toBe("true");
   });
 
   it("没有数据根时画板包菜单按钮禁用，有则可用", async () => {

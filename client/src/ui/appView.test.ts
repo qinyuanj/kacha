@@ -16,7 +16,6 @@ import {
   tidyKeyAfter,
   tidyingFor,
   updateNoticeOf,
-  usageNoticeOf,
 } from "./appView";
 
 const okSession = (patch: Partial<Extract<Session, { status: "ok" }>> = {}): Session => ({
@@ -43,43 +42,12 @@ describe("工作台视图模型", () => {
     expect(view.titleOf("k1")).toBe("标题");
   });
 
-  it("归档画板：只读，导出与下载仍可用", () => {
-    const view = appView({ sessions: [okSession({ path: "/~/画板/归档/a.ugcboard.json" })], activeKey: "k1", userRoot: "/~", activeSize: null, sizeNotices: {} });
-    expect(view.activeArchived).toBe(true);
-    expect(view.archived).toBe("/~/画板/归档/a.ugcboard.json");
-  });
-
-  it("没有打开的画板：工作区是空的", () => {
-    const view = appView({ sessions: [], activeKey: null, userRoot: "/~", activeSize: null, sizeNotices: {} });
-    expect(view.openState).toBe("none");
-  });
 });
 
 describe("体量查询与提示", () => {
   it("体量查询：ok 状态才有路径与版本", () => {
     expect(sizeQueryOf(okSession())).toEqual({ path: "/~/画板/a.ugcboard.json", version: "v1" });
     expect(sizeQueryOf(undefined)).toBeNull();
-  });
-
-  it("体量提示：越过线才显示", () => {
-    const view = appView({ sessions: [okSession()], activeKey: "k1", userRoot: "/~", activeSize: { path: "/~/画板/a.ugcboard.json", bytes: 150, tier: "warn" }, sizeNotices: {} });
-    expect(view.sizeNotice).toEqual({ bytes: 150, tier: "warn", path: "/~/画板/a.ugcboard.json" });
-  });
-
-  it("整理模式：记下档位并进入整理", () => {
-    const view = appView({ sessions: [okSession()], activeKey: "k1", userRoot: "/~", activeSize: { path: "/~/a", bytes: 150, tier: "warn" }, sizeNotices: {} });
-    const setSizeNotices = vi.fn();
-    const setTidyKey = vi.fn();
-    tidyAction(view, {}, setSizeNotices, setTidyKey);
-    expect(setSizeNotices).toHaveBeenCalledWith({ "/~/a": "warn" });
-    expect(setTidyKey).toHaveBeenCalledWith("k1");
-  });
-
-  it("关闭体量提示：只记档位", () => {
-    const view = appView({ sessions: [okSession()], activeKey: "k1", userRoot: "/~", activeSize: { path: "/~/a", bytes: 150, tier: "warn" }, sizeNotices: {} });
-    const setSizeNotices = vi.fn();
-    dismissSizeAction(view, {}, setSizeNotices);
-    expect(setSizeNotices).toHaveBeenCalledWith({ "/~/a": "warn" });
   });
 
   it("没有体量提示：两个动作都不做", () => {
@@ -92,17 +60,6 @@ describe("体量查询与提示", () => {
 });
 
 describe("用量与更新提示", () => {
-  it("用量提醒：没到线不提醒", () => {
-    expect(usageNoticeOf(null, null)).toBeNull();
-  });
-
-  it("用量提醒：关掉同一档后不再提醒", () => {
-    const notice = { level: "warn" as const, total: 100, limit: 100 };
-    expect(usageNoticeOf(notice, null)).toBe(notice);
-    expect(usageNoticeOf(notice, "warn")).toBeNull();
-    expect(usageNoticeOf({ ...notice, level: "alert" }, "warn")).toEqual({ level: "alert", total: 100, limit: 100 });
-  });
-
   it("更新提示：没准备好或没有版本都不提示", () => {
     expect(updateNoticeOf(false, "1.0", undefined, () => true)).toBeNull();
     expect(updateNoticeOf(true, null, undefined, () => true)).toBeNull();

@@ -51,30 +51,21 @@ describe("运行的分派结果", () => {
     confirm: vi.fn(),
   });
 
-  it("toast：给一句说明", () => {
-    const d = deps();
-    applyRunDecision(d, board(), { kind: "toast", message: "没有可运行的任务" });
-    expect(d.toast).toHaveBeenCalledWith("没有可运行的任务");
-  });
-
-  it("needKey：提示并打开高级设置", () => {
-    const d = deps();
-    applyRunDecision(d, board(), { kind: "needKey" });
-    expect(d.openSettings).toHaveBeenCalled();
-  });
-
-  it("submit：直接提交", () => {
-    const d = deps();
-    applyRunDecision(d, board(), { kind: "submit", taskId: "t1" });
-    expect(d.startRun).toHaveBeenCalledWith("k1", expect.anything(), ["t1"]);
-  });
-
-  it("confirm：弹二次确认", () => {
-    const d = deps();
+  it("决策分派：toast / needKey / submit / confirm 各走各的", () => {
     const items = [{ taskId: "t1", modelName: "m", firstLine: "x", send: null, reasons: [], warnings: [] }];
-    applyRunDecision(d, board(), { kind: "confirm", items, scope: "selection" });
-    expect(d.confirm).toHaveBeenCalledWith("k1", expect.anything(), items, "selection");
+    const cases = [
+      { decision: { kind: "toast", message: "没有可运行的任务" }, check: (d: ReturnType<typeof deps>) => expect(d.toast).toHaveBeenCalledWith("没有可运行的任务") },
+      { decision: { kind: "needKey" }, check: (d: ReturnType<typeof deps>) => expect(d.openSettings).toHaveBeenCalled() },
+      { decision: { kind: "submit", taskId: "t1" }, check: (d: ReturnType<typeof deps>) => expect(d.startRun).toHaveBeenCalledWith("k1", expect.anything(), ["t1"]) },
+      { decision: { kind: "confirm", items, scope: "selection" }, check: (d: ReturnType<typeof deps>) => expect(d.confirm).toHaveBeenCalledWith("k1", expect.anything(), items, "selection") },
+    ];
+    for (const item of cases) {
+      const d = deps();
+      applyRunDecision(d, board(), item.decision as never);
+      item.check(d);
+    }
   });
+
 });
 
 describe("重新生成", () => {

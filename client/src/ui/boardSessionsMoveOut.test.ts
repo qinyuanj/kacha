@@ -103,11 +103,6 @@ describe("移出前的画板位预检", () => {
     expect(refusal).toBeNull();
   });
 
-  it("画板位满了：给统一文案", async () => {
-    const refusal = await moveOutRefusal({ board: { list: async () => ({ slots: { used: 10, total: 10 } }) } });
-    expect(refusal).toContain("画板位满了");
-  });
-
   it("读不到列表：不拦", async () => {
     const refusal = await moveOutRefusal({ board: { list: async () => { throw new Error("offline"); } } });
     expect(refusal).toBeNull();

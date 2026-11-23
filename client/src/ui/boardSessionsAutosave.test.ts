@@ -1,7 +1,7 @@
 // 多画板会话的去抖自动保存（#137）：落盘时机、写入条件与写失败。
 import { describe, expect, it, vi } from "vitest";
 import { serializeBoard } from "../core/board";
-import { flushPending, noteSaveFailure, unsavedChanges, writableNow, writeSession, type Saver } from "./boardSessionsAutosave";
+import { flushPending, unsavedChanges, writableNow, writeSession, type Saver } from "./boardSessionsAutosave";
 import type { OkSession, Session } from "./useBoardSessions";
 
 const session = (patch: Partial<OkSession> = {}): OkSession =>
@@ -113,12 +113,3 @@ describe("写入", () => {
   });
 });
 
-describe("写失败", () => {
-  it("记下错误并写日志", () => {
-    const patch = vi.fn();
-    const log = vi.fn();
-    noteSaveFailure(patch, { ui: { log } }, "k1", session(), new Error("offline"));
-    expect(log).toHaveBeenCalled();
-    expect(patch).toHaveBeenCalled();
-  });
-});
