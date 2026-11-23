@@ -39,16 +39,16 @@
 | # | 规格要求（摘要） | 证据类型 | 具体命令 / 文件 | 结果 |
 | --- | --- | --- | --- | --- |
 | 1 | 按完整用户流程验收是最高边界：经真实壳端口与本机服务，以可见状态、实际文件、可重开数据、可启动程序判定 | A + B + C；F 未执行 | §4.1–§4.3；`build/windows-amd64/kacha-setup-1.5.0-amd64.exe` | **部分通过**：桌面端口 / Go 服务 / 构建 / 隔离发行已验证；真机安装与原生交互未执行 |
-| 2 | 优先扩展现有桌面端口集成测试、运行器测试与 Go 服务临时目录测试 | A | `python packaging\verify.py`（176 个前端测试文件、18 个 Go 包） | **通过** |
-| 3 | 同一桌面端口入口下，用受控网关替身与真实临时文件系统覆盖 配置→参考图→提交→结果落盘→保存→重开；跨语言接线要有实际绑定 / 服务集成证据 | D + A | `npm --prefix client test -- src/shell/desktopGeneration.test.ts src/shell/desktopImageEdit.test.ts src/shell/desktopLayers.test.ts src/shell/desktopQueue.test.ts`（30 用例）；`go test ./desktop/internal/gateway -v`（8 用例） | **替身通过**；真实网关 E 未执行 |
+| 2 | 优先扩展现有桌面端口集成测试、运行器测试与 Go 服务临时目录测试 | A | `python packaging\verify.py`（171 个前端测试文件、25 个 Go 包） | **通过** |
+| 3 | 同一桌面端口入口下，用受控网关替身与真实临时文件系统覆盖 配置→参考图→提交→结果落盘→保存→重开；跨语言接线要有实际绑定 / 服务集成证据 | D + A | `npm --prefix client test -- src/shell/desktopGeneration.test.ts src/shell/desktopImageEdit.test.ts`（2 个文件 / 5 个用例）；`go test ./desktop/internal/gateway -v`（10 个用例）。图层拆分与跨画板队列 / 份数覆盖随 #234 归并到 `src/core/runner.test.ts`、`src/core/submission.test.ts`、`src/ui/previewLayers.test.ts`、`src/core/layerCount.test.ts`（见 #4 / #5 行证据） | **替身通过**；真实网关 E 未执行 |
 | 4 | 生成回归：发送计划与任务记录一致、模型参数边界、份数与逐份取消、跨画板并发、401/429/5xx、错误响应、下载失败、部分图层失败、结局落盘与重开 | A | 同 #3；`src/core/runner.test.ts`、`src/core/run.test.ts`、`src/core/submission.test.ts`、`src/core/taskDir.test.ts`、`src/shell/desktopGeneration.test.ts` 等 | **通过（替身）**；真实网关未执行 |
-| 5 | 归档与存储：满 20 位、归档释放位置、取消归档限制、阶段与定稿整理、唯一引用计量、容量提醒不阻止生成、归档引用不被误清理 | A | `go test ./desktop/internal/localstore ./desktop/internal/boardmeasure ./desktop/internal/usageservice`；`src/shell/desktopBoards.test.ts`、`src/shell/desktopTidy.test.ts`、`src/ui/stages.test.ts`、`src/ui/UsageSection.test.ts` | **通过** |
+| 5 | 归档与存储：满 20 位、归档释放位置、取消归档限制、阶段与定稿整理、唯一引用计量、容量提醒不阻止生成、归档引用不被误清理 | A | `go test ./desktop/internal/localstore ./desktop/internal/boardmeasure ./desktop/internal/usageservice`；`src/shell/desktopBoards.test.ts`、`src/core/tidy.test.ts`、`src/ui/stages.test.ts`、`src/ui/UsageSection.test.ts` | **通过** |
 | 6 | 清理 / 恢复：预览取消零修改、未引用判定、不可读画板阻断、回收区 14 天边界、恢复冲突不覆盖、失败可追溯 | A | `go test ./desktop/internal/usageservice`（5 个用例）；`src/ui/usageClean.test.ts`、`src/ui/UsageSection.test.ts` | **通过** |
 | 7 | 文件交换与结果保存：旧包读取、导出再导入、图片 / 图层 / 任务记录完整、去重、冲突、损坏与越界拒绝、取消与失败保护；结果保存以实际输出文件可读为判据 | A | `go test ./desktop/internal/packimport ./desktop/internal/packexport ./desktop/internal/resultsave`（13 + 5 + 6 个用例）；`src/shell/desktopPackImport.test.ts`、`src/shell/desktopPackExport.test.ts`、`src/ui/BoardPackDialog.test.ts` | **通过** |
 | 8 | 数据位置迁移：成功重启、失败回退、目标冲突与路径边界；凭据覆盖重启读取、替换、清除及诊断输出不含秘密 | A | `go test ./desktop/internal/moveroot ./desktop/internal/storage ./desktop/internal/gateway ./desktop/internal/diagnostics`；`src/shell/desktopDataRoot.test.ts`、`src/core/dataRoot.test.ts` | **通过** |
 | 9 | 更新历史：保护全部恢复后的版本索引，弹窗显示当前及更早版本，未发布版本不误展示，格式与单一版本源门禁有效 | A | `src/core/changelog.test.ts`、`src/ui/ChangelogDialog.test.ts`；`python -m unittest discover -s packaging/tests`（含 `packaging/tests/test_release_gate.py`） | **通过** |
 | 10 | 安装与更新：在已解锁 Windows x64 交互会话，用两个隔离测试版本执行首次安装→建立数据与凭据→发现更高版本→后台下载→点击更新→重启→验证版本与数据保留 | C 部分；F 未执行 | §4.3（资产与信任链）；§6 B3 | **阻塞** |
-| 11 | 更新故障：不完整 / 不匹配发行、latest 为 Web 包、错误 / 篡改签名、损坏下载、离线、安装失败、任务未完成、在途导入 / 导出、画板或界面状态保存失败 | A | `go test ./desktop/internal/updateservice`（15 个用例）；`src/core/updatePreparation.test.ts`、`src/core/updateScheduler.test.ts`、`src/ui/UpdateSection.test.tsx` | **通过（单元 / 替身）**；真机安装失败仍待 F |
+| 11 | 更新故障：不完整 / 不匹配发行、latest 为 Web 包、错误 / 篡改签名、损坏下载、离线、安装失败、任务未完成、在途导入 / 导出、画板或界面状态保存失败 | A | `go test ./desktop/internal/updateservice`（15 个用例）；`src/core/updatePreparation.test.ts`、`src/core/updateScheduler.test.ts`、`src/ui/UpdateToolbarControl.test.tsx` | **通过（单元 / 替身）**；真机安装失败仍待 F |
 | 12 | 更新的最高测试入口是公开的检查 / 准备 / 安装服务及实际安装器；若缺少只新增一个协调边界 | A + C | §4.3 的 `TestIsolatedReleaseAcceptance`：走 `Service.Check` / `Install`，安装器启动被注入记录（参数 `/S`），不真起进程 | **部分通过**：真实安装器启动与重启未执行 |
 | 13 | 真实剪贴板复制 / 粘贴、外部软件互操作、窗口激活及真实安装更新单独记录人工 / 交互证据；不以 debug 构建或合成事件替代 | F 未执行 | `go test ./desktop/internal/clipboard`（契约层）只能证明端口形状 | **阻塞** |
 | 14 | 按项目验证入口执行完整验证，合入前运行含质量检查的验证；保留前端质量门禁；不宣称 Go 的 CRAP / DRY / mutation 已通过 | A | `python packaging\verify.py`（含 `packaging/quality.py` 的 CRAP 与 DRY）；`--quality` / mutate 按项目与本次约定未运行 | **通过（默认门禁）**；变异测试未执行，不宣称通过 |
@@ -59,7 +59,7 @@
 | # | 验收项（摘要） | 证据类型 | 具体证据 | 结果 |
 | --- | --- | --- | --- | --- |
 | 1 | 真实网关前列明模型、合成载荷与任务分配；全范围最多 5 个生成任务，失败也计数、不追加重试，记录既有消耗 | E | §5 的计划表；本机无网关配置、无任务记录 | **未执行（0/5 已用）** |
-| 2 | 真实验证文生图、参考图编辑、结果落盘与重开；回放、真实成功与未完成分别记录 | D 通过；E 未执行 | §4.4（30 个前端用例 + 8 个 Go 用例）；§5 | **真实网关未执行** |
+| 2 | 真实验证文生图、参考图编辑、结果落盘与重开；回放、真实成功与未完成分别记录 | D 通过；E 未执行 | §4.4（5 个前端用例 + 10 个 Go 用例）；§5 | **真实网关未执行** |
 | 3 | 已解锁 Windows x64 交互会话，用两个隔离测试发行完成首次安装、建立数据与凭据、发现更高版本、后台下载、点击更新、重启、版本与数据保留 | C + F | §4.3 覆盖资产、选版、下载、验签与安装入口；安装、重启与数据保留未执行 | **阻塞（B3）** |
 | 4 | 开始菜单、快捷方式选择、无需管理员权限及卸载默认保数据；旧 0.3.x 只承诺手动安装与画板包迁入；新壳后续版本必须可自动更新 | B + C + F | §4.2 安装器；§4.5 本机旧 0.3.0 安装；§6 B2 / B3 | **阻塞（B2、B3）** |
 | 5 | 跨流程覆盖归档与满位、阶段与定稿、用量提醒不阻止生成、回收恢复、包往返、结果保存、数据迁移、诊断秘密排除 | A | 见 Testing Decisions #5–#8 的命令与用例 | **通过** |
@@ -80,18 +80,19 @@ python packaging\verify.py
 
 | 步骤 | 结果 | 关键数字 |
 | --- | --- | --- |
-| `python -m unittest discover -s packaging/tests` | 通过 | 74 个用例 |
-| `npm --prefix client test` | 通过 | 176 个测试文件 / 2478 个用例 |
+| `python -m unittest discover -s packaging/tests` | 通过 | 120 个用例 |
+| `npm --prefix client test` | 通过 | 171 个测试文件 / 2427 个用例 |
 | `npm --prefix client run typecheck` | 通过 | — |
 | `npm --prefix client run lint:dead` | 通过 | — |
-| `go test ./...` | 通过 | 18 个包 ok，0 个 FAIL |
+| `go test ./...` | 通过 | 25 个包 ok，0 个 FAIL |
 | `python packaging/build_desktop.py --debug --skip-install` | 通过 | `build/debug/windows-amd64/Kacha.exe`（1.5.0） |
 | `python packaging/quality.py` | 通过 | CRAP 报告与 DRY 报告已写出；门禁退出码 0 |
 
-两点说明：
+三点说明：
 
 - 预检没有报告仓库 `build/` 或 `client/target/` 的 Low 完整性标签问题。日志中出现的 Low 标签提示来自 `test_verify` 自己造的临时目录夹具，不是本次构建目录。
 - `quality.py` 的 DRY 报告列出一对 `src/core/history.ts:73-76` 与 `78-81` 的重复（相似度 1.00）。这两个位置不在本次改动集内，按门禁规则属于存量，不拦合入；这里如实记录，不当作已消除。
+- 基线缺陷处置（#238 收口复核）：测试清理过程中曾由 `a166588` 误删 `GLOSSARY.md` 的「反馈」「反馈中继」词条以及反馈入口的 token 归属文字，导致 `verify.py` 的文档门禁无法通过。已由集成分支提交 `5de3ad9` 最小化恢复这两条词条并补回「用户自带 Gitea token / 权限 / 服务端不持有统一写 token / 核心画板离线」表述；`packaging/tests/test_verify.py` 的 `DocumentationGateTest` 另有 `test_the_real_repository_docs_pass_the_gate` 直接断言 `documentation_problems(ROOT) == []`，确保真实文档不再漂移。此处登记该处置以留痕，不再改动 `GLOSSARY.md`。
 
 ### 4.2 release 构建产物（未发布）
 
@@ -219,11 +220,12 @@ ok  github.com/qinyuanj/kacha/desktop/internal/updateservice  0.413s
 ### 4.4 受控网关替身主流程（**非真实网关**）
 
 ```powershell
-npm --prefix client test -- src/shell/desktopGeneration.test.ts src/shell/desktopImageEdit.test.ts src/shell/desktopLayers.test.ts src/shell/desktopQueue.test.ts
+npm --prefix client test -- src/shell/desktopGeneration.test.ts src/shell/desktopImageEdit.test.ts
+# 图层拆分与队列 / 份数覆盖见 src/core/runner.test.ts、src/core/submission.test.ts、src/ui/previewLayers.test.ts、src/core/layerCount.test.ts
 go test ./desktop/internal/gateway -v -count=1
 ```
 
-结果：前端 4 个文件 / 30 个用例通过；Go 网关 8 个用例通过。
+结果：前端 2 个文件 / 5 个用例通过；Go 网关 10 个用例通过。
 
 覆盖：确认文本、请求与任务记录一致；一份一结果；结果与任务目录落盘；保存重开后仍见结果；401 / 5xx / 畸形响应 / 下载失败 / 429 退避 / 离线 / 取消 / 中断；参考图区域叠加与快照；透明背景与图层拆分（含部分图层失败）；跨画板队列、份数与逐份取消；API 密钥持久化与脱敏、数据根切换。以上全部由 `httptest` / `node:http` 替身驱动，**不是真实网关成功**。
 
