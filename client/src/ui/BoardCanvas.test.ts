@@ -733,9 +733,13 @@ describe("只读画板（归档）", () => {
     expect(harness.toast).toHaveBeenCalledWith(ARCHIVE_TEXT.readOnly);
     expect(port.media.uploadReference).not.toHaveBeenCalled();
     expect(editChanges(harness.apply)).toEqual([]);
-    // 右键节点：菜单只剩查看与下载（条目由 core/archive 的 readOnlyMenu 给）。
-    await openNodeMenu("r1", 20, 20);
+    // 只读同样进到悬浮动作条：条目与右键菜单同源（core/archive 的 readOnlyMenu）。
     const expected = readOnlyMenu(menuItems({ kind: "node", nodeId: "r1" }, menuFactsOf(harness.props.board, { selected: new Set(["r1"]) })));
+    await hoverNode("r1");
+    const barButtons = container.querySelectorAll('[data-testid="node-toolbar"] button');
+    expect([...barButtons].map((b) => b.getAttribute("aria-label"))).toEqual(expected.map((i) => i.label));
+    // 右键节点：菜单只剩查看与下载（条目同样由 core/archive 的 readOnlyMenu 给）。
+    await openNodeMenu("r1", 20, 20);
     expect(menuItemLabels()).toEqual(expected.map((i) => i.label));
     // 仍可放大预览。
     await act(async () => menuItemButton(expected, "preview").click());

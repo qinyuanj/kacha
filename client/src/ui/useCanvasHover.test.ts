@@ -55,12 +55,6 @@ describe("actionBarView", () => {
     expect(result.nodes).toEqual(["r1"]);
   });
 
-  it("只读画板：条目只剩查看与下载，挂载节点不变", () => {
-    const result = view(board, "r1", { readOnly: true });
-    expect(result.items.map((i) => i.action)).toEqual(["preview", "saveAs"]);
-    expect(result.nodes).toEqual(["r1"]);
-  });
-
   it("悬浮在多选内的节点上：挂到整条选区上（选区上方只出一条）", () => {
     expect(view(board, "r1", { selected: ["r1", "r2"] }).nodes).toEqual(["r1", "r2"]);
     // 悬浮的节点不在选区里：仍然只挂悬浮的那个。

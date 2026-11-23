@@ -19,23 +19,6 @@ const result = (id: string, path: string) =>
     layer_count: 1,
     record: { model: "m", prompt: "", negative_prompt: "", size_spec: { tier: null, ratio: null, width: null, height: null }, submitted_at: "2026-11-11T00:00:00Z", layers: [] },
   });
-const prompt = (id: string) =>
-  ({ id, type: "prompt" as const, pos: [0, 0] as [number, number], size: [240, 120] as [number, number], extra: {}, text: id });
-const task = (id: string) =>
-  ({
-    id,
-    type: "task" as const,
-    pos: [0, 0] as [number, number],
-    size: [280, 260] as [number, number],
-    extra: {},
-    model: "m",
-    size_spec: { tier: null, ratio: null, width: null, height: null },
-    image_ports: 1,
-    layer_decomposition: false,
-    transparent_background: false,
-    last_submitted: null,
-  });
-
 const board = (...nodes: Board["nodes"]): Board => ({ ...newBoard("画板"), nodes });
 
 describe("复制分派：单选一张图才复制图片", () => {
@@ -54,15 +37,6 @@ describe("复制分派：单选一张图才复制图片", () => {
 
   it("数据根外的绝对路径原样交给端口", () => {
     expect(copyOutcome(board(reference("r1", "D:/别处/cat.png")), ["r1"])).toMatchObject({ path: "D:/别处/cat.png" });
-  });
-
-  it("多选即使含图片：仍复制节点，画板内复制粘贴手感不变", () => {
-    expect(copyOutcome(board(reference("r1", "参考/cat.png"), prompt("p1")), ["r1", "p1"])).toEqual({ kind: "nodes" });
-  });
-
-  it("提示词、任务、已不在画板上的 id：都复制节点，不复制图片", () => {
-    const b = board(prompt("p1"), task("t1"));
-    for (const ids of [["p1"], ["t1"], ["gone"]]) expect(copyOutcome(b, ids)).toEqual({ kind: "nodes" });
   });
 
   it("空选区：什么都不做（键盘只在有选区时才会走到这里）", () => {

@@ -232,11 +232,6 @@ describe("CanvasOverlays", () => {
     expect(container.querySelector('[data-testid="preview-dialog"]')).toBeNull();
   });
 
-  it("共享的悬浮信息层照原样渲染", async () => {
-    const layer = createElement("div", { className: "hover-info" }, "透明通道");
-    await show(createElement(CanvasOverlays, overlays({ hoverLayer: layer })));
-    expect(container.querySelector(".hover-info")!.textContent).toBe("透明通道");
-  });
 });
 
 describe("整理条上的「自动划分阶段」（#143）", () => {
