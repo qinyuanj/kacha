@@ -350,6 +350,40 @@ describe("RatioCombo", () => {
     }
   });
 
+  it("钳制后与当前值相同时只提示范围，不提交", async () => {
+    const onPick = vi.fn();
+    await show(combo({ ...manual, ratio: "2:1" }, onPick, { unsupported: true }));
+    await act(async () => input().focus());
+    await act(async () => typeInto(input(), "8:1"));
+    await act(async () => input().blur());
+    expect(onPick).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="status"]')!.textContent).toBe("该模型宽高比范围 1:2–2:1");
+  });
+
+  it("自动状态下手填出当前值也要提交（转手动）", async () => {
+    const onPick = vi.fn();
+    await show(combo(auto, onPick));
+    await act(async () => input().focus());
+    await act(async () => typeInto(input(), "16:9"));
+    await act(async () => input().blur());
+    expect(onPick).toHaveBeenCalledWith("16:9");
+  });
+
+  it("读不出或模型不收的文本不提交，恢复原值", async () => {
+    const onPick = vi.fn();
+    await show(combo(manual, onPick));
+    await act(async () => input().focus());
+    await act(async () => typeInto(input(), "abc"));
+    await act(async () => input().blur());
+    expect(onPick).not.toHaveBeenCalled();
+    expect(input().value).toBe("16:9");
+    await show(createElement(RatioCombo, { rule: { ...rule, custom: null }, spec: manual, ratios, unsupported: false, disabled: false, onPick }));
+    await act(async () => input().focus());
+    await act(async () => typeInto(input(), "1:1"));
+    await act(async () => input().blur());
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
   it("↓ 与按钮都能展开预设，当前项标为选中", async () => {
     await show(combo(manual));
     expect(container.querySelector('[role="listbox"]')).toBeNull();

@@ -14,7 +14,7 @@ import type { DragFrom } from "../core/ports";
 import type { BrowserOptions } from "../shell/types";
 import type { SelectChange } from "../core/selection";
 import { DELETE_TASK_TEXT } from "./boardText";
-import { clientPointOf, dropTargetAt, edgeIdOf, nodeDims, type DropTarget } from "./canvasPoint";
+import { clientPointOf, dropTargetAt, edgeIdOf, type DropTarget } from "./canvasPoint";
 import { toConnection } from "./canvasFrame";
 
 /** 连线端口的 handle：节点 id、handle id（React Flow 的 Handle.id 可缺省）与方向。 */
@@ -98,8 +98,6 @@ export interface FlowHandlerDeps {
   /** 节点 id → 已测到的显示尺寸（跳转居中用）。 */
   measured: Readonly<Record<string, { width?: number; height?: number }>>;
   refs: FlowBookkeeping;
-  /** 落点命中检测（缺省用 document.elementFromPoint；测试注入替身）。 */
-  elementAt?: (x: number, y: number) => Element | null;
 }
 
 /** 一批节点变更里与画板（及选区）有关的事实。 */
@@ -120,7 +118,7 @@ function nodeChangeFacts(changes: NodeChange[]): NodeChangeFacts {
     else if (c.type === "position" && c.position) facts.moves.set(c.id, c.position);
     else if (c.type === "dimensions" && c.dimensions) {
       // 测量结果存下来、在重建节点时回传（见 nodes 的 measured）：只渲染可见节点的前提。
-      facts.measured.set(c.id, nodeDims(c.dimensions.width, c.dimensions.height));
+      facts.measured.set(c.id, { width: c.dimensions.width, height: c.dimensions.height });
       // NodeResizer 拖动中带 resizing: true，松开时报一次 resizing: false；普通测量不带 resizing。
       if (c.resizing) facts.resized.set(c.id, c.dimensions);
       else if (c.resizing === false) facts.resizeEnded = true;
@@ -221,7 +219,7 @@ function dropOnCard(deps: FlowHandlerDeps, from: DragFrom, cardId: string, onCon
 
 /** 落在空白处：拖线建节点（图片 → 以此继续编辑、提示词 → 新建任务、任务空端口 → 添加参考图）。 */
 function dropOnCanvas(deps: FlowHandlerDeps, from: DragFrom, client: { x: number; y: number }, onConnect: (c: ConnectEnds) => void): void {
-  const hit: DropTarget | null = dropTargetAt(client, deps.elementAt);
+  const hit: DropTarget | null = dropTargetAt(client);
   if (hit?.kind === "node") return dropOnCard(deps, from, hit.nodeId, onConnect);
   if (hit?.kind !== "pane") return;
   const [item] = dragCreateItems(deps.board, from);

@@ -30,6 +30,21 @@ describe("阶段在画布上的呈现", () => {
     const b = { ...staged(), stages: [{ id: "s", name: "空", nodes: ["gone"], collapsed: false, extra: {} }] };
     expect(stageBoxes(b, () => undefined)).toEqual([]);
   });
+
+  it("只读查看时收起的阶段按展开尺寸画（不改画板）", () => {
+    const board = staged();
+    const boxes = stageBoxes(board, (id) => (id === "a" ? { width: 300, height: 200 } : undefined), true);
+    const s2 = board.stages![1];
+    expect(boxes.find((b) => b.stage.id === s2.id)).toMatchObject({
+      stage: { ...s2, collapsed: false },
+      x: 1000 - STAGE_PADDING,
+      y: 1000 - STAGE_PADDING,
+      width: 100 + 2 * STAGE_PADDING,
+      height: 50 + 2 * STAGE_PADDING,
+      count: 1,
+    });
+    expect(board.stages![1].collapsed).toBe(true);
+  });
 });
 
 // ---- 建议保留（#144）----

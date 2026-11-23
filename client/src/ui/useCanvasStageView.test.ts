@@ -6,7 +6,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newBoard, serializeBoard, type Board, type BoardNode, type Stage } from "../core/board";
 import type { BoardChange, EditResult } from "../core/edit";
-import { nextStageName, STAGE_PADDING } from "../core/stages";
 import { boardBytes, type BoardMeasure } from "../core/tidy";
 import { TIDY_TEXT } from "./boardText";
 import { useCanvasStageView, type CanvasStageView } from "./useCanvasStageView";
@@ -144,33 +143,16 @@ describe("收起的阶段与阶段框", () => {
     expect(view.hidden.size).toBe(0);
   });
 
-  it("框按成员显示尺寸画：量到的用实测、没量到的用存的尺寸，成员都不在画板上的阶段不画", async () => {
+  it("阶段框只接住 core 算出的尺寸集合，不重放尺寸矩阵", async () => {
     const board = boardOf(
       [promptNode("a", [10, 20], [100, 100]), promptNode("b", [200, 300], [50, 50])],
       [stage("s1", ["a", "b"], true), stage("s2", ["已删掉的节点"])],
     );
     await show(propsOf(board, { measured: { a: { width: 300, height: 200 } } }));
 
-    expect(view.boxes).toEqual([
-      {
-        stage: board.stages![0],
-        // a 按实测 300×200（10,20 → 310,220），b 按存的 50×50（200,300 → 250,350），外留边距。
-        x: 10 - STAGE_PADDING,
-        y: 20 - STAGE_PADDING,
-        width: 310 + STAGE_PADDING - (10 - STAGE_PADDING),
-        height: 350 + STAGE_PADDING - (20 - STAGE_PADDING),
-        count: 2,
-      },
-    ]);
-  });
-
-  it("只读查看时框强制展开（不按收起画成小块）", async () => {
-    const board = boardOf([promptNode("a", [10, 20])], [stage("s1", ["a"], true)]);
-    await show(propsOf(board, { readOnly: true }));
-
-    expect(view.boxes).toHaveLength(1);
-    expect(view.boxes[0].stage.collapsed).toBe(false);
-    expect(view.boxes[0].width).toBe(100 + 2 * STAGE_PADDING);
+    expect(view.boxes.map((b) => b.stage.id)).toEqual(["s1"]);
+    expect(view.boxes[0].count).toBe(2);
+    expect(view.hidden).toEqual(new Set(["a", "b"]));
   });
 });
 
@@ -185,7 +167,8 @@ describe("新建阶段", () => {
     await show(propsOf(stale, { boardRef: { current: latest } }));
     await run(() => view.newStage(["a"]));
 
-    expect(applied).toEqual([{ kind: "newStage", name: nextStageName(latest), nodes: ["a"] }]);
+    // 写字面量：取最新画板算出的名字是「阶段 2」，不用被测函数再算一遍。
+    expect(applied).toEqual([{ kind: "newStage", name: "阶段 2", nodes: ["a"] }]);
     expect(view.editingStage).toBe("s-new");
 
     await run(() => view.onEditingDone());

@@ -96,21 +96,49 @@ describe("撤销 / 重做", () => {
     expect(onUndo).toHaveBeenCalledTimes(2);
   });
 
-  it("不带 Ctrl / ⌘、带 Alt、焦点在输入区、画布已卸载都不响应", async () => {
-    press({ key: "z" });
-    press({ key: "z", ctrlKey: true, altKey: true });
+  it("不带 Ctrl / ⌘ 或带 Alt 的组合不归画板管", () => {
+    expect(press({ key: "z" }).defaultPrevented).toBe(false);
+    expect(press({ key: "z", ctrlKey: true, altKey: true }).defaultPrevented).toBe(false);
+    expect(onUndo).not.toHaveBeenCalled();
+  });
+
+  it("焦点在输入区：连原生撤销也让给它", () => {
     const input = document.createElement("input");
     document.body.append(input);
-    const inField = press({ key: "z", ctrlKey: true }, input);
-    input.remove();
+    try {
+      expect(press({ key: "z", ctrlKey: true }, input).defaultPrevented).toBe(false);
+    } finally {
+      input.remove();
+    }
     expect(onUndo).not.toHaveBeenCalled();
-    // 输入区里的组合连原生撤销也让给它。
-    expect(inField.defaultPrevented).toBe(false);
+  });
 
+  it("画布根还没挂上（wrapper 为 null）时不响应", async () => {
     opts = { ...opts, wrapper: { current: null } };
     await show();
     press({ key: "z", ctrlKey: true });
     expect(onUndo).not.toHaveBeenCalled();
+  });
+
+  it("大写按键照旧（键盘的大写锁定不影响快捷键）", () => {
+    expect(press({ key: "Z", ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(onUndo).toHaveBeenCalledTimes(1);
+  });
+
+  it("弹窗开着时不复制", async () => {
+    opts.dialogOpen.current = true;
+    await show();
+    const event = press({ key: "c", ctrlKey: true });
+    expect(event.defaultPrevented).toBe(false);
+    expect(readClipboard()).toBeNull();
+    expect(port.calls.copyText).toEqual([]);
+  });
+
+  it("带 Shift 的 C 与 Ctrl+Shift+V 都不处理", () => {
+    expect(press({ key: "c", ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(false);
+    expect(press({ key: "v", ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(false);
+    expect(readClipboard()).toBeNull();
+    expect(port.calls.copyText).toEqual([]);
   });
 
   it("画布根存在但已脱离文档时不响应，重新接入后恢复", () => {
@@ -212,45 +240,23 @@ describe("复制图片（#130）", () => {
     expect(toast).not.toHaveBeenCalled();
   });
 
-  it("多选（含图片）仍复制节点标记，不碰系统剪贴板里的图片", async () => {
-    board = { ...newBoard("画板"), nodes: [reference("r1", "参考/cat.png"), prompt("p1")] };
-    opts = { ...opts, boardRef: { current: board }, selectedRef: { current: new Set(["r1", "p1"]) } };
-    await show();
-    const event = press({ key: "c", ctrlKey: true });
-    await settle();
-    expect(event.defaultPrevented).toBe(true);
-    expect(port.calls.copyImage).toEqual([]);
-    expect(port.calls.copyText).toEqual([nodeMarker(2)]);
-    expect(readClipboard()?.nodes.map((n) => n.id)).toEqual(["r1", "p1"]);
-  });
+  // 选区分派（多选含图片、提示词节点、已不在画板上的 id 都走节点复制）由 core/pageInput 的
+  // copyTarget 拥有；这里只留「单选参考图走图片」这一条本 hook 独有的执行路径。
 
-  it("单选提示词节点仍复制节点标记，不碰图片", async () => {
-    const event = press({ key: "c", ctrlKey: true });
-    await settle();
-    expect(event.defaultPrevented).toBe(true);
-    expect(port.calls.copyImage).toEqual([]);
-    expect(port.calls.copyText).toEqual([nodeMarker(1)]);
-  });
-
-  it("格式不受支持（HEIC、TIFF）：明确失败并指向该节点的「另存为…」", async () => {
-    port.media.copyImage = async () => ({ ok: false, reason: "unsupported" });
-    await selectImage("参考/cat.heic");
+  it.each([
+    { name: "HEIC", file: "参考/cat.heic", detail: undefined },
+    { name: "TIFF", file: "参考/cat.tiff", detail: "tiff" },
+  ])("格式不受支持（$name）：明确失败并指向该节点的「另存为…」", async ({ file, detail }) => {
+    port.media.copyImage = async () => ({ ok: false, reason: "unsupported", ...(detail ? { detail } : {}) });
+    await selectImage(file);
     press({ key: "c", ctrlKey: true });
     await settle();
     expect(toast).toHaveBeenCalledTimes(1);
     const message = toast.mock.calls[0][0] as string;
     expect(message).toContain("复制图片失败");
     expect(message).toContain("另存为");
-  });
-
-it("格式不受支持时提示带上 Go 认出的容器名（TIFF），并指向「另存为…」", async () => {
-    port.media.copyImage = async () => ({ ok: false, reason: "unsupported", detail: "tiff" });
-    await selectImage("参考/cat.tiff");
-    press({ key: "c", ctrlKey: true });
-    await settle();
-    const message = toast.mock.calls[0][0] as string;
-    expect(message).toContain("TIFF");
-    expect(message).toContain("另存为");
+    // Go 认出容器名时把格式说清楚（TIFF），认不出时不编一个名字。
+    if (detail) expect(message).toContain("TIFF");
   });
 
   it("剪贴板被占用：说成可重试，并指向「另存为…」，不报成功", async () => {
