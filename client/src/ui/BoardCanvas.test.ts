@@ -648,81 +648,27 @@ describe("上下文菜单", () => {
   });
 });
 
-describe("键盘快捷键", () => {
-  it("Ctrl+Z 撤销，Ctrl+Y 与 Ctrl+Shift+Z 重做", async () => {
+describe("键盘快捷键（接线）", () => {
+  // 键盘判定与执行归 useBoardKeyboard（撤销 / 重做 / 复制的矩阵、⌘ 等效、输入区放行都在那里），
+  // 这里只留「挂上了、且落到真实回调」的接线冒烟。
+  it("Ctrl+Z 接到 onUndo、Ctrl+Y 接到 onRedo", async () => {
     const { onUndo, onRedo } = await renderCanvas();
     await press("z", { ctrlKey: true });
     expect(onUndo).toHaveBeenCalledTimes(1);
     await press("y", { ctrlKey: true });
     expect(onRedo).toHaveBeenCalledTimes(1);
-    await press("z", { ctrlKey: true, shiftKey: true });
-    expect(onRedo).toHaveBeenCalledTimes(2);
-    // ⌘ 同效（Mac）。
-    await press("z", { metaKey: true });
-    expect(onUndo).toHaveBeenCalledTimes(2);
   });
 
-  it("Ctrl+C 复制选中节点：写应用内剪贴板与系统剪贴板标记，并吞掉默认行为", async () => {
+  it("Ctrl+C 把选区复制成节点标记（系统剪贴板里是标记文本）", async () => {
     const { apply } = await renderCanvas();
     await selectNodes(["p1", "r1"]);
-    const event = await press("c", { ctrlKey: true });
+    await press("c", { ctrlKey: true });
     await flush();
-    // 只有真复制到节点才拦默认行为（系统剪贴板里那段文本就是复制的产物）。
-    expect(event.defaultPrevented).toBe(true);
     expect(port.media.copyText).toHaveBeenCalledWith(nodeMarker(2));
     // 复制本身不写画板。
     expect(editChanges(apply)).toEqual([]);
   });
 
-  it("Ctrl+C 空选区：不写剪贴板、不拦默认行为", async () => {
-    await renderCanvas();
-    const event = await press("c", { ctrlKey: true });
-    await flush();
-    expect(event.defaultPrevented).toBe(false);
-    expect(port.media.copyText).not.toHaveBeenCalled();
-  });
-
-  it("系统剪贴板写不进去时提示可以用 Ctrl+J 原地复制", async () => {
-    const { toast } = await renderCanvas();
-    await selectNodes(["p1"]);
-    vi.mocked(port.media.copyText).mockRejectedValueOnce(new Error("浏览器拒绝了复制操作"));
-    await press("c", { ctrlKey: true });
-    await flush();
-    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.markerUnwritable);
-  });
-
-  it("Ctrl+V 不再由 keydown 管（粘贴走页面级 paste 事件）", async () => {
-    const harness = await renderCanvas();
-    await selectNodes(["p1"]);
-    await press("c", { ctrlKey: true });
-    const event = await press("v", { ctrlKey: true });
-    expect(event.defaultPrevented).toBe(false);
-    expect(appliedChanges(harness.apply).flatMap((c) => (c.kind === "paste" ? [c] : []))).toEqual([]);
-  });
-
-  it("焦点在输入框里时快捷键不作用于画板", async () => {
-    const harness = await renderCanvas();
-    await selectNodes(["p1"]);
-    const input = document.createElement("input");
-    document.body.append(input);
-    try {
-      input.focus();
-      await press("z", { ctrlKey: true }, input);
-      await press("y", { ctrlKey: true }, input);
-      await press("c", { ctrlKey: true }, input);
-      await press("v", { ctrlKey: true }, input);
-      await press("ArrowRight", {}, input);
-      const kinds = appliedChanges(harness.apply).map((c) => c.kind);
-      expect(harness.onUndo).not.toHaveBeenCalled();
-      expect(harness.onRedo).not.toHaveBeenCalled();
-      expect(kinds).not.toContain("paste");
-      expect(kinds).not.toContain("nudge");
-      // Ctrl+C 也不能抢输入框里的复制。
-      expect(port.media.copyText).not.toHaveBeenCalled();
-    } finally {
-      input.remove();
-    }
-  });
 });
 
 describe("页面级粘贴（#96：从系统剪贴板粘图片 / 节点）", () => {
