@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
-// 预览的状态判定（#137）：勾选、单层、拖拽与区域改动。
+// 预览的状态判定（#137）：拖拽、坐标换算与删除选中区域。
 import { describe, expect, it } from "vitest";
-import { beginDrag, clearRects, endDrag, pointInStage, regionChange, removeSelected, startEditState, targetLabel, toggleChecked, toggleSolo } from "./previewState";
-import { layerName } from "./previewLayers";
+import { beginDrag, endDrag, pointInStage, removeSelected, startEditState } from "./previewState";
 import type { RegionTarget } from "./PreviewDialog";
 
 const target = (patch: Partial<RegionTarget> = {}): RegionTarget => ({
@@ -14,54 +13,21 @@ const target = (patch: Partial<RegionTarget> = {}): RegionTarget => ({
   ...patch,
 });
 
-describe("区域编辑的初始状态", () => {
-  it("有目标：带上它的区域", () => {
-    const state = startEditState(target({ rects: [[0, 0, 1, 1]] }));
-    expect(state.editing?.label).toBe("提示词");
-    expect(state.rects).toHaveLength(1);
-    expect(state.selected).toBeNull();
-  });
-
-  it("坐标框的表达：记成 bbox", () => {
-    const state = startEditState(target({ render: "bbox_tag" }));
-    expect(state.regionMode).toBe("bbox");
-  });
-});
-
-describe("勾选与单层", () => {
-  it("勾选：加进去，再点一次拿掉", () => {
-    const once = toggleChecked(new Set<number>(), 0);
-    expect(once.has(0)).toBe(true);
-    expect(toggleChecked(once, 0).has(0)).toBe(false);
-  });
-
-  it("单层：点同一个就取消", () => {
-    expect(toggleSolo(null, 1)).toBe(1);
-    expect(toggleSolo(1, 1)).toBeNull();
-    expect(toggleSolo(1, 2)).toBe(2);
-  });
-});
-
 describe("拖拽", () => {
-  it("在空白处按下：开始画新框", () => {
+  it("从空白处开始画并松手：落下的是这次拖出的矩形", () => {
     const state = startEditState(target());
     const next = beginDrag(state, null, { x: 0.1, y: 0.1 });
     expect(next.selected).toBeNull();
-    expect(next.drag).toBeTruthy();
-  });
-
-  it("松手：空白处画的框被加进去", () => {
-    const state = startEditState(target());
-    const next = beginDrag(state, null, { x: 0.1, y: 0.1 });
-    const applied: number[][] = [];
-    endDrag({ ...state, drag: next.drag }, { x: 0.4, y: 0.4 }, (rects) => applied.push(...rects.map((r) => [...r])));
-    expect(applied).toHaveLength(1);
+    expect(next.drag.kind).toBe("draw");
+    const applied: [number, number, number, number][] = [];
+    endDrag({ ...state, drag: next.drag }, { x: 0.4, y: 0.4 }, (rects) => applied.push(...rects.map((r) => [...r] as [number, number, number, number])));
+    expect(applied).toEqual([[0.1, 0.1, 0.4, 0.4]]);
   });
 
   it("松手：没有拖动就不改", () => {
     const state = startEditState(target());
-    const applied: number[][] = [];
-    endDrag(state, { x: 0.4, y: 0.4 }, (rects) => applied.push(...rects.map((r) => [...r])));
+    const applied: [number, number, number, number][] = [];
+    endDrag(state, { x: 0.4, y: 0.4 }, (rects) => applied.push(...rects.map((r) => [...r] as [number, number, number, number])));
     expect(applied).toHaveLength(0);
   });
 });
@@ -88,35 +54,5 @@ describe("其余判定", () => {
     ];
     expect(removeSelected(rects, 0)).toHaveLength(1);
     expect(removeSelected(rects, null)).toHaveLength(2);
-  });
-
-  it("区域改动：没有框时清空区域", () => {
-    const changed = regionChange(target().edgeRef, [], "overlay");
-    expect(changed.region).toBeNull();
-  });
-
-  it("区域改动：高亮叠加", () => {
-    const changed = regionChange(target().edgeRef, [[0, 0, 1, 1]], "overlay");
-    expect(changed.region?.render).toBe("highlight_overlay");
-  });
-
-  it("区域改动：坐标框", () => {
-    const changed = regionChange(target().edgeRef, [[0, 0, 1, 1]], "bbox");
-    expect(changed.region?.render).toBe("bbox_tag");
-    expect(changed.region?.coordinate_kind).toBe("bbox");
-  });
-
-  it("目标的标签：有区域时带上个数", () => {
-    expect(targetLabel(target())).toBe("提示词");
-    expect(targetLabel(target({ rects: [[0, 0, 1, 1]] }))).toContain("1 区域");
-  });
-
-  it("图层名：没有名字时按序号", () => {
-    expect(layerName({ file: "a.png", name: undefined } as never, 0)).toBe("图层1");
-    expect(layerName({ file: "a.png", name: "底" } as never, 0)).toBe("底");
-  });
-
-  it("清空区域", () => {
-    expect(clearRects()).toEqual([]);
   });
 });

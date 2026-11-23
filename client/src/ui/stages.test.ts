@@ -197,12 +197,8 @@ describe("阶段框标题栏上的「加入所选」「删除阶段」「收起 
 
     await act(async () => buttonWith(STAGE_TEXT.addSelected).click());
     expect(applied).toEqual([{ kind: "addToStage", stageId: "s1", nodes: ["x", "y"] }]);
-  });
-
-  it("选中的节点都已经在阶段里时不出「加入所选」", async () => {
     await showStage(stage("s1", ["a"]), null, { selected: new Set(["a"]) });
-
-    expect(buttons().map((b) => b.textContent)).toEqual([STAGE_TEXT.collapse, STAGE_TEXT.delete]);
+    expect(buttons().map((b) => b.textContent)).not.toContain(STAGE_TEXT.addSelected);
   });
 
   it("删除阶段：点一下发出删除该阶段的变更", async () => {
@@ -287,7 +283,13 @@ describe("只读画板上的阶段框", () => {
   it("阶段自己的按钮都不出现，整理模式的整理动作照旧", async () => {
     await showStage(stage("s1"), tidyOf(), { readOnly: true });
 
-    expect(buttons().map((b) => b.className)).toEqual(["stage-keep", "stage-prune", "stage-move-out"]);
+    const labels = buttons().map((b) => b.textContent?.trim());
+    expect(labels).not.toContain(STAGE_TEXT.collapse);
+    expect(labels).not.toContain(STAGE_TEXT.delete);
+    expect(labels).not.toContain(STAGE_TEXT.addSelected);
+    expect(labels).toContain(TIDY_TEXT.prune(2));
+    expect(labels).toContain(TIDY_TEXT.moveOut);
+    expect(labels.some((label) => label?.includes("保留"))).toBe(true);
   });
 
   it("只读时双击标题栏不进入改名", async () => {

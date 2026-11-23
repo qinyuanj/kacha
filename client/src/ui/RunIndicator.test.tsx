@@ -68,6 +68,11 @@ describe("顶栏运行指示", () => {
     await render([task("a", "running"), task("b", "waiting")], { ...idle, busy: true, pending: 2, running: 1, waiting: 1, boards: ["A"] });
     await act(async () => (container.querySelector("button") as HTMLButtonElement).click());
     expect(cancelAll().disabled).toBe(false);
+    await act(async () => dom.unmount());
+    dom = createRoot(container);
+    await render([task("a", "running"), task("b", "waiting")], { ...idle, busy: true, pending: 2, running: 1, backoff: 1, boards: ["A"] });
+    await act(async () => (container.querySelector("button") as HTMLButtonElement).click());
+    expect(cancelAll().disabled).toBe(false);
   });
 
   it("列表里取消一份：交出任务编号", async () => {

@@ -307,15 +307,12 @@ describe("RatioCombo", () => {
     expect(onPick).toHaveBeenCalledWith("16:9");
     // 画板值没变（父组件没重渲染）：输入框回到改前的 1:1，等画板文本追上。
     expect(input().value).toBe("1:1");
-  });
-
-  it("手填的文本约分后与当前值相同就不提交（不占撤销步）", async () => {
-    const onPick = vi.fn();
-    await show(combo(manual, onPick));
+    const samePick = vi.fn();
+    await show(combo(manual, samePick));
     await act(async () => input().focus());
     await act(async () => typeInto(input(), "32:18"));
     await act(async () => input().blur());
-    expect(onPick).not.toHaveBeenCalled();
+    expect(samePick).not.toHaveBeenCalled();
     expect(input().value).toBe("16:9");
   });
 
@@ -369,7 +366,7 @@ describe("RatioCombo", () => {
     expect(options()[0].getAttribute("aria-selected")).toBe("true");
   });
 
-  it("点预设换宽高比；点当前项不提交", async () => {
+  it("点预设或自动项换宽高比；点当前项不提交", async () => {
     const onPick = vi.fn();
     await show(combo(manual, onPick));
     await openList();
@@ -378,19 +375,16 @@ describe("RatioCombo", () => {
     await openList();
     await act(async () => options()[2].click());
     expect(onPick).toHaveBeenCalledTimes(1);
-  });
-
-  it("手动时点「自动」转为自动；已经是自动就不提交", async () => {
-    const onPick = vi.fn();
-    await show(combo(manual, onPick));
-    await openList();
-    await act(async () => options()[0].click());
-    expect(onPick).toHaveBeenCalledWith(AUTO_RATIO);
     const autoPick = vi.fn();
     await show(combo(auto, autoPick));
     await openList();
     await act(async () => options()[0].click());
     expect(autoPick).not.toHaveBeenCalled();
+    const manualPick = vi.fn();
+    await show(combo(manual, manualPick));
+    await openList();
+    await act(async () => options()[0].click());
+    expect(manualPick).toHaveBeenCalledWith(AUTO_RATIO);
   });
 
   it("禁用时不能手填与展开；手填途中被锁定则丢掉草稿", async () => {
@@ -441,14 +435,11 @@ describe("结果节点上的建议保留标记", () => {
   it("整理模式里带建议保留的结果节点上有标记", async () => {
     await showResult(dataOf({ suggestKeep: true }));
     expect(badgeTexts()).toEqual(["建议保留"]);
-  });
-
-  it("不在整理模式（没有建议）时不出现标记", async () => {
     await showResult(dataOf());
     expect(badgeTexts()).toEqual([]);
   });
 
-  it("定稿的结果只显示定稿角标：建议保留不会出现在定稿的结果上", async () => {
+  it("定稿的结果显示定稿角标（建议保留抑制由数据层负责）", async () => {
     await showResult(dataOf({ node: resultModel({ final: true }) }));
     expect(badgeTexts()).toEqual(["定稿"]);
   });
