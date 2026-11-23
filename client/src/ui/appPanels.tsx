@@ -8,7 +8,9 @@ import { BoardToolbar } from "./BoardToolbar";
 import { ContextMenu } from "./ContextMenu";
 import { RunIndicator } from "./RunIndicator";
 import { TabBar } from "./TabBar";
+import { ThemeSwitch } from "./ThemeSwitch";
 import { UpdateToolbarControl } from "./UpdateToolbarControl";
+import type { ThemeControl } from "./useTheme";
 import type { UpdateControl } from "./useUpdate";
 import type { Session } from "./useBoardSessions";
 
@@ -117,6 +119,7 @@ export function AppToolbar({
   onOpenFeedback,
   feedbackAvailable = true,
   update,
+  theme,
 }: {
   /** 画布把工具栏 portal 进这个容器。 */
   setToolbarSlot(slot: HTMLElement | null): void;
@@ -138,6 +141,8 @@ export function AppToolbar({
   feedbackAvailable?: boolean;
   /** 更新入口的接线（#181）：首页版本号旁的那一份，与高级设置共用同一份快照与动作。 */
   update: UpdateControl;
+  /** 主题切换入口的接线（#221）：档位与切换动作来自 App。 */
+  theme: ThemeControl;
 }) {
   return (
     <div className="board-toolbar">
@@ -164,6 +169,8 @@ export function AppToolbar({
         <button className="topbar-button" onClick={onOpenFeedback} aria-haspopup="dialog" title={feedbackAvailable ? "提交反馈" : "反馈暂不可用，点击重试"}>
           {feedbackAvailable ? "反馈" : "反馈（暂不可用）"}
         </button>
+        {/* 主题切换（#221）：常驻紧凑入口，点击即时生效，不进设置面板。 */}
+        <ThemeSwitch choice={theme.choice} onChoose={theme.choose} />
         <button className="topbar-button" onClick={onOpenSettings} disabled={!settingsLoaded}>
           ⚙ 高级设置
         </button>

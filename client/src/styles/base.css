@@ -1,0 +1,208 @@
+/* 全局基础层（#221）：盒模型与页面边界、链接、滚动条、焦点环、按钮变体、原生表单控件。
+ * 颜色一律引用 tokens.css 的语义变量；两套主题共用同一套规范，靠变量切换。
+ * 层叠顺序：tokens → base → shell → canvas → dialogs。
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* 页面输入接管（#97）：滚到边界时不出现回弹串动。 */
+html,
+body {
+  overscroll-behavior: none;
+}
+
+button,
+select,
+input,
+textarea {
+  font: inherit;
+}
+
+/* ---- 链接与文本工具 ---- */
+a {
+  color: var(--link);
+}
+a:hover {
+  color: var(--accent-hover);
+}
+.link {
+  color: var(--link);
+}
+
+.tab-close,
+.tab-new,
+.icon,
+.link {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.muted {
+  color: var(--text-2);
+}
+.small {
+  font-size: 11px;
+}
+.mono {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+/* ---- 按钮体系：普通按钮的中性外观 ----
+ * 此前普通 button 完全靠系统外观：暗色下就是一块系统浅灰按钮，弹窗里的取消 / 刷新 / 关闭都是它。
+ * 选择器用 :where() 把权重压到 0，主要 / 危险 / 图标 / 轻量链接四种变体与各域模块自己的按钮规则
+ * （.board-toolbar button、.context-menu button、.theme-switch 等）都仍然盖得住，不必重复定义外观。 */
+:where(button) {
+  padding: 4px 10px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  background: var(--control-bg);
+  color: var(--text-1);
+  cursor: pointer;
+}
+:where(button:hover:not(:disabled):not([aria-disabled="true"])) {
+  background: var(--control-hover);
+}
+:where(button:active:not(:disabled):not([aria-disabled="true"])) {
+  background: var(--control-active);
+}
+:where(button:disabled) {
+  background: var(--surface-sunken);
+  color: var(--text-3);
+  cursor: default;
+}
+
+/* ---- 按钮变体：主要 / 危险（图标与轻量链接的基座在下面）---- */
+button.primary {
+  background: var(--success-fill);
+  border: 1px solid var(--success);
+  color: var(--text-on-accent);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+button[aria-disabled="true"] {
+  color: var(--text-3);
+  cursor: default;
+}
+button.primary:disabled,
+button.primary[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.danger {
+  background: var(--danger-fill);
+  border: 1px solid var(--danger-fill-hover);
+  color: var(--text-on-accent);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+button.danger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- 原生表单控件：输入框 / 文本域 ----
+ * 选择器用 :where() 把权重压到 0：域模块里只写布局的选择器（如 .ratio-combo input 的
+ * padding-right）必须还能盖过这里的默认外观。 */
+input:where(:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"])),
+textarea {
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text-1);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-3);
+}
+input:disabled,
+textarea:disabled,
+select:disabled {
+  color: var(--text-3);
+  background: var(--surface-sunken);
+  cursor: default;
+}
+
+/* ---- 原生下拉框：去掉系统箭头，用随主题的正相反色箭头 ---- */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-width: 0;
+  padding: 4px 24px 4px 8px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  background-color: var(--control-bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2357606a' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  color: var(--text-1);
+  cursor: pointer;
+}
+/* 暗色下的同一枚箭头：只换描边色，形状与位置不变。
+ * 用 :not([data-theme="light"]) 而不是 =["dark"]：没有属性时就是暗色，与 tokens 的口径一致。 */
+:root:not([data-theme="light"]) select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23a6b0bb' stroke-width='1.5'/%3E%3C/svg%3E");
+}
+
+/* ---- 进度条 ---- */
+progress {
+  width: 100%;
+  height: 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: var(--surface-sunken);
+}
+progress::-webkit-progress-bar {
+  background: var(--surface-sunken);
+}
+progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+}
+progress::-moz-progress-bar {
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+}
+
+/* ---- 滚动条：细、随主题、不抢视觉 ---- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scrollbar-thumb);
+  background-clip: content-box;
+}
+
+/* ---- 统一焦点环：键盘走查时每个可交互元素都有同一圈强调 ---- */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}

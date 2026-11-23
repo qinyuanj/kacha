@@ -39,7 +39,8 @@ const IMAGE_INFO = { sha256: SHA_A, bytes: 12, width: 240, height: 160, format: 
 
 /** @xyflow/react 替身里供测试读 / 改的部分：captured = ReactFlow 这一帧收到的 props。 */
 const xyflow = vi.hoisted(() => {
-  const captured: { props: Record<string, unknown> } = { props: {} };
+  /** props = ReactFlow 这一帧收到的 props；plugin = 画布插件（Background / Controls / MiniMap 等）各自收到的 props。 */
+  const captured: { props: Record<string, unknown>; plugin: Record<string, Record<string, unknown>> } = { props: {}, plugin: {} };
   /** 拖线态（useConnection 收到的 ConnectionState）：换成一个进行中的连线即可模拟「正拖着一条线」。 */
   const connection: { current: Record<string, unknown> } = { current: { inProgress: false, fromHandle: null } };
   const flow = {
@@ -61,7 +62,10 @@ const xyflow = vi.hoisted(() => {
 vi.mock("@xyflow/react", async () => {
   const { createElement: h } = await import("react");
   /** 只是占位的画布插件：渲染成带名字的 div，方便断言「在不在」。 */
-  const box = (name: string) => (props: { children?: ReactNode }) => h("div", { "data-xyflow": name }, props.children);
+  const box = (name: string) => (props: { children?: ReactNode } & Record<string, unknown>) => {
+    xyflow.captured.plugin[name] = props;
+    return h("div", { "data-xyflow": name }, props.children);
+  };
   return {
     ReactFlow: (props: { children?: ReactNode }) => {
       // 把这一帧的 props 交给测试；节点 / 连线的 selected、画布配置都从这里断言。
@@ -203,6 +207,7 @@ function makeProps(patch: Partial<Props> = {}) {
     toolbarSlot: null,
     focus: null,
     tidying: false,
+    theme: "dark",
     ...spies,
     ...patch,
   };
@@ -823,6 +828,29 @@ describe("画布结构", () => {
     for (const name of ["background", "controls", "minimap"]) {
       expect(container.querySelector(`[data-xyflow="${name}"]`)).not.toBeNull();
     }
+  });
+
+  it("有效主题交给 React Flow 色彩模式，点阵背景与迷你地图带 token 配置", async () => {
+    await renderCanvas({ theme: "light" });
+    expect(flowProps().colorMode).toBe("light");
+    expect(xyflow.captured.plugin.background).toMatchObject({
+      gap: 20,
+      color: "var(--rf-dot)",
+      bgColor: "var(--rf-background)",
+    });
+    expect(xyflow.captured.plugin.minimap).toMatchObject({
+      pannable: true,
+      zoomable: true,
+      bgColor: "var(--rf-minimap-bg)",
+      maskColor: "var(--rf-minimap-mask)",
+      maskStrokeColor: "var(--rf-controls-border)",
+      maskStrokeWidth: 1,
+      nodeColor: "var(--rf-minimap-node)",
+    });
+    // 同一个画布换主题再渲染：色彩模式跟着有效主题走，背景 token 引用不变。
+    await renderCanvas({ theme: "dark" });
+    expect(flowProps().colorMode).toBe("dark");
+    expect(xyflow.captured.plugin.background).toMatchObject({ bgColor: "var(--rf-background)" });
   });
 
   it("整理模式：根类名带 tidying、出整理条、可退出", async () => {

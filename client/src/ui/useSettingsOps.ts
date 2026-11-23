@@ -3,9 +3,11 @@ import {
   DEFAULT_SETTINGS,
   discoveryFromCache,
   loadSettings,
+  mayOverwriteSettings,
   normalizeBaseUrl,
   refreshModels as refreshModelsWith,
   saveSettings,
+  serializeSettings,
   type Discovery,
   type KeyPersistence,
   type LoadedSettings,
@@ -13,6 +15,7 @@ import {
   type Settings,
   type SettingsPorts,
 } from "../core/settings";
+import type { ThemeChoice } from "../core/theme";
 import { settingsFileProblem } from "./settingsText";
 
 /** 连接测试的结果。 */
@@ -45,6 +48,24 @@ export const initialSettingsState = (): SettingsState => ({
 export function fileProblemOf(loaded: LoadedSettings): string | null {
   if (loaded.kind === "corrupt") return settingsFileProblem("corrupt", undefined, loaded.reason);
   return settingsFileProblem(loaded.kind, loaded.kind === "newer" ? loaded.version : undefined);
+}
+
+/**
+ * 切换主题（#221）：内存状态立刻生效；写不写盘看两道门。
+ *
+ * 1. 设置还没读到（loaded=false）：此刻磁盘上是什么内容完全未知，写下去会把用户真实的
+ *    网关地址 / 并发 / 中继与全部未知字段冲成默认值，所以只改内存；载入完成后由
+ *    ui/useTheme 补写一次。
+ * 2. mayOverwriteSettings：文件是 newer / unreadable 时只改内存，不覆盖别人的版本。
+ */
+export async function setThemeState(ports: SettingsPorts, current: SettingsState, choice: ThemeChoice): Promise<SettingsState> {
+  const next: Settings = { ...current.settings, theme: choice };
+  const state: SettingsState = { ...current, settings: next };
+  if (!current.loaded) return state;
+  if (!mayOverwriteSettings(current.file)) return state;
+  // 写盘失败不回滚界面：本次会话的主题已经生效，下次打开再写一次。
+  await ports.writeSettings(serializeSettings(next)).catch(() => undefined);
+  return state;
 }
 
 /** 刷新模型后要不要把发现结果写回界面：网关地址换了就不写（那是另一个网关的模型）。 */

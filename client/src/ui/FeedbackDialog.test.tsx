@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { ShellProvider } from "./shell";
 import { FeedbackDialog, redactFeedbackText } from "./FeedbackDialog";
+import { FEEDBACK_TOKEN_NOTICE, FEEDBACK_TOKEN_SCOPE } from "../core/feedback";
 import type { FeedbackAttachment, FeedbackOutcome, FeedbackSpec } from "../shell/port";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -496,6 +497,7 @@ describe("用户自带 Gitea token（#213）", () => {
     expect(container.textContent).toContain("建 issue");
     expect(container.textContent).toContain("评论");
     expect(container.textContent).toContain("打标签");
+
     expect(container.textContent).toContain("上传附件");
   });
 });
@@ -526,5 +528,68 @@ describe("裸凭据脱敏（#229）", () => {
     expect(port.calls.copyText[0]).toContain("标题：");
     expect(port.calls.copyText[0]).not.toContain(bareHexToken);
     expect(port.calls.copyText[0]).not.toContain(bareSecretPlaceholder);
+  });
+});
+
+describe("弹窗语义结构（#219）", () => {
+  it("反馈弹窗用可见标题作为无障碍名称，字段标签走语义类名而不是位置选择器", async () => {
+    await show(createFakePort());
+    const dialog = container.querySelector<HTMLElement>("[role=dialog]")!;
+    const labelledBy = dialog.getAttribute("aria-labelledby")!;
+    const heading = container.querySelector<HTMLElement>(`#${labelledBy}`)!;
+    expect(heading.textContent).toBe("反馈");
+    expect(dialog.contains(heading)).toBe(true);
+    const labels = [...dialog.querySelectorAll(".form-row > .form-row-label")].map((el) => el.textContent);
+    expect(labels).toEqual(expect.arrayContaining(["标题（可选）", "分类", "正文", "Gitea token（仅本次提交）"]));
+  });
+
+  it("截图说明行把标签与「选择截图」按钮各自成元素，不再压成窄条", async () => {
+    await show(createFakePort());
+    const label = [...container.querySelectorAll(".form-row-label")].find((el) => el.textContent?.includes("截图"));
+    expect(label).toBeDefined();
+    expect(label!.parentElement!.querySelector("button")?.textContent).toBe("选择截图");
+  });
+
+  it("附件以列表项渲染，移除按钮按名字可辨且能移除该项", async () => {
+    const shot = new File([new Uint8Array([137, 80, 78, 71])], "画面.png", { type: "image/png" });
+    const port = createFakePort({ pickImages: [[shot]] });
+    await show(port);
+    await click("选择截图");
+    const list = container.querySelector("ul.feedback-attachments")!;
+    expect(list).not.toBeNull();
+    expect(list.querySelectorAll("li.feedback-attachment")).toHaveLength(1);
+    const remove = list.querySelector<HTMLButtonElement>("button.feedback-attachment-remove")!;
+    expect(remove.getAttribute("aria-label")).toBe("移除 画面.png");
+    await act(async () => remove.click());
+    expect(container.querySelector("ul.feedback-attachments")).toBeNull();
+  });
+
+  it("预览把令牌说明、权限范围与元数据说明分成独立块", async () => {
+    await show(createFakePort());
+    await setInput("正文", "语义块");
+    await click("预览");
+    expect(container.querySelector(".feedback-token-notice")?.textContent).toBe(FEEDBACK_TOKEN_NOTICE);
+    expect(container.querySelector(".feedback-token-scope")?.textContent).toBe(FEEDBACK_TOKEN_SCOPE);
+    expect(container.querySelector(".feedback-preview-meta")?.textContent).toContain("只含画板名字");
+  });
+
+  it("提交成功的回执块给出可点击外链与独立地址行", async () => {
+    await show(createFakePort());
+    await setInput("正文", "回执结构");
+    await click("预览");
+    await click("确认发送");
+    const receipt = container.querySelector<HTMLElement>(".feedback-receipt")!;
+    expect(receipt.querySelector("a")?.getAttribute("href")).toBe("https://gitea.test/kacha-feedback/issues/17");
+    expect(receipt.querySelector(".feedback-url")?.textContent).toContain("gitea.test");
+  });
+
+  it("失败回执把返回链接放在独立行，错误说明是可读的提示块", async () => {
+    const outcome: FeedbackOutcome = { ok: false, kind: "duplicate", message: "重复", number: 17, url: "https://gitea.test/kacha-feedback/issues/17" };
+    await show(createFakePort({ feedbackOutcome: outcome }));
+    await setInput("正文", "重复提交");
+    await click("预览");
+    await click("确认发送");
+    expect(container.querySelector(".feedback-return-link a")?.getAttribute("href")).toBe("https://gitea.test/kacha-feedback/issues/17");
+    expect(container.querySelector(".form-alert")?.textContent).toContain("刚刚已提交过 #17");
   });
 });

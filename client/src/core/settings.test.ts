@@ -18,6 +18,7 @@ import {
   saveSettings,
   serializeModelsCache,
   serializeSettings,
+  SETTINGS_FORMAT_VERSION,
   settingsFromForm,
   validateBaseUrl,
   validateFeedbackRelayUrl,
@@ -51,6 +52,38 @@ describe("高级设置 settings.json", () => {
   it("缺失时用默认值：v1 网关地址、并发 4", () => {
     expect(parseSettings(null)).toEqual({ kind: "ok", settings: DEFAULT_SETTINGS });
     expect(DEFAULT_SETTINGS).toMatchObject({ format_version: 1, base_url: "http://lzxsvn:3001", concurrency: 4 });
+  });
+
+  // #221：主题档位是可选字段——没写该字段的旧配置平滑回退默认暗色，格式版本不动。
+  it("主题：未写时默认暗色，格式版本不升", () => {
+    const parsed = parseSettings('{"format_version":1}');
+    expect(parsed.kind).toBe("ok");
+    expect(parsed.settings.theme).toBe("dark");
+    expect(SETTINGS_FORMAT_VERSION).toBe(1);
+  });
+
+  it("主题：合法档位保留，三档都能往返", () => {
+    for (const theme of ["dark", "light", "system"] as const) {
+      const text = serializeSettings({ ...DEFAULT_SETTINGS, theme });
+      expect(JSON.parse(text).theme, theme).toBe(theme);
+      expect(parseSettings(text)).toEqual({ kind: "ok", settings: { ...DEFAULT_SETTINGS, theme } });
+    }
+  });
+
+  it("主题：非法值回退默认暗色，其它字段不丢", () => {
+    const parsed = parseSettings('{"format_version":1,"base_url":"https://gw.example","concurrency":6,"theme":"auto","future":1}');
+    expect(parsed).toEqual({
+      kind: "ok",
+      settings: { format_version: 1, base_url: "https://gw.example", feedback_relay_url: "", concurrency: 6, theme: "dark", extra: { future: 1 } },
+    });
+  });
+
+  it("主题：序列化写在顶层（不是未知字段），未知字段仍原样保留", () => {
+    const text = serializeSettings({ ...DEFAULT_SETTINGS, theme: "light", extra: { future: [1] } });
+    const raw = JSON.parse(text);
+    expect(raw.theme).toBe("light");
+    expect(raw.future).toEqual([1]);
+    expect(text).not.toContain('"extra"');
   });
 
   it("往返并保留未知字段", () => {
@@ -296,7 +329,7 @@ describe("载入设置", () => {
 
   it("settings.json 不存在：用服务端给的默认网关地址合成默认设置", async () => {
     const { ports } = memoryPorts({ readSettings: async () => null, defaultBaseUrl: async () => "http://gw.example:3001" });
-    expect((await loadSettings(ports)).file).toEqual({ kind: "ok", settings: { format_version: 1, base_url: "http://gw.example:3001", feedback_relay_url: "", concurrency: 4, extra: {} } });
+    expect((await loadSettings(ports)).file).toEqual({ kind: "ok", settings: { ...DEFAULT_SETTINGS, base_url: "http://gw.example:3001" } });
   });
 
   it("settings.json 不存在且拿不到默认网关地址：按 unreadable 处理", async () => {

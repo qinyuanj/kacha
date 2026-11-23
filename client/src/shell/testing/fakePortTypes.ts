@@ -1,6 +1,7 @@
 // 内存壳端口的类型（#137）：从 shell/testing/fakePort.ts 拆出，供替身与各分组共用。
 import type { ImportOptions } from "../../core/boardPack";
 import type { BoardWriteOptions } from "../types";
+import type { ThemeChoice } from "../../core/theme";
 import type { ClipboardContent, ImageCopyResult } from "../port";
 import type { DiagnosticsOutcome, FeatureId, FeedbackOutcome, FeedbackSpec, PortFailureKind } from "../port";
 
@@ -39,6 +40,8 @@ export interface FakePortOptions {
   writeFailures?: Map<string, PortFailureKind>;
   /** 没有的能力。 */
   missing?: FeatureId[];
+  /** 宿主拒绝同步原生主题（#221）：验证切换不因原生窗口失败而中断。 */
+  nativeThemeFailure?: true;
   slots?: { used: number; total: number };
   /** 文件组已有的文件（绝对路径 → 字节）：readFile/sha256/inspectImage 只认这些与画板。 */
   files?: Record<string, Uint8Array>;
@@ -101,4 +104,6 @@ export interface FakeCalls {
   moveTargets?: string[];
   /** 替身认为的当前数据根；迁移成功后换成新位置。 */
   dataRootRoot?: string;
+  /** 通知宿主壳的主题档位（按顺序，#221）。 */
+  nativeTheme: ThemeChoice[];
 }

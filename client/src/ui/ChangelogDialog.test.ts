@@ -49,7 +49,7 @@ describe("更新说明弹窗", () => {
     expect(container.textContent).toContain("Windows 桌面客户端");
     expect(container.querySelector(".changelog-notice")?.textContent).toBe(changelog.NOTICE_PREFIX);
     expect(scroll).toHaveBeenCalledWith({ block: "start" });
-    expect(document.activeElement?.textContent).toBe("关闭");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("关闭");
   });
   it("只展示当前及更早版本，尚未发布版本不进入弹窗", async () => {
     vi.spyOn(changelog, "parseChangelog").mockReturnValue([

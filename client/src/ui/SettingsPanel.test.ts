@@ -7,6 +7,7 @@ import { DEFAULT_SETTINGS } from "../core/settings";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { ShellProvider } from "./shell";
 import { SettingsPanel } from "./SettingsPanel";
+import type { ThemeChoice } from "../core/theme";
 import type { SettingsState } from "./useSettingsOps";
 
 // React 19 的 act() 要在测试环境里显式打开。
@@ -29,6 +30,7 @@ afterEach(async () => {
 type PanelSettings = SettingsState & {
   save(next: unknown, apiKey: string): Promise<string | null>;
   testConnection(baseUrl: string, apiKey: string): Promise<{ ok: true; count: number } | { ok: false; message: string }>;
+  setTheme(choice: ThemeChoice): Promise<void>;
 };
 
 function settings(overrides: Partial<SettingsState> = {}): PanelSettings {
@@ -42,6 +44,7 @@ function settings(overrides: Partial<SettingsState> = {}): PanelSettings {
     discovery: { source: "none" },
     save: vi.fn(async () => null),
     testConnection: vi.fn(async () => ({ ok: true as const, count: 3 })),
+    setTheme: vi.fn(async () => undefined),
     ...overrides,
   } as unknown as PanelSettings;
 }
@@ -236,4 +239,28 @@ describe("诊断包导出（#162）", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+});
+
+describe("弹窗语义结构（#219）", () => {
+  it("高级设置每个字段落在自己的分区里，分区之间不混装", async () => {
+    const port = createFakePort({ userRoot: "C:\\data" });
+    await show(port, settings(), { prepare: async () => undefined, finish: () => undefined, guard: () => ({ pending: 0, packBusy: false, moving: false }) });
+    const panel = container.querySelector("[aria-label='高级设置']")!;
+    const sectionOf = (text: string) => {
+      const label = [...panel.querySelectorAll(".form-row > .form-row-label")].find((el) => el.textContent?.trim() === text);
+      expect(label).toBeTruthy();
+      return label!.closest(".settings-section");
+    };
+    const sections = ["网关基础地址", "反馈中继地址", "API 密钥", "连接测试", "并发上限", "数据位置"].map(sectionOf);
+    sections.forEach((section) => expect(section).not.toBeNull());
+    // 六个字段分属六个不同分区：不是一整个大表单，也没有两段被并成一段。
+    expect(new Set(sections).size).toBe(sections.length);
+  });
+
+  it("说明与警告挂在各自区段里，作为独立块而不是靠固定左缩进对齐", async () => {
+    await show(createFakePort(), settings({ fileProblem: "settings.json 已损坏" }));
+    const panel = container.querySelector("[aria-label='高级设置']")!;
+    expect(panel.querySelector(".notice-warn")?.textContent).toContain("settings.json 已损坏");
+    expect(panel.querySelector(".settings-section .form-hint")).not.toBeNull();
+  });
 });
