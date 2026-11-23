@@ -53,7 +53,7 @@ func PublisherKey() string {
 	return ""
 }
 
-// Options 是服务的依赖；测试替换掉网络、时钟与安装动作，不弹窗也不真装。
+// Options 是服务的依赖；测试替换掉网络与安装动作，不弹窗也不真装。
 type Options struct {
 	// Current 是当前运行版本。
 	Current string
@@ -65,17 +65,12 @@ type Options struct {
 	BaseURL string
 	// PublicKey 是发布者公钥（base64）；空则用内置的 publisherKey。
 	PublicKey string
-	// NoBuiltinKey 让 PublicKey 为空时不再回退到内置公钥，用来显式表达
-	// 「这次构建没有可信公钥」。测试与发布预检用它，正式装配不设。
-	NoBuiltinKey bool
 	// Client 是 HTTP 客户端；空则用带超时的默认客户端。
 	Client *http.Client
 	// Launch 启动安装器；空则真起进程。
 	Launch func(path string, args []string) error
 	// Quit 退出本应用；空则什么也不做（由装配层接 mygo.App.Quit）。
 	Quit func()
-	// Now 是时钟；空则用 time.Now。
-	Now func() time.Time
 }
 
 // dataRoot 是下载目录的父目录：装了 RootFunc 就跟当前数据根走（迁移后不往旧位置写）。
@@ -96,7 +91,6 @@ type Service struct {
 	client   *http.Client
 	launch   func(string, []string) error
 	quit     func()
-	now      func() time.Time
 
 	mu         sync.Mutex
 	snap       Snapshot
@@ -116,12 +110,8 @@ func New(opts Options) *Service {
 		base = DefaultBaseURL
 	}
 	keyText := strings.TrimSpace(opts.PublicKey)
-	if keyText == "" && !opts.NoBuiltinKey {
+	if keyText == "" {
 		keyText = PublisherKey()
-	}
-	now := opts.Now
-	if now == nil {
-		now = time.Now
 	}
 	client := opts.Client
 	if client == nil {
@@ -135,7 +125,7 @@ func New(opts Options) *Service {
 	if quit == nil {
 		quit = func() {}
 	}
-	s := &Service{current: opts.Current, root: opts.Root, rootFunc: opts.RootFunc, base: base, client: client, launch: launch, quit: quit, now: now}
+	s := &Service{current: opts.Current, root: opts.Root, rootFunc: opts.RootFunc, base: base, client: client, launch: launch, quit: quit}
 	s.snap = Snapshot{Phase: PhaseIdle, Current: opts.Current}
 	if keyText == "" {
 		// 没有内置公钥：这次构建不能验证发布者，更新保持明确不可用。
@@ -187,7 +177,7 @@ func (s *Service) runCheck(gen int64) {
 		s.mu.Lock()
 		if s.generation == gen {
 			s.checking = false
-			s.snap.CheckedAt = s.now()
+			s.snap.CheckedAt = time.Now()
 		}
 		s.mu.Unlock()
 	}()

@@ -83,11 +83,11 @@ func TestInstallFailureKeepsAppRunnable(t *testing.T) {
 	}
 }
 
-// 没有内置发布者公钥：更新明确不可用，检查也不发请求。
-func TestWithoutPublisherKeyUpdatesAreUnavailable(t *testing.T) {
+// 发布者公钥不可用：更新明确不可用，检查也不发请求。
+func TestUnusablePublisherKeyUpdatesAreUnavailable(t *testing.T) {
 	pub := newPublisher(t)
 	f := buildFixture(t, pub, releaseSpec{Version: "1.6.0"})
-	svc := New(Options{Current: "1.5.0", Root: t.TempDir(), BaseURL: f.base, Client: f.server.Client(), NoBuiltinKey: true})
+	svc := New(Options{Current: "1.5.0", Root: t.TempDir(), BaseURL: f.base, Client: f.server.Client(), PublicKey: "not-a-valid-base64-key"})
 	if svc.Enabled() {
 		t.Fatalf("a build without a publisher key must not be enabled")
 	}
