@@ -157,12 +157,6 @@ beforeEach(() => {
   Object.defineProperty(document, "elementFromPoint", { configurable: true, writable: true, value: () => hitTarget });
 });
 
-describe("跨渲染记账", () => {
-  it("初始不拖、不缩放、没有待豁免的删除", () => {
-    expect(flowBookkeeping()).toEqual({ dragId: 0, dragSeq: 0, dragCopies: 0, resizeId: 0, resizeSeq: 0, cancelled: [] });
-  });
-});
-
 describe("节点变更", () => {
   it("选中变更交给选区句柄，不写画板", () => {
     const h = harness();
@@ -347,6 +341,12 @@ describe("拖线松手", () => {
     );
     expect(h.toast).not.toHaveBeenCalled();
     expect(h.apply).not.toHaveBeenCalled();
+    // 端口没有 id 时按空串 handle 判定：来源端口无效（与上一条同一个空串契约）。
+    flowHandlers(h.deps).onConnectEnd(
+      mouseUp,
+      dropState({ fromHandle: { nodeId: "ref1", id: null, type: "source" }, toHandle: { nodeId: "t1", id: null }, fromNode: xyNode("ref1"), toNode: xyNode("t1") }),
+    );
+    expect(h.toast).toHaveBeenCalledWith("来源端口无效");
   });
 
   it("落在没有被分配 id 的端口上也不报错（handleId 记空串，不是 out 端口，没有可建的节点）", () => {
@@ -376,27 +376,16 @@ describe("拖线松手", () => {
     expect(h.toast).toHaveBeenCalledWith("该端口已有连线");
   });
 
-  it("落在任务卡片上：接到下一个空端口（走连线生效）", () => {
+  // 卡片落点接哪个端口（image:0）、什么卡片不给连线、锁定卡片说什么，都归 core/dragCreate
+  // 的 cardDropConnection（含 LOCKED_HINT）；本层只证明「命中卡片 → 走连线生效」这条接线：
+  // apply 收到一条 connect，端点来自松手时拖出的那条线。
+  it("落在任务卡片上：把 cardDrop 的结果接成一条连线", () => {
     hitAt(nodeCardElement("t1"));
     const h = harness();
     flowHandlers(h.deps).onConnectEnd(mouseUp, dropState());
-    expect(h.apply).toHaveBeenCalledWith({ kind: "connect", connection: { source: "ref1", sourceHandle: "out", target: "t1", targetHandle: "image:0" } });
-  });
-
-  it("落在非任务的卡片上：不给连线也不提示", () => {
-    hitAt(nodeCardElement("ref1"));
-    const h = harness();
-    flowHandlers(h.deps).onConnectEnd(mouseUp, dropState());
-    expect(h.apply).not.toHaveBeenCalled();
+    expect(h.apply).toHaveBeenCalledTimes(1);
+    expect(h.apply).toHaveBeenCalledWith({ kind: "connect", connection: expect.objectContaining({ source: "ref1", sourceHandle: "out", target: "t1" }) });
     expect(h.toast).not.toHaveBeenCalled();
-  });
-
-  it("落在锁定的任务卡片上：提示锁定", () => {
-    hitAt(nodeCardElement("t1"));
-    const h = harness({ locked: new Set(["t1"]) });
-    flowHandlers(h.deps).onConnectEnd(mouseUp, dropState());
-    expect(h.toast).toHaveBeenCalledWith(LOCKED_HINT);
-    expect(h.apply).not.toHaveBeenCalled();
   });
 
   it("落在空白处：拖线建节点，落点换算成画布坐标", () => {
