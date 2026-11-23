@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // 网关端口（#152）：设置面板的模型发现与密钥管理必须穿过 Go 绑定，不能留在前端替身里。
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { refreshModels, type SettingsPorts } from "../core/settings";
 import { PortError } from "./port";
 import type { DesktopBridge, DesktopGatewayResponse } from "./desktop";
@@ -98,8 +98,6 @@ describe("网关壳端口", () => {
     const ports = createGatewayPorts({ info: async () => INFO, local: {} as DesktopBridge["local"] });
     await expect(ports.readApiKey()).rejects.toMatchObject({ kind: "unavailable", feature: "gateway" });
     await expect(ports.writeApiKey(SYNTHETIC)).rejects.toBeInstanceOf(PortError);
-    const fail = vi.fn();
     await expect(ports.fetch("http://gw/v1/models", { method: "GET", headers: {} })).rejects.toBeInstanceOf(PortError);
-    expect(fail).not.toHaveBeenCalled();
   });
 });

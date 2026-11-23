@@ -74,52 +74,32 @@ describe("更新排程", () => {
     expect(check).not.toHaveBeenCalled();
   });
 
-  it("检查结束后才排下一次，且间隔 15 分钟", () => {
+  it("检查完成不自行排下一次，由调用方重排且间隔 15 分钟", () => {
     const { c, scheduler, check } = setup(emptySnapshot());
     scheduler.start();
     c.tick();
     expect(check).toHaveBeenCalledTimes(1);
-    // 检查结束后重排：从现在起 15 分钟。
+    // 检查是异步的：模块不自行重排，界面记下 checked_at 后由调用方 reschedule。
+    expect(c.live()).toBe(0);
     scheduler.reschedule();
     expect(c.due()).toBe(CHECK_INTERVAL_MS);
     c.tick();
     expect(check).toHaveBeenCalledTimes(2);
   });
 
-  it("手动检查不受排程限制", () => {
-    const { c, scheduler, check } = setup(emptySnapshot());
-    scheduler.start();
-    scheduler.checkNow();
-    expect(check).toHaveBeenCalledTimes(1);
-    // 手动检查不取消已排的启动检查。
-    expect(c.due()).toBe(STARTUP_DELAY_MS);
-  });
-
-  it("正在检查时手动检查被忽略，不叠加请求", () => {
-    const { scheduler, check, set } = setup({ ...emptySnapshot(), phase: "checking" });
-    scheduler.start();
-    scheduler.checkNow();
-    expect(check).not.toHaveBeenCalled();
-    // 装的时候也不能再查。
-    set({ ...emptySnapshot(), phase: "installing" });
-    scheduler.checkNow();
-    expect(check).not.toHaveBeenCalled();
-  });
-
   it("已排的检查到点时若已在检查，就不再叠加一次", () => {
     const { c, scheduler, check, set } = setup(emptySnapshot());
     scheduler.start();
-    // 用户先手动检查：阶段变成 checking，但启动那次计时器还在。
+    // 检查阶段由快照持有；期间启动那次计时器还在。
     set({ ...emptySnapshot(), phase: "checking" });
     c.tick();
     expect(check).not.toHaveBeenCalled();
   });
 
-  it("更新不可用时既不排也不查", () => {
+  it("更新不可用时既不排定时器，也不触发检查", () => {
     const { c, scheduler, check } = setup({ ...emptySnapshot(), phase: "disabled" });
     scheduler.start();
     expect(c.live()).toBe(0);
-    scheduler.checkNow();
     expect(check).not.toHaveBeenCalled();
   });
 

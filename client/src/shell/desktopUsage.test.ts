@@ -95,6 +95,11 @@ describe("桌面用量端口", () => {
 		const off = { ...INFO, features: { ...INFO.features, usage: false } };
 		const { port } = await createDesktopPort(makeBridge({} as DesktopUsageBridge, off));
 		await expect(port.usage.usage()).rejects.toMatchObject({ kind: "unavailable", feature: "usage" });
+
+		const missing = makeBridge({} as DesktopUsageBridge);
+		delete (missing as { usage?: DesktopUsageBridge }).usage;
+		const { port: missingPort } = await createDesktopPort(missing);
+		await expect(missingPort.usage.usage()).rejects.toMatchObject({ kind: "unavailable", feature: "usage" });
 	});
 
 	it("绑定抛错折成 failed，不静默当成功", async () => {

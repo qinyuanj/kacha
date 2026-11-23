@@ -14,74 +14,74 @@ function goName(method: string): string {
 }
 
 /** 生成的客户端没在手边时也能用：直接按方法名调用。 */
-export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promise<unknown> = (method, ...args) => call(method, ...args)): DesktopBridge {
+export function mygoBridge(): DesktopBridge {
   const local = new Proxy({} as DesktopLocalBridge, {
-    get: (_target, prop: string) => (...args: unknown[]) => callFn(`Local.${goName(prop)}`, ...args),
+    get: (_target, prop: string) => (...args: unknown[]) => call(`Local.${goName(prop)}`, ...args),
   });
   // 系统剪贴板（#129）：与 Go 侧 BindAs("Clipboard", clipboard.Service{}) 对齐。
   // 少这一项时 desktop.ts 的 readClipboard 恒为 null，粘贴会静默退回 paste 事件。
   const clipboard: DesktopClipboardBridge = {
-    read: () => callFn("Clipboard.Read") as Promise<DesktopClipboardSnapshot>,
+    read: () => call("Clipboard.Read") as Promise<DesktopClipboardSnapshot>,
     // 复制图片（#130）：Go 侧自己按路径读字节并归一化成 PNG，页面只给路径与格式提示。
-    copyImage: (path, format) => callFn("Clipboard.CopyImage", path, format) as Promise<DesktopImageCopy>,
+    copyImage: (path, format) => call("Clipboard.CopyImage", path, format) as Promise<DesktopImageCopy>,
     // 复制文本（#124）：Go 原生 Clipboard.WriteText，桌面壳复制节点标记不再依赖浏览器剪贴板权限。
-    writeText: (text) => callFn("Clipboard.WriteText", text) as Promise<DesktopTextCopy>,
+    writeText: (text) => call("Clipboard.WriteText", text) as Promise<DesktopTextCopy>,
   };
   // 画板包导入（#131）：与 Go 侧 BindAs("Pack", packservice.New(root)) 对齐。
   // 少这一项时 desktop.ts 的 features.packImport 为 false，导入入口会标「尚不可用」。
   const pack: DesktopPackBridge = {
-    pick: () => callFn("Pack.Pick") as Promise<string>,
-    start: (path) => callFn("Pack.Start", path) as Promise<DesktopPackOutcome>,
-    snapshot: () => callFn("Pack.Snapshot") as Promise<DesktopPackSnapshot>,
-    cancel: () => callFn("Pack.Cancel") as Promise<void>,
+    pick: () => call("Pack.Pick") as Promise<string>,
+    start: (path) => call("Pack.Start", path) as Promise<DesktopPackOutcome>,
+    snapshot: () => call("Pack.Snapshot") as Promise<DesktopPackSnapshot>,
+    cancel: () => call("Pack.Cancel") as Promise<void>,
     // 画板包导出（票 160）：与 Go 侧 Pack.PickExport / Facts / Export / ExportSnapshot / CancelExport 对齐。
-    pickExport: (name) => callFn("Pack.PickExport", name) as Promise<DesktopExportTarget>,
-    facts: (spec) => callFn("Pack.Facts", spec) as Promise<PackEntryFact[]>,
-    exportPack: (target, spec, overwrite) => callFn("Pack.Export", target, spec, overwrite) as Promise<DesktopExportOutcome>,
-    exportSnapshot: () => callFn("Pack.ExportSnapshot") as Promise<DesktopExportSnapshot>,
-    cancelExport: () => callFn("Pack.CancelExport") as Promise<void>,
+    pickExport: (name) => call("Pack.PickExport", name) as Promise<DesktopExportTarget>,
+    facts: (spec) => call("Pack.Facts", spec) as Promise<PackEntryFact[]>,
+    exportPack: (target, spec, overwrite) => call("Pack.Export", target, spec, overwrite) as Promise<DesktopExportOutcome>,
+    exportSnapshot: () => call("Pack.ExportSnapshot") as Promise<DesktopExportSnapshot>,
+    cancelExport: () => call("Pack.CancelExport") as Promise<void>,
   };
   // 网关与密钥（#152）：与 Go 侧 BindAs("Gateway", ...) 对齐。
   const gateway: DesktopGatewayBridge = {
-    request: (url, method, headers, body) => callFn("Gateway.Request", url, method, headers, body) as Promise<DesktopGatewayResponse>,
-    readApiKey: () => callFn("Gateway.ReadApiKey") as Promise<string | null>,
-    writeApiKey: (key) => callFn("Gateway.WriteApiKey", key) as Promise<void>,
-    deleteApiKey: () => callFn("Gateway.DeleteApiKey") as Promise<void>,
+    request: (url, method, headers, body) => call("Gateway.Request", url, method, headers, body) as Promise<DesktopGatewayResponse>,
+    readApiKey: () => call("Gateway.ReadApiKey") as Promise<string | null>,
+    writeApiKey: (key) => call("Gateway.WriteApiKey", key) as Promise<void>,
+    deleteApiKey: () => call("Gateway.DeleteApiKey") as Promise<void>,
   };
   // 本机用量与回收（#159）：与 Go 侧 BindAs("Usage", usageservice.New(store)) 对齐。
   const usage = new Proxy({} as DesktopUsageBridge, {
-    get: (_target, prop: string) => (...args: unknown[]) => callFn(`Usage.${goName(prop)}`, ...args),
+    get: (_target, prop: string) => (...args: unknown[]) => call(`Usage.${goName(prop)}`, ...args),
   });
   // 可信自动更新（#164）：与 Go 侧 BindAs("Update", updateservice.New(...)) 对齐。
   // 选版、验签与真实安装器都在 Go 侧；这里只转发三个动作。
   const update: DesktopUpdateBridge = {
-    status: () => callFn("Update.Status") as Promise<Awaited<ReturnType<DesktopUpdateBridge["status"]>>>,
-    check: () => callFn("Update.Check") as Promise<void>,
-    install: () => callFn("Update.Install") as Promise<void>,
+    status: () => call("Update.Status") as Promise<Awaited<ReturnType<DesktopUpdateBridge["status"]>>>,
+    check: () => call("Update.Check") as Promise<void>,
+    install: () => call("Update.Install") as Promise<void>,
   };
   // 诊断采集与导出（#162）：与 Go 侧 BindAs("Diagnostics", ...) 对齐。
   const diagnostics: DesktopDiagnosticsBridge = {
     // 日志是尽力而为的旁路：采集失败不能影响界面，错误在这里就地吞掉。
     log: (kind, fields) => {
-      void Promise.resolve(callFn("Diagnostics.Log", kind, fields)).catch(() => undefined);
+      void Promise.resolve(call("Diagnostics.Log", kind, fields)).catch(() => undefined);
     },
-    export: () => callFn("Diagnostics.Export") as Promise<DesktopDiagnosticsOutcome>,
+    export: () => call("Diagnostics.Export") as Promise<DesktopDiagnosticsOutcome>,
     // 反馈附件（#207）：复用允许清单生成内存包，不弹「另存为」对话框。
-    pack: () => callFn("Diagnostics.Bundle") as Promise<DesktopDiagnosticsBundle>,
+    pack: () => call("Diagnostics.Bundle") as Promise<DesktopDiagnosticsBundle>,
   };
   // 反馈（#205）：与 Go 侧 BindAs("Feedback", feedbackservice.New(...)) 对齐。
   const feedback: DesktopFeedbackBridge = {
-    send: (spec) => callFn("Feedback.Send", spec) as Promise<FeedbackOutcome>,
+    send: (spec) => call("Feedback.Send", spec) as Promise<FeedbackOutcome>,
   };
   // 本机数据位置（#161）：与 Go 侧 BindAs("Storage", storage.NewWithBusy(...)) 对齐。
   // 少这一项时 features.dataRoot 为 false，设置里不会出现迁移入口。
   const dataRoot: DesktopDataRootBridge = {
-    status: () => callFn("Storage.Status") as Promise<DesktopDataRootStatus>,
-    pick: () => callFn("Storage.Pick") as Promise<string>,
-    move: (target) => callFn("Storage.Move", target) as Promise<DesktopDataRootOutcome>,
+    status: () => call("Storage.Status") as Promise<DesktopDataRootStatus>,
+    pick: () => call("Storage.Pick") as Promise<string>,
+    move: (target) => call("Storage.Move", target) as Promise<DesktopDataRootOutcome>,
   };
   return {
-    info: () => callFn("Shell.Info") as Promise<DesktopInfo>,
+    info: () => call("Shell.Info") as Promise<DesktopInfo>,
     dataRoot,
     local,
     clipboard,

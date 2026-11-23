@@ -180,7 +180,6 @@ describe("桌面壳：画板包导入（#131）", () => {
     // false 只是复位取消标记，不该再打扰 Go 侧。
     await port.pack.io.cancel(false);
     expect(calls.cancel).toBe(1);
-    expect(Object.keys(port.pack.io)).toEqual(["cancel"]);
   });
 
   it("桥上没有 Pack 服务：导入与选包都报 unavailable", async () => {

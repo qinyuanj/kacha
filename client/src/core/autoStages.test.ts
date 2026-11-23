@@ -46,10 +46,13 @@ describe("自动划分阶段：按一次生成尝试把没进阶段的节点划�
       [edge("p", "t1", "positive"), systemEdge("t1", "r1"), systemEdge("t1", "r2"), edge("r1", "t2", "image:0"), systemEdge("t2", "r3")],
     );
     // r1 已被上游任务认领，t2 只带自己的提示词与结果。
-    expect(autoStageGroups(b)).toEqual([
+    const expected = [
       ["p", "t1", "r1", "r2"],
       ["t2", "r3"],
-    ]);
+    ];
+    expect(autoStageGroups(b)).toEqual(expected);
+    // 同一份画板重复计算也得到同一份分组（确定性）。
+    expect(autoStageGroups(b)).toEqual(expected);
   });
 
   it("多源并行：各尝试各自成组", () => {
@@ -112,8 +115,4 @@ describe("自动划分阶段：按一次生成尝试把没进阶段的节点划�
     expect(autoStageGroups(board([result("r1", "x"), result("r2", "x")]))).toEqual([["r1", "r2"]]);
   });
 
-  it("同一份画板算出同一份结果", () => {
-    const b = board([prompt("p"), task("t"), result("r", "t")], [edge("p", "t", "positive"), systemEdge("t", "r")]);
-    expect(autoStageGroups(b)).toEqual([["p", "t", "r"]]);
-  });
 });

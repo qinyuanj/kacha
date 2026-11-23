@@ -94,7 +94,8 @@ describe("图片格式识别", () => {
 
 describe("能力表摘要", () => {
   it("能力表摘要基于生效表的 JSON", async () => {
-    expect(await tableDigest(BUILTIN_TABLE)).toBe(await sha256Hex(new TextEncoder().encode(JSON.stringify(BUILTIN_TABLE))));
+    // 固定摘要来自现有内置表，独立期望值；不重算实现的 JSON 序列化。
+    expect(await tableDigest(BUILTIN_TABLE)).toBe("acd705f26927fc3224cd28f8591610701814752964c7e51d314883907db50088");
   });
 });
 

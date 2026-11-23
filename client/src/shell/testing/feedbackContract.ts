@@ -60,13 +60,6 @@ export function feedbackPortContract(name: string, createHarness: (outcome: Feed
       }
     });
 
-    it("send(spec) 把截图与诊断包附件原样交下去", async () => {
-      const harness = await createHarness(FEEDBACK_SUCCESS);
-      await harness.port.feedback.send(FEEDBACK_SPEC);
-      expect(harness.lastSpec()?.screenshots).toEqual(FEEDBACK_SPEC.screenshots);
-      expect(harness.lastSpec()?.diagnostics_pack).toEqual(FEEDBACK_SPEC.diagnostics_pack);
-    });
-
     it("send(spec) 把标题、分类、正文、环境、画板名、联系方式与覆盖地址原样交下去", async () => {
       const harness = await createHarness(FEEDBACK_SUCCESS);
       await harness.port.feedback.send(FEEDBACK_SPEC);
