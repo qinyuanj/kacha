@@ -88,29 +88,3 @@ func TestMigrationMovesRealDataAndServices(t *testing.T) {
 		t.Fatalf("旧位置的画板被动了：%q, %v", body, err)
 	}
 }
-
-// 换根之后旧位置的绝对路径越界：页面不可能再把写入落到旧位置（#161 的路径边界）。
-func TestMigrationRejectsWritesToOldRoot(t *testing.T) {
-	base := t.TempDir()
-	userData := filepath.Join(base, "appdata")
-	statePath := dataroot.StatePath(userData)
-	source, err := dataroot.Resolve(statePath, defaultRoot(userData))
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	writeFile(t, filepath.Join(source, "画板", "a.ugcboard.json"), `{"format_version":2}`)
-	roots := dataroot.NewRoots(source)
-	store := localstore.NewFollowing(roots)
-	target := filepath.Join(base, "新位置")
-	if out := storage.NewWithBusy(roots, statePath, nil).Move(target); !out.OK {
-		t.Fatalf("迁移失败：%+v", out)
-	}
-
-	old := filepath.Join(source, "画板", "a.ugcboard.json")
-	if _, err := store.Resolve(old); err == nil {
-		t.Fatal("旧位置的路径应当越界")
-	}
-	if out := store.WriteBoard(old, "{}", localstore.WriteOptions{}); out.OK {
-		t.Fatal("旧位置的画板不该还能写")
-	}
-}

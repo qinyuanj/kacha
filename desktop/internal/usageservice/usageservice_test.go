@@ -262,8 +262,16 @@ func TestRecycleRetentionAndPartialFailure(t *testing.T) {
 	if out := day13.Restore(e1.ID); out.OK || out.Kind != KindMissing {
 		t.Fatalf("内容缺失应报失败：%+v", out)
 	}
-	if len(RestoreIDs(day13.Recycle())) == 0 {
-		t.Fatalf("部分失败后条目仍需可追溯")
+	// 失败的 e1 必须仍在回收区可追溯；仅检查「还有任意条目」会被 e2 满足而漏掉本缺陷（#232）。
+	var e1StillTracked bool
+	for _, e := range day13.Recycle() {
+		if e.ID == e1.ID {
+			e1StillTracked = true
+			break
+		}
+	}
+	if !e1StillTracked {
+		t.Fatalf("部分失败后 e1 条目仍需可追溯：%s", e1.ID)
 	}
 	if out := day13.Restore(e2.ID); !out.OK {
 		t.Fatalf("另一份应能恢复：%+v", out)
@@ -298,11 +306,3 @@ func TestRecycleRetentionAndPartialFailure(t *testing.T) {
 	}
 }
 
-// RestoreIDs 方便断言回收区里还有条目。
-func RestoreIDs(entries []RecycleEntry) []string {
-	out := []string{}
-	for _, e := range entries {
-		out = append(out, e.ID)
-	}
-	return out
-}

@@ -68,11 +68,5 @@ func TestBindServicesExposeUpdateService(t *testing.T) {
 			t.Fatalf("Update 服务里没有 %q：\n%s", want, section)
 		}
 	}
-	// 快照的键名是页面的约定（client/src/core/update.ts 的 UpdateSnapshot）：
-	// 少了 verified / installable，界面就只能靠 phase 猜能不能装。
-	for _, key := range []string{"phase", "current", "version", "notes", "page_url", "downloaded", "total", "verified", "installable", "error", "checked_at"} {
-		if !strings.Contains(src, key) {
-			t.Fatalf("生成的客户端类型里没有快照字段 %q：\n%s", key, src)
-		}
-	}
+	// 快照的线键契约由 updateservice.TestSnapshotJSONKeys 在 json.Marshal 边界守住（#232）。
 }
