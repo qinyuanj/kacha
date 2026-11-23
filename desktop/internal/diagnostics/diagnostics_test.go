@@ -13,6 +13,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
@@ -27,7 +28,7 @@ func withDialog(t *testing.T, fn func(mygo.SaveDialogOptions) (string, error)) {
 }
 
 func newService(root string, secrets ...string) *Service {
-	return New("1.5.0", root, func() []string { return secrets })
+	return NewFollowing("1.5.0", dataroot.NewRoots(root), func() []string { return secrets })
 }
 
 func readZip(t *testing.T, path string) (map[string]string, []string) {
@@ -81,7 +82,7 @@ func TestExportUsesAllowlistAndRedactsSecrets(t *testing.T) {
 	svc.Log("task", map[string]string{
 		"model":         "test-model",
 		"authorization": "Bearer " + testSecret,
-		"note":        "gateway_key=gw-synthetic-secret {{SECRET_9p7w668j}}",
+		"note":          "gateway_key=gw-synthetic-secret {{SECRET_9p7w668j}}",
 	})
 	dest := filepath.Join(t.TempDir(), "diag.zip")
 	withDialog(t, func(mygo.SaveDialogOptions) (string, error) { return dest, nil })
@@ -161,7 +162,7 @@ func TestBundleExcludesSecretsCredentialsHostnameAndPaths(t *testing.T) {
 	svc.Log("connection", map[string]string{
 		"authorization": "Bearer " + testSecret,
 		"api_key":       testSecret,
-		"note":        "gateway_key=gw-synthetic-secret {{SECRET_9p7w668j}}",
+		"note":          "gateway_key=gw-synthetic-secret {{SECRET_9p7w668j}}",
 	})
 
 	out := svc.Bundle()

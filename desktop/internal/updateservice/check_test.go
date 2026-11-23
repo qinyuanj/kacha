@@ -8,6 +8,8 @@ import (
 func TestCheckSelectsOnlyHigherFormalReleaseWithCompleteAssets(t *testing.T) {
 	pub := newPublisher(t)
 	f := buildFixture(t, pub,
+		// latest 指向 Web 发行（无桌面资产）时，不能遮蔽后面的桌面发行。
+		releaseSpec{Version: "1.9.0", Omit: []string{ManifestName, InstallerName("1.9.0"), InstallerName("1.9.0") + ".sig"}},
 		// 与当前同版本：不算更新。
 		releaseSpec{Version: "1.5.0"},
 		// 预发布：不进正式通道。
@@ -20,6 +22,10 @@ func TestCheckSelectsOnlyHigherFormalReleaseWithCompleteAssets(t *testing.T) {
 		releaseSpec{Version: "1.6.5", Notes: "修复若干问题"},
 		// 描述平台不对：不是本平台的包。
 		releaseSpec{Version: "1.6.4", Platform: "darwin-arm64"},
+		// 说明里的版本标题必须精确：更长的标题、丢掉 #、空说明都不算完整。
+		releaseSpec{Version: "1.6.2", Notes: "# 1.6.2-beta"},
+		releaseSpec{Version: "1.6.1", Notes: "1.6.1\n"},
+		releaseSpec{Version: "1.6.6", Notes: "\n"},
 		// 这个才是该选的。
 		releaseSpec{Version: "1.6.0"},
 	)
@@ -34,22 +40,6 @@ func TestCheckSelectsOnlyHigherFormalReleaseWithCompleteAssets(t *testing.T) {
 	}
 	if !snap.Verified || !snap.Installable {
 		t.Fatalf("verified = %v, installable = %v, want both true", snap.Verified, snap.Installable)
-	}
-}
-
-// latest 指向 Web 发行（无桌面资产）时，仍要发现有效的桌面发行。
-func TestCheckFindsDesktopReleaseWhenLatestIsWebRelease(t *testing.T) {
-	pub := newPublisher(t)
-	f := buildFixture(t, pub,
-		// Web 发行：只有前端压缩包，没有安装器与描述。
-		releaseSpec{Version: "1.9.0", Omit: []string{ManifestName, InstallerName("1.9.0"), InstallerName("1.9.0") + ".sig"}},
-		releaseSpec{Version: "1.6.0"},
-	)
-	svc, _ := newService(t, f, pub, "1.5.0")
-	svc.Check()
-	snap := waitPhase(t, svc, PhaseReady)
-	if snap.Version != "1.6.0" {
-		t.Fatalf("version = %q (error %q), want 1.6.0", snap.Version, snap.Error)
 	}
 }
 

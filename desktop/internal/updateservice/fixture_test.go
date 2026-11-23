@@ -199,7 +199,6 @@ func newService(t *testing.T, f *fixture, pub publisher, current string) (*Servi
 		Client:    f.server.Client(),
 		Launch:    rec.launch,
 		Quit:      rec.quit,
-		Now:       func() time.Time { return time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC) },
 	})
 	return svc, rec
 }

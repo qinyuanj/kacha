@@ -10,6 +10,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/gateway"
 )
 
@@ -19,8 +20,7 @@ import (
 // 这个用例不替身密钥存储，也不替身对话框：只有解压后的实际内容能作为证据。
 func TestExportWithRealProtectedCredentialNeverLeaksIt(t *testing.T) {
 	root := t.TempDir()
-	credPath := filepath.Join(root, "api-key.protected")
-	cred := gateway.New(credPath)
+	cred := gateway.NewFollowing(dataroot.NewRoots(root))
 
 	saved := "sk-spec152-synthetic-not-real"
 	replaced := "sk-replaced-" + saved
@@ -40,7 +40,7 @@ func TestExportWithRealProtectedCredentialNeverLeaksIt(t *testing.T) {
 			t.Fatalf("%s：写入密钥状态失败: %v", stage.name, err)
 		}
 		// 服务每次都重新读当前密钥，不缓存旧明文：替换后旧值不该再被需要，但出现过也必须被遮掉。
-		svc := New("1.5.0", root, func() []string {
+		svc := NewFollowing("1.5.0", dataroot.NewRoots(root), func() []string {
 			key, err := cred.ReadApiKey()
 			if err != nil || key == "" {
 				return nil
@@ -108,13 +108,12 @@ func TestExportWithRealProtectedCredentialNeverLeaksIt(t *testing.T) {
 // 落盘的脱敏日志文件本身也不许含明文密钥：它在数据根里，用户可能直接把它发出去。
 func TestPersistedLogFileNeverContainsPlainKey(t *testing.T) {
 	root := t.TempDir()
-	credPath := filepath.Join(root, "api-key.protected")
-	cred := gateway.New(credPath)
+	cred := gateway.NewFollowing(dataroot.NewRoots(root))
 	saved := "sk-spec152-synthetic-not-real"
 	if err := cred.WriteApiKey(saved); err != nil {
 		t.Fatalf("保存密钥: %v", err)
 	}
-	svc := New("1.5.0", root, func() []string {
+	svc := NewFollowing("1.5.0", dataroot.NewRoots(root), func() []string {
 		key, err := cred.ReadApiKey()
 		if err != nil || key == "" {
 			return nil

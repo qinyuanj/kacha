@@ -69,22 +69,6 @@ func TestInstallerNameMatchesReleaseAssets(t *testing.T) {
 	}
 }
 
-// 说明里必须有本版本的标题：没有标题的发行说明等于「描述不完整」。
-func TestHasHeading(t *testing.T) {
-	if !hasHeading("# 1.6.0\n\n- 自动更新\n", "# 1.6.0") {
-		t.Fatalf("hasHeading must find the exact heading")
-	}
-	if hasHeading("# 1.6.0-beta\n", "# 1.6.0") {
-		t.Fatalf("hasHeading must not accept a longer heading")
-	}
-	if hasHeading("1.6.0\n", "# 1.6.0") {
-		t.Fatalf("hasHeading must require the markdown heading marker")
-	}
-	if hasHeading("", "# 1.6.0") {
-		t.Fatalf("empty notes have no heading")
-	}
-}
-
 // 签名是发布者的 Ed25519 签名，不是文件哈希：哈希对得上但签名不对时必须拒绝。
 func TestVerifyRejectsHashInPlaceOfSignature(t *testing.T) {
 	pub := newPublisher(t)
