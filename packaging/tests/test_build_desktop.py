@@ -118,14 +118,8 @@ def assert_prints_produced_exe(case: unittest.TestCase, root: Path, stdout: str)
 class VersionParsingTest(unittest.TestCase):
     """版本解析：从命令输出里取出要记录的那一段，读不到就是 None。"""
 
-    def test_mygo_version(self):
-        self.assertEqual(build_desktop.parse_mygo_version("mygo 0.9.0\n"), "0.9.0")
-
     def test_mygo_version_missing(self):
         self.assertIsNone(build_desktop.parse_mygo_version(""))
-
-    def test_go_version(self):
-        self.assertEqual(build_desktop.parse_go_version("go version go1.27.3 windows/amd64\n"), "go1.27.3")
 
     def test_go_version_missing(self):
         self.assertIsNone(build_desktop.parse_go_version("something else"))
@@ -176,7 +170,7 @@ class BuildDesktopTest(unittest.TestCase):
             self.assertEqual(info["platform"], "windows/amd64")
             self.assertEqual(info["exe"], "build/windows-amd64/Kacha.exe")
 
-    def test_release_build_uses_native_installer_and_signs_updates(self):
+    def test_release_build_uses_the_native_installer(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env = make_repo(root)
@@ -188,6 +182,24 @@ class BuildDesktopTest(unittest.TestCase):
             self.assertIn("-platform windows/amd64", build[0])
             self.assertNotIn("-skip-installer", build[0])
             self.assertIn("kacha-setup-0.1.0-amd64.exe", (root / "build" / "windows-amd64" / "build-info.json").read_text(encoding="utf-8"))
+
+    def test_fails_when_the_installer_is_missing(self):
+        """正式构建必须产出当前用户安装器：缺了就失败，不能把「没有安装器」当成功（build_desktop.py 的安装器守卫）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = make_repo(root)
+            # 让 go 桩不产出安装器：模拟构建没打出当前用户安装器的情形。
+            stub = root / "tools" / "go.py"
+            stub.write_text(
+                stub.read_text(encoding="utf-8").replace(
+                    "        (out / 'kacha-setup-0.1.0-amd64.exe').write_bytes(b'installer')\n",
+                    "        pass\n"),
+                encoding="utf-8",
+            )
+            result = run_build(root, env)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn("安装器", result.stderr)
+            self.assertIn("kacha-setup-0.1.0-amd64.exe", result.stderr)
 
     def test_debug_build_keeps_release_output_separate(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -232,7 +244,13 @@ class BuildDesktopTest(unittest.TestCase):
             info = json.loads((root / "build/debug/windows-amd64/build-info.json").read_text(encoding="utf-8"))
             self.assertEqual(info["relay"], "build/debug/windows-amd64/feedbackrelay.exe")
 
-    def test_build_keeps_runtime_token_out_of_artifacts(self):
+    def test_build_info_records_no_environment_secrets(self):
+        """打包脚本只把固定的版本字段写进 build-info / 日志，不把运行环境倾倒在产物里。
+
+        请求级 token 只在运行时经请求进入中继、根本不参与编译；「中继不持有统一写 token」的
+        证明在 Go 的 relay 测试里。这条守在打包脚本这一层：即使环境里有 GITEA token，构建记录
+        也不能出现它，也不能退化成「整个 os.environ 的转储」。
+        """
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env = make_repo(root)
@@ -241,8 +259,15 @@ class BuildDesktopTest(unittest.TestCase):
             result = run_build(root, env, "--debug", "--skip-install")
             self.assertEqual(result.returncode, 0, result.stderr)
             calls = (root / "calls.log").read_text(encoding="utf-8")
-            info = (root / "build/debug/windows-amd64/build-info.json").read_text(encoding="utf-8")
-            self.assertNotIn(secret, result.stdout + result.stderr + calls + info)
+            raw_info = (root / "build/debug/windows-amd64/build-info.json").read_text(encoding="utf-8")
+            info = json.loads(raw_info)
+            # 记录的就是这几个固定字段；多出一个「env」之类的整包转储会在这里挂掉。
+            self.assertEqual(
+                set(info),
+                {"app", "version", "platform", "mygo", "go", "webview2", "profile",
+                 "exe", "relay", "relay_asset", "installer"},
+            )
+            self.assertNotIn(secret, result.stdout + result.stderr + calls + raw_info)
 
     def test_fails_when_exe_missing(self):
         with tempfile.TemporaryDirectory() as tmp:

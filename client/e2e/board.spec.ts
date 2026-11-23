@@ -1,8 +1,8 @@
-// 第一个 e2e：浏览器里把画板真的挂起来。
-// 断言的是"用户看得见的东西"：顶栏版本按钮、工作区、没有致命错误块。
+// 画板在真实浏览器里启动：断言的是「用户看得见的画布」，不只是外壳。
+// 外壳出现但画布没挂载，正是加载失败或整页白屏的样子；这里要求画布根元素与真实节点都渲染出来。
 import { expect, test } from "@playwright/test";
 
-test("画板在真实浏览器里启动：顶栏版本、工作区、无致命错误", async ({ page }) => {
+test("画板在真实浏览器里启动：顶栏版本、画布根元素与真实节点都可见", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
 
@@ -14,6 +14,18 @@ test("画板在真实浏览器里启动：顶栏版本、工作区、无致命�
   // 工作台外壳挂起来了（没有停在"正在加载…"或致命错误）。
   await expect(page.locator(".app")).toBeVisible();
   await expect(page.locator(".fatal")).toHaveCount(0);
+
+  // 画布真的挂上了：根元素可见，React Flow 的视口也在。
+  // 只断言 .app 时，画布没挂载（白屏的下半截）照样能绿；这两条才是「画布存在」的证据。
+  const canvas = page.locator(".canvas");
+  await expect(canvas).toBeVisible();
+  await expect(canvas.locator(".react-flow")).toBeVisible();
+
+  // 新建一个提示词节点：画布不只是空壳，节点真的渲染出来且可见。
+  await page.getByRole("button", { name: "＋ 提示词" }).click();
+  const node = canvas.locator(".react-flow__node");
+  await expect(node).toHaveCount(1);
+  await expect(node).toBeVisible();
 
   expect(errors).toEqual([]);
 });

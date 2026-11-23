@@ -35,26 +35,28 @@ INSTALLED = {"node_modules/@playwright/test": {"version": "1.65.1"}}
 
 
 class VerificationCommandsTest(unittest.TestCase):
-    def test_desktop_suite_runs_go_and_debug_build_without_web_tools(self):
-        selected = commands([])
-        self.assertIn(["go", "test", "./..."], selected)
-        self.assertIn([sys.executable, "packaging/build_desktop.py", "--debug", "--skip-install"], selected)
-        self.assertIn(["npm", "--prefix", "client", "test"], selected)
-        self.assertIn(["npm", "--prefix", "client", "run", "typecheck"], selected)
-        self.assertIn(["npm", "--prefix", "client", "run", "lint:dead"], selected)
-        self.assertFalse(any("cargo" in command or "test:e2e" in command for command in selected))
+    def test_desktop_suite_runs_the_whole_ordered_gate(self):
+        """README 默认验证的完整顺序：打包单测 → 前端单测 → 类型检查 → knip → go test → debug 构建 → 质量门禁。
 
-    def test_the_gate_runs_without_mutation_by_default(self):
-        self.assertIn(QUALITY, commands([]))
-        self.assertNotIn([*QUALITY, "--mutate"], commands([]))
-
-    def test_quality_flag_keeps_the_gate_free_of_mutation(self):
-        """#193：2026-11-20 决定不做变异测试，--quality 只跑 CRAP 与重复检查。"""
-        self.assertIn(QUALITY, commands(["--quality"]))
-        self.assertFalse([command for command in commands(["--quality"]) if "--mutate" in command])
+        断言整条有序清单（不是子集）：删、改或挪动任一步都会在这里挂掉，才抓得到门禁漂移。
+        """
+        self.assertEqual(commands([]), [
+            [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"],
+            ["npm", "--prefix", "client", "test"],
+            ["npm", "--prefix", "client", "run", "typecheck"],
+            ["npm", "--prefix", "client", "run", "lint:dead"],
+            ["go", "test", "./..."],
+            [sys.executable, "packaging/build_desktop.py", "--debug", "--skip-install"],
+            list(QUALITY),
+        ])
 
     def test_no_argument_can_bring_mutation_back_into_the_gate(self):
-        """任何参数组合都不许再拼出 --mutate：本机 commit limit 只有 23,060 MB，跑它会整机崩溃。"""
+        """#193：任何参数组合都不许再拼出 --mutate（本机 commit limit 只有 23,060 MB，跑它会整机崩溃）。
+
+        同时覆盖「默认就跑质量门禁」与「--quality 也跑质量门禁」两条契约（原 :47 / :51 已并入此处）。
+        """
+        self.assertIn(QUALITY, commands([]))
+        self.assertIn(QUALITY, commands(["--quality"]))
         for argv in ([], ["--quality"], ["--base", "origin/main"], ["--quality", "--base", "origin/main"]):
             self.assertFalse([command for command in commands(argv) if "--mutate" in command], argv)
 
@@ -141,6 +143,10 @@ class DocumentationGateTest(unittest.TestCase):
             root = Path(tmp)
             self.make_tree(root)
             self.assertEqual(documentation_problems(root), [])
+
+    def test_the_real_repository_docs_pass_the_gate(self):
+        """真实仓库文档必须过门禁：合成树的用例证明规则，这一条防止真身漂移（不只在 CI 真跑 verify 时才发现）。"""
+        self.assertEqual(documentation_problems(ROOT), [])
 
     def test_version_drift_from_the_single_declaration_is_reported(self):
         with tempfile.TemporaryDirectory() as tmp:

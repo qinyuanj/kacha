@@ -117,18 +117,17 @@ class DeployScriptTest(unittest.TestCase):
         self.assertGreater(len(runner.commands), first_len)
         self.assertEqual(runner.commands[first_len], ["nssm-test", "status", "kacha-feedbackrelay"])
 
-    def test_deploy_does_not_configure_a_server_token(self):
+    def test_token_parameter_is_neither_accepted_nor_configured(self):
+        """#212：中继不持有统一写 token —— 正常部署不往 nssm 环境写 token，传 --token-env 直接拒绝。"""
         runner = FakeRunner()
         self.run_main(runner)
         args = [arg for command in runner.commands for arg in command]
         self.assertFalse(any("FEEDBACK_GITEA_TOKEN" in arg for arg in args))
-        self.assertFalse(any("TEST_RELAY_TOKEN" in arg for arg in args))
-
-    def test_token_parameter_is_not_accepted(self):
-        runner = FakeRunner()
+        # --token-env 在 #212 已删除：再传就是未知参数，SystemExit 且一条 nssm 命令都不跑。
+        rejecting = FakeRunner()
         with self.assertRaises(SystemExit):
-            deploy.main(["--relay-binary", str(self.binary), "--token-env", "TEST_RELAY_TOKEN"], runner=runner)
-        self.assertEqual(runner.commands, [])
+            deploy.main(["--relay-binary", str(self.binary), "--token-env", "TEST_RELAY_TOKEN"], runner=rejecting)
+        self.assertEqual(rejecting.commands, [])
 
     def test_missing_relay_binary_fails_before_any_command(self):
         self.binary.unlink()

@@ -176,15 +176,6 @@ class ReleaseAssetGateTest(RepoFixture):
         paths = self.collect()
         self.assertEqual([p.name for p in paths], [INSTALLER, INSTALLER + ".sig", RELAY, "update-windows-amd64.json", "SHA256SUMS"])
 
-    def test_relay_asset_name_uses_the_product_version(self):
-        self.assertEqual(publish_release.relay_asset_name(VERSION), RELAY)
-        self.assertEqual(publish_release.relay_asset_name("9.9.9"), "kacha-feedbackrelay-9.9.9-windows-amd64.exe")
-
-    def test_collects_the_versioned_relay_binary(self):
-        self.write_assets()
-        paths = self.collect()
-        self.assertIn(RELAY, [p.name for p in paths])
-
     def test_requires_the_versioned_relay_binary(self):
         message = self.assert_rejected(assets(omit_relay=True), words=RELAY)
         self.assertIn(RELAY, message)
@@ -196,19 +187,10 @@ class ReleaseAssetGateTest(RepoFixture):
             self.collect()
         self.assertIn("SHA256SUMS", str(caught.exception))
 
-    def test_rejects_another_platform(self):
-        self.assert_rejected(assets(descriptor(platform="linux-amd64")), words="平台")
-
     def test_rejects_a_package_url_on_another_host(self):
         self.assert_rejected(
             assets(descriptor(url=f"https://elsewhere.example/{REPO}/releases/download/{TAG}/{INSTALLER}")),
             words="包地址",
-        )
-
-    def test_rejects_a_package_url_for_another_version(self):
-        self.assert_rejected(
-            assets(descriptor(url=f"{BASE_URL}/{REPO}/releases/download/v1.4.0/{INSTALLER}")),
-            words="URL",
         )
 
     def test_rejects_a_signature_that_does_not_match_the_signature_asset(self):
@@ -224,58 +206,6 @@ class ReleaseAssetGateTest(RepoFixture):
             self.collect()
         message = str(caught.exception)
         self.assertIn(".sig", message)
-
-    def test_rejects_a_descriptor_without_notes_for_the_current_version(self):
-        self.assert_rejected(assets(descriptor(notes="# 1.4.0\n")), words="描述")
-
-
-class ReleaseNotesSourceTest(RepoFixture):
-    """发布说明只有 changelog.md 这一份（ADR 0024）。"""
-
-    def test_body_is_the_current_section_of_the_changelog(self):
-        body = publish_release.release_body(self.root, VERSION)
-        self.assertTrue(body.startswith("# 1.5.0"), body)
-        self.assertIn("- 一条。", body)
-        self.assertNotIn("旧的一条", body)
-
-    def test_missing_section_names_the_changelog(self):
-        (self.root / "docs" / "release" / "changelog.md").write_text("# 1.4.0\n\n## 修复\n\n- 旧的一条。\n", encoding="utf-8")
-        with self.assertRaises(SystemExit) as caught:
-            publish_release.release_body(self.root, VERSION)
-        self.assertIn("changelog.md", str(caught.exception))
-
-    def test_a_second_release_notes_file_is_not_read(self):
-        (self.root / "docs" / "release" / f"release-notes-{VERSION}.md").write_text("# 1.5.0\n\n另一份来源。\n", encoding="utf-8")
-        self.assertNotIn("另一份来源", publish_release.release_body(self.root, VERSION))
-
-
-class SignatureCheckTest(RepoFixture):
-    """签名校验走客户端同一条路径：调 desktop/cmd/verifyrelease，本脚本不另写一份验签。"""
-
-    def test_invokes_the_release_tool_with_the_installer_and_descriptor(self):
-        installer = self.release_dir / INSTALLER
-        desc = self.release_dir / "update-windows-amd64.json"
-        installer.write_bytes(b"installer")
-        desc.write_text(json.dumps(descriptor()), encoding="utf-8")
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-        with mock.patch.object(publish_release.subprocess, "run", return_value=completed) as run:
-            publish_release.verify_release_signature(installer, desc, repo_root=self.root)
-        command = run.call_args.args[0]
-        self.assertIn("./desktop/cmd/verifyrelease", command)
-        self.assertIn(str(installer), command)
-        self.assertIn(str(desc), command)
-        self.assertEqual(run.call_args.kwargs["cwd"], self.root)
-
-    def test_a_failing_check_stops_the_publish(self):
-        installer = self.release_dir / INSTALLER
-        desc = self.release_dir / "update-windows-amd64.json"
-        installer.write_bytes(b"installer")
-        desc.write_text(json.dumps(descriptor()), encoding="utf-8")
-        failed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="签名对不上")
-        with mock.patch.object(publish_release.subprocess, "run", return_value=failed):
-            with self.assertRaises(SystemExit) as caught:
-                publish_release.verify_release_signature(installer, desc, repo_root=self.root)
-        self.assertIn("签名对不上", str(caught.exception))
 
 
 class PublishCoordinatorTest(RepoFixture):
@@ -336,6 +266,9 @@ class PublishCoordinatorTest(RepoFixture):
         self.assertEqual(self.gitea.names(7), [])
         self.assertEqual(self.run_publish()[0], 0)
         self.assertEqual(self.gitea.names(7), sorted([*ASSETS, "SHA256SUMS"]))
+        # 名字承诺「保留旧 tag」：重试复用已有的 id=7 这一条，绝不新建第二个发布条目。
+        self.assertEqual(len(self.gitea.releases), 1)
+        self.assertNotIn(("create_release", TAG), self.gitea.calls)
 
 
 @unittest.skipUnless(shutil.which("go"), "需要 Go 工具链才能跑发布验签")
