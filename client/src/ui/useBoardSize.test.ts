@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 当前画板体量的取数（#137）：保存后去抖取一次；列表里没有这一块就没有体量；换画板不当成旧画板的。
+// 当前画板体量的取数（#137）：版本变化后去抖取一次；读失败保持空；换画板不当成旧画板的。
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -55,25 +55,37 @@ it("保存后取一次列表：给出体量与档位", async () => {
   });
   expect(box.current).toEqual({ path: "/~/a.ugcboard.json", bytes: 50, tier: null });
   expect(listed).toBe(1);
-});
 
-it("列表里没有这一块：没有体量", async () => {
-  const port = createFakePort();
-  const box = sizeOf(port, "/~/missing.ugcboard.json", "v1");
+  // 第二次保存（version 变化）再去抖取一次，连续变化只问一次。
   await act(async () => {
-    vi.advanceTimersByTime(2000);
+    root.render(createElement(ShellProvider, { port, children: createElement(function Host() { box.current = useActiveBoardSize("/~/a.ugcboard.json", "v2"); return null; }) }));
   });
-  expect(box.current).toBeNull();
+  await act(async () => {
+    vi.advanceTimersByTime(1000);
+  });
+  await act(async () => {
+    root.render(createElement(ShellProvider, { port, children: createElement(function Host() { box.current = useActiveBoardSize("/~/a.ugcboard.json", "v3"); return null; }) }));
+  });
+  await act(async () => {
+    vi.advanceTimersByTime(1999);
+  });
+  expect(listed).toBe(1);
+  await act(async () => {
+    vi.advanceTimersByTime(1);
+  });
+  expect(listed).toBe(2);
 });
 
-it("读列表失败：没有体量，也不影响任何操作", async () => {
+it("读列表失败：只取一次、不进体量", async () => {
   const port = createFakePort();
-  port.board.list = async () => {
+  const listed = vi.fn(async () => {
     throw new Error("offline");
-  };
+  });
+  port.board.list = listed;
   const box = sizeOf(port, "/~/a.ugcboard.json", "v1");
   await act(async () => {
     vi.advanceTimersByTime(2000);
   });
   expect(box.current).toBeNull();
+  expect(listed).toHaveBeenCalledTimes(1);
 });

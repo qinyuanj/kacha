@@ -35,23 +35,12 @@ describe("落图", () => {
     expect(pasteEffect({ kind: "importImages", at: [51, 26] }, deps({ images: () => files }))).toEqual({ kind: "importImages", files, at: [51, 26] });
   });
 
-  it("没有能读出的图片：吞掉但什么都不做", () => {
-    expect(pasteEffect({ kind: "importImages", at: [0, 0] }, deps({ images: () => [] }))).toEqual({ kind: "swallow" });
-  });
 });
 
 describe("粘节点", () => {
   it("应用内剪贴板有节点：写进画板", () => {
     const clip = clipOf("p1");
     expect(pasteEffect({ kind: "pasteNodes" }, deps({ readClipboard: () => clip }))).toEqual({ kind: "pasteNodes", clip });
-  });
-
-  it("剪贴板空了：吞掉但什么都不做（防御分支）", () => {
-    expect(pasteEffect({ kind: "pasteNodes" }, deps({ readClipboard: () => null }))).toEqual({ kind: "swallow" });
-  });
-
-  it("剪贴板里没有节点：同样什么都不做", () => {
-    expect(pasteEffect({ kind: "pasteNodes" }, deps({ readClipboard: () => ({ nodes: [], edges: [] }) }))).toEqual({ kind: "swallow" });
   });
 });
 

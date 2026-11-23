@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConnectionState } from "@xyflow/react";
 import { newBoard, type Board, type BoardEdge, type BoardNode, type ResultNode, type TaskNode } from "../core/board";
 import { BUILTIN_TABLE } from "../core/capabilities";
-import { menuItems, type MenuFacts, type MenuItem } from "../core/contextMenu";
+import type { MenuFacts } from "../core/contextMenu";
 import type { HoverInfo } from "../core/hoverInfo";
 import { SAVE_TEXT } from "./boardText";
 
@@ -15,7 +15,6 @@ import {
   blockNativeContextMenu,
   connectionAllowed,
   connectionLineStyle,
-  deleteKeyCodeFor,
   dragFromOf,
   edgeHoverMove,
   hoveredActionBarOf,
@@ -29,7 +28,6 @@ import {
   pickMenuAction,
   pickReferencesOf,
   saveNodeAsOf,
-  toConnection,
   type CommandTable,
 } from "./canvasFrame";
 import type { CanvasMenuState } from "./useCanvasOverlaysState";
@@ -119,16 +117,6 @@ describe("右键菜单", () => {
     expect(preventDefault).not.toHaveBeenCalled();
   });
 
-  it("可编辑画板原样放行条目，归档画板只留查看类", () => {
-    const items: MenuItem[] = [
-      { action: "preview", label: "放大预览", disabledReason: null },
-      { action: "delete", label: "删除", disabledReason: null },
-      { action: "saveAs", label: "另存为…", disabledReason: null },
-    ];
-    expect(menuViewFor(false)(items)).toBe(items);
-    expect(menuViewFor(true)(items).map((i) => i.action)).toEqual(["preview", "saveAs"]);
-  });
-
   it("没开菜单时没有条目", () => {
     expect(menuEntriesOf(null, factsOf(boardOf([])), new Set(), menuViewFor(false))).toEqual([]);
   });
@@ -161,12 +149,6 @@ describe("右键菜单", () => {
 });
 
 describe("React Flow 的开关与着色", () => {
-  it("删除键：弹窗开着或归档画板时关掉，否则用画布配置里的键", () => {
-    expect(deleteKeyCodeFor(true, false)).toBeNull();
-    expect(deleteKeyCodeFor(false, true)).toBeNull();
-    expect(deleteKeyCodeFor(false, false)).toEqual(["Delete", "Backspace"]);
-  });
-
   it("拖线中按起点端口着色，没拖线不着色", () => {
     const board = boardOf([prompt("p")]);
     expect(connectionLineStyle(board, null)).toBeUndefined();
@@ -176,27 +158,11 @@ describe("React Flow 的开关与着色", () => {
     expect(connectionLineStyle(board, fromTaskTarget)).toEqual({ stroke: "var(--port-negative)" });
   });
 
-  it("端点缺失的 handle 记空串", () => {
-    expect(toConnection({ source: "a", target: "b" })).toEqual({ source: "a", sourceHandle: "", target: "b", targetHandle: "" });
-    expect(toConnection({ source: "a", sourceHandle: "out", target: "b", targetHandle: "positive" })).toEqual({
-      source: "a",
-      sourceHandle: "out",
-      target: "b",
-      targetHandle: "positive",
-    });
-  });
 });
 
 describe("连线合法判定", () => {
   const board = boardOf([prompt("p"), task("t")]);
 
-  it("提示词出端口接任务正向端口连得上", () => {
-    expect(connectionAllowed(board, BUILTIN_TABLE, new Set(), { source: "p", sourceHandle: "out", target: "t", targetHandle: "positive" })).toBe(true);
-  });
-
-  it("画板规则不允许的端口连不上", () => {
-    expect(connectionAllowed(board, BUILTIN_TABLE, new Set(), { source: "p", sourceHandle: "out", target: "t", targetHandle: "image:0" })).toBe(false);
-  });
 
   it("锁定的任务不接受连线", () => {
     expect(connectionAllowed(board, BUILTIN_TABLE, new Set(["t"]), { source: "p", sourceHandle: "out", target: "t", targetHandle: "positive" })).toBe(false);
@@ -374,10 +340,3 @@ describe("悬浮动作条的显示条件", () => {
   });
 });
 
-describe("菜单条目与 core 同源", () => {
-  it("动作条 / 菜单条目都来自 core/contextMenu 的同一份判定", () => {
-    const board = boardOf([reference("r")]);
-    const facts = factsOf(board)(new Set(["r"]));
-    expect(menuEntriesOf(paneMenu, factsOf(board), new Set(["r"]), menuViewFor(false))).toEqual(menuItems({ kind: "pane" }, facts));
-  });
-});

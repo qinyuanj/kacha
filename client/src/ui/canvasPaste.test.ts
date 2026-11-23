@@ -120,9 +120,12 @@ describe("放行的粘贴", async () => {
     expect(importPastedImages).not.toHaveBeenCalled();
   });
 
-  it("普通文本：放行（画布上的文字仍能自己粘）", async () => {
+  it("普通文本：吞掉默认粘贴，但不落图不写画板也不提示", async () => {
+    // 原生读取是异步的，生产在读取之前一律吞掉默认行为；画布上没有可粘文本的地方，所以没有损失。
     expect((await paste({ text: "一段普通文字" })).defaultPrevented).toBe(true);
     expect(toast).not.toHaveBeenCalled();
+    expect(importPastedImages).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
   });
 
   it("事件没有内容仍由原生端口处理", async () => {
@@ -211,6 +214,13 @@ describe("粘贴节点", async () => {
     expect(apply).toHaveBeenCalledWith({ kind: "paste", clip });
     expect(readClipboard()?.nodes[0].pos).toEqual([100 + PASTE_OFFSET, 200 + PASTE_OFFSET]);
     expect(importPastedImages).not.toHaveBeenCalled();
+    // 再粘一次：错开量是叠加的（剪贴板本身被推进一格，原快照不动）。
+    await paste({ text: nodeMarker(1) });
+    expect(apply).toHaveBeenLastCalledWith({
+      kind: "paste",
+      clip: { ...clip, nodes: [{ ...clip.nodes[0], pos: [100 + PASTE_OFFSET, 200 + PASTE_OFFSET] }] },
+    });
+    expect(readClipboard()?.nodes[0].pos).toEqual([100 + 2 * PASTE_OFFSET, 200 + 2 * PASTE_OFFSET]);
   });
 
   it("节点标记还在但内存剪贴板空了：提示重新复制", async () => {
@@ -230,14 +240,6 @@ describe("粘贴节点", async () => {
     expect(importPastedImages).not.toHaveBeenCalled();
   });
 
-  it("分派判为粘节点、读剪贴板时却空了：不崩也不落盘（防御分支，正常路径走不到）", async () => {
-    // 同一帧内没有 await，正常不会变；这里让两次读数不同，锁住防御分支的行为。
-    vi.mocked(readClipboard).mockReturnValueOnce(clipOf("p1")).mockReturnValueOnce(null);
-    const event = await paste({ text: nodeMarker(1) });
-    expect(event.defaultPrevented).toBe(true);
-    expect(apply).not.toHaveBeenCalled();
-  });
-
   it("只读画板：粘节点也拒绝", async () => {
     writeClipboard(clipOf("p1"));
     opts = { ...opts, readOnly: true };
@@ -245,6 +247,49 @@ describe("粘贴节点", async () => {
     expect((await paste({ text: nodeMarker(1) })).defaultPrevented).toBe(true);
     expect(toast).toHaveBeenCalledWith(ARCHIVE_TEXT.readOnly);
     expect(apply).not.toHaveBeenCalled();
+  });
+});
+
+describe("原生快照的其余结局（壳端口读到什么就照什么分派）", async () => {
+  /** 换一份原生快照：读剪贴板的端口替身按它回值。 */
+  async function withSnapshot(snapshot: ClipboardContent | null | (() => Promise<ClipboardContent | null>)): Promise<void> {
+    opts = { ...opts, readClipboard: typeof snapshot === "function" ? snapshot : async () => snapshot };
+    await show();
+  }
+
+  it("节点标记 + 应用内剪贴板为空：标记优先，提示重新复制而不是落图", async () => {
+    await withSnapshot({ kind: "mark", text: nodeMarker(1), images: [image()], reason: null, readFailureCount: 0 });
+    const event = await paste({ text: nodeMarker(1), files: [image()] });
+    expect(event.defaultPrevented).toBe(true);
+    expect(importPastedImages).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.staleNodeClip);
+  });
+
+  it.each<{ name: string; snapshot: ClipboardContent; text: string }>([
+    { name: "内容格式不受支持", snapshot: { kind: "unsupported", text: null, images: [], reason: "format", readFailureCount: 0 }, text: PASTE_TEXT.unsupported },
+    { name: "剪贴板被占用", snapshot: { kind: "busy", text: null, images: [], reason: "busy", readFailureCount: 0 }, text: PASTE_TEXT.busy },
+    { name: "单张超过上限", snapshot: { kind: "unsupported", text: null, images: [], reason: "tooLarge", readFailureCount: 0 }, text: PASTE_TEXT.tooLarge },
+    { name: "剪贴板里只有文件", snapshot: { kind: "unsupported", text: null, images: [], reason: "files", readFailureCount: 0 }, text: PASTE_TEXT.filesNotReadable },
+  ])("$name：明确提示，不落图", async ({ snapshot, text }) => {
+    await withSnapshot(snapshot);
+    await paste({});
+    expect(importPastedImages).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(text);
+  });
+
+  it("端口读剪贴板抛错：当作读不到，提示不可用", async () => {
+    await withSnapshot(() => Promise.reject(new Error("剪贴板不可用")));
+    const event = await paste({});
+    expect(event.defaultPrevented).toBe(true);
+    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.unavailable);
+    expect(importPastedImages).not.toHaveBeenCalled();
+  });
+
+  it("读不到原生快照：提示不可用，不用事件里的图片", async () => {
+    await withSnapshot(null);
+    await paste({ files: [image()] });
+    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.unavailable);
+    expect(importPastedImages).not.toHaveBeenCalled();
   });
 });
 

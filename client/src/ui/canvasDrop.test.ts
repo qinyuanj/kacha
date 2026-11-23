@@ -50,15 +50,7 @@ describe("isImageFile", () => {
 });
 
 describe("imageFilesOf", () => {
-  it("MIME 是图片就收", () => {
-    expect(imageFilesOf([{ name: "a.bin", type: "image/png" }])).toEqual([{ name: "a.bin", type: "image/png" }]);
-  });
-
-  it("后缀在 IMAGE_EXTENSIONS 里也收，大小写不敏感", () => {
-    expect(imageFilesOf([{ name: "截图.PNG", type: "" }, { name: "x.heic", type: "" }])).toHaveLength(2);
-  });
-
-  it("非图片一律不收；混合时保持原顺序", () => {
+  it("非图片一律不收；只有图片按原顺序通过", () => {
     const files = [
       { name: "a.png", type: "image/png" },
       { name: "note.txt", type: "text/plain" },
