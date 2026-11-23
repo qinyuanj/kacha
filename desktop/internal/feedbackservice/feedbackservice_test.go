@@ -416,13 +416,20 @@ func TestSendRejectsInvalidAttachmentsBeforeRelay(t *testing.T) {
 	}
 }
 
+// #229 的裸凭据夹具：与 redaction 包的测试同一组值，两端都不许漏。
+// 占位符按片段拼出来，运行时得到的才是这段字面量，不会先被替换成别的值。
+const (
+	bareHexTokenFixture    = "0123456789abcdef0123456789abcdef01234567"
+	barePlaceholderFixture = "{{SECRET" + "_fixture}}"
+)
+
 func TestSendRedactsSecretsAndLocalPaths(t *testing.T) {
 	server, captured := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "已提交 #1", Number: 1, URL: "https://example.test/1"})
 	defer server.Close()
 
 	spec := sampleSpec()
-	spec.Title = "草稿 C:\\Users\\me\\draft.md 上的错误"
-	spec.Body = "api_key=hunter2 gateway_key=gw-synthetic ghp_synthetic1234567890 ghp_synthetic1234567890 api_key=user-api-key-abc C:\\\\Users\\\\me\\\\secret\\\\board.md \\\\\\\\lzxsvn\\\\share\\\\draft.png"
+	spec.Title = "草稿 C:\\Users\\me\\draft.md 上的错误 " + bareHexTokenFixture
+	spec.Body = "api_key=hunter2 gateway_key=gw-synthetic ghp_synthetic1234567890 ghp_synthetic1234567890 api_key=user-api-key-abc C:\\\\Users\\\\me\\\\secret\\\\board.md \\\\\\\\lzxsvn\\\\share\\\\draft.png 令牌 " + barePlaceholderFixture
 	out := New(Config{RelayURL: server.URL}).Send(spec)
 	if !out.OK {
 		t.Fatalf("Send unexpectedly failed: %+v", out)
@@ -431,6 +438,8 @@ func TestSendRedactsSecretsAndLocalPaths(t *testing.T) {
 	req := captured()
 	for _, key := range []string{
 		"hunter2", "gw-synthetic ghp_synthetic1234567890", "ghp_synthetic1234567890", "user-api-key-abc", "C:\\\\Users\\\\me", "\\\\lzxsvn\\\\share",
+		// #229：没有 key= 前缀的裸 40 位 token 与裸占位符同样不许出现在发往中继的字段里。
+		bareHexTokenFixture, barePlaceholderFixture,
 	} {
 		if strings.Contains(req.fields["body"], key) || strings.Contains(req.fields["title"], key) {
 			t.Fatalf("redacted text still contains %q: title=%q body=%q", key, req.fields["title"], req.fields["body"])

@@ -411,9 +411,26 @@ describe("用户自带 Gitea token（#213）", () => {
     expect(container.textContent).not.toContain("preview-must-not-show-this");
   });
 
-  it("正文脱敏隐藏 token、API key、gateway key 与常见密钥模式", () => {
-    const redacted = redactFeedbackText("token=abc123 api_key=def456 gateway_key=ghi789 sk-synthetic5678 ghp_synthetic1234567890");
-    for (const secret of ["abc123", "def456", "ghi789", "sk-synthetic5678", "ghp_synthetic1234567890"]) {
+  // #229：脱敏断言必须和输入指向同一个值。逐条先证明它真的在输入里，再证明脱敏后不在了，
+  // 任何一类规则被删掉，对应断言都会变红。
+  const prefixedSecrets = ["abc123", "def456", "ghi789", "ghp_synthetic1234567890"];
+  // 裸 Gitea token 的典型形态：40 位十六进制，没有 key= 前缀。
+  const bareHexToken = "0123456789abcdef0123456789abcdef01234567";
+  // 裸占位符按片段拼出来，保证运行时得到的就是这段字面量，而不是被替换成别的值。
+  const bareSecretPlaceholder = "{{SECRET" + "_fixture}}";
+
+  it("正文脱敏隐藏带前缀凭据、裸 40 位 token 与裸占位符", () => {
+    const input = [
+      `token=${prefixedSecrets[0]}`,
+      `api_key=${prefixedSecrets[1]}`,
+      `gateway_key=${prefixedSecrets[2]}`,
+      prefixedSecrets[3],
+      bareHexToken,
+      bareSecretPlaceholder,
+    ].join(" ");
+    const redacted = redactFeedbackText(input);
+    for (const secret of [...prefixedSecrets, bareHexToken, bareSecretPlaceholder]) {
+      expect(input).toContain(secret);
       expect(redacted).not.toContain(secret);
     }
     expect(redacted).toContain("<已隐藏>");
@@ -443,5 +460,32 @@ describe("用户自带 Gitea token（#213）", () => {
     expect(container.textContent).toContain("评论");
     expect(container.textContent).toContain("打标签");
     expect(container.textContent).toContain("上传附件");
+  });
+});
+
+describe("裸凭据脱敏（#229）", () => {
+  // 与上面同一组值：输入里放什么，就断言什么，界面、发送与复制三处都不许出现。
+  const bareHexToken = "0123456789abcdef0123456789abcdef01234567";
+  const bareSecretPlaceholder = "{{SECRET" + "_fixture}}";
+
+  it("裸 40 位 token 与裸占位符在预览、发送正文与复制内容中都不出现", async () => {
+    const port = createFakePort({ feedbackOutcome: { ok: false, kind: "unreachable", message: "不可达" } });
+    await show(port);
+    await setInput("标题", `同步失败 ${bareHexToken}`);
+    await setInput("正文", `令牌 ${bareSecretPlaceholder} 与预期不一致`);
+    await click("预览");
+    expect(container.textContent).not.toContain(bareHexToken);
+    expect(container.textContent).not.toContain(bareSecretPlaceholder);
+
+    await click("确认发送");
+    expect(port.calls.feedback).toHaveLength(1);
+    expect(port.calls.feedback[0].title).not.toContain(bareHexToken);
+    expect(port.calls.feedback[0].body).not.toContain(bareSecretPlaceholder);
+
+    await click("复制内容");
+    expect(port.calls.copyText).toHaveLength(1);
+    expect(port.calls.copyText[0]).toContain("标题：");
+    expect(port.calls.copyText[0]).not.toContain(bareHexToken);
+    expect(port.calls.copyText[0]).not.toContain(bareSecretPlaceholder);
   });
 });
