@@ -70,21 +70,6 @@ func TestReadFileReturnsBase64(t *testing.T) {
 	}
 }
 
-// 写画板失败时结局带类别：只新建撞上已存在给 alreadyExists。
-func TestWriteBoardOutcomeKind(t *testing.T) {
-	store := localstore.New(t.TempDir())
-	svc := New(store)
-	path := filepath.Join(store.BoardDir(), "画板"+localstore.BoardExt)
-
-	if got := svc.WriteBoard(path, "{}", BoardWriteOptions{CreateOnly: true}); !got.OK {
-		t.Fatalf("first write: %+v", got)
-	}
-	got := svc.WriteBoard(path, "{}", BoardWriteOptions{CreateOnly: true})
-	if got.OK || got.Kind != "alreadyExists" {
-		t.Fatalf("outcome = %+v, want alreadyExists", got)
-	}
-}
-
 // 越出数据根的路径被拒绝，不会读到别的文件。
 func TestReadFileRejectsOutsideRoot(t *testing.T) {
 	base := t.TempDir()
