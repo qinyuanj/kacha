@@ -41,6 +41,10 @@ func TestBindServicesExposeClipboardRead(t *testing.T) {
 	if !strings.Contains(src, "copyImage") {
 		t.Fatalf("Clipboard 上没有 copyImage 方法：\n%s", src)
 	}
+	// 复制节点标记（#130）：页面按 Clipboard.WriteText(text) 调用，绑的是 Bound.WriteText。
+	if !strings.Contains(src, "writeText") {
+		t.Fatalf("Clipboard 上没有 writeText 方法：\n%s", src)
+	}
 	// 网关与密钥服务（#152）：少绑一个，设置面板的测试连接与密钥管理会落到 notBound。
 	for _, want := range []string{"Gateway", "request", "readApiKey", "writeApiKey", "deleteApiKey"} {
 		if !strings.Contains(src, want) {

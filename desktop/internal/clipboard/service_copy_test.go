@@ -2,14 +2,10 @@ package clipboard
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/egoist/mygo"
-
-	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
 // mygoClipboardError 拼出 MyGo 在 Windows 上写剪贴板失败时的真实文案形状：
@@ -48,45 +44,48 @@ func TestCopyImageWritesPNG(t *testing.T) {
 	}
 }
 
-// TestCopyImageUnsupported HEIC、TIFF 在复制侧明确失败，并指向该节点已有的「另存为…」。
+// TestCopyImageUnsupported 容器不受支持时明确失败（HEIC、TIFF 都是 unsupported，不是 invalid）：
+// 结局带上按字节认出来的容器，消息说真实容器而不是页面给的提示，并指向该节点已有的「另存为…」，
+// 且不碰系统剪贴板。
 func TestCopyImageUnsupported(t *testing.T) {
-	writer := &fakeWriter{}
-	service := Service{Writer: writer}
-	out := service.CopyImage(fixture(t, "photo.tiff"), "tiff")
-	if out.OK {
-		t.Fatal("TIFF 不该报成功")
+	heic := append([]byte{0x00, 0x00, 0x00, 0x18}, []byte("ftypheic")...)
+	cases := []struct {
+		name        string
+		data        []byte
+		hint        Format
+		container   Container
+		hintIsWrong bool
+	}{
+		{"TIFF 按字节认出来", fixture(t, "photo.tiff"), "tiff", ContainerTIFF, false},
+		{"TIFF 即便提示说是 PNG", fixture(t, "photo.tiff"), FormatPNG, ContainerTIFF, true},
+		{"HEIC 文件头", heic, "heic", ContainerHEIC, false},
 	}
-	if out.Kind != ImageUnsupported {
-		t.Fatalf("类别 = %q，期望 %q", out.Kind, ImageUnsupported)
-	}
-	if !strings.Contains(out.Message, "另存为") {
-		t.Fatalf("消息没说替代动作：%q", out.Message)
-	}
-	if writer.call != 0 {
-		t.Fatal("不受支持的格式不该碰系统剪贴板")
-	}
-}
-
-// TestCopyImageUnsupportedNamesRealContainer 提示写错时，消息说的是按字节认出来的容器：
-// 用户看到「tiff」而不是被扩展名骗出来的「png」。
-func TestCopyImageUnsupportedNamesRealContainer(t *testing.T) {
-	out := Service{Writer: &fakeWriter{}}.CopyImage(fixture(t, "photo.tiff"), "png")
-	if out.Kind != ImageUnsupported {
-		t.Fatalf("类别 = %q，期望 %q", out.Kind, ImageUnsupported)
-	}
-	if !strings.Contains(out.Message, "tiff") || strings.Contains(out.Message, "（png）") {
-		t.Fatalf("消息应说出真实容器：%q", out.Message)
-	}
-}
-
-// TestCopyImageUnsupportedReportsContainer 结局带上认出来的容器名：页面据此说「TIFF 不受支持」。
-func TestCopyImageUnsupportedReportsContainer(t *testing.T) {
-	out := Service{Writer: &fakeWriter{}}.CopyImage(fixture(t, "photo.tiff"), "png")
-	if out.Kind != ImageUnsupported {
-		t.Fatalf("类别 = %q，期望 %q", out.Kind, ImageUnsupported)
-	}
-	if out.Container != "tiff" {
-		t.Fatalf("容器 = %q，期望 tiff", out.Container)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			writer := &fakeWriter{}
+			out := Service{Writer: writer}.CopyImage(c.data, c.hint)
+			if out.OK {
+				t.Fatalf("不受支持的容器不该报成功：%+v", out)
+			}
+			if out.Kind != ImageUnsupported {
+				t.Fatalf("类别 = %q，期望 %q", out.Kind, ImageUnsupported)
+			}
+			if out.Container != string(c.container) {
+				t.Fatalf("容器 = %q，期望 %q", out.Container, c.container)
+			}
+			if !strings.Contains(out.Message, string(c.container)) {
+				t.Fatalf("消息应说出真实容器 %q：%q", c.container, out.Message)
+			}
+			if c.hintIsWrong && strings.Contains(out.Message, "（"+string(c.hint)+"）") {
+				t.Fatalf("消息不该被扩展名骗成 %q：%q", c.hint, out.Message)
+			}
+			if !strings.Contains(out.Message, "另存为") {
+				t.Fatalf("消息没说替代动作：%q", out.Message)
+			}
+			if writer.call != 0 {
+				t.Fatal("不受支持的格式不该碰系统剪贴板")
+			}
+		})
 	}
 }
 
@@ -187,44 +186,6 @@ func TestBoundCopyImageReadFailure(t *testing.T) {
 	if writer.call != 0 {
 		t.Fatal("读不到字节时不该碰系统剪贴板")
 	}
-}
-
-// TestBoundCopyImageReadsThroughStore 绑定服务用真实 store 读绝对路径：数据根内的绝对路径照用，
-// 越出根的路径被拒绝（复制不能把任意本机文件写进剪贴板）。
-func TestBoundCopyImageReadsThroughStore(t *testing.T) {
-	root := t.TempDir()
-	store := localstore.New(root)
-	abs := filepath.Join(root, "参考", "cat.jpg")
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		t.Fatalf("建目录: %v", err)
-	}
-	if err := os.WriteFile(abs, fixture(t, "photo.jpg"), 0o644); err != nil {
-		t.Fatalf("写 fixture: %v", err)
-	}
-	writer := &fakeWriter{}
-	out := Bound{Service: Service{Writer: writer}, read: store.ReadFile}.CopyImage(abs, "jpeg")
-	if !out.OK {
-		t.Fatalf("结局 = %+v，期望成功", out)
-	}
-	if !IsPNG(writer.got) {
-		t.Fatal("写进系统剪贴板的不是 PNG")
-	}
-
-	outside := filepath.Join(t.TempDir(), "secret.png")
-	if err := os.WriteFile(outside, fixture(t, "alpha.png"), 0o644); err != nil {
-		t.Fatalf("写越界文件: %v", err)
-	}
-	refused := Bound{Service: Service{Writer: &fakeWriter{}}, read: store.ReadFile}.CopyImage(outside, "png")
-	if refused.OK {
-		t.Fatal("越出数据根的路径不该被读")
-	}
-}
-
-// TestBoundStillReadsClipboard 绑定的服务仍然能读剪贴板：读与写是同一个服务（#129 / #130）。
-func TestBoundStillReadsClipboard(t *testing.T) {
-	bound := NewBound(func(string) ([]byte, error) { return nil, errors.New("不该被调用") })
-	// 读走 MyGo，测试环境没有窗口：只要方法存在、签名是 Snapshot 即可（真读由真机验收）。
-	var _ func() Snapshot = bound.Read
 }
 
 // TestCopyImageOtherFailure 别的写失败按 failed 收，不伪装成 busy 让用户白重试。

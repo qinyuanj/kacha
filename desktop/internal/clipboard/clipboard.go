@@ -13,12 +13,7 @@ package clipboard
 import (
 	"bytes"
 	"errors"
-	"fmt"
 )
-
-// MaxImageBytes 是单张图片的上限（字节）：与画板侧粘贴的单张上限一致（64 MiB）。
-// 超限的图在客户端就挡住，不落盘、不进画板。
-const MaxImageBytes = 64 * 1024 * 1024
 
 // Kind 是剪贴板快照的类别：页面按它分支，不看文案。
 type Kind string
@@ -64,20 +59,6 @@ var PNGMagic = []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
 func IsPNG(data []byte) bool {
 	return bytes.HasPrefix(data, PNGMagic)
 }
-
-// ImageExtension 是图片字节对应的扩展名（不含点）。
-//
-// 只认 PNG：MyGo 交出来的图片字节就是 PNG（Windows 的 DIB 回落也会先转成 PNG），
-// 别的容器（HEIC、TIFF）不在这一竖切的支持范围里（见 ADR 0023）。
-func ImageExtension(data []byte) (string, bool) {
-	if IsPNG(data) {
-		return "png", true
-	}
-	return "", false
-}
-
-// Oversized 判断一张图是不是超过单张上限。
-func Oversized(size int) bool { return size > MaxImageBytes }
 
 // Content 是读到的剪贴板内容（纯数据，不带 IO）。
 type Content struct {
@@ -174,6 +155,3 @@ func isSpace(c byte) bool {
 	}
 	return false
 }
-
-// fmtUnused 让 fmt 保持被引用（错误消息用得上）。
-var _ = fmt.Sprintf
