@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { newBoard, type Board, type BoardNode } from "../core/board";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
-import { ARCHIVE_TEXT, IMPORT_TEXT } from "./boardText";
+import { IMPORT_TEXT } from "./boardText";
 import { knownImageInfo } from "./context";
 import { ShellProvider } from "./shell";
 import { imageImportPorts, useCanvasDrop } from "./useCanvasDrop";
@@ -146,23 +146,6 @@ describe("drop", () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
-  it("只读画板：提示只读，不导入", async () => {
-    opts = { ...opts, readOnly: true };
-    await show();
-    const event = dragEvent("drop", fileDrag(fileOf("a.png", "image/png")));
-    canvasEl.dispatchEvent(event);
-    expect(event.defaultPrevented).toBe(true);
-    expect(toast).toHaveBeenCalledWith(ARCHIVE_TEXT.readOnly);
-    expect(port.media.uploadReference).not.toHaveBeenCalled();
-    expect(apply).not.toHaveBeenCalled();
-  });
-
-  it("拖的不是图片：提示只支持图片文件，不导入", () => {
-    canvasEl.dispatchEvent(dragEvent("drop", fileDrag(fileOf("note.txt", "text/plain"))));
-    expect(toast).toHaveBeenCalledWith(IMPORT_TEXT.imageOnly);
-    expect(port.media.uploadReference).not.toHaveBeenCalled();
-  });
-
   it("拖入图片：捕获阶段先接并阻断冒泡，按松手处落成参考图节点", async () => {
     const bubbled = vi.fn();
     canvasEl.addEventListener("drop", bubbled);
@@ -187,20 +170,6 @@ describe("drop", () => {
     });
     inner.remove();
     canvasEl.removeEventListener("drop", bubbled);
-  });
-
-  it("落在任务卡片上：挂到该任务左侧", async () => {
-    elementAt.mockReturnValue(taskCard);
-    canvasEl.dispatchEvent(dragEvent("drop", fileDrag(fileOf("a.png", "image/png"))));
-    await settle();
-    expect(apply).toHaveBeenCalledWith(expect.objectContaining({ attach: { taskId: "t1", place: "left" } }));
-  });
-
-  it("落在画布空白：就地新建参考图节点", async () => {
-    elementAt.mockReturnValue(paneEl);
-    canvasEl.dispatchEvent(dragEvent("drop", fileDrag(fileOf("a.png", "image/png"))));
-    await settle();
-    expect(apply).toHaveBeenCalledWith(expect.objectContaining({ attach: null }));
   });
 
   it("调用方每次渲染换新的坐标换算函数（箭头包装）：用最新那一版，监听不必重挂", async () => {

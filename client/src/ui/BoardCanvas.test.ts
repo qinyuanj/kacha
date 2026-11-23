@@ -22,7 +22,7 @@ import type { ClipboardContent } from "../core/clipboardDispatch";
 import type { BoardMeasure } from "../core/tidy";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { BoardCanvas } from "./BoardCanvas";
-import { ARCHIVE_TEXT, DELETE_TASK_TEXT, SAVE_TEXT, TIDY_TEXT } from "./boardText";
+import { ARCHIVE_TEXT, DELETE_TASK_TEXT, IMPORT_TEXT, SAVE_TEXT, TIDY_TEXT } from "./boardText";
 import { writeClipboard } from "./canvasKeyboard";
 import { HOVER_DELAY_MS } from "./hoverInfo";
 import { ShellProvider } from "./shell";
@@ -416,6 +416,18 @@ async function openEdgeMenu(index: number, x: number, y: number): Promise<void> 
   });
 }
 
+/** 真实 DOM drop：jsdom 没有 DataTransfer，补上 useCanvasDrop 读取的字段。 */
+function dropFiles(target: HTMLElement, files: File[], point = { x: 30, y: 40 }): Event {
+  const event = new Event("drop", { bubbles: true, cancelable: true });
+  Object.defineProperties(event, {
+    clientX: { value: point.x },
+    clientY: { value: point.y },
+    dataTransfer: { value: { types: ["Files"], files } },
+  });
+  target.dispatchEvent(event);
+  return event;
+}
+
 // ---- 用例 ----
 
 describe("工具栏（portal 进 toolbarSlot）", () => {
@@ -652,6 +664,34 @@ describe("页面级粘贴（#96：从系统剪贴板粘图片 / 节点）", () =
     expect(editChanges(harness.apply)).toEqual([]);
   });
 
+  it("真实画布拖放：只读与非图片只提示，落在任务卡片上按 attach 接到该任务", async () => {
+    const readOnly = await renderCanvas({ readOnly: true });
+    readOnly.toast.mockClear();
+    const blocked = dropFiles(canvasRoot(), [new File(["x"], "a.png", { type: "image/png" })]);
+    expect(blocked.defaultPrevented).toBe(true);
+    expect(readOnly.toast).toHaveBeenCalledWith(ARCHIVE_TEXT.readOnly);
+    expect(port.media.uploadReference).not.toHaveBeenCalled();
+    expect(editChanges(readOnly.apply)).toEqual([]);
+
+    const writable = await renderCanvas();
+    writable.toast.mockClear();
+    dropFiles(canvasRoot(), [new File(["x"], "note.txt", { type: "text/plain" })]);
+    expect(writable.toast).toHaveBeenCalledWith(IMPORT_TEXT.imageOnly);
+    expect(port.media.uploadReference).not.toHaveBeenCalled();
+    writable.toast.mockClear();
+    // 真实 DOM 落点：jsdom 里节点由替身渲染成普通容器，给任务节点容器打上生产用的落点属性。
+    const taskCard = document.createElement("div");
+    taskCard.className = "react-flow__node";
+    taskCard.setAttribute("data-id", "t1");
+    canvasRoot().append(taskCard);
+    elementAt.mockReturnValue(taskCard);
+    dropFiles(canvasRoot(), [new File(["x"], "a.png", { type: "image/png" })]);
+    await flush();
+    expect(editChanges(writable.apply)).toEqual([
+      expect.objectContaining({ kind: "addReferences", attach: { taskId: "t1", place: "left" } }),
+    ]);
+  });
+
 });
 
 describe("悬浮动作条与放大预览", () => {
@@ -718,7 +758,7 @@ describe("悬浮动作条与放大预览", () => {
 });
 
 describe("只读画板（归档）", () => {
-  it("工具栏置灰、编辑类动作不写画板、拖入图片与粘贴只提示只读", async () => {
+  it("工具栏置灰、编辑类动作不写画板、粘贴只提示只读", async () => {
     const harness = await renderCanvas({ readOnly: true, toolbarSlot: slot });
     expect(buttonByText(slot, "＋ 提示词").getAttribute("aria-disabled")).toBe("true");
     expect(slot.querySelector<HTMLSelectElement>('select[aria-label="新建任务模型"]')!.disabled).toBe(true);
@@ -726,7 +766,7 @@ describe("只读画板（归档）", () => {
     expect(flowProps().nodesConnectable).toBe(false);
     // 画板不能改，Delete 键也不交给 React Flow。
     expect(flowProps().deleteKeyCode).toBeNull();
-    // 只读经画板传给粘贴层（拖放的只读拒绝由 useCanvasDrop 的 DOM drop 用例拥有）。
+    // 只读经画板传给粘贴层（拖放的只读拒绝由上面的真实 DOM drop 用例拥有）。
     harness.toast.mockClear();
     const pasted = await paste({ files: [new File(["y"], "b.png", { type: "image/png" })] });
     expect(pasted.defaultPrevented).toBe(true);
