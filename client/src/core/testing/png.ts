@@ -1,4 +1,4 @@
-// 测试用 PNG 夹具：固定的 1×1 PNG，以及按尺寸 / 颜色生成的纯色 PNG（e2e 经 e2e/common/boards 转出 png）。
+// 测试用 PNG 夹具：固定的 1×1 PNG，以及按尺寸 / 颜色生成的纯色 PNG。
 import { deflateSync } from "node:zlib";
 
 /** 1×1 PNG（base64）：需要一张真实、可解码的最小 PNG 时用。 */
