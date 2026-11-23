@@ -18,7 +18,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import quality  # noqa: E402
-from quality import (MUTATION_COPIES, VIEWER_BINARY_NAME, ViewerMissing, Package, Scope, changed_files,  # noqa: E402
+from quality import (VIEWER_BINARY_NAME, ViewerMissing, Package, Scope, changed_files,  # noqa: E402
                      copy_supported, crap_unmeasured, dry_offenders, in_scope, mutation_command, mutation_uncovered,
                      packages, tool_command, uncovered_sites, viewer_binary)
 
@@ -82,14 +82,13 @@ class ToolCommandTest(unittest.TestCase):
 
 
 class MutationCommandTest(unittest.TestCase):
-    def test_work_copy_includes_contracts_notes_and_only_version_manifest(self):
+    def test_only_the_mutator_gets_the_copy_flag(self):
         client = Package(root="client", source="src", excludes=())
-        self.assertEqual(MUTATION_COPIES, ("../contracts", "../docs/release", "../mygo.config.ts"))
+        # mutator 必须带齐被基线测试读到的包外依赖：契约、发版说明与唯一的版本清单（ADR 0022）。
         self.assertEqual(mutation_command(BINARY, client, ["src/a.ts"]),
                          [str(BINARY), "mutate", "--root", "client", "-s", "src", "--copy", "../contracts",
                           "--copy", "../docs/release", "--copy", "../mygo.config.ts", "src/a.ts"])
-
-    def test_only_the_mutator_gets_the_copy_flag(self):
+        # 只有 mutator 带 --copy；crap / dry 不能带这个开关（uml-viewer 1.0.0 也没有）。
         self.assertNotIn("--copy", tool_command(BINARY, "crap", []))
         self.assertNotIn("--copy", tool_command(BINARY, "dry", []))
 
@@ -97,10 +96,8 @@ class MutationCommandTest(unittest.TestCase):
 class CopySupportTest(unittest.TestCase):
     """带 --mutate 时先确认二进制认得 --copy：uml-viewer 1.0.0 还没有这个开关，不能静默跳过。"""
 
-    def test_help_text_mentioning_the_flag_means_supported(self):
+    def test_copy_support_is_read_from_the_help_text(self):
         self.assertTrue(copy_supported("  --copy <path>   Copy this directory into the work copy. May be repeated."))
-
-    def test_a_help_text_without_the_flag_means_unsupported(self):
         self.assertFalse(copy_supported("Usage: mutator [options]\n  --scan  --mutate-all  --since-last-run\n"))
 
 
@@ -256,8 +253,15 @@ class QualityBaseTest(unittest.TestCase):
             result = quality.main([])
         self.assertEqual(result, 0)
         self.assertIn("自 origin/main", output.getvalue())
-        self.assertIn("Go 当前只由 go test ./... 验证", output.getvalue())
-        self.assertIn("未接入这两项质量指标", output.getvalue())
+
+    def test_go_coverage_notice_is_printed(self):
+        """Go 未接入 CRAP / DRY 必须在输出里明说，不让人误以为跑过了（独立断言，别混进基线用例）。"""
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(quality.main([]), 0)
+        printed = output.getvalue()
+        self.assertIn("Go 当前只由 go test ./... 验证", printed)
+        self.assertIn("未接入这两项质量指标", printed)
 
     def test_mutation_is_announced_as_disabled_with_its_reason(self):
         """#193：不跑变异测试必须明说，静默跳过会让人以为跑过了。"""
