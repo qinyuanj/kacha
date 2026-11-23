@@ -43,12 +43,18 @@ TOKEN_SOURCE_FILES = (
     Path("packaging/publish_release.py"),
 )
 QUALITY = [sys.executable, "packaging/quality.py"]
+# #229 的验收要求用 -race 证明诊断导出与日志记录并发安全。定向到 diagnostics 一个包：
+# 整仓跑 -race 太慢，本机内存也有限。--race 需要 cgo，执行前先看工具链（见 race_toolchain_available）。
+RACE = ["go", "test", "-race", "./desktop/internal/diagnostics/..."]
+RACE_NOTICE = ("未运行 -race：本机没有可用的 C 工具链（-race 需要 cgo）。"
+               "装上 gcc 后这条会真正执行；这里只说明未运行，不静默跳过。")
 COMMANDS = (
     [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"],
     ["npm", "--prefix", "client", "test"],
     ["npm", "--prefix", "client", "run", "typecheck"],
     ["npm", "--prefix", "client", "run", "lint:dead"],
     ["go", "test", "./..."],
+    RACE,
     [sys.executable, "packaging/build_desktop.py", "--debug", "--skip-install"],
     QUALITY,
 )
@@ -278,22 +284,47 @@ def documentation_preflight(root: Path) -> int:
     return 2
 
 
+def race_toolchain_available() -> bool:
+    """-race 需要 cgo：CGO_ENABLED=1，且 `go env CC` 指名的编译器真的在 PATH 上。
+
+    本机 Windows 只装了 Go、没有 gcc，CGO_ENABLED=0，硬跑 `-race` 会直接构建失败；
+    有工具链的机器（例如 CI 的 windows-latest）照常执行，不是按平台写死跳过。
+    """
+    go = shutil.which("go")
+    if go is None:
+        return False
+    probe = subprocess.run([go, "env", "CGO_ENABLED", "CC"], capture_output=True, text=True, errors="replace")
+    if probe.returncode != 0:
+        return False
+    lines = probe.stdout.splitlines()
+    if len(lines) < 2 or lines[0].strip() != "1":
+        return False
+    compiler = (lines[1].strip().split() or [""])[0]
+    return bool(compiler) and shutil.which(compiler) is not None
+
+
 def main(argv: list[str]) -> int:
     selected = commands(argv)
     code = preflight(ROOT) or dependencies_preflight(ROOT) or documentation_preflight(ROOT)
     if code or "--preflight" in argv:
         return code
     failed = []
+    skipped = []
     for command in selected:
         line = " ".join(command)
         print(f"\n=== {line}", flush=True)
+        if command == RACE and not race_toolchain_available():
+            print(RACE_NOTICE, flush=True)
+            skipped.append(line)
+            continue
         executable = shutil.which(command[0])
         if executable is None or subprocess.run([executable, *command[1:]], cwd=ROOT).returncode != 0:
             failed.append(line)
     print("\n=== 汇总")
     for command in selected:
         line = " ".join(command)
-        print(f"{'失败' if line in failed else '通过'}  {line}")
+        state = "失败" if line in failed else "未运行" if line in skipped else "通过"
+        print(f"{state}  {line}")
     return 1 if failed else 0
 
 
