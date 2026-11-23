@@ -256,8 +256,8 @@ function FeedbackForm(props: FeedbackFormProps) {
 }
 
 interface FeedbackPreviewProps {
-  title: string; setTitle: Setter<string>; category: string; setCategory: Setter<string>;
-  body: string; setBody: Setter<string>; spec: FeedbackSpec; attachmentSummary: string;
+  setTitle: Setter<string>; category: string; setCategory: Setter<string>;
+  setBody: Setter<string>; spec: FeedbackSpec; attachmentSummary: string;
   sending: boolean; onBack(): void; onClose(): void; onSend(): void;
 }
 
@@ -373,7 +373,7 @@ export function FeedbackDialog({ version, build, boardName, relayUrl, onClose }:
           <button ref={closeRef} className='icon-button' aria-label='关闭反馈' onClick={onClose}>✕</button>
         </div>
         {step === 'form' && <FeedbackForm title={title} setTitle={setTitle} category={category} setCategory={setCategory} body={body} setBody={setBody} contact={contact} setContact={setContact} screenshots={screenshots} setScreenshots={setScreenshots} diagnosticsPack={diagnosticsPack} attachmentError={attachmentError} diagnosticsAvailable={!!port.features.diagnostics} onPick={() => void pick()} onToggleDiagnostics={(pressed) => void toggle(pressed)} token={token} setToken={setToken} tokenVisible={tokenVisible} setTokenVisible={setTokenVisible} onClose={onClose} onPreview={() => setStep('preview')} />}
-        {step === 'preview' && <FeedbackPreview title={title} setTitle={setTitle} category={category} setCategory={setCategory} body={body} setBody={setBody} spec={spec} attachmentSummary={attachmentSummary} sending={sending} onBack={() => setStep('form')} onClose={onClose} onSend={() => void send(spec)} />}
+        {step === 'preview' && <FeedbackPreview setTitle={setTitle} category={category} setCategory={setCategory} setBody={setBody} spec={spec} attachmentSummary={attachmentSummary} sending={sending} onBack={() => setStep('form')} onClose={onClose} onSend={() => void send(spec)} />}
         {step === 'receipt' && outcome && <FeedbackReceipt outcome={outcome} copied={copied} sending={sending} onClose={onClose} onEditAgain={editAgain} onCopy={() => void copyContent()} onRetry={() => void send(submittedSpec ?? spec)} />}
       </div>
     </div>
