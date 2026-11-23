@@ -62,6 +62,13 @@ async function field(labelText: string): Promise<HTMLInputElement | HTMLTextArea
   return control;
 }
 
+/** 「将要提交」的只读展示块：脱敏结果只允许出现在这里，不在可编辑控件里。 */
+function submitPreview(): Element {
+  const block = container.querySelector(".feedback-preview-submit");
+  if (!block) throw new Error("没有找到「将要提交」展示块");
+  return block;
+}
+
 /** 按用户看得到的中文选项选择，返回真正交给端口的稳定 code。 */
 async function setSelectByVisibleLabel(labelText: string, optionText: string): Promise<string> {
   const select = await field(labelText);
@@ -101,8 +108,31 @@ describe("反馈对话框（#206）", () => {
     expect(container.textContent).toContain(navigator.userAgent);
     expect(container.textContent).toContain("项目 A");
     expect(container.textContent).not.toContain("/tmp/boards/");
-    expect(container.textContent).toContain("<本地路径>");
-    expect(container.textContent).not.toContain("sk-abcdef");
+    // 脱敏只属于「将要提交」那一块：可编辑正文里是用户原文，不能拿整页文本判定。
+    const willSubmit = submitPreview();
+    expect(willSubmit.textContent).toContain("<本地路径>");
+    expect(willSubmit.textContent).not.toContain("sk-abcdef");
+  });
+
+  it("预览里的可编辑控件绑定原文，只有「将要提交」的展示才是脱敏值", async () => {
+    // #229 复审必修 1：可编辑控件曾绑定脱敏后的 props.spec.title，onChange 却写入原始 state。
+    // 用户看到「<已隐藏>」，一编辑就把原文写回去，输入框随即回弹/错位。
+    // 契约：输入框显示并可编辑原文；脱敏结果只出现在「将要提交」展示与最终 spec。
+    const port = createFakePort();
+    const bareToken = "0123456789abcdef0123456789abcdef01234567";
+    await show(port);
+    await setInput("标题", `泄露 ${bareToken}`);
+    await setInput("正文", "正文照常");
+    await click("预览");
+
+    expect((await field("标题")) as HTMLInputElement).toMatchObject({ value: `泄露 ${bareToken}` });
+
+    const willSubmit = submitPreview();
+    expect(willSubmit.textContent).toContain("泄露 <已隐藏>");
+    expect(willSubmit.textContent).not.toContain(bareToken);
+
+    await click("确认发送");
+    expect(port.calls.feedback[0]).toEqual(expect.objectContaining({ title: "泄露 <已隐藏>" }));
   });
 
   it("确认后通过 Feedback 端口发送并显示 issue 编号与可点击链接", async () => {
@@ -481,8 +511,10 @@ describe("裸凭据脱敏（#229）", () => {
     await setInput("标题", `同步失败 ${bareHexToken}`);
     await setInput("正文", `令牌 ${bareSecretPlaceholder} 与预期不一致`);
     await click("预览");
-    expect(container.textContent).not.toContain(bareHexToken);
-    expect(container.textContent).not.toContain(bareSecretPlaceholder);
+    // 预览的可编辑控件绑定的是原文（复审必修 1），脱敏证据只取「将要提交」那一块。
+    const willSubmit = submitPreview();
+    expect(willSubmit.textContent).not.toContain(bareHexToken);
+    expect(willSubmit.textContent).not.toContain(bareSecretPlaceholder);
 
     await click("确认发送");
     expect(port.calls.feedback).toHaveLength(1);

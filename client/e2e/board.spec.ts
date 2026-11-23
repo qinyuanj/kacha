@@ -21,11 +21,18 @@ test("画板在真实浏览器里启动：顶栏版本、画布根元素与真�
   await expect(canvas).toBeVisible();
   await expect(canvas.locator(".react-flow")).toBeVisible();
 
+  // 样式表真的加载了。只断言元素存在时，整页零样式（CSS 崩溃、白屏、忘记引入样式）照样能绿：
+  // .canvas 的 position 来自 src/styles.css，.react-flow__node 的 position 来自
+  // @xyflow/react/dist/style.css；两个样式表缺一个，下面两条就会退回 static。
+  await expect(canvas).toHaveCSS("position", "absolute");
+
   // 新建一个提示词节点：画布不只是空壳，节点真的渲染出来且可见。
   await page.getByRole("button", { name: "＋ 提示词" }).click();
   const node = canvas.locator(".react-flow__node");
   await expect(node).toHaveCount(1);
   await expect(node).toBeVisible();
+  // 节点的 position 来自 @xyflow/react 的样式表：它没被加载时节点会退回 static，布局随之散架。
+  await expect(node).toHaveCSS("position", "absolute");
 
   expect(errors).toEqual([]);
 });

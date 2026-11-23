@@ -3,9 +3,12 @@ package gateway
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -111,6 +114,76 @@ func TestTimeoutForSeparatesGenerationFromQueries(t *testing.T) {
 	// 生成超时必须比查询宽松一个数量级，否则这次修复等于没做。
 	if generationTimeout < 10*requestTimeout {
 		t.Fatalf("生成超时 %v 与查询超时 %v 太接近", generationTimeout, requestTimeout)
+	}
+}
+
+// largestDeclaredImageLimit 读能力表里声明的最大单图上限（任意层级的 max_bytes 取最大）。
+// 它是独立于本包的期望值来源：上限写死在 request.go，能力表在 client 侧，两边靠这条对齐。
+func largestDeclaredImageLimit(t *testing.T) int64 {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "client", "src", "core", "capabilities.builtin.json"))
+	if err != nil {
+		t.Fatalf("读能力表失败: %v", err)
+	}
+	var document any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("解析能力表失败: %v", err)
+	}
+	var largest int64
+	var walk func(node any)
+	walk = func(node any) {
+		switch value := node.(type) {
+		case map[string]any:
+			for key, child := range value {
+				if key == "max_bytes" {
+					if number, ok := child.(float64); ok && int64(number) > largest {
+						largest = int64(number)
+					}
+					continue
+				}
+				walk(child)
+			}
+		case []any:
+			for _, child := range value {
+				walk(child)
+			}
+		}
+	}
+	walk(document)
+	if largest == 0 {
+		t.Fatal("能力表里没有声明任何 max_bytes")
+	}
+	return largest
+}
+
+// #228：上限必须取能力表声明的最大单图上限，否则最大的那种合法结果图会被误判超限。
+func TestResponseLimitMatchesTheLargestDeclaredImageLimit(t *testing.T) {
+	if want := largestDeclaredImageLimit(t); int64(maxResponseBytes) != want {
+		t.Fatalf("响应上限 = %d 字节，能力表声明的最大单图上限 = %d 字节：%d 字节的合法结果图会被判超限",
+			maxResponseBytes, want, want)
+	}
+}
+
+// 能力表里最大的单图上限本身必须能完整往返：卡在「上限 + 1 才拒绝」的边界之内。
+func TestRequestAcceptsAnImageAtTheLargestDeclaredLimit(t *testing.T) {
+	data := binaryOf(int(largestDeclaredImageLimit(t)))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(data)
+	}))
+	defer server.Close()
+
+	svc := NewFollowing(dataroot.NewRoots(t.TempDir()))
+	res, err := svc.Request(server.URL+"/files/result.png", "GET", map[string]string{"Accept": "image/*"}, "")
+	if err != nil {
+		t.Fatalf("能力表允许的合法结果图被判超限: %v", err)
+	}
+	got, decodeErr := base64.StdEncoding.DecodeString(res.BodyBase64)
+	if decodeErr != nil {
+		t.Fatalf("body_base64 解不开：%v", decodeErr)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("二进制响应不完整：收到 %d 字节，要 %d 字节", len(got), len(data))
 	}
 }
 

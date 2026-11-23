@@ -92,7 +92,7 @@ python packaging\verify.py
 
 - 预检没有报告仓库 `build/` 或 `client/target/` 的 Low 完整性标签问题。日志中出现的 Low 标签提示来自 `test_verify` 自己造的临时目录夹具，不是本次构建目录。
 - `quality.py` 的 DRY 报告列出一对 `src/core/history.ts:73-76` 与 `78-81` 的重复（相似度 1.00）。这两个位置不在本次改动集内，按门禁规则属于存量，不拦合入；这里如实记录，不当作已消除。
-- 基线缺陷处置（#238 收口复核）：测试清理过程中曾由 `a166588` 误删 `GLOSSARY.md` 的「反馈」「反馈中继」词条以及反馈入口的 token 归属文字，导致 `verify.py` 的文档门禁无法通过。已由集成分支提交 `5de3ad9` 最小化恢复这两条词条并补回「用户自带 Gitea token / 权限 / 服务端不持有统一写 token / 核心画板离线」表述；`packaging/tests/test_verify.py` 的 `DocumentationGateTest` 另有 `test_the_real_repository_docs_pass_the_gate` 直接断言 `documentation_problems(ROOT) == []`，确保真实文档不再漂移。此处登记该处置以留痕，不再改动 `GLOSSARY.md`。
+- 术语表缺陷处置（#238 收口复核，本条已按 #227 复审必修 5 更正）：测试清理时 `a166588`（「清理术语表」）把 `GLOSSARY.md` 从 229 行、53 条砍到 45 行、12 条。当时登记的处置是「`5de3ad9` 最小化恢复「反馈」「反馈中继」两条并补回 token 归属表述，不再改动 `GLOSSARY.md`」——这条说法不成立：被删的 41 条里仍有大量在用的领域定义，而 `docs/agents/domain.md` 要求 agent 探索领域前先读这张词表，等于让词表失去作用。本轮按引用证据逐条核对（`grep` 代码 / 契约 / 文档，不计 `GLOSSARY.md` 自身）：41 条全部仍被引用，例如图层 84 个文件、归档画板 47、定稿 32、画板体量 26、并发上限 23、发送计划 16、用户序号 14、区域编号 11、结局记录 9、任务队列 8。据此把 41 条按原有格式（`**术语**：` + 定义 + `_Avoid_：`）恢复，词表回到 228 行、53 条；没有一条属于「产品已删除、确实无人引用」，所以一条都没有故意不恢复。原有 12 条保留 `a166588` 之后的新措辞（含 #214 的 token 归属表述），不回退到旧文本，避免把后续修正一并丢掉。恢复后 `python packaging/verify.py --preflight` 退出码 0，`packaging/tests/test_verify.py` 的 `test_the_real_repository_docs_pass_the_gate` 直接断言 `documentation_problems(ROOT) == []`；文档门禁照旧检查「反馈」「反馈中继」与 token 归属说明（用户自带、权限、服务端不持有统一写 token）。
 
 ### 4.2 release 构建产物（未发布）
 

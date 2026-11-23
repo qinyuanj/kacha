@@ -1,0 +1,53 @@
+{
+  "note": "反馈脱敏的跨语言夹具（#227 复审判断题 6）：Go 的 desktop/internal/redaction 与前端 client/src/ui/FeedbackDialog.tsx 的 redactFeedbackText 各写一套实现，只能靠人工对齐。这份夹具是唯一的一份样本：同一段文字里哪些内容必须消失（hidden）、哪些必须留下（kept），两端都要给出同一个答案。改任一侧的规则或改样本时，两边的用例会一起红。",
+  "samples": [
+    {
+      "name": "裸 40 位十六进制 token",
+      "text": "同步失败 0123456789abcdef0123456789abcdef01234567 请重试",
+      "hidden": ["0123456789abcdef0123456789abcdef01234567"],
+      "kept": ["同步失败", "请重试"]
+    },
+    {
+      "name": "大小写混合的 40 位十六进制 token",
+      "text": "凭证 0123456789ABCDEF0123456789abcdef01234567 无效",
+      "hidden": ["0123456789ABCDEF0123456789abcdef01234567"],
+      "kept": ["凭证", "无效"]
+    },
+    {
+      "name": "裸 {{SECRET_ 占位符",
+      "text": "令牌 {{SECRET_ab12cd}} 与预期不一致",
+      "hidden": ["{{SECRET_ab12cd}}"],
+      "kept": ["令牌", "与预期不一致"]
+    },
+    {
+      "name": "Bearer 鉴权头",
+      "text": "网关报错 Authorization: Bearer abcdefghijklmnopqrstuvwxyz 请重试",
+      "hidden": ["abcdefghijklmnopqrstuvwxyz"],
+      "kept": ["请重试"]
+    },
+    {
+      "name": "key=value 凭据",
+      "text": "gateway_key=gw-abcdef123456 连接失败",
+      "hidden": ["gw-abcdef123456"],
+      "kept": ["连接失败"]
+    },
+    {
+      "name": "sk- 独立密钥",
+      "text": "密钥 sk-abcdef123456 被拒绝",
+      "hidden": ["sk-abcdef123456"],
+      "kept": ["被拒绝"]
+    },
+    {
+      "name": "本机 Windows 路径",
+      "text": "打开 C:\\Users\\me\\画板\\项目.kacha 失败",
+      "hidden": ["C:\\Users\\me"],
+      "kept": ["打开", "失败"]
+    },
+    {
+      "name": "普通文本（对照）",
+      "text": "生成失败，请重试。",
+      "hidden": [],
+      "kept": ["生成失败，请重试。"]
+    }
+  ]
+}

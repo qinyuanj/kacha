@@ -85,7 +85,9 @@ python packaging\verify.py --quality
 python packaging\verify.py --base origin/main
 ~~~
 
-默认按顺序运行打包脚本单测、前端单测、类型检查、knip（普通与 production）、`go test ./...`、桌面 debug 构建和前端质量门禁。各项跑完再汇总，任一失败即返回非零。不会安装 Chromium，也不运行 e2e。旧的 --e2e 参数会被拒绝。`--quality` 只标注「这是发版门禁用例」：它跑的质量步骤与默认验证相同，不再追加变异测试（见下文「变异测试未启用」）。
+默认按顺序运行打包脚本单测、前端单测、类型检查、knip（普通与 production）、`go test ./...`、`go test -race ./desktop/internal/diagnostics/...`、桌面 debug 构建和前端质量门禁。各项跑完再汇总，任一失败即返回非零。
+
+`-race` 那一步只覆盖诊断导出与日志记录的并发安全（#229 的并发证据），定向到 `desktop/internal/diagnostics` 一个包：整仓跑 `-race` 太慢，本机内存也有限。`-race` 需要 cgo，所以执行前先看工具链（`CGO_ENABLED=1` 且 `go env CC` 指名的编译器在 PATH 上）：有工具链就真跑，没有就打印「未运行 -race」并在汇总里标成未运行——只说明未运行，不静默跳过，也不因此判定失败。本机 Windows 只装了 Go、没有 gcc，因此这里通常看到的是「未运行」；CI 的 `windows-latest` 自带 MinGW，会真正执行。不会安装 Chromium，也不运行 e2e。旧的 --e2e 参数会被拒绝。`--quality` 只标注「这是发版门禁用例」：它跑的质量步骤与默认验证相同，不再追加变异测试（见下文「变异测试未启用」）。
 
 Go 单测覆盖本地存储、路径边界、导入、剪贴板契约与服务绑定；前端单测使用壳端口替身。它们不能替代 Windows 已解锁交互会话里的真实剪贴板、外部软件粘贴、窗口激活与打包产物检查。debug 构建只证明程序可构建，不宣称这些交互验收通过。
 
