@@ -4,7 +4,7 @@
 // 源码与单测在没有它时也要能编译。调用名与 Go 侧绑定名一致（Shell.Info / Local.WriteBoard）。
 import { call } from "mygo-runtime";
 
-import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopDataRootBridge, DesktopDataRootOutcome, DesktopDataRootStatus, DesktopDiagnosticsBridge, DesktopDiagnosticsBundle, DesktopDiagnosticsOutcome, DesktopExportOutcome, DesktopFeedbackBridge, DesktopExportSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy, DesktopUpdateBridge, DesktopUsageBridge } from "./desktop";
+import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopDataRootBridge, DesktopDataRootOutcome, DesktopDataRootStatus, DesktopDiagnosticsBridge, DesktopDiagnosticsBundle, DesktopDiagnosticsOutcome, DesktopExportOutcome, DesktopExportTarget, DesktopFeedbackBridge, DesktopExportSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy, DesktopUpdateBridge, DesktopUsageBridge } from "./desktop";
 import type { PackEntryFact } from "../core/boardPack";
 import type { FeedbackOutcome } from "./port";
 
@@ -35,9 +35,9 @@ export function mygoBridge(callFn: (method: string, ...args: unknown[]) => Promi
     snapshot: () => callFn("Pack.Snapshot") as Promise<DesktopPackSnapshot>,
     cancel: () => callFn("Pack.Cancel") as Promise<void>,
     // 画板包导出（票 160）：与 Go 侧 Pack.PickExport / Facts / Export / ExportSnapshot / CancelExport 对齐。
-    pickExport: (name) => callFn("Pack.PickExport", name) as Promise<string>,
+    pickExport: (name) => callFn("Pack.PickExport", name) as Promise<DesktopExportTarget>,
     facts: (spec) => callFn("Pack.Facts", spec) as Promise<PackEntryFact[]>,
-    exportPack: (target, spec) => callFn("Pack.Export", target, spec) as Promise<DesktopExportOutcome>,
+    exportPack: (target, spec, overwrite) => callFn("Pack.Export", target, spec, overwrite) as Promise<DesktopExportOutcome>,
     exportSnapshot: () => callFn("Pack.ExportSnapshot") as Promise<DesktopExportSnapshot>,
     cancelExport: () => callFn("Pack.CancelExport") as Promise<void>,
   };
