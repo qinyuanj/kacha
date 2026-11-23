@@ -98,6 +98,20 @@ func TestMeasureBoardCountsUniqueEntries(t *testing.T) {
 	if got := m.Nodes["i"]; len(got) != 1 || got[0] != "导入参考图/bbbb.png" {
 		t.Fatalf("nodes[i] = %v", got)
 	}
+
+	// 量的是请求体（画板原文），不是盘上的画板文件：画板还没保存时新加的节点照样计入。
+	writeFile(t, filepath.Join(root, "导入参考图", "cccc.png"), 40)
+	unsaved := `{"format_version": 2, "nodes": [
+	  {"id": "a", "type": "result", "path": "2026-01-01/20260101T000000Z-aaaaaaaa/result.png"},
+	  {"id": "b", "type": "reference", "path": "导入参考图/cccc.png"}
+	]}`
+	grown, ok := MeasureBoard(root, unsaved)
+	if !ok {
+		t.Fatalf("MeasureBoard: 读不懂没保存过的画板原文")
+	}
+	if total := totalOf(grown); total != 1040 {
+		t.Fatalf("含未保存改动的体量 = %d, want 1040（任务目录 1000 + 这张新参考图 40）", total)
+	}
 }
 
 // 引用不存在的条目按 0 计：画板体量仍算得出来，不因为缺图变成未知。
