@@ -23,10 +23,14 @@ class Result:
 class FakeRunner:
     """记录命令并模拟 nssm 服务状态；不启动任何进程。"""
 
-    def __init__(self, *, installed: bool = False, failing: str | None = None):
+    def __init__(self, *, installed: bool = False, failing: str | None = None,
+                 application: str | None = None):
         self.commands: list[list[str]] = []
         self.status = Result(0, "SERVICE_RUNNING", "") if installed else Result(1, "", "missing")
         self.failing = failing
+        # 按 nssm 语义模拟镜像路径：install 与 set Application 写入，start 时按它启动。
+        self.application = application
+        self.running_application: str | None = None
 
     def __call__(self, args: list[str]) -> Result:
         self.commands.append(list(args))
@@ -36,10 +40,15 @@ class FakeRunner:
             return self.status
         if args[1] == "install":
             self.status = Result(0, "SERVICE_STOPPED")
+            self.application = args[3]
+        elif args[1] == "set" and len(args) > 3 and args[3] == "Application":
+            self.application = args[4]
         elif args[1] == "stop":
             self.status = Result(0, "SERVICE_STOPPED")
+            self.running_application = None
         elif args[1] == "start":
             self.status = Result(0, "SERVICE_RUNNING")
+            self.running_application = self.application
         return Result(0, "ok")
 
 
@@ -51,20 +60,18 @@ class DeployScriptTest(unittest.TestCase):
         self.binary = self.root / "kacha-feedbackrelay-1.6.5-windows-amd64.exe"
         self.binary.write_bytes(b"relay")
 
-    def run_main(self, runner: FakeRunner, *extra: str):
+    def run_main(self, runner: FakeRunner, *extra: str, binary: Path | None = None):
         argv = [
-            "--relay-binary", str(self.binary),
+            "--relay-binary", str(binary or self.binary),
             "--gitea-base-url", "http://gitea.test",
             "--gitea-repo", "team/feedback",
             "--listen-address", ":3005",
             "--nssm", "nssm-test",
             *extra,
         ]
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            code = deploy.main(argv, runner=runner, env={})
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = deploy.main(argv, runner=runner)
         self.assertEqual(code, 0)
-        self.assertNotIn("environment-only", out.getvalue())
 
     def test_installs_a_new_service_with_all_relay_environment_parameters(self):
         runner = FakeRunner()
@@ -75,9 +82,9 @@ class DeployScriptTest(unittest.TestCase):
         env_command = next(c for c in commands if c[1:3] == ["set", "kacha-feedbackrelay"] and "AppEnvironment" in c)
         self.assertEqual(env_command[3], "AppEnvironment")
         self.assertEqual(env_command[4:], [
-            "FEEDBACK_GITEA_URL", "http://gitea.test",
-            "FEEDBACK_GITEA_REPO", "team/feedback",
-            "FEEDBACK_ADDR", ":3005",
+            "FEEDBACK_GITEA_URL=http://gitea.test",
+            "FEEDBACK_GITEA_REPO=team/feedback",
+            "FEEDBACK_ADDR=:3005",
         ])
         self.assertIn(["nssm-test", "start", "kacha-feedbackrelay"], commands)
 
@@ -89,8 +96,16 @@ class DeployScriptTest(unittest.TestCase):
         self.assertIn(["nssm-test", "stop", "relay-custom"], commands)
         self.assertIn(["nssm-test", "start", "relay-custom"], commands)
         env_command = next(c for c in commands if "AppEnvironment" in c)
-        self.assertEqual(env_command[4:][-2:], ["FEEDBACK_ADDR", ":3105"])
+        self.assertEqual(env_command[4:][-1], "FEEDBACK_ADDR=:3105")
         self.assertTrue(all(c[2] == "relay-custom" for c in commands if c[1] != "status"))
+
+    def test_redeploy_switches_installed_service_to_the_new_versioned_binary(self):
+        new_binary = self.root / "kacha-feedbackrelay-1.6.6-windows-amd64.exe"
+        new_binary.write_bytes(b"relay")
+        runner = FakeRunner(installed=True, application=str(self.binary))
+        self.run_main(runner, binary=new_binary)
+        self.assertEqual(runner.running_application, str(new_binary))
+        self.assertEqual([c for c in runner.commands if c[1] == "install"], [])
 
     def test_redeploy_is_idempotent_without_a_second_install(self):
         runner = FakeRunner()
@@ -112,14 +127,14 @@ class DeployScriptTest(unittest.TestCase):
     def test_token_parameter_is_not_accepted(self):
         runner = FakeRunner()
         with self.assertRaises(SystemExit):
-            deploy.main(["--relay-binary", str(self.binary), "--token-env", "TEST_RELAY_TOKEN"], runner=runner, env={})
+            deploy.main(["--relay-binary", str(self.binary), "--token-env", "TEST_RELAY_TOKEN"], runner=runner)
         self.assertEqual(runner.commands, [])
 
     def test_missing_relay_binary_fails_before_any_command(self):
         self.binary.unlink()
         runner = FakeRunner()
         with self.assertRaises(SystemExit) as caught:
-            deploy.main(["--relay-binary", str(self.binary)], runner=runner, env={})
+            deploy.main(["--relay-binary", str(self.binary)], runner=runner)
         self.assertIn("relay", str(caught.exception).lower())
         self.assertEqual(runner.commands, [])
 
