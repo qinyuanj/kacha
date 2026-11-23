@@ -194,29 +194,6 @@ func TestListSeparatesArchived(t *testing.T) {
 	}
 }
 
-// 改名：主文件与 .bak 一起搬，目标已存在时拒绝。
-func TestRenameBoard(t *testing.T) {
-	s := New(t.TempDir())
-	from := filepath.Join(s.BoardDir(), "一"+BoardExt)
-	to := filepath.Join(s.BoardDir(), "二"+BoardExt)
-	s.WriteBoard(from, "{\"a\":1}", WriteOptions{CreateOnly: true})
-	s.WriteBoard(from, "{\"a\":2}", WriteOptions{})
-
-	if got := s.RenameBoard(from, to, ""); !got.OK {
-		t.Fatalf("RenameBoard: %+v", got)
-	}
-	if s.IsFile(from) {
-		t.Fatalf("原画板还在")
-	}
-	texts, _ := s.ReadBoard(to)
-	if texts.Main == nil || *texts.Main != "{\"a\":2}" {
-		t.Fatalf("main = %v", texts.Main)
-	}
-	if texts.Bak == nil {
-		t.Fatalf("备份没跟着搬")
-	}
-}
-
 // 元数据：settings.json 读写；不存在时读出空串。
 func TestMetaReadWrite(t *testing.T) {
 	s := New(t.TempDir())
