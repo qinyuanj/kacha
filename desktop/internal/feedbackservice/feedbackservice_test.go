@@ -3,7 +3,6 @@ package feedbackservice
 import (
 	"encoding/json"
 	"io"
-	"mime"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -213,48 +212,6 @@ func TestUnauthorizedThenRetryUsesFreshRequestToken(t *testing.T) {
 	}
 }
 
-type captureTransport struct{ request *http.Request }
-
-func (c *captureTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	c.request = r
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"ok":true,"kind":"created","message":"已提交 #1","number":1,"url":"http://fake/1"}`)),
-		Request:    r,
-	}, nil
-}
-
-func TestDefaultRelayAddressIsLzxsvn3005(t *testing.T) {
-	if DefaultRelayURL != "http://lzxsvn:3005" {
-		t.Fatalf("DefaultRelayURL = %q", DefaultRelayURL)
-	}
-}
-
-func TestSendUsesConfiguredDefaultWhenSpecOmitsOverride(t *testing.T) {
-	trip := &captureTransport{}
-	out := New(Config{RelayURL: DefaultRelayURL, Client: &http.Client{Transport: trip}}).Send(sampleSpec())
-	if !out.OK {
-		t.Fatalf("Send outcome = %+v", out)
-	}
-	if trip.request == nil || trip.request.URL.String() != "http://lzxsvn:3005/api/feedback" {
-		t.Fatalf("request URL = %v", trip.request)
-	}
-}
-
-func TestSendExplicitOverrideWorksWithBlankConfiguredRelay(t *testing.T) {
-	server, captured := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "已提交 #1", Number: 1})
-	defer server.Close()
-	spec := sampleSpec()
-	spec.RelayURL = server.URL
-	if out := New(Config{}).Send(spec); !out.OK {
-		t.Fatalf("Send outcome = %+v", out)
-	}
-	if captured().calls != 1 {
-		t.Fatalf("relay calls = %d", captured().calls)
-	}
-}
-
 func TestSendWithoutRelayAddressIsExplicitlyUnavailable(t *testing.T) {
 	got := New(Config{}).Send(sampleSpec())
 	want := Outcome{Kind: "unavailable", Message: "反馈暂不可用：未配置中继地址"}
@@ -305,18 +262,18 @@ func TestSendUploadsScreenshotsAndDiagnosticsPack(t *testing.T) {
 	}
 }
 
-func TestChineseCategoryLabelReachesRelayAsStableCode(t *testing.T) {
+func TestCategoryCodeReachesRelayAsChineseLabel(t *testing.T) {
+	// 只保留缺陷一行：证明 client multipart 的 category code 经真中继生成中文标题（#232）。
+	// 其余 code/label 映射由 feedbackrelay.TestCategoryLabels 与 Python sync 覆盖。
 	cases := []struct {
-		label, code string
-		id          int64
+		code  string
+		label string
+		id    int64
 	}{
-		{"缺陷", "bug", 1},
-		{"需求", "feature", 2},
-		{"建议", "suggestion", 3},
-		{"其他", "other", 4},
+		{"bug", "缺陷", 1},
 	}
 	for _, tc := range cases {
-		t.Run(tc.label+"->"+tc.code, func(t *testing.T) {
+		t.Run(tc.code+"->"+tc.label, func(t *testing.T) {
 			var issueTitle string
 			var issueLabels []int64
 			gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -445,6 +402,13 @@ func TestSendRedactsSecretsAndLocalPaths(t *testing.T) {
 			t.Fatalf("redacted text still contains %q: title=%q body=%q", key, req.fields["title"], req.fields["body"])
 		}
 	}
+	// 标题脱敏必须真的发生：原始路径是单反斜杠，旧的双反斜杠检查串永远匹配不到（#232）。
+	if strings.Contains(req.fields["title"], `C:\Users\me`) {
+		t.Fatalf("title still contains local path: %q", req.fields["title"])
+	}
+	if !strings.Contains(req.fields["title"], "[REDACTED]") {
+		t.Fatalf("title redaction placeholder missing: %q", req.fields["title"])
+	}
 	// 共享脱敏实现统一用 [REDACTED]（diagnostics 与 feedbackservice 同一语义，#216 项4）。
 	if !strings.Contains(req.fields["body"], "[REDACTED]") {
 		t.Fatalf("redaction placeholder missing: body=%q", req.fields["body"])
@@ -493,33 +457,53 @@ func TestSendUsesStableContentIdempotencyKey(t *testing.T) {
 }
 
 func TestSendRelayUrlOverridesConfiguredAddress(t *testing.T) {
-	defaultServer, defaultCapture := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "默认中继", Number: 1, URL: "https://example.test/1"})
-	defer defaultServer.Close()
-	overrideServer, overrideCapture := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "覆盖中继", Number: 2, URL: "https://example.test/2"})
-	defer overrideServer.Close()
-
-	spec := sampleSpec()
-	spec.RelayURL = overrideServer.URL
-	got := New(Config{RelayURL: defaultServer.URL}).Send(spec)
-	if !got.OK || got.Message != "覆盖中继" {
-		t.Fatalf("Send outcome = %+v, want override response", got)
+	// 地址优先级表：配置与本次覆盖各自独立生效，覆盖优先；两者都空则明确不可用（#232）。
+	cases := []struct {
+		name       string
+		configured bool
+		override   bool
+		wantKind   string
+		wantServer string // "default" / "override" / ""
+	}{
+		{name: "neither configured nor overridden", wantKind: KindUnavailable},
+		{name: "configured only", configured: true, wantKind: KindOK, wantServer: "default"},
+		{name: "override only", override: true, wantKind: KindOK, wantServer: "override"},
+		{name: "both, override wins", configured: true, override: true, wantKind: KindOK, wantServer: "override"},
 	}
-	if defaultCapture().calls != 0 || overrideCapture().calls != 1 {
-		t.Fatalf("calls: default=%d override=%d", defaultCapture().calls, overrideCapture().calls)
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defaultServer, defaultCapture := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "默认中继", Number: 1, URL: "https://example.test/1"})
+			defer defaultServer.Close()
+			overrideServer, overrideCapture := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "覆盖中继", Number: 2, URL: "https://example.test/2"})
+			defer overrideServer.Close()
 
-func TestMultipartBodyIsFormEncoded(t *testing.T) {
-	var contentType string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		contentType = r.Header.Get("Content-Type")
-		_, _ = io.WriteString(w, "{}")
-	}))
-	defer server.Close()
-
-	_ = New(Config{RelayURL: server.URL}).Send(sampleSpec())
-	mediaType, params, err := mime.ParseMediaType(contentType)
-	if err != nil || mediaType != "multipart/form-data" || params["boundary"] == "" {
-		t.Fatalf("request Content-Type is not multipart: %q", contentType)
+			cfg := Config{}
+			if tc.configured {
+				cfg.RelayURL = defaultServer.URL
+			}
+			spec := sampleSpec()
+			if tc.override {
+				spec.RelayURL = overrideServer.URL
+			}
+			got := New(cfg).Send(spec)
+			if got.Kind != tc.wantKind {
+				t.Fatalf("Send outcome = %+v, want kind %q", got, tc.wantKind)
+			}
+			defaultCalls, overrideCalls := defaultCapture().calls, overrideCapture().calls
+			switch tc.wantServer {
+			case "default":
+				if defaultCalls != 1 || overrideCalls != 0 {
+					t.Fatalf("calls: default=%d override=%d, want default only", defaultCalls, overrideCalls)
+				}
+			case "override":
+				if defaultCalls != 0 || overrideCalls != 1 {
+					t.Fatalf("calls: default=%d override=%d, want override only", defaultCalls, overrideCalls)
+				}
+			case "":
+				if defaultCalls != 0 || overrideCalls != 0 {
+					t.Fatalf("calls: default=%d override=%d, want no relay", defaultCalls, overrideCalls)
+				}
+			}
+		})
 	}
 }

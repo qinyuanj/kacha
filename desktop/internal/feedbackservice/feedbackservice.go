@@ -92,7 +92,6 @@ type Outcome struct {
 // Config 是服务的运行参数；RelayURL 为空且调用方也没有显式覆盖时，发送明确不可用。
 type Config struct {
 	RelayURL string
-	Client   *http.Client
 }
 
 // Service 持有 HTTP 客户端与配置；无共享可变状态。
@@ -103,10 +102,7 @@ type Service struct {
 
 // New 造一个反馈服务；不擅自填默认地址，是否配置由调用方说清楚。
 func New(cfg Config) *Service {
-	if cfg.Client == nil {
-		cfg.Client = &http.Client{Timeout: 20 * time.Second}
-	}
-	return &Service{cfg: cfg, client: cfg.Client}
+	return &Service{cfg: cfg, client: &http.Client{Timeout: 20 * time.Second}}
 }
 
 // redact 去掉正文中会泄露身份的绝对路径与常见凭据形态；主机名不主动采集。

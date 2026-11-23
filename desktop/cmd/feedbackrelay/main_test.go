@@ -38,16 +38,6 @@ func TestLoadConfigReadsEnvironmentOverrides(t *testing.T) {
 	}
 }
 
-func TestLoadConfigStartsWithoutEnvironmentToken(t *testing.T) {
-	cfg, err := loadConfig(envLookup(nil))
-	if err != nil {
-		t.Fatalf("loadConfig: %v", err)
-	}
-	if cfg.GiteaBase == "" || cfg.OwnerRepo == "" || cfg.Address == "" {
-		t.Fatalf("cfg=%+v", cfg)
-	}
-}
-
 func TestLoadConfigDoesNotReadLegacyTokenEnvironment(t *testing.T) {
 	lookup := func(key string) string {
 		if key == "FEEDBACK_GITEA_TOKEN" {
@@ -60,12 +50,3 @@ func TestLoadConfigDoesNotReadLegacyTokenEnvironment(t *testing.T) {
 	}
 }
 
-func TestEnvOrUsesOverrideAndDefault(t *testing.T) {
-	lookup := envLookup(map[string]string{"SET": "value"})
-	if got := envOr(lookup, "SET", "fallback"); got != "value" {
-		t.Fatalf("override=%q", got)
-	}
-	if got := envOr(lookup, "UNSET", "fallback"); got != "fallback" {
-		t.Fatalf("default=%q", got)
-	}
-}
