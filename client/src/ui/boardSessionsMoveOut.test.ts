@@ -1,16 +1,29 @@
 // 移出为新画板的最后两步（#137）：写新画板与从原画板删节点。
 import { describe, expect, it, vi } from "vitest";
-import { newBoard, type Board, type TaskNode } from "../core/board";
+import { newBoard, openBoard, type Board, type TaskNode } from "../core/board";
+import { prepareStageSplit } from "../core/moveOut";
+import { createFakePort } from "../shell/testing/fakePort";
 import { finishMoveOut, moveOutWrite, moveOutRefusal, writeMovedOut } from "./boardSessionsMoveOut";
 
 const board = (title = "新"): Board => ({ format_version: 2, title, viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges: [], extra: {} });
 
 describe("写新画板", () => {
-  it("写成功：没有说明", async () => {
-    const write = vi.fn(async () => undefined);
-    const message = await writeMovedOut({ board: { write } } as never, "/~/a.ugcboard.json", board());
+  it("经真实壳端口写盘：读回能重新解析，内容等于从原画板拆出的结果", async () => {
+    const port = createFakePort();
+    const original = stagedBoard();
+    let seq = 0;
+    const prepared = await prepareStageSplit(() => original, "s1", async () => "sha", () => `n${++seq}`);
+    if (!prepared) throw new Error("阶段应能拆出新画板");
+
+    const message = await writeMovedOut(port, "/~/新.ugcboard.json", prepared.board);
     expect(message).toBeNull();
-    expect(write).toHaveBeenCalled();
+
+    // 端口只收文本：写进去的是画板序列化后的正文，不是画板对象。
+    const written = port.calls.write[0].text;
+    expect(typeof written).toBe("string");
+    const reopened = openBoard(written, null);
+    if (reopened.kind !== "ok") throw new Error("写出的新画板读不回来：" + reopened.kind);
+    expect(reopened.board).toEqual(prepared.board);
   });
 
   it("写不进去：给错误说明", async () => {
