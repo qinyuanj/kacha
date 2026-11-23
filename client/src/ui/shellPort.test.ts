@@ -114,7 +114,7 @@ describe("粘贴分派（端口驱动）", () => {
     expect(applied).toEqual([]);
   });
 
-  it("两样都不是（普通文本）：放行给浏览器，不提示也不落盘", async () => {
+  it("两样都不是（普通文本）：不提示也不落盘，交给浏览器默认读取", async () => {
     const images = vi.fn();
     await show(createElement(PasteProbe, { onImages: images }));
     expect((await pasteEvent({ text: "一段普通文字" })).defaultPrevented).toBe(true);

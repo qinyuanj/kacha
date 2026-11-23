@@ -89,6 +89,6 @@ describe("读一张图的信息", () => {
     };
     await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(Probe) })));
     await act(async () => undefined);
-    expect(seen).toBeTruthy();
+    expect(seen).toMatchObject({ sha256: expect.any(String), bytes: expect.any(Number), width: expect.any(Number), height: expect.any(Number), format: expect.any(String), has_alpha: expect.any(Boolean) });
   });
 });

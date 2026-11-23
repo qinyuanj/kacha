@@ -57,6 +57,7 @@ describe("其余判定", () => {
 
   it("体量提醒：没超线就不显示", () => {
     expect(activeSizeNotice(null, undefined).show).toBeNull();
+    expect(activeSizeNotice("warn", "warn").show).toBeNull();
   });
 
   it("用量提醒：没有用量就不显示", () => {
@@ -65,7 +66,17 @@ describe("其余判定", () => {
     expect(usageNoticeVisible("alert", "alert")).toBe(false);
   });
 
-  it("模态：没有打开就是 false", () => {
+  it("模态：任一模态打开就是 true，全关才 false", () => {
+    expect(
+      modalOpenOf({
+        settingsOpen: false,
+        changelogOpen: false,
+        boardListOpen: false,
+        confirmOpen: false,
+        sendTextOpen: true,
+        packDialogOpen: false,
+      }),
+    ).toBe(true);
     expect(
       modalOpenOf({
         settingsOpen: false,

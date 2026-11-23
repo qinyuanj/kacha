@@ -1,5 +1,5 @@
 // 画板包界面的各个步骤（#137）：导出的第一步与第二步、对话框的状态。
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { planExport } from "../core/boardPack";
 import { confirmDialog, exportPackStep, exportPlanStep, progressDialog, type ExportDeps } from "./boardPackOps";
 
@@ -23,6 +23,7 @@ describe("导出的第一步", () => {
     const broken = { ...(board as { nodes: unknown[] }), nodes: undefined } as never;
     const step = await exportPlanStep(deps(), broken, "a.ugcboard.json", "/~", () => () => undefined);
     expect(step.kind).toBe("failed");
+    expect(step.kind === "failed" && step.text).toContain("无法导出画板包：");
   });
 
   it("读不到参考图：仍进确认，但计划里记为缺图", async () => {
@@ -43,8 +44,11 @@ describe("导出的第二步", () => {
   it("成功：提示已导出", async () => {
     const plan = await planExport(board, "/~", packFs);
     const contents = { duplicates: {}, bytes: 10, totalBytes: 10 };
-    const result = await exportPackStep(deps(), "a.ugcboard.json", plan, contents, () => () => undefined);
-    expect(result.ok).toBe(true);
+    const exportPack = vi.fn(async () => ({ task_dirs: 0, bytes: 0, target: "/~/a.ugcpack" }));
+    const d = deps({ exportPack });
+    const result = await exportPackStep(d, "a.ugcboard.json", plan, contents, () => () => undefined);
+    expect(exportPack).toHaveBeenCalledWith("a.ugcpack", expect.anything());
+    expect(result.ok && result.text).toBe("已导出画板包 /~/a.ugcpack");
   });
 });
 
@@ -53,5 +57,6 @@ describe("对话框的状态", () => {
     expect(progressDialog("正在导出")).toEqual({ stage: "progress", title: "正在导出" });
     const plan = await planExport(board, "/~", packFs);
     expect(confirmDialog("a.ugcboard.json", plan, { duplicates: {}, bytes: 10, totalBytes: 10 }).stage).toBe("confirmExport");
+    expect(progressDialog("正在导出").stage).toBe("progress");
   });
 });

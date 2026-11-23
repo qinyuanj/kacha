@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
 import { TIDY_TEXT } from "./boardText";
 import {
-  NO_BOARD,
+
   redoHint,
   runHint,
   runSuffix,
@@ -17,7 +17,7 @@ import {
 
 describe("工具栏文案", () => {
   it("没有画板：所有入口都说同一个原因", () => {
-    expect(toolbarHint(true, "在视口中央新建一个提示词节点")).toBe(NO_BOARD);
+    expect(toolbarHint(true, "在视口中央新建一个提示词节点")).toBe("没有打开的画板");
   });
 
   it("有画板：用这个入口自己的说明", () => {

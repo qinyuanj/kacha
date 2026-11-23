@@ -141,6 +141,7 @@ describe("画板变更与撤销", () => {
     const apply = vi.fn(() => ({ board: {} }));
     applyWithFlush(apply, flushNow, "k1", { kind: "submitted", taskId: "t1", lastSubmitted: null });
     expect(flushNow).toHaveBeenCalledWith("k1");
+    expect(apply).toHaveBeenCalledTimes(1);
   });
 
   it("其它变更：不落盘", () => {
@@ -148,6 +149,10 @@ describe("画板变更与撤销", () => {
     const apply = vi.fn(() => ({ board: {} }));
     applyWithFlush(apply, flushNow, "k1", { kind: "title", title: "新" });
     expect(flushNow).not.toHaveBeenCalled();
+  });
+
+  it("没有待写错误：不记保存失败", () => {
+    expect(boardNoticeText(okSession())).toBeNull();
   });
 
   it("没有打开的画板：变更与试算都不做", () => {
@@ -263,7 +268,10 @@ describe("其它接线", () => {
   });
 
   it("撤销 / 重做标签：没有画板时为 null", () => {
-    expect(historyLabels(okSession()).undo).toBeNull();
-    expect(historyLabels(undefined).redo).toBeNull();
+    expect(historyLabels(undefined)).toEqual({ undo: null, redo: null });
+    const ok = okSession();
+    if (ok.status !== "ok") throw new Error("fixture should be ok");
+    const b = ok.board;
+    expect(historyLabels(okSession({ history: { ...emptyHistory(), undo: [{ board: b, label: "改标题", seenResults: new Set() }], redo: [{ board: b, label: "删除节点", seenResults: new Set() }] } }))).toEqual({ undo: "改标题", redo: "删除节点" });
   });
 });

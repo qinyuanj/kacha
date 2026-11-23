@@ -28,9 +28,7 @@ describe("运行的判定", () => {
   });
 
   it("单个干净任务：直接提交", () => {
-    const decision = decideRun([item()], 0, true);
-    if (decision.kind === "submit") expect(decision.taskId).toBe("t1");
-    else expect(decision.kind).toBe("confirm");
+    expect(decideRun([item()], 0, true)).toEqual({ kind: "submit", taskId: "t1" });
   });
 
   it("单个有警告的任务：弹确认", () => {
@@ -38,14 +36,11 @@ describe("运行的判定", () => {
   });
 
   it("多个任务：弹确认，并带上范围", () => {
-    const decision = decideRun([item(), item({ taskId: "t2" })], 2, true);
-    expect(decision.kind).toBe("confirm");
-    if (decision.kind === "confirm") expect(decision.scope).toBe("selection");
+    expect(decideRun([item(), item({ taskId: "t2" })], 2, true)).toMatchObject({ kind: "confirm", scope: "selection" });
   });
 
   it("没有选中：范围是整板", () => {
-    const decision = decideRun([item(), item({ taskId: "t2" })], 0, true);
-    if (decision.kind === "confirm") expect(decision.scope).toBe("board");
+    expect(decideRun([item(), item({ taskId: "t2" })], 0, true)).toMatchObject({ kind: "confirm", scope: "board" });
   });
 });
 

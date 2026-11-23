@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approxSizeText, ARCHIVE_TEXT, boardSlotsFullText, DELETE_TASK_TEXT, formatBytes, IMPORT_TEXT, isSlotsFullText, PACK_IMPORT_TEXT, PASTE_TEXT, pasteRefusalText, REGION_TEXT, RELOCATE_TEXT, SAVE_TEXT, sizeNoticeText, slotsRefusal, slotsUsageText, STAGE_TEXT, SUGGEST_KEEP_TEXT, TIDY_TEXT, usageLimitText, VARIANT_TEXT } from "./boardText";
+import { approxSizeText, boardSlotsFullText, DELETE_TASK_TEXT, formatBytes, IMPORT_TEXT, isSlotsFullText, PACK_IMPORT_TEXT, PASTE_TEXT, pasteRefusalText, REGION_TEXT, RELOCATE_TEXT, SAVE_TEXT, sizeNoticeText, slotsRefusal, slotsUsageText, STAGE_TEXT, SUGGEST_KEEP_TEXT, TIDY_TEXT, usageLimitText, VARIANT_TEXT } from "./boardText";
 
 // 期望文案照抄票面（#89 已确认的简洁版），独立于源码，防止同义反复。
 describe("画板位文案（#89）", () => {
@@ -67,9 +67,9 @@ describe("用量与体量提醒", () => {
 
 describe("粘贴文案（#96）", () => {
   it("拒绝原因到文案只有一处映射：只读归档沿用画板只读的共享文案", () => {
-    expect(pasteRefusalText("readOnly")).toBe(ARCHIVE_TEXT.readOnly);
-    expect(pasteRefusalText("staleNodeClip")).toBe(PASTE_TEXT.staleNodeClip);
-    expect(pasteRefusalText("filesNotReadable")).toBe(PASTE_TEXT.filesNotReadable);
+    expect(pasteRefusalText("readOnly")).toBe("归档画板只读，不能编辑。");
+    expect(pasteRefusalText("staleNodeClip")).toBe("剪贴板里的节点已失效，重新复制节点后再粘贴");
+    expect(pasteRefusalText("filesNotReadable")).toBe("剪贴板里是文件，暂不支持粘贴文件：请把图片拖进画板");
   });
 
   it("超限提示里的上限来自那个跨层常量，不另写一份数字", () => {

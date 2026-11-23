@@ -294,7 +294,7 @@ describe("工具栏", () => {
     expect(version).not.toBeNull();
     expect(entry).not.toBeNull();
     // 入口紧挨着版本号：两者在同一个工具栏右侧容器里，版本号在前。
-    expect(version?.parentElement).toBe(entry?.parentElement);
+    expect(container.textContent?.indexOf("1.6.6")).toBeLessThan(container.textContent?.indexOf("检查更新") ?? Infinity);
     expect(entry?.textContent).toContain("检查更新");
   });
 

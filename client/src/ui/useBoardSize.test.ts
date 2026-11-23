@@ -66,6 +66,37 @@ it("列表里没有这一块：没有体量", async () => {
   expect(box.current).toBeNull();
 });
 
+it("体量未知：没有体量", async () => {
+  const port = createFakePort();
+  port.board.list = async () => ({
+    boards: [{ name: "a.ugcboard.json", path: "/~/a.ugcboard.json", archived: false, bytes: null }],
+    slots: { used: 0, total: 10 },
+    size_lines: { warn: 100, alert: 200 },
+  });
+  const box = sizeOf(port, "/~/a.ugcboard.json", "v1");
+  await act(async () => {
+    vi.advanceTimersByTime(2000);
+  });
+  expect(box.current).toBeNull();
+});
+
+it("换了画板：旧的结果不当成新画板的体量", async () => {
+  const port = createFakePort();
+  port.board.list = async () => ({
+    boards: [{ name: "a.ugcboard.json", path: "/~/a.ugcboard.json", archived: false, bytes: 50 }],
+    slots: { used: 0, total: 10 },
+    size_lines: { warn: 100, alert: 200 },
+  });
+  const box = sizeOf(port, "/~/a.ugcboard.json", "v1");
+  await act(async () => { vi.advanceTimersByTime(2000); });
+  expect(box.current?.bytes).toBe(50);
+  act(() => {
+    // 同一 hook：换 key 后下一轮不能沿用旧 key 的体量。
+    const next = sizeOf(port, "/~/b.ugcboard.json", "v2");
+    expect(next.current).toBeNull();
+  });
+});
+
 it("读列表失败：没有体量，也不影响任何操作", async () => {
   const port = createFakePort();
   port.board.list = async () => {

@@ -51,11 +51,18 @@ describe("删除画板", () => {
   it("先落盘再删：删除后关掉标签页", async () => {
     const port = createFakePort({ boards: [{ path: "/~/a.ugcboard.json", main: "{}", version: "v1" }] });
     const store = storeOf([okSession()]);
-    const flush = vi.fn(async () => undefined);
+    const order: string[] = [];
+    const flush = vi.fn(async () => void order.push("flush"));
     const dropSession = vi.fn();
+    const remove = port.board.remove.bind(port.board);
+    port.board.remove = async (path: string) => {
+      order.push("remove");
+      return remove(path);
+    };
     await deleteBoardSession(store, port as unknown as SessionPorts, flush, dropSession, "k1");
     expect(flush).toHaveBeenCalledWith("k1");
     expect(port.calls.remove).toHaveLength(1);
+    expect(order).toEqual(["flush", "remove"]);
     expect(dropSession).toHaveBeenCalledWith("k1");
   });
 
@@ -133,6 +140,8 @@ describe("取消归档与另存", () => {
     const refusal = await copyAsNewBoardSession(store, port as unknown as SessionPorts, "/~", openPath, "/~/画板/归档/a.ugcboard.json");
     expect(refusal).toBeNull();
     expect(port.calls.write.length).toBeGreaterThan(0);
+    expect(port.calls.write[0].path).toContain("画板");
+    expect(openPath).toHaveBeenCalledWith(port.calls.write[0].path, true);
   });
 });
 
@@ -158,9 +167,11 @@ describe("改名", () => {
   it("只读画板：给出提示，不改", async () => {
     const port = createFakePort();
     const apply = vi.fn();
-    await renameBoardSession(storeOf([okSession()]), port as unknown as SessionPorts, async () => undefined, apply, vi.fn(), () => true, new Set(), "k1", "新名字");
+    const store = storeOf([okSession()]);
+    await renameBoardSession(store, port as unknown as SessionPorts, async () => undefined, apply, vi.fn(), () => true, new Set(), "k1", "新名字");
     expect(port.calls.rename).toHaveLength(0);
     expect(apply).not.toHaveBeenCalled();
+    expect(store.sessionOf("k1")).toMatchObject({ status: "ok", notice: "归档画板只读，不能编辑。" });
   });
 });
 

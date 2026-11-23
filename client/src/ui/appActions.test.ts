@@ -30,7 +30,8 @@ describe("运行的分派", () => {
     const openSettings = vi.fn();
     const startRun = vi.fn();
     await openRunConfirm({ activeKey: "k1", userRoot: "/~", hasApiKey: false, board: board(), locked: new Set(), selectedIds: [], ctx, startRun, toast, openSettings, confirm: vi.fn() });
-    expect(toast).toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith("没有需要运行的任务");
+    expect(openSettings).not.toHaveBeenCalled();
     expect(startRun).not.toHaveBeenCalled();
   });
 });

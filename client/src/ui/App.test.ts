@@ -246,7 +246,7 @@ describe("工作台", () => {
     await vi.waitFor(() => expect(container.textContent).toContain("a"));
     const boardButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("a"));
     await act(async () => boardButton?.click());
-    await vi.waitFor(() => expect(container.querySelector(".board-toolbar-slot")).not.toBeNull());
+    await vi.waitFor(() => expect(container.querySelector(".canvas")).not.toBeNull());
   });
 
   it("顶栏与用量提醒里的入口都能打开对应弹层", async () => {
