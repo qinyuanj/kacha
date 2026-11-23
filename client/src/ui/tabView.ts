@@ -35,7 +35,7 @@ export function renameKeyOf(key: string): "commit" | "cancel" | null {
 }
 
 /** 右键菜单里「导出画板包」这一条要的画板状态。 */
-export function packBoardOf(s: Session): { open: boolean; broken: boolean } {
+function packBoardOf(s: Session): { open: boolean; broken: boolean } {
   return { open: s.status === "ok", broken: s.status !== "ok" };
 }
 /** 右键菜单要的那一条：导出画板包。 */

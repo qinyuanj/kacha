@@ -10,6 +10,7 @@ import { emptyHistory } from "../core/history";
 import { createDesktopPort, type DesktopBridge, type DesktopInfo, type DesktopLocalBridge } from "../shell/desktop";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { ShellProvider } from "./shell";
+import type { Session } from "./useBoardSessions";
 import { TabBar } from "./TabBar";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -108,6 +109,33 @@ describe("标签页栏的行为", () => {
     });
     return port;
   }
+
+  it("画板读不出来时写文件名并标红，不进入改名", async () => {
+    const bad: Session = { key: "k", path: "/b/x.kacha", status: "corrupt", reason: "坏了" };
+    await act(async () => {
+      root.render(createElement(ShellProvider, { port: createFakePort(), children: createElement(TabBar, { sessions: [bad], activeKey: null, onActivate: () => undefined, onClose: () => undefined, onRename: () => undefined, onCreate: () => undefined, onExportPack: () => undefined }) }));
+    });
+    expect(container.querySelector(".tab-title")?.textContent).toBe("x.kacha");
+    expect((container.querySelector(".tab") as HTMLElement).className).toContain("tab-bad");
+    await act(async () => { container.querySelector(".tab")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); });
+    expect(container.querySelector("input")).toBeNull();
+    await act(async () => { container.querySelector(".tab")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 })); });
+    expect(container.querySelector('[role="menuitem"]')?.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("保存失败时标红", async () => {
+    await act(async () => {
+      root.render(createElement(ShellProvider, { port: createFakePort(), children: createElement(TabBar, { sessions: [{ ...SESSION, saveError: "写不进去" }], activeKey: null, onActivate: () => undefined, onClose: () => undefined, onRename: () => undefined, onCreate: () => undefined, onExportPack: () => undefined }) }));
+    });
+    expect((container.querySelector(".tab") as HTMLElement).className).toContain("tab-bad");
+  });
+
+  it("改名输入普通键不提交", async () => {
+    await renderBar();
+    await act(async () => { container.querySelector(".tab")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); });
+    await act(async () => { (container.querySelector("input") as HTMLInputElement).dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true })); });
+    expect(container.querySelector("input")).not.toBeNull();
+  });
 
   it("标签写画板标题，当前标签高亮", async () => {
     await renderBar();

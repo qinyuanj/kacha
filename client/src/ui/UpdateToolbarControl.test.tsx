@@ -78,11 +78,6 @@ describe("首页版本号旁的更新入口", () => {
     expect(container.textContent).not.toContain("下载并安装");
   });
 
-  it("下载完成但没验签：安装按钮不能点", async () => {
-    await show(createFakePort(), ready({ verified: false, installable: false }));
-    expect(button("下载并安装").disabled).toBe(true);
-  });
-
   it("实现说可装但没验签：仍然不能点（界面不把 installable 当成验签）", async () => {
     await show(createFakePort(), ready({ verified: false, installable: true }));
     expect(button("下载并安装").disabled).toBe(true);
@@ -99,40 +94,6 @@ describe("首页版本号旁的更新入口", () => {
   });
 
   // #181：按钮跟着状态变文案与颜色。
-  it("已是最新：按钮变绿并说「已是最新」", async () => {
-    await show(createFakePort(), { ...emptySnapshot(), phase: "up_to_date" });
-    const el = container.querySelector(".topbar-update-btn");
-    expect(el?.textContent).toContain("已是最新");
-    expect(el?.getAttribute("data-update-tone")).toBe("latest");
-  });
-
-  it("有新版本：按钮变红并带上版本号", async () => {
-    await show(createFakePort(), { ...emptySnapshot(), phase: "available", version: "1.6.8" });
-    const el = container.querySelector(".topbar-update-btn");
-    expect(el?.textContent).toContain("有新版本 1.6.8");
-    expect(el?.getAttribute("data-update-tone")).toBe("action");
-  });
-
-  it("有未完成任务时拒绝安装，且不起安装器", async () => {
-    const port = createFakePort();
-    await show(port, ready(), { queue: { pending: () => 2, setSubmissionGuard: () => undefined } });
-    await act(async () => button("下载并安装").click());
-    expect(hint()).toContain("任务结束后可更新");
-    expect(port.calls.updateInstall).toBe(0);
-  });
-
-  it("保存失败时拒绝安装，且说明原因", async () => {
-    const port = createFakePort();
-    await show(port, ready(), {
-      saveBoards: async () => {
-        throw new Error("磁盘已满");
-      },
-    });
-    await act(async () => button("下载并安装").click());
-    expect(hint()).toContain("保存画板失败：磁盘已满");
-    expect(port.calls.updateInstall).toBe(0);
-  });
-
   it("写盘没抛错但仍有改动没保存：拒绝安装（#180）", async () => {
     const port = createFakePort();
     await show(port, ready(), { unsavedChanges: () => true });

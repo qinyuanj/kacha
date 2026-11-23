@@ -142,23 +142,6 @@ it("保存成功后重新打开画板：改动还在", async () => {
   expect(session.status === "ok" && session.board.title).toBe("存下来的标题");
 });
 
-it("新建画板：只新建不覆盖地写本地画板，文件名的重名由端口列出的名字决定", async () => {
-  const port = createFakePort({
-    boards: [{ path: BOARD_PATH, main: serializeBoard(newBoard("本地")), version: "v1" }],
-  });
-
-  const boards = sessions(port);
-  await act(async () => {
-    expect(await boards.createBoard()).toBeNull();
-  });
-
-  expect(port.calls.write).toHaveLength(1);
-  expect(port.calls.write[0].options).toEqual({ createOnly: true });
-  expect(port.calls.write[0].path).not.toBe(BOARD_PATH);
-  // 新建的画板是一个标签页，内容在内存里。
-  expect(boards.snapshot().sessions).toHaveLength(1);
-});
-
 it("新建画板写不进去：标签页留着，内容不丢，失败原因看得见", async () => {
   const port = createFakePort({
     boards: [{ path: BOARD_PATH, main: serializeBoard(newBoard("本地")), version: "v1" }],

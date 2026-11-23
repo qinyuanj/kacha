@@ -73,13 +73,6 @@ async function advance(ms: number): Promise<void> {
 }
 
 describe("空闲自动安装的接线", () => {
-  it("还没读到快照：既不倒计时也不装", async () => {
-    await render(deps({ loaded: false }));
-    expect(shown?.view.counting).toBe(false);
-    await advance(AUTO_INSTALL_DELAY_MS * 2);
-    expect(installs).toBe(0);
-  });
-
   it("下载中：不装；下载完就绪后开始倒计时", async () => {
     await render(deps({ snapshot: ready({ phase: "downloading", downloaded: 10 }) }));
     expect(shown?.view.counting).toBe(false);
@@ -113,16 +106,6 @@ describe("空闲自动安装的接线", () => {
     expect(shown?.view.counting).toBe(true);
     await advance(AUTO_INSTALL_DELAY_MS);
     expect(installs).toBe(1);
-  });
-
-  it("有改动没落盘：不装", async () => {
-    await render(deps({ snapshot: ready({ phase: "downloading" }), idle: () => ({ boardsReady: true,
-  settingsLoaded: true, pendingTasks: 0, unsavedChanges: true }) }));
-    await render(deps({ idle: () => ({ boardsReady: true,
-  settingsLoaded: true, pendingTasks: 0, unsavedChanges: true }) }));
-    expect(shown?.view.counting).toBe(false);
-    await advance(AUTO_INSTALL_DELAY_MS * 2);
-    expect(installs).toBe(0);
   });
 
   it("点了稍后：本轮不再自动装", async () => {

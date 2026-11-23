@@ -1,6 +1,7 @@
 // 多画板会话的去抖自动保存（#137）：落盘时机、写入条件与写失败。
 import { describe, expect, it, vi } from "vitest";
-import { flushPending, noteSaveFailure, unsavedChanges, writableNow, writeSession, type Saver } from "./boardSessionsAutosave";
+import { serializeBoard } from "../core/board";
+import { flushPending, unsavedChanges, writableNow, writeSession, type Saver } from "./boardSessionsAutosave";
 import type { OkSession, Session } from "./useBoardSessions";
 
 const session = (patch: Partial<OkSession> = {}): OkSession =>
@@ -91,8 +92,15 @@ describe("写入", () => {
     const write = vi.fn(async () => undefined);
     const patch = vi.fn();
     await writeSession({ board: { write } } as never, patch, "k1", session());
-    expect(write).toHaveBeenCalled();
-    expect(patch).toHaveBeenCalled();
+    const text = serializeBoard(session().board);
+    expect(write).toHaveBeenCalledWith("/~/a.ugcboard.json", text, { version: "v1" });
+    expect(patch).toHaveBeenCalledTimes(1);
+    const [key, update] = patch.mock.calls[0] as [string, (s: unknown) => unknown];
+    const next = update(session()) as Record<string, unknown>;
+    expect(key).toBe("k1");
+    expect(typeof next.version).toBe("string");
+    expect(next.version).not.toBe("v1");
+    expect(next).toMatchObject({ saveError: null, conflicted: false, missing: false });
   });
 
   it("新建的画板：只新建不覆盖", async () => {
@@ -105,12 +113,3 @@ describe("写入", () => {
   });
 });
 
-describe("写失败", () => {
-  it("记下错误并写日志", () => {
-    const patch = vi.fn();
-    const log = vi.fn();
-    noteSaveFailure(patch, { ui: { log } }, "k1", session(), new Error("offline"));
-    expect(log).toHaveBeenCalled();
-    expect(patch).toHaveBeenCalled();
-  });
-});

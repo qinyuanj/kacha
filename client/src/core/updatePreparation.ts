@@ -1,6 +1,7 @@
 // 更新安装前的准备与保护（#164）：复用 v0.3.2 updatePreparation 的行为。
 //
-// 保护覆盖两件事：拒绝新提交、严格保存全部打开的画板与界面状态。任一失败就解除保护、恢复正常操作。
+// 保护要覆盖两件事：拒绝新提交（含已经开始的异步提交）、严格保存全部打开的画板与界面状态。
+// 任一失败就解除保护、恢复正常操作。
 
 /** 有未完成任务时的拒绝说法（与旧版一致）。 */
 export const BUSY_MESSAGE = "任务结束后可更新";
@@ -60,7 +61,7 @@ async function saveAll(ports: UpdatePreparationPorts): Promise<PreparationResult
   return { ok: true };
 }
 
-/** 一次准备的完整流程：任务必须结束、保存必须成功。 */
+/** 一次准备的完整流程：任务必须结束、保存要成功。 */
 async function runPreparation(ports: UpdatePreparationPorts): Promise<PreparationResult> {
   try {
     // 已经在读图 / 排队 / 执行 / 退避的任务继续跑：不等它结束、也不取消。
@@ -79,16 +80,13 @@ export function createUpdatePreparation(ports: UpdatePreparationPorts): UpdatePr
     ports.queue.setSubmissionGuard(null);
   }
 
-  async function run(): Promise<PreparationResult> {
-    return runPreparation(ports);
-  }
-
   const preparation: UpdatePreparation = {
     prepare() {
       if (current) return current;
       if (ports.queue.pending() > 0) return Promise.resolve({ ok: false, reason: BUSY_MESSAGE });
+      // 准备期间就挡住新提交：等保存的这段时间里用户不该再改动画板。
       ports.queue.setSubmissionGuard(() => undefined);
-      current = run().then((result) => {
+      current = runPreparation(ports).then((result) => {
         // 失败立刻解除保护：用户要能继续创作，旧版本也照常可用。
         if (!result.ok) release();
         return result;

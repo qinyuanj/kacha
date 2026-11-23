@@ -94,6 +94,76 @@ describe("画板列表", () => {
     expect(buttonWithText("复制为新画板")).toBeDefined();
   });
 
+  it("普通列表：照存储端口给的顺序，不重排", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing({ boards: [
+      { name: "z.ugcboard.json", path: "/~/z.ugcboard.json", archived: false, bytes: 1 },
+      { name: "a.ugcboard.json", path: "/~/a.ugcboard.json", archived: false, bytes: 9999 },
+    ] });
+    await show(port);
+    expect([...container.querySelectorAll(".board-list-open")].map((b) => b.textContent)).toEqual(["z", "a"]);
+  });
+
+  it("列表说明：普通与管理各一句", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    await show(port);
+    expect(container.textContent).toContain("画板保存在这台电脑的数据根中");
+    await show(port, { manage: true });
+    expect(container.textContent).toContain("按画板体量从大到小排列");
+  });
+
+  it("超出画板位：顶部给出提醒", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing({ slots: { used: 11, total: 10 } });
+    await show(port);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("删除不再需要的画板后才能新建");
+  });
+
+  it("体量档位：越过提醒线才有档位", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing({ boards: [
+      { name: "a.ugcboard.json", path: "/~/a.ugcboard.json", archived: false, bytes: 50 },
+      { name: "b.ugcboard.json", path: "/~/b.ugcboard.json", archived: false, bytes: 150 },
+      { name: "c.ugcboard.json", path: "/~/c.ugcboard.json", archived: false, bytes: 2048 },
+    ] });
+    await show(port);
+    const tiers = [...container.querySelectorAll("[data-size-tier]")].map((n) => n.getAttribute("data-size-tier"));
+    expect(tiers).toEqual(["none", "warn", "alert"]);
+  });
+
+  it("取消归档 / 复制成功：不留在错误说明里", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    await show(port, { onUnarchive: async () => null, onCopy: async () => null });
+    await act(async () => buttonWithText("取消归档").click());
+    await act(async () => buttonWithText("复制为新画板").click());
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("取消归档 / 复制失败：显示原因", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    await show(port, {
+      onUnarchive: async () => { throw new Error("offline"); },
+      onCopy: async () => { throw new Error("offline"); },
+    });
+    await act(async () => buttonWithText("取消归档").click());
+    expect(container.textContent).toContain("offline");
+    await act(async () => buttonWithText("复制为新画板").click());
+    expect(container.textContent).toContain("offline");
+  });
+
+  it("删除 / 归档成功：确认框关闭", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    const onDelete = vi.fn(async () => undefined);
+    await show(port, { onDelete });
+    await act(async () => buttonWithText("删除").click());
+    await act(async () => confirmButton("删除").click());
+    expect(container.textContent).not.toContain("删除画板「a」？");
+  });
+
   it("点画板名：打开并关闭列表", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();

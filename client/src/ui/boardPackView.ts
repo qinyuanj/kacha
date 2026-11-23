@@ -2,7 +2,7 @@
 import type { PackDialogState } from "./BoardPackDialog";
 
 /** 进度字节的可读大小。 */
-export const formatSize = (bytes: number) => (bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
+const formatSize = (bytes: number) => (bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
 
 /** 进度那一行：还没拿到总量时说「准备中…」，有了就说已用 / 总量。 */
 export function progressText(progress: { done: number; total: number }): string {

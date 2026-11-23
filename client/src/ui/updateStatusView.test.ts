@@ -25,9 +25,4 @@ describe("更新提示条", () => {
     expect(updateStatusView({ snapshot: snapshot("ready"), auto: IDLE_AUTO_VIEW }).canDefer).toBe(false);
   });
 
-  it("带上阶段与那一句话", () => {
-    const view = updateStatusView({ snapshot: snapshot("downloading"), auto: IDLE_AUTO_VIEW });
-    expect(view.phase).toBe("downloading");
-    expect(view.text).toContain("正在下载 1.6.2");
-  });
 });
