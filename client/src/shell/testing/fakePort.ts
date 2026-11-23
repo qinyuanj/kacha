@@ -3,7 +3,7 @@
 // 形状与真实适配器一致：失败一律是 PortError，类别（conflict / missing / slotsFull / alreadyExists, ...）与
 // 壳端口使用同一套类别，界面按类别分支的分支点因此在替身下也走得到。
 // 各分组的替身在 shell/testing/fakePortStores.ts（#137），这里只把它们拼起来。
-import { FEEDBACK_UNAVAILABLE, PortError, type CorePorts, type FeatureId, type FeedbackOutcome, type FeedbackSpec, type PortFailureKind, type ShellPort } from "../port";
+import { FEEDBACK_UNAVAILABLE, type CorePorts, type FeatureId, type FeedbackOutcome, type FeedbackSpec, type ShellPort } from "../port";
 import type { FakeBoard, FakeCalls, FakePortOptions } from "./fakePortTypes";
 import {
   fakeBoardStore,
@@ -27,10 +27,6 @@ const DEFAULT_FEEDBACK_OUTCOME: FeedbackOutcome = {
   number: 17,
   url: "https://gitea.test/kacha-feedback/issues/17",
 };
-
-/** 造一个端口失败（界面按 kind 分支）。 */
-export const fakeFailure = (kind: PortFailureKind, message: string = kind, feature?: FeatureId): PortError =>
-  new PortError({ kind, code: kind, message, status: kind === "conflict" ? 409 : 0, ...(feature ? { feature } : {}) });
 
 /** 内存壳端口：所有分组都是可断言的替身，行为按选项脚本化。 */
 export type FakePort = ShellPort & { calls: FakeCalls };

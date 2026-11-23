@@ -62,6 +62,13 @@ async function field(labelText: string): Promise<HTMLInputElement | HTMLTextArea
   return control;
 }
 
+/** 「将要提交」的只读展示块：脱敏结果只允许出现在这里，不在可编辑控件里。 */
+function submitPreview(): Element {
+  const block = container.querySelector(".feedback-preview-submit");
+  if (!block) throw new Error("没有找到「将要提交」展示块");
+  return block;
+}
+
 /** 按用户看得到的中文选项选择，返回真正交给端口的稳定 code。 */
 async function setSelectByVisibleLabel(labelText: string, optionText: string): Promise<string> {
   const select = await field(labelText);
@@ -77,11 +84,18 @@ async function setSelectByVisibleLabel(labelText: string, optionText: string): P
 }
 
 describe("反馈对话框（#206）", () => {
-  it("填写正文、取消与关闭都不调用 Feedback 端口", async () => {
+  it("填写正文后取消或关闭都不调用 Feedback 端口", async () => {
     const port = createFakePort();
-    await show(port);
+    const onClose = vi.fn();
+    await show(port, onClose);
     await setInput("正文", "在 C:/secret/项目 里生成失败");
     await click("取消");
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(port.calls.feedback).toHaveLength(0);
+    onClose.mockClear();
+    await act(async () => (container.querySelector('[aria-label="关闭反馈"]') as HTMLButtonElement).click());
+    await act(async () => undefined);
+    expect(onClose).toHaveBeenCalledTimes(1);
     expect(port.calls.feedback).toHaveLength(0);
   });
 
@@ -94,8 +108,31 @@ describe("反馈对话框（#206）", () => {
     expect(container.textContent).toContain(navigator.userAgent);
     expect(container.textContent).toContain("项目 A");
     expect(container.textContent).not.toContain("/tmp/boards/");
-    expect(container.textContent).toContain("<本地路径>");
-    expect(container.textContent).not.toContain("sk-abcdef");
+    // 脱敏只属于「将要提交」那一块：可编辑正文里是用户原文，不能拿整页文本判定。
+    const willSubmit = submitPreview();
+    expect(willSubmit.textContent).toContain("<本地路径>");
+    expect(willSubmit.textContent).not.toContain("sk-abcdef");
+  });
+
+  it("预览里的可编辑控件绑定原文，只有「将要提交」的展示才是脱敏值", async () => {
+    // #229 复审必修 1：可编辑控件曾绑定脱敏后的 props.spec.title，onChange 却写入原始 state。
+    // 用户看到「<已隐藏>」，一编辑就把原文写回去，输入框随即回弹/错位。
+    // 契约：输入框显示并可编辑原文；脱敏结果只出现在「将要提交」展示与最终 spec。
+    const port = createFakePort();
+    const bareToken = "0123456789abcdef0123456789abcdef01234567";
+    await show(port);
+    await setInput("标题", `泄露 ${bareToken}`);
+    await setInput("正文", "正文照常");
+    await click("预览");
+
+    expect((await field("标题")) as HTMLInputElement).toMatchObject({ value: `泄露 ${bareToken}` });
+
+    const willSubmit = submitPreview();
+    expect(willSubmit.textContent).toContain("泄露 <已隐藏>");
+    expect(willSubmit.textContent).not.toContain(bareToken);
+
+    await click("确认发送");
+    expect(port.calls.feedback[0]).toEqual(expect.objectContaining({ title: "泄露 <已隐藏>" }));
   });
 
   it("确认后通过 Feedback 端口发送并显示 issue 编号与可点击链接", async () => {
@@ -189,7 +226,7 @@ describe("反馈对话框（#206）", () => {
     expect(port.calls.feedback).toHaveLength(0);
   });
 
-  it("勾选诊断包时附上脱敏包并在失败时明确报错", async () => {
+  it("勾选诊断包时附上脱敏包", async () => {
     const pack = { kind: "saved" as const, name: "diagnostics.zip", contentType: "application/zip", data: "UEsDBA==" };
     const port = createFakePort({ diagnosticsPackOutcome: pack });
     await show(port);
@@ -411,9 +448,26 @@ describe("用户自带 Gitea token（#213）", () => {
     expect(container.textContent).not.toContain("preview-must-not-show-this");
   });
 
-  it("正文脱敏隐藏 token、API key、gateway key 与常见密钥模式", () => {
-    const redacted = redactFeedbackText("token=abc123 api_key=def456 gateway_key=ghi789 sk-synthetic5678 ghp_synthetic1234567890");
-    for (const secret of ["abc123", "def456", "ghi789", "sk-synthetic5678", "ghp_synthetic1234567890"]) {
+  // #229：脱敏断言必须和输入指向同一个值。逐条先证明它真的在输入里，再证明脱敏后不在了，
+  // 任何一类规则被删掉，对应断言都会变红。
+  const prefixedSecrets = ["abc123", "def456", "ghi789", "ghp_synthetic1234567890"];
+  // 裸 Gitea token 的典型形态：40 位十六进制，没有 key= 前缀。
+  const bareHexToken = "0123456789abcdef0123456789abcdef01234567";
+  // 裸占位符按片段拼出来，保证运行时得到的就是这段字面量，而不是被替换成别的值。
+  const bareSecretPlaceholder = "{{SECRET" + "_fixture}}";
+
+  it("正文脱敏隐藏带前缀凭据、裸 40 位 token 与裸占位符", () => {
+    const input = [
+      `token=${prefixedSecrets[0]}`,
+      `api_key=${prefixedSecrets[1]}`,
+      `gateway_key=${prefixedSecrets[2]}`,
+      prefixedSecrets[3],
+      bareHexToken,
+      bareSecretPlaceholder,
+    ].join(" ");
+    const redacted = redactFeedbackText(input);
+    for (const secret of [...prefixedSecrets, bareHexToken, bareSecretPlaceholder]) {
+      expect(input).toContain(secret);
       expect(redacted).not.toContain(secret);
     }
     expect(redacted).toContain("<已隐藏>");
@@ -443,5 +497,34 @@ describe("用户自带 Gitea token（#213）", () => {
     expect(container.textContent).toContain("评论");
     expect(container.textContent).toContain("打标签");
     expect(container.textContent).toContain("上传附件");
+  });
+});
+
+describe("裸凭据脱敏（#229）", () => {
+  // 与上面同一组值：输入里放什么，就断言什么，界面、发送与复制三处都不许出现。
+  const bareHexToken = "0123456789abcdef0123456789abcdef01234567";
+  const bareSecretPlaceholder = "{{SECRET" + "_fixture}}";
+
+  it("裸 40 位 token 与裸占位符在预览、发送正文与复制内容中都不出现", async () => {
+    const port = createFakePort({ feedbackOutcome: { ok: false, kind: "unreachable", message: "不可达" } });
+    await show(port);
+    await setInput("标题", `同步失败 ${bareHexToken}`);
+    await setInput("正文", `令牌 ${bareSecretPlaceholder} 与预期不一致`);
+    await click("预览");
+    // 预览的可编辑控件绑定的是原文（复审必修 1），脱敏证据只取「将要提交」那一块。
+    const willSubmit = submitPreview();
+    expect(willSubmit.textContent).not.toContain(bareHexToken);
+    expect(willSubmit.textContent).not.toContain(bareSecretPlaceholder);
+
+    await click("确认发送");
+    expect(port.calls.feedback).toHaveLength(1);
+    expect(port.calls.feedback[0].title).not.toContain(bareHexToken);
+    expect(port.calls.feedback[0].body).not.toContain(bareSecretPlaceholder);
+
+    await click("复制内容");
+    expect(port.calls.copyText).toHaveLength(1);
+    expect(port.calls.copyText[0]).toContain("标题：");
+    expect(port.calls.copyText[0]).not.toContain(bareHexToken);
+    expect(port.calls.copyText[0]).not.toContain(bareSecretPlaceholder);
   });
 });

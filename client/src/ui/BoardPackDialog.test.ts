@@ -43,8 +43,9 @@ describe("画板包模态", () => {
       plan: { board: { format_version: 2, title: "a", viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges: [], extra: {} }, taskDirs: ["/~/任务"], files: [], missing: [] },
       contents: { duplicates: {}, bytes: 1024, totalBytes: 2048 },
     });
-    expect(container.textContent).toContain("导出画板包");
-    expect(container.textContent).toContain("预估大小");
+    expect(container.textContent).toContain("1 个任务目录");
+    expect(container.textContent).toContain("预估大小：1.0 KB");
+    expect(container.textContent).toContain("省去 1.0 KB");
   });
 
   it("导出确认：有缺图时按钮变了说法", async () => {
@@ -54,7 +55,21 @@ describe("画板包模态", () => {
       plan: { board: { format_version: 2, title: "a", viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges: [], extra: {} }, taskDirs: [], files: [], missing: [{ nodeId: "n1", path: "/~/a.png" }] },
       contents: { duplicates: {}, bytes: 1024, totalBytes: 2048 },
     });
-    expect(container.textContent).toContain("缺");
+    const button = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("导出"));
+    expect(button?.textContent).toContain("仍然导出…");
+    expect(container.textContent).toContain("/~/a.png");
+  });
+
+  it("进度条：没有总量时 max 为 1", async () => {
+    await show({ stage: "progress", title: "正在导出" });
+    expect(container.querySelector("progress")?.getAttribute("max")).toBe("1");
+  });
+
+  it("进度中点背景不关闭，只能取消", async () => {
+    const onClose = vi.fn();
+    await show({ stage: "progress", title: "正在导出" }, { onClose });
+    await act(async () => (container.querySelector(".modal-backdrop") as HTMLElement).click());
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("进度：可以取消", async () => {

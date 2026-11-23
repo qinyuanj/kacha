@@ -4,10 +4,10 @@ import { bySizeDescending, sizeTier, type SizeTier } from "../core/boardSize";
 import type { BoardListEntry, BoardListing } from "../shell/types";
 
 /** 画板名（去掉扩展名）：列表里显示的是标题，不是文件名。 */
-export const titleOf = (name: string) => name.slice(0, -BOARD_EXTENSION.length);
+const titleOf = (name: string) => name.slice(0, -BOARD_EXTENSION.length);
 
 /** 一行画板在列表里的样子。 */
-export interface BoardRow {
+interface BoardRow {
   entry: BoardListEntry;
   /** 标题（去扩展名）。 */
   title: string;
@@ -20,7 +20,7 @@ export interface BoardRow {
 }
 
 /** 列表按体量分两组：可编辑的与归档的。 */
-export interface BoardGroups {
+interface BoardGroups {
   editable: BoardListEntry[];
   archived: BoardListEntry[];
 }

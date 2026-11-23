@@ -10,7 +10,6 @@ import type { ImageInfo } from "../shell/port";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { REGION_TEXT, RELOCATE_TEXT, VARIANT_TEXT } from "./boardText";
 import { canvasBoardActions, type CanvasBoardActionsDeps } from "./canvasBoardActions";
-import { nodePreviewRequest } from "./canvasPreview";
 
 vi.mock("../core/relocate", () => ({ findResultFile: vi.fn(), findReferenceFile: vi.fn() }));
 
@@ -134,16 +133,6 @@ beforeEach(() => {
 });
 
 describe("动作对象的字段", () => {
-  it("画板事实直接透传：能力表、数据根、可用模型、并发上限", () => {
-    const h = harness();
-    const actions = canvasBoardActions(h.deps);
-    expect(actions.table).toBe(BUILTIN_TABLE);
-    expect(actions.userRoot).toBe(ROOT);
-    expect(actions.concurrency).toBe(2);
-    // 还没从网关发现过：没有模型可选，静态上架清单不能冒充成功。
-    expect(actions.availableModels).toEqual([]);
-  });
-
   it("perform 经 ref 转发最新一版（画布每次渲染重建新建类函数）", () => {
     const h = harness();
     const actions = canvasBoardActions(h.deps);
@@ -157,6 +146,12 @@ describe("动作对象的字段", () => {
     const change: BoardChange = { kind: "lastModel", model: "qwen-image-3.0" };
     expect(actions.apply(change)).toBeUndefined();
     expect(h.apply).toHaveBeenCalledWith(change);
+  });
+
+  it("还没从网关发现过模型：没有模型可选，静态上架清单不冒充成功", () => {
+    // 这条守的是「可用模型只来自网关发现」：一旦有人把 BUILTIN_TABLE 的静态清单接上来，
+    // 空列表就会变成有内容。
+    expect(canvasBoardActions(harness().deps).availableModels).toEqual([]);
   });
 });
 
@@ -255,39 +250,27 @@ describe("一次性聚焦请求", () => {
   });
 });
 
-describe("节点卸载", () => {
-  it("交给画布收起该节点的悬浮动作条", () => {
-    const h = harness();
-    canvasBoardActions(h.deps).nodeUnmounted("ref1");
-    expect(h.unhoverNode).toHaveBeenCalledWith("ref1");
-  });
-});
-
 describe("加为参考图", () => {
-  it("按当前选区与图层写一步变更", () => {
+  it.each([
+    { name: "带图层", layer: 2 as const, sourceLayer: 2 },
+    { name: "缺省不带图层", layer: undefined, sourceLayer: null },
+  ])("$name：按当前选区写一步变更", ({ layer, sourceLayer }) => {
     const h = harness();
-    canvasBoardActions(h.deps).addAsReference("res1", 2);
-    expect(h.apply).toHaveBeenCalledWith({ kind: "addAsReference", resultId: "res1", selected: ["ref1"], sourceLayer: 2 });
-  });
-
-  it("缺省不带图层", () => {
-    const h = harness();
-    canvasBoardActions(h.deps).addAsReference("res1");
-    expect(h.apply).toHaveBeenCalledWith({ kind: "addAsReference", resultId: "res1", selected: ["ref1"], sourceLayer: null });
+    canvasBoardActions(h.deps).addAsReference("res1", layer);
+    expect(h.apply).toHaveBeenCalledWith({ kind: "addAsReference", resultId: "res1", selected: ["ref1"], sourceLayer });
   });
 });
 
 describe("放大预览", () => {
-  it("参考图 / 结果节点打开预览弹窗，请求由画板现算", () => {
+  // 请求的完整构造归 canvasPreview（含「任务节点没有图片 → null」）；这里只证明动作把请求
+  // 交给了弹窗状态，且指向被点的那个节点（期望值不再用被测的同一函数算一遍）。
+  it("结果节点打开预览弹窗：请求指向该节点的图片", () => {
     const h = harness();
     canvasBoardActions(h.deps).previewNode("res1");
-    expect(h.showPreview).toHaveBeenCalledWith(nodePreviewRequest(canvasBoard(), BUILTIN_TABLE, ROOT, "res1"));
-  });
-
-  it("任务节点没有可预览的图片：不弹窗", () => {
-    const h = harness();
-    canvasBoardActions(h.deps).previewNode("t1");
-    expect(h.showPreview).not.toHaveBeenCalled();
+    expect(h.showPreview).toHaveBeenCalledTimes(1);
+    const [request] = h.showPreview.mock.calls[0];
+    expect(request.absPath).toBe(`${ROOT}/results/res1/res1.png`);
+    expect(request.resultId).toBe("res1");
   });
 });
 

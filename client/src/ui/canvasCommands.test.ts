@@ -123,33 +123,11 @@ function harness(options: HarnessOptions = {}) {
   return { deps, spies, commands: canvasCommands(deps), dragCreate: canvasDragCreate(deps) };
 }
 
-/** BoardAction 全集：新增动作时这张表要跟着加，下面的只读 / 目标类型反例才覆盖得到。 */
-const ALL_ACTIONS: readonly BoardAction[] = [
-  "newPrompt",
-  "newTask",
-  "addReferences",
-  "undo",
-  "redo",
-  "preview",
-  "saveAs",
-  "continueEditing",
-  "addAsReference",
-  "generateVariant",
-  "delete",
-  "run",
-  "cancel",
-  "regenerate",
-  "toggleSettings",
-  "viewSendText",
-  "disconnect",
-  "editRegion",
-  "newStage",
-  "removeFromStage",
-  "toggleFinal",
-  "exportPack",
-  "downloadResults",
-  "importPack",
-];
+/**
+ * BoardAction 全集：直接取分派表的键。表本身由 CanvasCommandTable 的
+ * Record<BoardAction, …> 保证不漏（手工清单曾经是第二份真相，漏加动作时两处一起错）。
+ */
+const ALL_ACTIONS = Object.keys(canvasCommands(harness().deps)) as readonly BoardAction[];
 
 /** 画布上不执行的动作：导出画板包 / 整板下载结果 / 导入画板包属于标签页。 */
 const NOT_ON_CANVAS: readonly BoardAction[] = ["exportPack", "downloadResults", "importPack"];
@@ -214,10 +192,11 @@ describe("动作分派", () => {
     expect(calledIn(spies)).toEqual([name]);
   });
 
-  it("表里每个动作都有实现，只有标签页那三项为 undefined", () => {
-    const { commands } = harness();
-    const missing = ALL_ACTIONS.filter((action) => (NOT_ON_CANVAS.includes(action) ? commands[action] !== undefined : commands[action] === undefined));
-    expect(missing).toEqual([]);
+  // 表不漏动作由类型保证（见 ALL_ACTIONS）；这条守的是另一半：每个画布上的动作都有分派用例，
+  // 新增动作却忘了写用例时这里会红。
+  it("每个画布上的动作都有分派用例", () => {
+    const covered = new Set(CASES.map((c) => c.action).filter((action) => !NOT_ON_CANVAS.includes(action)));
+    expect([...covered].sort()).toEqual([...ALL_ACTIONS].filter((action) => !NOT_ON_CANVAS.includes(action)).sort());
   });
 
   it.each(NOT_ON_CANVAS)("%s 不在画布上执行", (action) => {

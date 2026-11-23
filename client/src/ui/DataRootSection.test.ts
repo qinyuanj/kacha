@@ -56,24 +56,18 @@ describe("数据位置入口", () => {
 });
 
 describe("迁移的拦截与结局", () => {
-	it("有在途生成任务时不发起迁移，只说清原因", async () => {
+	it.each([
+		{ label: "有在途生成任务", guard: () => ({ pending: 2, packBusy: false, moving: false }), reason: "2" },
+		{ label: "打包在跑", guard: () => ({ pending: 0, packBusy: true, moving: false }), reason: "画板包" },
+	])("$label：不发起迁移，只说清原因", async ({ guard, reason }) => {
 		const options: FakePortOptions = { pickTargets: ["D:\\新位置"] };
 		const port = createFakePort(options);
-		const a = actions(() => ({ pending: 2, packBusy: false, moving: false }));
+		const a = actions(guard);
 		await show(port, a);
 		await act(async () => button()!.click());
 		expect(a.prepare).not.toHaveBeenCalled();
-		expect(message()).toContain("2");
 		expect(port.calls.moveTargets ?? []).toEqual([]);
-	});
-
-	it("打包在跑时不发起迁移", async () => {
-		const port = createFakePort({ pickTargets: ["D:\\新位置"] });
-		const a = actions(() => ({ pending: 0, packBusy: true, moving: false }));
-		await show(port, a);
-		await act(async () => button()!.click());
-		expect(port.calls.moveTargets ?? []).toEqual([]);
-		expect(message()).toContain("画板包");
+		expect(message()).toContain(reason);
 	});
 
 	it("用户取消选目录时不迁移，也不是成功", async () => {
@@ -87,11 +81,13 @@ describe("迁移的拦截与结局", () => {
 
 	it("确认后先落盘再迁移，成功后把界面状态换到新根并重新载入", async () => {
 		const port = createFakePort({ userRoot: "C:\\data", pickTargets: ["D:\\新位置"], moveFiles: 7 });
+		const moveSpy = vi.spyOn(port.dataRoot, "move");
 		port.meta.readUiState = async () => JSON.stringify({ open_boards: ["C:\\data\\画板\\a.ugcboard.json"], active_board: "C:\\data\\画板\\a.ugcboard.json" });
 		const a = actions();
 		await show(port, a);
 		await act(async () => button()!.click());
 		expect(a.prepare).toHaveBeenCalledTimes(1);
+		expect(a.prepare.mock.invocationCallOrder[0]).toBeLessThan(moveSpy.mock.invocationCallOrder[0]);
 		expect(port.calls.moveTargets).toEqual(["D:\\新位置"]);
 		expect(a.finish).toHaveBeenCalledWith(true);
 		expect(message()).toContain("7");
@@ -106,5 +102,6 @@ describe("迁移的拦截与结局", () => {
 		await act(async () => button()!.click());
 		expect(a.finish).toHaveBeenCalledWith(false);
 		expect(message()).toContain("迁移失败");
+		expect(message()).toContain("conflict");
 	});
 });

@@ -139,6 +139,7 @@ describe("桌面壳的画板方法", () => {
     const listing = await port.board.list();
     expect(listing.boards[0].name).toBe("本地.ugcboard.json");
     expect(listing.boards[0].path).toBe(joinPath(INFO.user_data_root, "画板/本地.ugcboard.json"));
+    expect(listing.boards[0].path.startsWith(boardsDir(INFO.user_data_root))).toBe(true);
     expect(listing.slots.used).toBe(1);
   });
 
@@ -147,16 +148,6 @@ describe("桌面壳的画板方法", () => {
     const { port } = await createDesktopPort(stub.bridge);
 
     await expect(port.board.listNames("C:/data/画板")).resolves.toEqual(["本地.ugcboard.json"]);
-  });
-
-  it("画板列表的路径是数据根下的绝对路径（与界面别处同一形状）", async () => {
-    const stub = stubBridge();
-    const { port } = await createDesktopPort(stub.bridge);
-
-    const listing = await port.board.list();
-    expect(listing.boards[0].path).toBe(joinPath(INFO.user_data_root, "画板/本地.ugcboard.json"));
-    // 与界面自己拼的画板目录同一形状：列表里的路径能直接当作会话路径用。
-    expect(listing.boards[0].path.startsWith(boardsDir(INFO.user_data_root))).toBe(true);
   });
 
   it("列表 → 打开 → 带版本保存 → 带版本删除：路径形状一路一致", async () => {

@@ -1,5 +1,6 @@
 """桌面验证入口：验证清单、参数转发、Windows 完整性预检与前端依赖校验。"""
 
+import io
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,8 @@ from verify import (
     INSTALL_HINT,
     INSTALL_RECORD,
     QUALITY,
+    RACE,
+    RACE_NOTICE,
     ROOT,
     commands,
     dependency_problems,
@@ -35,28 +38,91 @@ INSTALLED = {"node_modules/@playwright/test": {"version": "1.65.1"}}
 
 
 class VerificationCommandsTest(unittest.TestCase):
-    def test_desktop_suite_runs_go_and_debug_build_without_web_tools(self):
-        selected = commands([])
-        self.assertIn(["go", "test", "./..."], selected)
-        self.assertIn([sys.executable, "packaging/build_desktop.py", "--debug", "--skip-install"], selected)
-        self.assertIn(["npm", "--prefix", "client", "test"], selected)
-        self.assertIn(["npm", "--prefix", "client", "run", "typecheck"], selected)
-        self.assertIn(["npm", "--prefix", "client", "run", "lint:dead"], selected)
-        self.assertFalse(any("cargo" in command or "test:e2e" in command for command in selected))
+    def test_desktop_suite_runs_the_whole_ordered_gate(self):
+        """README 默认验证的完整顺序：打包单测 → 前端单测 → 类型检查 → knip → go test → go test -race（定向 diagnostics）→ debug 构建 → 质量门禁。
 
-    def test_the_gate_runs_without_mutation_by_default(self):
-        self.assertIn(QUALITY, commands([]))
-        self.assertNotIn([*QUALITY, "--mutate"], commands([]))
-
-    def test_quality_flag_keeps_the_gate_free_of_mutation(self):
-        """#193：2026-11-20 决定不做变异测试，--quality 只跑 CRAP 与重复检查。"""
-        self.assertIn(QUALITY, commands(["--quality"]))
-        self.assertFalse([command for command in commands(["--quality"]) if "--mutate" in command])
+        断言整条有序清单（不是子集）：删、改或挪动任一步都会在这里挂掉，才抓得到门禁漂移。
+        """
+        self.assertEqual(commands([]), [
+            [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"],
+            ["npm", "--prefix", "client", "test"],
+            ["npm", "--prefix", "client", "run", "typecheck"],
+            ["npm", "--prefix", "client", "run", "lint:dead"],
+            ["go", "test", "./..."],
+            list(RACE),
+            [sys.executable, "packaging/build_desktop.py", "--debug", "--skip-install"],
+            list(QUALITY),
+        ])
 
     def test_no_argument_can_bring_mutation_back_into_the_gate(self):
-        """任何参数组合都不许再拼出 --mutate：本机 commit limit 只有 23,060 MB，跑它会整机崩溃。"""
+        """#193：任何参数组合都不许再拼出 --mutate（本机 commit limit 只有 23,060 MB，跑它会整机崩溃）。
+
+        同时覆盖「默认就跑质量门禁」与「--quality 也跑质量门禁」两条契约（原 :47 / :51 已并入此处）。
+        """
+        self.assertIn(QUALITY, commands([]))
+        self.assertIn(QUALITY, commands(["--quality"]))
         for argv in ([], ["--quality"], ["--base", "origin/main"], ["--quality", "--base", "origin/main"]):
             self.assertFalse([command for command in commands(argv) if "--mutate" in command], argv)
+
+    def test_the_concurrency_proof_runs_race_on_diagnostics_only(self):
+        """#229 的验收要求用 -race 证明诊断导出与日志记录并发安全。
+
+        整仓跑 -race 太慢且本机内存有限，所以只定向 diagnostics；这条断言同时保证它没被
+        删掉、没被放宽成整仓，也没有多出第二个 -race 步骤。
+        """
+        race = [command for command in commands([]) if "-race" in command]
+        self.assertEqual(len(race), 1, race)
+        self.assertEqual(race[0], ["go", "test", "-race", "./desktop/internal/diagnostics/..."])
+        self.assertNotIn("./...", race[0])
+
+    def test_a_missing_c_toolchain_is_announced_and_does_not_fail_the_gate(self):
+        """本机没有 C 工具链时 -race 跑不了：门禁要大声说「未运行」，既不静默跳过也不误报失败。"""
+        started: list[list[str]] = []
+
+        def fake_run(command, **kwargs):
+            started.append(list(command))
+            return subprocess.CompletedProcess(command, 0)
+
+        out = io.StringIO()
+        with (
+            mock.patch.object(verify, "preflight", return_value=0),
+            mock.patch.object(verify, "dependencies_preflight", return_value=0),
+            mock.patch.object(verify, "documentation_preflight", return_value=0),
+            mock.patch.object(verify, "race_toolchain_available", return_value=False),
+            mock.patch.object(verify.shutil, "which", return_value="tool"),
+            mock.patch("subprocess.run", side_effect=fake_run),
+            mock.patch("sys.stdout", out),
+        ):
+            self.assertEqual(main([]), 0)
+        report = out.getvalue()
+        self.assertFalse([command for command in started if "-race" in command], started)
+        self.assertIn(RACE_NOTICE, report)
+        self.assertIn(f"未运行  {' '.join(RACE)}", report)
+
+    def test_the_race_step_really_runs_when_a_c_toolchain_exists(self):
+        """有工具链（例如 CI）时这条不是摆设：真的以 -race 跑 diagnostics 包。"""
+        started: list[list[str]] = []
+
+        def fake_run(command, **kwargs):
+            started.append(list(command))
+            return subprocess.CompletedProcess(command, 0)
+
+        out = io.StringIO()
+        with (
+            mock.patch.object(verify, "preflight", return_value=0),
+            mock.patch.object(verify, "dependencies_preflight", return_value=0),
+            mock.patch.object(verify, "documentation_preflight", return_value=0),
+            mock.patch.object(verify, "race_toolchain_available", return_value=True),
+            mock.patch.object(verify.shutil, "which", return_value="tool"),
+            mock.patch("subprocess.run", side_effect=fake_run),
+            mock.patch("sys.stdout", out),
+        ):
+            self.assertEqual(main([]), 0)
+        raced = [command for command in started if "-race" in command]
+        self.assertEqual(len(raced), 1, raced)
+        # main 用 which 解析出的可执行文件替换 argv[0]，其余参数原样。
+        self.assertEqual(raced[0][1:], RACE[1:])
+        self.assertIn(f"通过  {' '.join(RACE)}", out.getvalue())
 
     def test_an_explicit_base_is_forwarded_to_the_gate(self):
         selected = commands(["--quality", "--base", "origin/pr-base"])
@@ -141,6 +207,10 @@ class DocumentationGateTest(unittest.TestCase):
             root = Path(tmp)
             self.make_tree(root)
             self.assertEqual(documentation_problems(root), [])
+
+    def test_the_real_repository_docs_pass_the_gate(self):
+        """真实仓库文档必须过门禁：合成树的用例证明规则，这一条防止真身漂移（不只在 CI 真跑 verify 时才发现）。"""
+        self.assertEqual(documentation_problems(ROOT), [])
 
     def test_version_drift_from_the_single_declaration_is_reported(self):
         with tempfile.TemporaryDirectory() as tmp:

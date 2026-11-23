@@ -5,11 +5,21 @@ import { useShell } from './shell';
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg'];
 
-/** #206 的脱敏只处理预览可见文本：本机路径换成占位，凭据整段移除。 */
+/** #206 / #229 的脱敏只处理「将要提交」与复制出去的文本：本机路径换成占位，凭据整段移除。
+ *  提交正文、预览里的只读展示与失败后复制的内容都走这一条纯函数路径，不各写一份而漂移；
+ *  预览里的可编辑控件绑定的是原始 state，不经过这里（#229 复审必修 1）。 */
 export function redactFeedbackText(text: string): string {
   return text
     .replace(/(?:[A-Za-z]:)?[\\/](?:[^\s:："'<>|*?]+[\\/])+[^\s:："'<>|*?]*/g, '<本地路径>')
+    // 代表真实密钥的占位符形态（如 {{SECRET_xxxxxxxx}}）：用户把它粘进正文时也当秘密处理。
+    .replace(/\{\{SECRET_[A-Za-z0-9_]+\}\}/gi, '<已隐藏>')
     .replace(/(?:sk-[A-Za-z0-9_-]{6,}|gh[pousr]_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,})/g, '<已隐藏>')
+    // 裸 Gitea token：40 位十六进制，没有 key= 前缀也要遮。
+    .replace(/\b[0-9a-f]{40}\b/gi, '<已隐藏>')
+    // 鉴权头里的 Bearer 串：没有 key= 前缀也要遮。缺这一条时「Authorization: Bearer <token>」
+    // 只会把 "Bearer" 当成值遮掉，真正的 token 原样留下（Go 侧 BearerToken 有同一条规则，
+    // 由 contracts/redaction-samples.json 的跨语言用例守着）。
+    .replace(/\bbearer\s+\S+/gi, '<已隐藏>')
     .replace(/(?:api[_-]?key|gateway[_-]?key|token|secret|authorization|bearer)\s*[:=]\s*(?:"[^"]+"|'[^']+'|\S+)/gi, '<已隐藏>');
 }
 
@@ -98,7 +108,8 @@ interface FeedbackSpecInput {
 function feedbackSpecOf(input: FeedbackSpecInput): FeedbackSpec {
   const contact = input.contact.trim();
   return {
-    title: input.title.trim(),
+    // 标题与正文同一条脱敏路径：预览、发送与复制都取这里的值（#229）。
+    title: redactFeedbackText(input.title.trim()),
     category: input.category,
     body: redactFeedbackText(input.body.trim()),
     version: input.version,
@@ -250,8 +261,11 @@ function FeedbackForm(props: FeedbackFormProps) {
 }
 
 interface FeedbackPreviewProps {
-  title: string; setTitle: Setter<string>; category: string; setCategory: Setter<string>;
-  body: string; setBody: Setter<string>; spec: FeedbackSpec; attachmentSummary: string;
+  /** 可编辑控件绑定的是原始 state；spec 是脱敏后的提交值，只用于「将要提交」的只读展示。 */
+  title: string; setTitle: Setter<string>;
+  category: string; setCategory: Setter<string>;
+  body: string; setBody: Setter<string>;
+  spec: FeedbackSpec; attachmentSummary: string;
   sending: boolean; onBack(): void; onClose(): void; onSend(): void;
 }
 
@@ -259,17 +273,22 @@ function FeedbackPreview(props: FeedbackPreviewProps) {
   return (
     <>
       <div className='feedback-preview'>
+        {/* 可编辑控件一律绑定原始值：绑脱敏值会让用户看到「<已隐藏>」，一编辑又把原文写回 state，
+            输入框随即回弹（#229 复审必修 1）。 */}
         <label className='form-row'>标题（可选）<input value={props.title} onChange={(event) => props.setTitle(event.target.value)} /></label>
         <label className='form-row'>分类<select value={props.category} onChange={(event) => props.setCategory(event.target.value)}>{FEEDBACK_CATEGORIES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>
-        <label className='form-row'>正文（可修改）<textarea value={redactFeedbackText(props.body)} onChange={(event) => props.setBody(event.target.value)} rows={6} /></label>
-        <p>标题：{props.spec.title || '（无）'}</p>
-        <p>分类：{feedbackCategoryLabel(props.spec.category)}</p>
-        <p>正文：{props.spec.body}</p>
-        <p className='feedback-preview-meta'>自动元数据：版本 {props.spec.version}（build {props.spec.build || '未知'}）、系统 {props.spec.os}、当前画板 {props.spec.board_name || '（未打开画板）'}；只含画板名字，不含路径或密钥。</p>
-        <p className='feedback-token-notice'>{FEEDBACK_TOKEN_NOTICE}</p>
-        <p className='feedback-token-scope'>{FEEDBACK_TOKEN_SCOPE}</p>
-        <p>提交者：{props.spec.contact ?? '匿名'}</p>
-        <p>附件摘要：{props.attachmentSummary}。</p>
+        <label className='form-row'>正文（可修改）<textarea value={props.body} onChange={(event) => props.setBody(event.target.value)} rows={6} /></label>
+        <div className='feedback-preview-submit'>
+          <p className='feedback-preview-heading'>将要提交的内容（已脱敏，不可在此修改）</p>
+          <p>标题：{props.spec.title || '（无）'}</p>
+          <p>分类：{feedbackCategoryLabel(props.spec.category)}</p>
+          <p>正文：{props.spec.body}</p>
+          <p className='feedback-preview-meta'>自动元数据：版本 {props.spec.version}（build {props.spec.build || '未知'}）、系统 {props.spec.os}、当前画板 {props.spec.board_name || '（未打开画板）'}；只含画板名字，不含路径或密钥。</p>
+          <p className='feedback-token-notice'>{FEEDBACK_TOKEN_NOTICE}</p>
+          <p className='feedback-token-scope'>{FEEDBACK_TOKEN_SCOPE}</p>
+          <p>提交者：{props.spec.contact ?? '匿名'}</p>
+          <p>附件摘要：{props.attachmentSummary}。</p>
+        </div>
       </div>
       <div className='modal-foot'>
         <button disabled={props.sending} onClick={props.onBack}>返回修改</button>

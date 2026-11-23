@@ -114,7 +114,7 @@ describe("粘贴分派（端口驱动）", () => {
     expect(applied).toEqual([]);
   });
 
-  it("两样都不是（普通文本）：放行给浏览器，不提示也不落盘", async () => {
+  it("两样都不是（普通文本）：不提示也不落盘，交给浏览器默认读取", async () => {
     const images = vi.fn();
     await show(createElement(PasteProbe, { onImages: images }));
     expect((await pasteEvent({ text: "一段普通文字" })).defaultPrevented).toBe(true);
@@ -223,6 +223,7 @@ describe("打开 / 新建画板（端口驱动）", () => {
     expect(port.calls.write).toHaveLength(1);
     expect(port.calls.write[0].options).toEqual({ createOnly: true });
     expect(port.calls.write[0].path).not.toBe(BOARD_PATH);
+    expect(sessions.snapshot().sessions).toHaveLength(1);
   });
 
   it("保存冲突：端口给 conflict，标签页记成冲突并保留本页改动", async () => {

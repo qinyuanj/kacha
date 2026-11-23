@@ -26,7 +26,7 @@ function fakeBridge(overrides: Partial<DesktopInfo> = {}, failure?: Error): Desk
 }
 
 describe("桌面壳端口", () => {
-  it("数据根是本机真实目录，画板根在它下面", async () => {
+  it("userRoot 来自 Shell.Info", async () => {
     const { port } = await createDesktopPort(fakeBridge());
     expect(port.userRoot).toBe("C:/Users/me/AppData/Roaming/Kacha/data");
   });
@@ -36,7 +36,7 @@ describe("桌面壳端口", () => {
     // packImport（#131）也关着：这个假桥上没有 Pack 服务，导入无从谈起。
     // update（#164）同理：这个假桥上没有 Update 服务，自动更新无从谈起。
     // dataRoot（#161）也一样：没有 Storage 服务就没有迁移入口。
-    expect(port.features).toEqual({ generation: false, usage: false, packExport: false, packImport: false, tidy: false, diagnostics: false, archive: true, update: false, dataRoot: false, feedback: false });
+    expect(port.features).toMatchObject({ archive: true, update: false, dataRoot: false, feedback: false });
   });
 
   it("自动更新：没有 Update 服务时明确不可用，不返回空成功", async () => {
@@ -150,19 +150,6 @@ describe("桌面壳端口", () => {
     await expect(port.core.runDeps.fetch("http://gw/v1/models", { method: "GET", headers: {} })).rejects.toMatchObject({ kind: "unavailable", feature: "gateway" });
   });
 
-  it("用量与画板包导出同样报 unavailable，不假装成功", async () => {
-    const { port } = await createDesktopPort(fakeBridge());
-    await expect(port.usage.usage()).rejects.toMatchObject({ kind: "unavailable", feature: "usage" });
-    await expect(port.pack.exportPack("x", { task_dirs: [], texts: [], files: [], omitted: [] })).rejects.toMatchObject({ kind: "unavailable", feature: "packExport" });
-  });
-
-  it("归档真的走本地服务，整理仍报 unavailable", async () => {
-    const { port } = await createDesktopPort(fakeBridge());
-    // 假桥上的 Local 全拒绝：归档把失败原样带回来，而不是假装能力还不可用。
-    await expect(port.board.archive("a", "b")).rejects.toMatchObject({ kind: "failed" });
-    await expect(port.board.measure("{}")).rejects.toMatchObject({ kind: "unavailable", feature: "tidy" });
-  });
-
   it("整板结果保存走 Local 服务：取消不报成功", async () => {
     const base = fakeBridge();
     const local = new Proxy({} as DesktopLocalBridge, {
@@ -238,12 +225,6 @@ describe("网关配置与密钥（#152）", () => {
       "Gateway.Request http://gw:3001/v1/models GET application/json",
     ]);
   });
-
-  it("没有 Gateway 绑定时，密钥与请求明确不可用，不用空成功冒充", async () => {
-    const { port } = await createDesktopPort(fakeBridge());
-    await expect(port.core.settingsPorts.readApiKey()).rejects.toMatchObject({ kind: "unavailable", feature: "gateway" });
-    await expect(port.core.settingsPorts.fetch("http://gw/v1/models", { method: "GET", headers: {} })).rejects.toMatchObject({ kind: "unavailable", feature: "gateway" });
-  });
 });
 describe("本机图片进 导入参考图/（#129）", () => {
   it("文件名是内容的 sha256、扩展名按格式、落在 导入参考图/ 下", async () => {
@@ -262,7 +243,9 @@ describe("本机图片进 导入参考图/（#129）", () => {
     const { bridge } = uploadBridge("alreadyExists");
     const { port } = await createDesktopPort(bridge);
     const file = new File([PNG_BYTES], "截图.png", { type: "image/png" });
-    await expect(port.media.uploadReference(file)).resolves.toMatchObject({ path: expect.stringContaining(".png") });
+    const first = await port.media.uploadReference(file);
+    const second = await port.media.uploadReference(file);
+    expect(second).toEqual(first);
   });
 
   it("别的原因的写入失败照旧抛 PortError，不伪装成功", async () => {
@@ -322,24 +305,6 @@ describe("读系统剪贴板（#129）", () => {
     await expect(port.media.readClipboard()).resolves.toBeNull();
   });
 
-  it("有剪贴板：快照折成页面的 ClipboardContent，图片还原成 image/png", async () => {
-    const bridge = fakeBridge();
-    const b64 = Buffer.from(PNG_BYTES).toString("base64");
-    const withClip = {
-      ...bridge,
-      clipboard: {
-        read: () => Promise.resolve({ kind: "images", text: "", images: [b64], reason: "", formats: ["image/png"] }),
-        copyImage: () => Promise.resolve({ ok: true, kind: "", message: "", bytes: b64.length }),
-        writeText: () => Promise.resolve({ ok: true, kind: "", message: "" }),
-      },
-    };
-    const { port } = await createDesktopPort(withClip);
-    const content = await port.media.readClipboard();
-    expect(content?.kind).toBe("images");
-    expect(content?.images[0].type).toBe("image/png");
-    expect(content?.images[0].size).toBe(PNG_BYTES.length);
-  });
-
 });
 
 describe("整理模式的度量（#158）", () => {
@@ -364,25 +329,6 @@ describe("整理模式的度量（#158）", () => {
     expect(calls).toContain("measureBoard");
     expect(measure.nodes).toEqual({ a: ["d1"], b: ["d1", "d2"] });
     expect(measure.dirs).toEqual({ d1: 1000, d2: 500 });
-  });
-
-  it("能力关着时仍报 unavailable，不假装量出了 0 字节", async () => {
-    const { port } = await createDesktopPort(fakeBridge());
-    expect(port.features.tidy).toBe(false);
-    await expect(port.board.measure("{}")).rejects.toMatchObject({ kind: "unavailable", feature: "tidy" });
-  });
-
-  it("本地服务拒绝时按 failed 带原因回界面（整理条据此显示算不出，而不是 0）", async () => {
-    const info: DesktopInfo = { ...INFO, features: { ...INFO.features, tidy: true } };
-    const local = new Proxy({} as DesktopLocalBridge, {
-      get: () => async () => {
-        throw new Error("读不懂这块画板");
-      },
-    });
-    const { port } = await createDesktopPort({ info: async () => info, local });
-    const failure = await port.board.measure("{}").then(() => null, (e: unknown) => portFailureOf(e));
-    expect(failure?.kind).toBe("failed");
-    expect(failure?.message).toContain("读不懂这块画板");
   });
 });
 

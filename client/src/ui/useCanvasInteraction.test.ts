@@ -8,7 +8,6 @@ import type { Node } from "@xyflow/react";
 import type { Board, BoardNode } from "../core/board";
 import type { BoardChange, EditResult } from "../core/edit";
 import { isEditableTarget } from "../shell/pageInput";
-import { canvasFlowProps } from "./canvasFlowProps";
 import { useCanvasInteraction, type Selection } from "./useCanvasInteraction";
 
 
@@ -124,15 +123,6 @@ afterEach(async () => {
   container.remove();
 });
 
-// ---- 固定配置 ----
-
-describe("flowProps", () => {
-  it("直接返回 canvasFlowProps（同一个对象）", () => {
-    mount();
-    expect(nav.flowProps).toBe(canvasFlowProps);
-  });
-});
-
 // ---- 键盘 ----
 
 describe("键盘", () => {
@@ -198,6 +188,31 @@ describe("键盘", () => {
     expect(applied).toHaveLength(1);
   });
 
+  it("方向键带 Ctrl / Cmd / Alt 时不微移（那些是浏览器与系统的组合键）", () => {
+    mount();
+    keydown("ArrowRight", { ctrlKey: true });
+    keydown("ArrowRight", { metaKey: true });
+    keydown("ArrowRight", { altKey: true });
+    expect(applied).toEqual([]);
+  });
+
+  it("带 Alt / Shift 的 Ctrl 组合、不带的字母键、已被页面吞掉的键都不处理", () => {
+    mount();
+    expect(keydown("0", { ctrlKey: true, altKey: true }).defaultPrevented).toBe(false);
+    expect(keydown("0", { ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(false);
+    expect(keydown("j", { ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(false);
+    expect(keydown("j").defaultPrevented).toBe(false);
+    expect(keydown("0").defaultPrevented).toBe(false);
+    // 页面级接管已经吞掉的键（如 shell 的 Ctrl+0）：不再处理，也不重复拦。
+    const prevented = new KeyboardEvent("keydown", { key: "0", ctrlKey: true, bubbles: true, cancelable: true });
+    prevented.preventDefault();
+    act(() => {
+      window.dispatchEvent(prevented);
+    });
+    expect(flowStub.fitView).not.toHaveBeenCalled();
+    expect(applied).toEqual([]);
+  });
+
   it("Esc 清空节点与连线选区，且不改默认行为", () => {
     mount({ nodes: ["a", "b"] });
     edges = new Set(["e"]);
@@ -205,6 +220,11 @@ describe("键盘", () => {
     expect(nodes.size).toBe(0);
     expect(edges.size).toBe(0);
     expect(escape.defaultPrevented).toBe(false);
+    // Alt / Ctrl + Esc 不进画布键位（那是系统与浏览器自己的组合）。
+    mount({ nodes: ["a"] });
+    keydown("Escape", { altKey: true });
+    keydown("Escape", { ctrlKey: true });
+    expect([...nodes]).toEqual(["a"]);
   });
 
   it("连线拖动中的 Esc 不清选区", () => {
@@ -293,6 +313,18 @@ describe("触控板双指平移", () => {
     expect(e.defaultPrevented).toBe(false);
   });
 
+  it("Ctrl / Alt + 滚轮不算双指平移（交给 React Flow 缩放与系统）", () => {
+    mount();
+    for (const patch of [{ ctrlKey: true }, { altKey: true }]) {
+      const e = wheel(patch);
+      act(() => {
+        canvas.dispatchEvent(e);
+      });
+      expect(e.defaultPrevented).toBe(false);
+    }
+    expect(flowStub.setViewport).not.toHaveBeenCalled();
+  });
+
   it(".nowheel 区域内让给控件自己处理", () => {
     mount();
     const nowheel = document.createElement("div");
@@ -302,16 +334,6 @@ describe("触控板双指平移", () => {
       nowheel.dispatchEvent(wheel());
     });
     expect(flowStub.setViewport).not.toHaveBeenCalled();
-  });
-
-  it("画布上其它子元素里的双指滑动照样平移", () => {
-    mount();
-    const child = document.createElement("div");
-    canvas.append(child);
-    act(() => {
-      child.dispatchEvent(wheel());
-    });
-    expect(flowStub.setViewport).toHaveBeenCalledTimes(1);
   });
 
   it("卸载后移除捕获阶段的滚轮监听", async () => {
@@ -325,9 +347,14 @@ describe("触控板双指平移", () => {
     expect(e.defaultPrevented).toBe(false);
   });
 
-  it("wrapper 还不存在时不挂监听，也不崩", () => {
+  it("wrapper 还不存在时不挂监听：双指滚动不被吞，也不崩", () => {
     mount({ wireRef: false });
     expect(wrapperRef.current).toBeNull();
+    const e = wheel({ deltaX: 4, deltaY: 0 });
+    act(() => {
+      canvas.dispatchEvent(e);
+    });
+    expect(e.defaultPrevented).toBe(false);
     expect(flowStub.setViewport).not.toHaveBeenCalled();
   });
 });

@@ -12,8 +12,6 @@ export interface SettingsPanelView {
   plainHttp: boolean;
   /** settings.json 不能被本次覆盖（newer / unreadable）：保存置灰。 */
   readOnly: boolean;
-  /** 并发上限的有效值（草稿经钳制后的）。 */
-  concurrency: number;
   /** 并发上限超过 5 时给网关限流的提示。 */
   highConcurrency: boolean;
   /** 并发上限输入框的范围说明。 */
@@ -46,7 +44,6 @@ export function settingsPanelView(input: {
     feedbackRelayUrlError,
     plainHttp: !urlError && isPlainHttp(input.baseUrl),
     readOnly: !mayOverwriteSettings(input.file),
-    concurrency,
     highConcurrency: concurrency > 5,
     concurrencyHint: `1～${MAX_CONCURRENCY}，默认 ${DEFAULT_SETTINGS.concurrency}；按页面各自计算，同一密钥开多个页面时互不共享`,
     canTest,

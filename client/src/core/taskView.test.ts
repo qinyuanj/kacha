@@ -330,21 +330,29 @@ describe("不可运行原因：文案", () => {
 });
 
 describe("节点标红 ≡ 运行被拦：二次确认与任务视图同一份", () => {
-  it("参考图文件缺失：二次确认的原因与警告和任务视图相同", () => {
-    const { board: b, table = BUILTIN_TABLE, facts = UNKNOWN } = CASES.find((c) => c.name === "参考图文件缺失")!;
-    const [item] = buildConfirmItems(b, table, ["t"], facts);
-    const v = view(b, table, facts);
-    expect(item.reasons).toEqual(v.reasons);
-    expect(item.warnings).toEqual(v.warnings);
+  it("每种阻断原因的二次确认与任务视图相同", () => {
+    for (const { board: b, table = BUILTIN_TABLE, facts = UNKNOWN } of CASES) {
+      const [item] = buildConfirmItems(b, table, ["t"], facts);
+      const v = view(b, table, facts);
+      expect(item.reasons).toEqual(v.reasons);
+      expect(item.warnings).toEqual(v.warnings);
+    }
   });
 });
 
 describe("任务开关的可用性", () => {
-  const TRANSPARENT = new Set(["transparentUnsupported", "transparentNeedsOneImage", "transparentNoAlpha"]);
+  const TRANSPARENT = new Set(["transparentUnsupported", "transparentNeedsOneImage", "transparentNoAlpha", "transparentNeedsPng"]);
   const alphaOf = (a: boolean | undefined): TaskFacts => ({ ...UNKNOWN, alphaByNode: a === undefined ? new Map() : new Map([["r1", a]]) });
+  const flash = (on: boolean, patch: Partial<TaskNode> = {}, region = false): Board => {
+    const b = ready({ model: "doubao-seedream-5-0-flash-260915", transparent_background: on, ...patch }, ["r1"], "@图1");
+    if (region) b.edges[1] = { ...b.edges[1], region: REGION };
+    return b;
+  };
   const setups = [
     { name: "不支持透明背景的模型", board: (on: boolean) => ready({ transparent_background: on }, ["r1"]) },
     ...[[], ["r1"], ["r1", "r2"]].map((refs) => ({ name: `${refs.length} 条图片线`, board: (on: boolean) => seedreamPro({ transparent_background: on }, refs) })),
+    { name: "Flash JPEG 输出", board: (on: boolean) => flash(on, { output_options: { output_format: "jpeg", response_format: "url", watermark: false } }) },
+    { name: "Flash 区域指示", board: (on: boolean) => flash(on, {}, true) },
   ];
   const cases = setups.flatMap((s) => [true, false, undefined].map((alpha) => ({ ...s, alpha, label: `${s.name}，透明通道 ${alpha ?? "未知"}` })));
 

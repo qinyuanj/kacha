@@ -42,8 +42,15 @@ func timeoutFor(method string, url string) time.Duration {
 	return requestTimeout
 }
 
-// maxResponseBytes 防止异常大的响应把 IPC 撑爆；模型发现与生成结果都远小于它。
-const maxResponseBytes = 2 << 20
+// maxResponseBytes 是单次网关响应体的硬上限，取能力表声明的最大单图上限 31457280 字节（30 MiB）：
+// 结果图比旧的 2 MiB 大得多，按旧的固定读数会被静默截断成半张图。
+//
+// 这个数不是随手挑的：client/src/core/capabilities.builtin.json 里逐模型的 max_bytes 有
+// 10485760 / 30000000 / 31457280 三种，取它们的最大值，避免任何单个合法结果图被误判超限。
+// 用中间值（30000000）会让最大的那种模型产出的 30 MiB 结果图必然失败。
+// 超限仍按失败结束，不交回被截断的字节；两边一致性由 request_test.go 的
+// TestResponseLimitMatchesTheLargestDeclaredImageLimit 守着，改任一侧都会红。
+const maxResponseBytes = 31457280
 
 // Request 经 Go 的 net/http 发真实请求。Authorization 等请求头只从这里进入，
 // 不写日志；网关回显的密钥在正文里替换掉。
@@ -65,9 +72,13 @@ func (s *Service) Request(url string, method string, headers map[string]string, 
 		return Response{}, fmt.Errorf("无法连接网关：%s", redact(err.Error(), headers))
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	// 多读一个字节用于判断有没有超限：读满上限再加 1 还能读到东西，就说明响应更大。
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return Response{}, fmt.Errorf("读取网关响应失败：%s", redact(err.Error(), headers))
+	}
+	if len(data) > maxResponseBytes {
+		return Response{}, fmt.Errorf("网关响应超过 %d 字节上限，已按失败处理，不保存截断结果", maxResponseBytes)
 	}
 	result := Response{Status: resp.StatusCode, Headers: map[string]string{}}
 	for name, values := range resp.Header {

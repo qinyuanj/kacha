@@ -1,6 +1,6 @@
 // 更新排程（#164）：启动约 3 秒后检查一次，之后每次检查结束 15 分钟再检查。
 //
-// 计时器与时钟从外面注入，测试不用等真实时间；手动检查不受排程限制。
+// 计时器与时钟从外面注入，测试不用等真实时间；手动检查由调用方直接触发。
 import { canCheck, nextCheckDelay, type UpdateSnapshot } from "./update";
 
 export interface UpdateSchedulerPorts {
@@ -17,8 +17,6 @@ export interface UpdateSchedulerPorts {
 export interface UpdateScheduler {
   /** 装上排程：立刻按快照排下一次；返回卸载函数。 */
   start(): () => void;
-  /** 手动检查：不受排程限制，但正在检查 / 正在装时忽略。 */
-  checkNow(): void;
   /** 快照变了之后重排（检查结束、装完了）。 */
   reschedule(): void;
 }
@@ -58,10 +56,6 @@ export function createUpdateScheduler(ports: UpdateSchedulerPorts): UpdateSchedu
         stopped = true;
         clear();
       };
-    },
-    checkNow() {
-      if (!canCheck(ports.snapshot())) return;
-      ports.check();
     },
     reschedule,
   };

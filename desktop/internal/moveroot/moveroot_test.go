@@ -157,10 +157,16 @@ func TestMigrateFailureKeepsOldRoot(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 
-	// 用户在看到第一份复制完之后取消：已写进目标的半份内容要清掉。
+	// 用户在看到第一份复制完之后取消：这份已写进目标的内容要清掉。
+	// 取消点必须落在复制之后，否则目标里从来没有过半份内容，清理分支也就没有任何证明。
+	cancelled := false
+	progresses := 0
 	_, err := Migrate(source, target, statePath, &Options{
-		Progress:  func(Progress) {},
-		Cancelled: func() bool { return true },
+		Progress: func(p Progress) {
+			progresses++
+			cancelled = p.Done == 1
+		},
+		Cancelled: func() bool { return cancelled },
 	})
 	if err == nil {
 		t.Fatal("取消时应当返回失败")
@@ -168,9 +174,15 @@ func TestMigrateFailureKeepsOldRoot(t *testing.T) {
 	if got := KindOf(err); got != KindCancelled {
 		t.Fatalf("失败类别 = %q, want %q（%v）", got, KindCancelled, err)
 	}
+	if progresses != 1 {
+		t.Fatalf("进度回调 %d 次，want 1：取消要发生在第 1 份复制完成之后", progresses)
+	}
 	assertRootStill(t, statePath, source)
 	entries, readErr := os.ReadDir(target)
-	if readErr == nil && len(entries) > 0 {
+	if readErr != nil {
+		t.Fatalf("取消后目标目录读不出来：%v", readErr)
+	}
+	if len(entries) != 0 {
 		t.Fatalf("取消后目标里还留着 %d 项", len(entries))
 	}
 }

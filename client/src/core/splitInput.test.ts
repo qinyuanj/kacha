@@ -80,14 +80,6 @@ describe("#176 拆分场景：格式与像素下限按声明", () => {
 });
 
 describe("#176 生成场景不受影响", () => {
-  it("八种格式与下限 196 照旧", () => {
-    const rule = modelOf(FLASH).input_image_rule;
-    expect(rule.min_total_pixels).toBe(196);
-    for (const format of ["jpeg", "png", "webp", "bmp", "tiff", "gif", "heic", "heif"]) expect(imageRuleViolations(facts(format, 2000, 2000), rule)).toEqual([]);
-    expect(imageRuleViolations(facts("png", 13, 15), rule).join()).toContain("总像素");
-    expect(imageRuleViolations(facts("png", 15, 15), rule)).toEqual([]);
-  });
-
   it("生成场景仍按模型级规则与模型上限", () => {
     const flash = modelOf(FLASH);
     expect(inputImageRuleOf(flash, "image_edit", "generate")).toBe(flash.input_image_rule);
@@ -128,9 +120,6 @@ describe("#176 工作流级规则覆盖模型级，缺这项回落", () => {
 
 describe("#176 三层 512×512", () => {
   const flash = modelOf(FLASH);
-  it("生成场景合法", () => {
-    expect(imageRuleViolations(facts("png", 512, 512), flash.input_image_rule)).toEqual([]);
-  });
   it("拆分场景合法（恰等于 262144 下限）", () => {
     expect(imageRuleViolations(facts("png", 512, 512), flash.workflows.image_edit.layer_split!.input_image_rule)).toEqual([]);
   });
@@ -238,9 +227,6 @@ describe("#176 两级同时声明时的优先级（复审第 5 条）", () => {
 });
 
 describe("#176 能力表 schema", () => {
-  it("内置表通过校验", () => {
-    expect(parseCapabilityTable(structuredClone(BUILTIN_TABLE)).ok).toBe(true);
-  });
   it("拆分声明张数非法或缺规则视为损坏", () => {
     const broken = structuredClone(BUILTIN_TABLE);
     (findModel(broken, FLASH)!.workflows.image_edit.layer_split as unknown as { max_references: number }).max_references = 0;

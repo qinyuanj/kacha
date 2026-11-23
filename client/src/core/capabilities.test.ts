@@ -63,7 +63,7 @@ describe("Seedream 5.5 上架条目", () => {
     expect(five().transparent_background).toBe("supported");
     expect(five().region_hint).toEqual({ highlight_overlay: "supported", marked_image: "supported", bbox_tag: "supported" });
     expect(five().native_mask).toBe("unsupported");
-    expect(five().reference_phrasing.en_verified).toBe(flash().reference_phrasing.en_verified);
+    expect(five().reference_phrasing.en_verified).toBe("supported");
   });
 
   it("拆分图层与文字识别已按 #179 真机验收放开（2026-11-20 owner 确认）", () => {

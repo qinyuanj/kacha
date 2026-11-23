@@ -17,7 +17,7 @@ export interface ExportDeps {
 }
 
 /** 导出流程的结果。 */
-export type ExportStep =
+type ExportStep =
   | { kind: "failed"; text: string }
   | { kind: "confirm"; boardFile: string; plan: Awaited<ReturnType<typeof planExport>>; contents: ReturnType<typeof planPackContents> };
 

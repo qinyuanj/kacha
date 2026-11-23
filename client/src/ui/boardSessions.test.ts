@@ -1,8 +1,8 @@
 // 多画板会话的判定逻辑（#137）：冲突类别、只读判定、保存失败提示、删除与移出的阻断说明。
 import { describe, expect, it } from "vitest";
 import { PortError } from "../shell/port";
-import { ARCHIVE_TEXT, BOARD_MISSING_TEXT, TIDY_TEXT } from "./boardText";
-import { archiveBlockedText, deleteBlockedText, deleteFailureState, isConflict, isMissing, isReadOnly, isSlotsFull, moveOutBlockedText, samePath, saveErrorFlags, saveErrorText } from "./boardSessions";
+import { BOARD_MISSING_TEXT } from "./boardText";
+import { deleteBlockedText, deleteFailureState, isConflict, isMissing, isReadOnly, isSlotsFull, moveOutBlockedText, samePath, saveErrorFlags, saveErrorText } from "./boardSessions";
 
 const failure = (kind: "conflict" | "missing" | "slotsFull" | "network") => new PortError({ kind, code: kind, message: kind, status: 0 });
 
@@ -62,7 +62,6 @@ describe("删除与归档的阻断说明", () => {
     expect(deleteBlockedText({ missing: true, conflicted: false, saveError: "x" })).toContain(BOARD_MISSING_TEXT);
     expect(deleteBlockedText({ missing: false, conflicted: true, saveError: "x" })).toContain("请先重新载入");
     expect(deleteBlockedText({ missing: false, conflicted: false, saveError: "写不进去" })).toContain("写不进去");
-    expect(archiveBlockedText({ missing: false, conflicted: false, saveError: "写不进去" })).toContain("写不进去");
   });
 
   it("删除失败：画板已不存在就标 missing，其余标 conflicted", () => {
@@ -74,9 +73,9 @@ describe("删除与归档的阻断说明", () => {
 
 describe("移出为新画板", () => {
   it("只读画板 / 不可编辑 / 正在移出 / 阶段没了：各有各的说法", () => {
-    expect(moveOutBlockedText("readOnly")).toBe(ARCHIVE_TEXT.readOnly);
+    expect(moveOutBlockedText("readOnly")).toBe("归档画板只读，不能编辑。");
     expect(moveOutBlockedText("notEditable")).toContain("画板不可编辑");
-    expect(moveOutBlockedText("busy")).toBe(TIDY_TEXT.moveOutBusy);
+    expect(moveOutBlockedText("busy")).toBe("正在移出另一个阶段，请稍候");
     expect(moveOutBlockedText("stageGone")).toContain("阶段已不存在");
     expect(moveOutBlockedText("stageGone", "那个阶段被删了")).toBe("那个阶段被删了");
   });

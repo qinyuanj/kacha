@@ -1,12 +1,20 @@
 package gateway
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 )
 
 // 连接测试与模型发现都经 Go 发真实 HTTP：Authorization、方法与响应原文按网关契约走。
@@ -20,7 +28,7 @@ func TestRequestExecutesGatewayModelsCall(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := New(t.TempDir() + "/api-key.protected")
+	svc := NewFollowing(dataroot.NewRoots(t.TempDir()))
 	res, err := svc.Request(server.URL+"/v1/models", "GET", map[string]string{"Authorization": "Bearer " + syntheticKey, "Accept": "application/json"}, "")
 	if err != nil {
 		t.Fatalf("Request: %v", err)
@@ -46,7 +54,7 @@ func TestRequestRedactsSecretAndFailsNetworkCleanly(t *testing.T) {
 		_, _ = io.WriteString(w, "{\"error\":{\"message\":\"bad token "+syntheticKey+"\"}}")
 	}))
 	headers := map[string]string{"Authorization": "Bearer " + syntheticKey}
-	svc := New(t.TempDir() + "/api-key.protected")
+	svc := NewFollowing(dataroot.NewRoots(t.TempDir()))
 	res, err := svc.Request(server.URL+"/v1/models", "GET", headers, "")
 	server.Close()
 	if err != nil {
@@ -74,7 +82,7 @@ func TestRequestCarriesPostBody(t *testing.T) {
 		_, _ = io.WriteString(w, "{}")
 	}))
 	defer server.Close()
-	svc := New(t.TempDir() + "/api-key.protected")
+	svc := NewFollowing(dataroot.NewRoots(t.TempDir()))
 	if _, err := svc.Request(server.URL+"/v1/images/generations", "POST", map[string]string{}, "{\"prompt\":\"x\"}"); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
@@ -106,5 +114,129 @@ func TestTimeoutForSeparatesGenerationFromQueries(t *testing.T) {
 	// 生成超时必须比查询宽松一个数量级，否则这次修复等于没做。
 	if generationTimeout < 10*requestTimeout {
 		t.Fatalf("生成超时 %v 与查询超时 %v 太接近", generationTimeout, requestTimeout)
+	}
+}
+
+// largestDeclaredImageLimit 读能力表里声明的最大单图上限（任意层级的 max_bytes 取最大）。
+// 它是独立于本包的期望值来源：上限写死在 request.go，能力表在 client 侧，两边靠这条对齐。
+func largestDeclaredImageLimit(t *testing.T) int64 {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "client", "src", "core", "capabilities.builtin.json"))
+	if err != nil {
+		t.Fatalf("读能力表失败: %v", err)
+	}
+	var document any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("解析能力表失败: %v", err)
+	}
+	var largest int64
+	var walk func(node any)
+	walk = func(node any) {
+		switch value := node.(type) {
+		case map[string]any:
+			for key, child := range value {
+				if key == "max_bytes" {
+					if number, ok := child.(float64); ok && int64(number) > largest {
+						largest = int64(number)
+					}
+					continue
+				}
+				walk(child)
+			}
+		case []any:
+			for _, child := range value {
+				walk(child)
+			}
+		}
+	}
+	walk(document)
+	if largest == 0 {
+		t.Fatal("能力表里没有声明任何 max_bytes")
+	}
+	return largest
+}
+
+// #228：上限必须取能力表声明的最大单图上限，否则最大的那种合法结果图会被误判超限。
+func TestResponseLimitMatchesTheLargestDeclaredImageLimit(t *testing.T) {
+	if want := largestDeclaredImageLimit(t); int64(maxResponseBytes) != want {
+		t.Fatalf("响应上限 = %d 字节，能力表声明的最大单图上限 = %d 字节：%d 字节的合法结果图会被判超限",
+			maxResponseBytes, want, want)
+	}
+}
+
+// 能力表里最大的单图上限本身必须能完整往返：卡在「上限 + 1 才拒绝」的边界之内。
+func TestRequestAcceptsAnImageAtTheLargestDeclaredLimit(t *testing.T) {
+	data := binaryOf(int(largestDeclaredImageLimit(t)))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(data)
+	}))
+	defer server.Close()
+
+	svc := NewFollowing(dataroot.NewRoots(t.TempDir()))
+	res, err := svc.Request(server.URL+"/files/result.png", "GET", map[string]string{"Accept": "image/*"}, "")
+	if err != nil {
+		t.Fatalf("能力表允许的合法结果图被判超限: %v", err)
+	}
+	got, decodeErr := base64.StdEncoding.DecodeString(res.BodyBase64)
+	if decodeErr != nil {
+		t.Fatalf("body_base64 解不开：%v", decodeErr)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("二进制响应不完整：收到 %d 字节，要 %d 字节", len(got), len(data))
+	}
+}
+
+// binaryOf 造一段覆盖全部字节值的二进制，长度按需要伸缩：截断或按 UTF-8 改写都会看得出来。
+func binaryOf(size int) []byte {
+	data := make([]byte, size)
+	for i := range data {
+		data[i] = byte(i * 7)
+	}
+	return data
+}
+
+// 结果图是二进制且可能超过旧的 2 MiB 固定读数：真实请求边界上必须完整往返。
+func TestRequestRoundTripsBinaryLargerThanTwoMiB(t *testing.T) {
+	data := binaryOf(3<<20 + 5)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(data)
+	}))
+	defer server.Close()
+
+	svc := NewFollowing(dataroot.NewRoots(t.TempDir()))
+	res, err := svc.Request(server.URL+"/files/result.png", "GET", map[string]string{"Accept": "image/*"}, "")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	got, decodeErr := base64.StdEncoding.DecodeString(res.BodyBase64)
+	if decodeErr != nil {
+		t.Fatalf("body_base64 解不开：%v", decodeErr)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("二进制响应不完整：收到 %d 字节，要 %d 字节", len(got), len(data))
+	}
+}
+
+// 超过能力表声明的单图上限：整次请求失败，不把截断的字节当成功的结果图交回页面。
+func TestRequestRejectsResponseOverDeclaredLimit(t *testing.T) {
+	data := binaryOf(maxResponseBytes + 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(data)
+	}))
+	defer server.Close()
+
+	svc := NewFollowing(dataroot.NewRoots(t.TempDir()))
+	res, err := svc.Request(server.URL+"/files/result.png", "GET", map[string]string{"Accept": "image/*"}, "")
+	if err == nil {
+		t.Fatalf("超过上限仍当成功返回：%d 字节的 body_base64", len(res.BodyBase64))
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(maxResponseBytes)) {
+		t.Fatalf("失败原因没说清上限：%v", err)
+	}
+	if res.BodyBase64 != "" || res.Body != "" {
+		t.Fatalf("超过上限不该留下可被当作图片的字节：%q", res.BodyBase64)
 	}
 }

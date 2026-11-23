@@ -18,7 +18,7 @@ export const exportOneText = "已开始下载";
 export const exportAllText = "已保存：底图、全部图层与 layers.json（zip）";
 
 /** 跑一次导出：成功给提示，失败给失败提示。 */
-export async function runExport(
+async function runExport(
   toast: (message: string) => void,
   setBusy: (busy: boolean) => void,
   fn: () => Promise<string | null>,

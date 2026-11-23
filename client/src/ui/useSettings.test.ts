@@ -36,9 +36,9 @@ describe("高级设置接线", () => {
     expect(loaded).toBe(true);
   });
 
-  it("模型刷新：给回模型数", async () => {
+  it("模型刷新失败：给回失败结局和可展示说明", async () => {
     const port = createFakePort();
-    const seen: { ok: boolean; count?: number; message?: string }[] = [];
+    const seen: { ok: boolean; message?: string }[] = [];
     const Probe = () => {
       const settings = useSettings();
       void settings.testConnection("http://gw", "sk-x").then((r) => seen.push(r));
@@ -46,13 +46,16 @@ describe("高级设置接线", () => {
     };
     await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(Probe) })));
     await act(async () => undefined);
+    // 替身的网关固定返回 500：必须把失败结局和一句可展示的话交回来。
     expect(seen.length).toBeGreaterThan(0);
-    // 替身的网关不通：给回失败结论也是一种正确的接线。
-    expect(typeof seen[0].ok).toBe("boolean");
+    for (const result of seen) expect(result).toEqual({ ok: false, message: expect.stringMatching(/\S/) });
   });
 
   it("保存：写不进去时给一句说明", async () => {
     const port = createFakePort();
+    port.core.settingsPorts.writeSettings = async () => {
+      throw new Error("写不进去");
+    };
     let problem: string | null = "unset";
     const Probe = () => {
       const settings = useSettings();
@@ -62,6 +65,6 @@ describe("高级设置接线", () => {
     await act(async () => undefined);
     await act(async () => container.querySelector("button")?.click());
     await act(async () => undefined);
-    expect(problem).not.toBe("unset");
+    expect(problem).toBe("保存设置失败：写不进去");
   });
 });

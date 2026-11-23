@@ -30,7 +30,7 @@ python packaging\build_desktop.py
 
 release 资产清单与桌面客户端共用 `mygo.config.ts` 的唯一产品版本：中继文件名是 `kacha-feedbackrelay-<版本>-windows-amd64.exe`，与安装器、签名、更新描述、SHA256SUMS 一起进入 Gitea Release。中继是可选联网能力，不进入 NSIS 默认安装流程；dev/debug 仍产出未带版本的 `feedbackrelay.exe` 供本机联调。
 
-本仓库没有 kacha-cd 检出，因此这里只交付可复核的安装脚本与测试，不声称已经部署。运维在 `lzxsvn` 上拿到对应版本的版本化中继资产和 `nssm.exe` 后，在受控会话中按下面形式执行；脚本会查询服务状态，服务不存在则安装，已存在则停止并重启，重复执行不会安装第二个服务：
+本仓库没有 kacha-cd 检出，因此这里只交付可复核的安装脚本与测试，不声称已经部署。运维在 `lzxsvn` 上拿到对应版本的版本化中继资产和 `nssm.exe` 后，在受控会话中按下面形式执行：脚本查询服务状态，运行中先停止；服务不存在才安装；随后把服务镜像路径重新指向本次的版本化 exe、更新工作目录与环境，最后启动。首次安装与升级走同一条命令，重复执行不会安装第二个服务，也不会出现「停止、启动后仍跑旧 exe」：
 
 ~~~powershell
 python packaging\deploy_feedbackrelay.py `
@@ -41,9 +41,19 @@ python packaging\deploy_feedbackrelay.py `
   --nssm C:\tools\nssm.exe
 ~~~
 
-默认服务名是 `kacha-feedbackrelay`，默认监听 `:3005`；`--service-name` 可按需覆盖。脚本只把 `FEEDBACK_GITEA_URL`、`FEEDBACK_GITEA_REPO`、`FEEDBACK_ADDR` 写进服务的 nssm 环境；服务端不配置统一写 token，提交者 token 只在单次反馈请求中传递。失败信息不回显命令输出，测试用假 runner，不接触真实服务。
+默认服务名是 `kacha-feedbackrelay`，默认监听 `:3005`；`--service-name` 可按需覆盖。脚本只把 `FEEDBACK_GITEA_URL`、`FEEDBACK_GITEA_REPO`、`FEEDBACK_ADDR` 写进服务的 nssm 环境，每项都是独立的 `KEY=VALUE` 字符串：nssm 的 `AppEnvironment` 是 REG_MULTI_SZ，交替传 key 与 value 只会留下没有等号的条目，服务读不到这些变量。服务端不配置统一写 token，提交者 token 只在单次反馈请求中传递。失败信息不回显命令输出，测试用假 runner，不接触真实 nssm 与服务。
 
 需要人工交接的是：① `lzxsvn` 上能放置发行资产、安装并启动 Windows 服务的账户与 `nssm.exe`；② 用户自带对 `kacha-feedback` 仓库有建 issue、写评论/标签与上传附件权限的 Gitea token；服务端不持有统一写 token。真实 token、密码、凭据文件不写入仓库、更新说明、测试夹具或客户端产物。实际安装、`GET /healthz`、发一条验证反馈与重启后复查由 #210 的人工验收完成。
+
+### 真实 nssm 人工复核（#230）
+
+脚本单测只证明命令形状与顺序，不证明 `lzxsvn` 上的真实服务。运维按上面命令执行后，在受控会话里逐条复核；下面的命令都只读，也不需要任何 token：
+
+1. 只有一个中继服务：`Get-Service kacha-feedbackrelay` 与 `nssm list` 里没有第二份；`sc.exe qc kacha-feedbackrelay` 的 `BINARY_PATH_NAME` 指向本次的版本化 exe。
+2. 镜像与工作目录：`nssm get kacha-feedbackrelay Application`、`nssm get kacha-feedbackrelay AppDirectory` 与 `--relay-binary` 一致。
+3. 环境项形状：`nssm get kacha-feedbackrelay AppEnvironment`（或 `reg query HKLM\SYSTEM\CurrentControlSet\Services\kacha-feedbackrelay\Parameters /v AppEnvironment`）列出三条独立字符串 `FEEDBACK_GITEA_URL=…`、`FEEDBACK_GITEA_REPO=…`、`FEEDBACK_ADDR=…`，没有单独的 key 行。
+4. 运行与冒烟：服务为 Running，`GET http://lzxsvn:3005/healthz` 成功；发一条验证反馈后重启服务，第 2、3 条结果不变。
+5. 升级演练：先用旧版本 exe 按上面命令部署一次，再用新版本 exe 跑同一条命令，确认第 1～3 条都换成新路径且仍只有一个服务。这一步证明「停掉再启动却仍在跑旧 exe」没有复现。
 
 客户端内置默认中继地址 `http://lzxsvn:3005`；高级设置的「反馈中继地址」可覆盖，留空或无效值回退默认值，有效覆盖值优先生效。接线层用 `resolveFeedbackRelayAddress(settings)` 取得该地址，并把结果放进每次 `Feedback.Send` 的 `relay_url`；Go 服务再用本次覆盖优先于自身默认配置。
 
@@ -75,11 +85,13 @@ python packaging\verify.py --quality
 python packaging\verify.py --base origin/main
 ~~~
 
-默认按顺序运行打包脚本单测、前端单测、类型检查、knip（普通与 production）、`go test ./...`、桌面 debug 构建和前端质量门禁。各项跑完再汇总，任一失败即返回非零。不会安装 Chromium，也不运行 e2e。旧的 --e2e 参数会被拒绝。`--quality` 只标注「这是发版门禁用例」：它跑的质量步骤与默认验证相同，不再追加变异测试（见下文「变异测试未启用」）。
+默认按顺序运行打包脚本单测、前端单测、类型检查、knip（普通与 production）、`go test ./...`、`go test -race ./desktop/internal/diagnostics/...`、桌面 debug 构建和前端质量门禁。各项跑完再汇总，任一失败即返回非零。
+
+`-race` 那一步只覆盖诊断导出与日志记录的并发安全（#229 的并发证据），定向到 `desktop/internal/diagnostics` 一个包：整仓跑 `-race` 太慢，本机内存也有限。`-race` 需要 cgo，所以执行前先看工具链（`CGO_ENABLED=1` 且 `go env CC` 指名的编译器在 PATH 上）：有工具链就真跑，没有就打印「未运行 -race」并在汇总里标成未运行——只说明未运行，不静默跳过，也不因此判定失败。本机 Windows 只装了 Go、没有 gcc，因此这里通常看到的是「未运行」；CI 的 `windows-latest` 自带 MinGW，会真正执行。不会安装 Chromium，也不运行 e2e。旧的 --e2e 参数会被拒绝。`--quality` 只标注「这是发版门禁用例」：它跑的质量步骤与默认验证相同，不再追加变异测试（见下文「变异测试未启用」）。
 
 Go 单测覆盖本地存储、路径边界、导入、剪贴板契约与服务绑定；前端单测使用壳端口替身。它们不能替代 Windows 已解锁交互会话里的真实剪贴板、外部软件粘贴、窗口激活与打包产物检查。debug 构建只证明程序可构建，不宣称这些交互验收通过。
 
-非 Draft PR 的 Windows CI 使用同一 `verify.py` 入口（不带 `--quality`，但质量步骤相同），质量基线为 PR 的实际目标分支；目标引用缺失、历史不足或没有共同祖先会失败。PR 更新取消过期运行，直接 push 不触发该 workflow。CI 与本机门禁都不运行 mutator。
+非 Draft PR 的 Windows CI 使用同一 `verify.py` 入口（不带 `--quality`，但质量步骤相同），质量基线为 PR 的实际目标分支；目标引用缺失、历史不足或没有共同祖先会失败。PR 更新取消过期运行，直接 push 不触发该 workflow。CI 与本机门禁都不运行 mutator。PR CI 在本机门禁之外，另在同一 workflow 里安装 Playwright Chromium 并单独跑一遍 `npm --prefix client run e2e`（见 `.github/workflows/pr-verification.yml`）；本机 `python packaging\verify.py` 不跑 e2e。
 
 ### Windows 完整性标签
 

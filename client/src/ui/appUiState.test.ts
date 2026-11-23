@@ -1,6 +1,6 @@
 // 工作台界面状态的判定（#137）：提示、菜单禁用与模态开关。
 import { describe, expect, it } from "vitest";
-import { activeSizeNotice, modalOpenOf, noticesAfterMove, packMenuDisabled, saveFailureNotice, uiStateOf, uiStateText, usageNoticeVisible } from "./appUiState";
+import { modalOpenOf, packMenuDisabled, saveFailureNotice, uiStateOf, uiStateText, usageNoticeVisible } from "./appUiState";
 
 const snapshot = (patch: Partial<Parameters<typeof uiStateOf>[0]> = {}) => ({
   sessions: [] as { key: string; path: string }[],
@@ -51,21 +51,23 @@ describe("保存失败", () => {
 });
 
 describe("其余判定", () => {
-  it("移走之后的提示跟着同一块画板", () => {
-    expect(noticesAfterMove({ "/~/a": "warn" }, "/~/a", "/~/归档/a")).toEqual({ "/~/归档/a": "warn" });
-  });
-
-  it("体量提醒：没超线就不显示", () => {
-    expect(activeSizeNotice(null, undefined).show).toBeNull();
-  });
-
   it("用量提醒：没有用量就不显示", () => {
     expect(usageNoticeVisible(null, null)).toBe(false);
     expect(usageNoticeVisible("alert", null)).toBe(true);
     expect(usageNoticeVisible("alert", "alert")).toBe(false);
   });
 
-  it("模态：没有打开就是 false", () => {
+  it("模态：任一模态打开就是 true，全关才 false", () => {
+    expect(
+      modalOpenOf({
+        settingsOpen: false,
+        changelogOpen: false,
+        boardListOpen: false,
+        confirmOpen: false,
+        sendTextOpen: true,
+        packDialogOpen: false,
+      }),
+    ).toBe(true);
     expect(
       modalOpenOf({
         settingsOpen: false,

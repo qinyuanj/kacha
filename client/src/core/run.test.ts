@@ -339,7 +339,7 @@ describe("单任务端到端", () => {
     expect(await sizeOf(withSpec(concrete))).toMatchObject({ size_spec: { tier: "1K", ratio: "1:1" }, size: { width: 1024, height: 1024 } });
   });
 
-  it("生成变体：按该结果的任务目录重跑，即使父任务之后又提交过别的参数；新结果进父任务结果列", async () => {
+  it("生成变体：按该结果的任务目录重跑，即使父任务之后又提交过别的参数", async () => {
     const { d } = deps(ok);
     const { job: older, board: b1 } = await prepare(d, { board: board(true), table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
     await writeJob(d, "/root", older);
@@ -608,6 +608,26 @@ describe("图层拆分：执行", () => {
       { file: "layers/01.png", z_index: 1, bounding_box: [5, 5, 20, 20] },
       { file: "layers/02.png", z_index: 2, bounding_box: [0, 0, 10, 10] },
     ]);
+  });
+
+  it("图层分两批写入时第二批失败：明确本地文件错误，不留下完整结果文件", async () => {
+    const { d, files } = deps(multi);
+    const write = d.writeNewFile;
+    d.writeNewFile = async (...args) => {
+      if (String(args[0]).endsWith("layers/02.png")) throw new Error("写不进去");
+      return write(...args);
+    };
+    const b = board(false);
+    (b.nodes[1] as TaskNode).layer_decomposition = true;
+    const { job: prepared } = await prepare(d, { board: b, table: BUILTIN_TABLE, tableSha256: "x", userRoot: "/root", taskNodeId: "t" });
+    const job = await writeJob(d, "/root", prepared);
+    const err = await executeJob(d, { job, userRoot: "/root", baseUrl: "http://gw", apiKey: "k" }).catch((e) => e);
+    expect(failureLabel(err)).toBe("本地文件错误");
+    const dir = `/root/${job.relDir}`;
+    expect(files.has(`${dir}/layers/01.png`)).toBe(true);
+    expect(files.has(`${dir}/layers/02.png`)).toBe(false);
+    expect(files.has(`${dir}/layers.json`)).toBe(false);
+    expect(files.has(`${dir}/result.png`)).toBe(false);
   });
 
   it("拆分只返回一张：按普通结果处理，无图层", async () => {

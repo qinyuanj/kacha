@@ -1,6 +1,8 @@
 package localservice
 
 import (
+	"archive/zip"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,6 +36,32 @@ func seedSaveRoot(t *testing.T) (string, string, string) {
 	return root, filepath.Join(dir, "result.png"), board
 }
 
+// zipEntries 把结果包读成「条目名 → 内容」：只有真的解包才能证明写进去的是什么。
+func zipEntries(t *testing.T, path string) map[string]string {
+	t.Helper()
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatalf("OpenReader(%s): %v", path, err)
+	}
+	defer zr.Close()
+	out := map[string]string{}
+	for _, f := range zr.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[f.Name] = string(data)
+	}
+	return out
+}
+
+// 另存一张带图层的结果：用对话框选的目标，默认名来自 resultsave.SuggestedName，
+// 包里实际有底图、layers.json 与图层。只 Stat 目标的话，零字节文件也能过。
 func TestSaveResultUsesChosenTarget(t *testing.T) {
 	root, src, _ := seedSaveRoot(t)
 	target := filepath.Join(t.TempDir(), "t1.zip")
@@ -47,21 +75,29 @@ func TestSaveResultUsesChosenTarget(t *testing.T) {
 	if err != nil || !out.OK {
 		t.Fatalf("SaveResult = %+v, %v", out, err)
 	}
-	if _, err := os.Stat(target); err != nil {
-		t.Fatalf("目标文件读不出来：%v", err)
+	entries := zipEntries(t, target)
+	for name, want := range map[string]string{
+		"result.png":    "base",
+		"layers.json":   `{"layers":[]}`,
+		"layers/01.png": "layer",
+	} {
+		if got, ok := entries[name]; !ok || got != want {
+			t.Fatalf("结果包 %s = %q（存在 %v），want %q；entries = %+v", name, got, ok, want, entries)
+		}
 	}
 }
 
-func TestSaveResultCancelWritesNothing(t *testing.T) {
+// 取消对话框是中性结局：不是失败，也不落盘任何东西。
+//
+// 取消时对话框返回空串，服务在调 resultsave 之前就返回，所以断言落在 cancelled 类别上：
+// 漏掉那段早返回会变成 failed。原来的 os.Stat(target) 永远不可能存在——那个 target
+// 从没交给生产代码——抓不到任何回归，已删。
+func TestSaveResultCancelIsNeutral(t *testing.T) {
 	root, src, _ := seedSaveRoot(t)
-	target := filepath.Join(t.TempDir(), "t1.zip")
 	withSaveDialog(t, func(mygo.SaveDialogOptions) (string, error) { return "", nil })
 	out, err := New(localstore.New(root)).SaveResult(src)
-	if err != nil || out.OK || out.Kind != "cancelled" {
+	if err != nil || out.OK || out.Kind != "cancelled" || out.Message == "" {
 		t.Fatalf("取消结局 = %+v, %v", out, err)
-	}
-	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Fatalf("取消不该写目标：%v", err)
 	}
 }
 
@@ -74,6 +110,7 @@ func TestSaveResultMissingIsTyped(t *testing.T) {
 	}
 }
 
+// 整板结果：解包后每条结果按画板的相对路径落进包里，图层跟在各自结果旁边。
 func TestSaveBoardResultsUsesChosenTarget(t *testing.T) {
 	root, _, board := seedSaveRoot(t)
 	target := filepath.Join(t.TempDir(), "板-结果.zip")
@@ -82,7 +119,14 @@ func TestSaveBoardResultsUsesChosenTarget(t *testing.T) {
 	if err != nil || !out.OK {
 		t.Fatalf("SaveBoardResults = %+v, %v", out, err)
 	}
-	if _, err := os.Stat(target); err != nil {
-		t.Fatalf("整板结果读不出来：%v", err)
+	entries := zipEntries(t, target)
+	for name, want := range map[string]string{
+		"2026-01-02/t1/result.png":    "base",
+		"2026-01-02/t1/layers.json":   `{"layers":[]}`,
+		"2026-01-02/t1/layers/01.png": "layer",
+	} {
+		if got, ok := entries[name]; !ok || got != want {
+			t.Fatalf("整板结果包 %s = %q（存在 %v），want %q；entries = %+v", name, got, ok, want, entries)
+		}
 	}
 }

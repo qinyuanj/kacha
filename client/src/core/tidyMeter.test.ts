@@ -60,23 +60,21 @@ it("量成功之后 cleared failed：恢复后不再显示未知", async () => {
   let call = 0;
   const meter = new TidyMeter("text", () => {
     call += 1;
-    return call === 1
-      ? Promise.resolve({ nodes: {}, dirs: { kept: 10 } })
-      : new Promise<BoardMeasure>((_resolve, reject) => { fail = reject; });
+    if (call === 1) return Promise.resolve({ nodes: {}, dirs: { kept: 10 } });
+    if (call === 2) return new Promise<BoardMeasure>((_resolve, reject) => { fail = reject; });
+    return Promise.resolve({ nodes: {}, dirs: { kept: 20 } });
   }, (value) => { state = value; });
 
   meter.update("text");
   await Promise.resolve();
-  meter.update("next");
+  meter.update("broken");
   fail(new Error("读盘失败"));
   await Promise.resolve();
   expect(state.failed).toBe(true);
 
-  const ok = new TidyMeter("text", () => Promise.resolve({ nodes: {}, dirs: { kept: 20 } }), (value) => { state = value; });
-  ok.update("text");
+  meter.update("next");
   await Promise.resolve();
   expect(state.failed).toBe(false);
   expect(state.measure).toEqual({ nodes: {}, dirs: { kept: 20 } });
   meter.dispose();
-  ok.dispose();
 });

@@ -104,14 +104,17 @@ describe("可编辑区域目标", () => {
 
 describe("放大预览的请求", () => {
   it("参考图：显示名、绝对路径、扇出的可编辑区域；没有图层、没有区域轮廓", () => {
-    expect(nodePreviewRequest(previewBoard(), table, ROOT, "ref1")).toEqual({
-      title: "ref1.png",
-      absPath: "/~/refs/ref1.png",
-      layers: [],
-      resultId: undefined,
-      regionTargets: regionTargetsOf(previewBoard(), table, "ref1"),
-      regionOutlines: [],
-    });
+    const request = nodePreviewRequest(previewBoard(), table, ROOT, "ref1")!;
+    expect(request.title).toBe("ref1.png");
+    expect(request.absPath).toBe("/~/refs/ref1.png");
+    expect(request.layers).toEqual([]);
+    expect(request.resultId).toBeUndefined();
+    expect(request.regionOutlines).toEqual([]);
+    // 区域目标的字段由「可编辑区域目标」拥有；这里只证明按这个节点扇出了它的图片线。
+    expect(request.regionTargets!.map((t) => t.edgeRef)).toEqual([
+      { from: ["ref1", "out"], to: ["t1", "image:0"] },
+      { from: ["ref1", "out"], to: ["t2", "image:0"] },
+    ]);
   });
 
   it("结果：图层带上绝对路径、resultId 带节点 id，区域轮廓取自产出任务提交快照", () => {
@@ -167,11 +170,20 @@ describe("框选修改区域的请求", () => {
   it("按任务与端口找到那条线：标题带源节点名，打开即进入该线的区域编辑", () => {
     const b = previewBoard();
     const req = previewOf(regionEditRequest(b, table, ROOT, "t1", { from: ["ref1", "out"], to: ["t1", "image:0"] }));
-    const target = regionTargetsOf(b, table, "ref1")[0];
     expect(req.title).toBe(REGION_TEXT.previewTitle("ref1.png"));
     expect(req.absPath).toBe("/~/refs/ref1.png");
-    expect(req.edit).toEqual(target);
-    expect(req.regionTargets).toEqual([target]);
+    // 期望值写字面量（不再拿 regionTargetsOf 再算一遍）：区域与渲染方式取自那条线，
+    // 坐标能力与首个区域编号按 qwen 算。
+    expect(req.edit).toEqual({
+      label: REGION_TEXT.targetLabel("qwen-image-3.0", 1),
+      edgeRef: { from: ["ref1", "out"], to: ["t1", "image:0"] },
+      rects: [[0.1, 0.2, 0.3, 0.4], [0.5, 0.5, 0.6, 0.6]],
+      render: "highlight_overlay",
+      coordinateKind: "point",
+      coordinateAvailable: false,
+      firstRegion: 0,
+    });
+    expect(req.regionTargets).toEqual([req.edit]);
   });
 
   it("结果节点用文件名", () => {

@@ -44,9 +44,10 @@ const giteaReleaseListPayload = `[
 
 const downloadBase = "http://lzxsvn:3000/qinyuanj/kacha-cd/releases/download/v1.6.1/"
 
-// TestAssetURLComesFromBrowserDownloadURL 锁住真实报文契约：附件的下载地址来自
-// browser_download_url。退回 json:"url" 时这条会红，因为真实报文里没有那个字段。
-func TestAssetURLComesFromBrowserDownloadURL(t *testing.T) {
+// TestRealGiteaPayloadMapping 锁住真实报文契约：tag_name、browser_download_url
+// 与选版规则一起决定能不能找到可安装的桌面发行。退回 json:"url" 或误用 API 地址时，
+// 这条会因为附件地址不匹配而红。
+func TestRealGiteaPayloadMapping(t *testing.T) {
 	var releases []Release
 	if err := json.Unmarshal([]byte(giteaReleaseListPayload), &releases); err != nil {
 		t.Fatalf("解不开真实报文：%v", err)
@@ -62,32 +63,23 @@ func TestAssetURLComesFromBrowserDownloadURL(t *testing.T) {
 			t.Fatalf("附件 %q 的地址 = %q，要 %q", asset.Name, asset.URL, want)
 		}
 	}
-}
-
-// TestCandidatesAcceptRealPayload 用真实报文走一遍选版：能选出候选，且候选里
-// 的包地址是浏览器下载地址（不是空串、也不是 API 地址）。
-func TestCandidatesAcceptRealPayload(t *testing.T) {
-	var releases []Release
-	if err := json.Unmarshal([]byte(giteaReleaseListPayload), &releases); err != nil {
-		t.Fatalf("解不开真实报文：%v", err)
-	}
 	picks := candidates(releases, "1.6.0")
 	if len(picks) != 1 || picks[0].Version != "1.6.1" {
 		t.Fatalf("选版 = %+v，要一个 1.6.1", picks)
 	}
-	pkg, ok := findAsset(picks[0].Release, InstallerName("1.6.1"))
+	name := InstallerName("1.6.1")
+	pkg, ok := findAsset(picks[0].Release, name)
 	if !ok {
 		t.Fatal("找不到安装器附件")
 	}
 	if want := downloadBase + "kacha-setup-1.6.1-amd64.exe"; pkg.URL != want {
 		t.Fatalf("安装器地址 = %q，要 %q", pkg.URL, want)
 	}
-	sigName := InstallerName("1.6.1") + ".sig"
-	sig, ok := findAsset(picks[0].Release, sigName)
+	sig, ok := findAsset(picks[0].Release, name+".sig")
 	if !ok {
 		t.Fatal("找不到签名附件")
 	}
-	if sig.URL == "" {
-		t.Fatal("签名附件地址是空的")
+	if want := downloadBase + "kacha-setup-1.6.1-amd64.exe.sig"; sig.URL != want {
+		t.Fatalf("签名附件地址 = %q，要 %q", sig.URL, want)
 	}
 }

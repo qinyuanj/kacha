@@ -1,5 +1,5 @@
 // 移出为新画板的最后两步（#137）：从 ui/boardSessionsOps.ts 拆出的模块级函数，便于单测。
-import type { Board } from "../core/board";
+import { serializeBoard, type Board } from "../core/board";
 import type { BoardChange, EditResult } from "../core/edit";
 import { newId } from "../core/ids";
 import { errorText } from "../core/errors";
@@ -59,7 +59,8 @@ export async function writeMovedOut(
   fresh: Board,
 ): Promise<string | null> {
   try {
-    await ports.board.write(path, fresh as never, { createOnly: true });
+    // 端口只收文本：与其余三处写盘一样先序列化，不把画板对象塞进只认文本的通道。
+    await ports.board.write(path, serializeBoard(fresh), { createOnly: true });
     return null;
   } catch (e) {
     return errorText(e);

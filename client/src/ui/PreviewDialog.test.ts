@@ -72,6 +72,9 @@ describe("放大预览弹窗", () => {
     await show({ title: "预览", absPath: "/~/a.png" }, port);
     expect(container.querySelector("[aria-label='预览']")).not.toBeNull();
     expect(container.querySelector(".preview-side")).toBeNull();
+    expect(container.textContent).not.toContain("编辑区域");
+    expect(container.textContent).not.toContain("框选修改区域");
+    expect(container.textContent).not.toContain("区域轮廓");
   });
 
   it("有图层：侧栏列出图层名与透明徽标", async () => {
@@ -80,6 +83,7 @@ describe("放大预览弹窗", () => {
     await show({ title: "预览", absPath: "/~/a.png", layers: [{ record: layerRecord(), absPath: "/~/l0.png" }] }, port);
     expect(container.querySelector(".preview-side")).not.toBeNull();
     expect(container.textContent).toContain("第一层");
+    expect(container.textContent).toContain("透明");
   });
 
   it("结果节点：露出「以此继续编辑」与「加为参考图」", async () => {

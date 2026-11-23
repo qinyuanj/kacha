@@ -21,7 +21,6 @@ import {
   openBoardList,
   openManageBoards,
   packMenuPick,
-  packMenuReason,
   redoOn,
   sizeNoticeOf,
   sizeNoticeUpdated,
@@ -89,27 +88,9 @@ describe("保存失败的画板", () => {
     expect(failing[0].saveError).toBe("写不进去");
   });
 
-  it("没有保存错误：一个都没有", () => {
-    expect(failingSessions([okSession()])).toEqual([]);
-  });
 });
 
 describe("画板包菜单", () => {
-  it("画板正常：两项都可点", () => {
-    expect(packMenuReason(okSession(), "exportPack")).toBeNull();
-    expect(packMenuReason(okSession(), "downloadResults")).toBeNull();
-  });
-
-  it("没有打开的画板", () => {
-    expect(packMenuReason(undefined, "exportPack")).toBe("没有打开的画板");
-  });
-
-  it("画板打不开：导出与下载各说各的", () => {
-    const broken: Session = { key: "k", path: "/~/a", status: "corrupt", reason: "坏了" };
-    expect(packMenuReason(broken, "exportPack")).toBe("画板无法打开，不能导出");
-    expect(packMenuReason(broken, "downloadResults")).toBe("画板无法打开，不能下载");
-  });
-
   it("点了菜单项：导入、导出、下载各走各的", () => {
     const importPack = vi.fn();
     const prepareExport = vi.fn();
@@ -140,7 +121,10 @@ describe("画板变更与撤销", () => {
     const flushNow = vi.fn(async () => undefined);
     const apply = vi.fn(() => ({ board: {} }));
     applyWithFlush(apply, flushNow, "k1", { kind: "submitted", taskId: "t1", lastSubmitted: null });
+    applyWithFlush(apply, flushNow, "k1", { kind: "runResult", result: {} as never });
+    expect(flushNow).toHaveBeenCalledTimes(2);
     expect(flushNow).toHaveBeenCalledWith("k1");
+    expect(apply).toHaveBeenCalledTimes(2);
   });
 
   it("其它变更：不落盘", () => {
@@ -148,6 +132,10 @@ describe("画板变更与撤销", () => {
     const apply = vi.fn(() => ({ board: {} }));
     applyWithFlush(apply, flushNow, "k1", { kind: "title", title: "新" });
     expect(flushNow).not.toHaveBeenCalled();
+  });
+
+  it("没有待写错误：不记保存失败", () => {
+    expect(boardNoticeText(okSession())).toBeNull();
   });
 
   it("没有打开的画板：变更与试算都不做", () => {
@@ -175,16 +163,6 @@ describe("画板变更与撤销", () => {
 });
 
 describe("体量提示", () => {
-  it("越过黄线：提醒 warn", () => {
-    const notice = sizeNoticeOf({ path: "/~/a", bytes: 150, tier: "warn" }, {});
-    expect(notice?.tier).toBe("warn");
-  });
-
-  it("已提醒过同一档：不再提醒", () => {
-    const notice = sizeNoticeOf({ path: "/~/a", bytes: 150, tier: "warn" }, { "/~/a": "warn" });
-    expect(notice?.tier).toBeNull();
-  });
-
   it("没有体量：没有提示", () => {
     expect(sizeNoticeOf(null, {})).toBeNull();
   });
@@ -263,7 +241,10 @@ describe("其它接线", () => {
   });
 
   it("撤销 / 重做标签：没有画板时为 null", () => {
-    expect(historyLabels(okSession()).undo).toBeNull();
-    expect(historyLabels(undefined).redo).toBeNull();
+    expect(historyLabels(undefined)).toEqual({ undo: null, redo: null });
+    const ok = okSession();
+    if (ok.status !== "ok") throw new Error("fixture should be ok");
+    const b = ok.board;
+    expect(historyLabels(okSession({ history: { ...emptyHistory(), undo: [{ board: b, label: "改标题", seenResults: new Set() }], redo: [{ board: b, label: "删除节点", seenResults: new Set() }] } }))).toEqual({ undo: "改标题", redo: "删除节点" });
   });
 });

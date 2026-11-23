@@ -1,16 +1,67 @@
 // 移出为新画板的最后两步（#137）：写新画板与从原画板删节点。
-import { describe, expect, it, vi } from "vitest";
-import { newBoard, type Board, type TaskNode } from "../core/board";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { newBoard, openBoard, type Board, type TaskNode } from "../core/board";
+import { prepareStageSplit } from "../core/moveOut";
+import { createDesktopPort, type DesktopBridge, type DesktopInfo, type DesktopLocalBridge, type DesktopOutcome } from "../shell/desktop";
 import { finishMoveOut, moveOutWrite, moveOutRefusal, writeMovedOut } from "./boardSessionsMoveOut";
 
 const board = (title = "新"): Board => ({ format_version: 2, title, viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges: [], extra: {} });
 
+const roots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+/** 真桌面端口：本地桥把画板正文落到真实临时文件，读回也经同一个端口。 */
+async function desktopPortIn(root: string) {
+  const local = new Proxy({} as DesktopLocalBridge, {
+    get: (_target, prop: string) => {
+      if (prop === "writeBoard")
+        return async (path: string, text: string): Promise<DesktopOutcome> => {
+          await writeFile(path, text);
+          return { ok: true, kind: "", message: "", version: "v1" };
+        };
+      if (prop === "readBoard")
+        return async (path: string) => {
+          try {
+            return { main: await readFile(path, "utf8"), bak: null, version: "v1" };
+          } catch {
+            return { main: null, bak: null, version: null };
+          }
+        };
+      return () => Promise.reject(new Error("未实现：" + prop));
+    },
+  });
+  const info: DesktopInfo = { version: "test", user_data_root: root, board_root: join(root, "画板"), features: { generation: false, usage: false, pack_export: false, tidy: false } };
+  const bridge: DesktopBridge = { info: async () => info, local };
+  return (await createDesktopPort(bridge)).port;
+}
+
 describe("写新画板", () => {
-  it("写成功：没有说明", async () => {
-    const write = vi.fn(async () => undefined);
-    const message = await writeMovedOut({ board: { write } } as never, "/~/a.ugcboard.json", board());
+  it("经真实壳端口写盘：落盘后读回能重新解析，内容等于从原画板拆出的结果", async () => {
+    const root = await mkdtemp(join(tmpdir(), "kacha-228-"));
+    roots.push(root);
+    const path = join(root, "画板", "新.ugcboard.json");
+    await mkdir(dirname(path), { recursive: true });
+    const port = await desktopPortIn(root);
+    const original = stagedBoard();
+    let seq = 0;
+    const prepared = await prepareStageSplit(() => original, "s1", async () => "sha", () => `n${++seq}`);
+    if (!prepared) throw new Error("阶段应能拆出新画板");
+
+    const message = await writeMovedOut(port, path, prepared.board);
     expect(message).toBeNull();
-    expect(write).toHaveBeenCalled();
+
+    // 端口只收文本：落到文件里的必须是画板正文，而不是画板对象。
+    expect(JSON.parse(await readFile(path, "utf8"))).toHaveProperty("format_version", 2);
+    const texts = await port.board.read(path);
+    const reopened = openBoard(texts.main, texts.bak);
+    if (reopened.kind !== "ok") throw new Error("写出的新画板读不回来：" + reopened.kind);
+    expect(reopened.board).toEqual(prepared.board);
   });
 
   it("写不进去：给错误说明", async () => {
@@ -50,11 +101,6 @@ describe("移出前的画板位预检", () => {
   it("画板位够：放行", async () => {
     const refusal = await moveOutRefusal({ board: { list: async () => ({ slots: { used: 1, total: 10 } }) } });
     expect(refusal).toBeNull();
-  });
-
-  it("画板位满了：给统一文案", async () => {
-    const refusal = await moveOutRefusal({ board: { list: async () => ({ slots: { used: 10, total: 10 } }) } });
-    expect(refusal).toContain("画板位满了");
   });
 
   it("读不到列表：不拦", async () => {

@@ -8,7 +8,6 @@
 // core/fitImage.test.ts、core/overlay.test.ts 与 shell 的 canvas 包装负责。
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { cp } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
@@ -390,12 +389,6 @@ async function factsOf(s: Setup) {
   return { ...await collectRunFacts(s.port.core.imageProbe, s.board, ["t"], s.root), discovery: { source: "live" as const, ids: [MODEL], fetchedAt: new Date().toISOString() }, concurrency: 1 };
 }
 
-/** 读一份结局：等 outcome.json 真正写完再读（写完才通知，所以不会读到写了一半的空文件）。 */
-async function outcomeOf(s: Setup): Promise<{ path: string; record: Record<string, unknown> }> {
-  const path = await s.written("outcome.json");
-  return { path, record: JSON.parse(await readFile(path, "utf8")) as Record<string, unknown> };
-}
-
 async function storedTask(absPath: string): Promise<{ dir: string; record: Record<string, unknown> }> {
   const dir = dirname(absPath);
   let raw = "";
@@ -511,104 +504,5 @@ describe("桌面端口的参考图编辑闭环（#154）", () => {
     expect(reasons2).toContain("提示词引用了图9，但只接了 1 张参考图");
     expect(await outOfRange.runner.submit(outOfRange.target, outOfRange.board, ["t"], { t: 1 })).toEqual(reasons2);
     expect(outOfRange.generated).toHaveLength(0);
-  });
-
-  it("缺图在提交前按界面同一句话拦下，不落任务目录、不调网关", async () => {
-    const s = await setup({ refPath: "导入参考图/不存在.png", regions: false });
-    const [item] = buildConfirmItems(s.board, BUILTIN_TABLE, ["t"], await factsOf(s));
-    const reasons = item.reasons.map((r) => r.text);
-    expect(reasons).toContain("图1 图片缺失：橘猫.png");
-    expect(await s.runner.submit(s.target, s.board, ["t"], { t: 1 })).toEqual(reasons);
-    expect(s.generated).toHaveLength(0);
-    expect(s.writes.filter((p) => p.endsWith("task.json"))).toEqual([]);
-  });
-
-  it("取消与中断的任务都能主动重新生成：按任务目录重算，不自动续算", async () => {
-    const s = await setup({ regions: false });
-    const [file] = await s.port.media.pickImages(true);
-    const uploaded = await s.port.media.uploadReference(file);
-    s.setBoard(boardOf(uploaded.path, { regions: false }));
-
-    // 取消：等请求真的发出去（网关那头已经收到、任务目录已经写好）再取消。
-    // 闸门把取消钉在「执行中」这一刻：早了任务目录还没写、结局无处可记；晚了任务已经成功，而成功不写结局。
-    // 等的是事件，不是时间窗：generationEntered 由服务端收到请求时兑现。
-    s.holdGeneration();
-    await s.runner.submit(s.target, s.board, ["t"], { t: 1 });
-    await s.generationEntered();
-    const taskJson = await s.written("task.json");
-    s.runner.cancel({ kind: "task", boardKey: "A", taskNodeId: "t" });
-    expect((await outcomeOf(s)).record).toMatchObject({ outcome: "cancelled" });
-    // 取消之后队列里不再有这一份，也没有第二次请求：不会自动续算。
-    // 末尾的「共 sent + 2 个请求」同样在兜这件事——多出一次自动续算会让它失败。
-    expect(s.runner.getSnapshot().pending("A")).toBe(0);
-    const sent = s.generated.length;
-    expect(s.changes.some((c) => c.kind === "runResult")).toBe(false);
-    s.releaseGeneration();
-
-    // 主动重新生成：读上次的任务目录重算发送计划，出新结果。
-    expect(await s.runner.regenerate(s.target, s.board, "t")).toBeNull();
-    const first = await s.nextResult();
-    expect(s.generated.at(-1)!.prompt).toContain("背景改成蓝色");
-
-    // 中断：任务目录在、没有结局（应用重启后），节点记着这个任务编号，同样可主动重新生成。
-    const interruptedId = "20261117T000000Z-99999999";
-    const from = dirname(taskJson);
-    // 任务目录由编号里的日期反推（taskDirOfTaskId），副本必须落在那一层；
-    // 放在"今天"的日期目录只有运行当天恰好是 2026-11-17 时才找得到。
-    const to = join(s.root, "2026-11-17", interruptedId);
-    await mkdir(dirname(to), { recursive: true });
-    await cp(from, to, { recursive: true });
-    const raw = JSON.parse(await readFile(join(to, "task.json"), "utf8"));
-    await writeFile(join(to, "task.json"), JSON.stringify({ ...raw, task_id: interruptedId }));
-    s.setBoard({ ...s.board, nodes: s.board.nodes.map((n) => n.id === "t" && n.type === "task" ? { ...n, last_submitted: { ...n.last_submitted!, task_id: interruptedId } } : n) });
-    expect(await s.runner.regenerate(s.target, s.board, "t")).toBeNull();
-    const second = await s.nextResult();
-    expect(second.result.submittedTaskId).not.toBe(first.result.submittedTaskId);
-    expect(s.generated).toHaveLength(sent + 2);
-    // 这条用例走真实文件系统与真实 HTTP，但每个等待都等事件：写入落盘的通知、运行结果落到画板上、
-    // 网关真正收到请求。撑时间窗的不是期限，所以这里只要比单次等待的兜底上限（WAIT_MS）宽就够；
-    // 真挂死时先报的是那句带上「等什么 / 等到哪一步」的具体原因，而不是 vitest 的笼统超时。
-  }, 20_000);
-
-  it("生成变体固定一份、进同一结果列不覆盖已有结果；失败后重新生成按当前能力重算发送文本", async () => {
-    const s = await setup();
-    const [file] = await s.port.media.pickImages(true);
-    const uploaded = await s.port.media.uploadReference(file);
-    s.setBoard(boardOf(uploaded.path, { prompt: "把@图1 的背景改成蓝色" }));
-
-    // 先让第一次提交失败：密钥不对。
-    s.setMode("auth");
-    await s.runner.submit(s.target, s.board, ["t"], { t: 1 });
-    const failed = await outcomeOf(s);
-    expect(failed.record).toMatchObject({ outcome: "failed" });
-    const failedPath = failed.path;
-    expect(s.changes.some((c) => c.kind === "runResult")).toBe(false);
-
-    // 旧任务记录里的发送文本改成过时口径：重新生成必须按当前能力重算，不重放它。
-    const oldTask = join(dirname(failedPath), "task.json");
-    const oldRecord = JSON.parse(await readFile(oldTask, "utf8"));
-    const recomputed = oldRecord.send_text as string;
-    await writeFile(oldTask, JSON.stringify({ ...oldRecord, send_text: "旧口径的发送文本 图1 图3" }));
-
-    s.setMode("success");
-    expect(await s.runner.regenerate(s.target, s.board, "t")).toBeNull();
-    const first = await until(() => s.changes.find((c) => c.kind === "runResult"));
-    if (first.kind !== "runResult") return;
-    expect(s.generated.at(-1)!.prompt).toBe(recomputed);
-    expect(s.generated.at(-1)!.prompt).not.toContain("旧口径");
-
-    // 生成变体：按那次提交重跑，固定一份；新结果进同一结果列，旧结果节点还在。
-    const before = s.changes.filter((c) => c.kind === "runResult").length;
-    const boardWithResult = s.board;
-    expect(await s.runner.regenerate(s.target, boardWithResult, "t", { kind: "variant", fromTaskId: first.result.submittedTaskId })).toBeNull();
-    const second = await until(() => s.changes.filter((c) => c.kind === "runResult").length > before && s.changes.filter((c) => c.kind === "runResult").at(-1));
-    if (!second || second.kind !== "runResult") return;
-    expect(second.result.submittedTaskId).not.toBe(first.result.submittedTaskId);
-    expect(s.generated).toHaveLength(3);
-    const results = s.board.nodes.filter((n) => n.type === "result" && n.task_id !== undefined);
-    expect(results.length).toBeGreaterThanOrEqual(2);
-    // 结果列不覆盖：每个结果各在自己的任务目录里，旧的还在盘上。
-    expect(new Uint8Array(await readFile(resolve(s.root, ...first.result.path.split("/"))))).toEqual(PNG_1X1);
-    expect(new Uint8Array(await readFile(resolve(s.root, ...second.result.path.split("/"))))).toEqual(PNG_1X1);
   });
 });

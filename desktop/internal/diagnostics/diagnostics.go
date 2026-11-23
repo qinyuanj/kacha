@@ -70,7 +70,6 @@ type logEntry struct {
 // Service 持有受保护的日志缓冲与当前秘密的读法；不缓存秘密明文。
 type Service struct {
 	version string
-	root    string
 	// roots 是可切换的数据根（迁移 #161）：装了它，日志跟着新位置写。
 	roots   *dataroot.Roots
 	secrets func() []string
@@ -82,11 +81,6 @@ type Service struct {
 	// 密钥被替换或清除后旧值读不到了，但旧值可能已经出现在早先的日志里，
 	// 记着它才能保证后来的导出也不泄漏。
 	seenSecrets []string
-}
-
-// New 用应用版本、数据根与「读当前秘密」的回调造服务；回调只在脱敏时调用。
-func New(version, root string, secrets func() []string) *Service {
-	return &Service{version: version, root: root, secrets: orNone(secrets)}
 }
 
 // NewFollowing 造一个跟着共享数据根走的服务：迁移切换后日志写到新位置。
@@ -104,10 +98,7 @@ func orNone(secrets func() []string) func() []string {
 
 // Root 返回当前数据根。
 func (s *Service) Root() string {
-	if s.roots != nil {
-		return s.roots.Current()
-	}
-	return s.root
+	return s.roots.Current()
 }
 
 // truncate 把过长文本截断并留下痕迹，避免一条日志把整包撑大。
@@ -276,8 +267,10 @@ func (s *Service) collectFacts() ([]byte, error) {
 			}
 		}
 	}
+	// 凭据是否存在与丢弃数都在同一把锁下取值：记录日志也在改这两个字段（#229）。
 	s.mu.Lock()
 	hasSecret := len(s.knownSecrets()) > 0
+	dropped := s.dropped
 	s.mu.Unlock()
 	facts := map[string]any{
 		"version": s.version,
@@ -292,7 +285,7 @@ func (s *Service) collectFacts() ([]byte, error) {
 			"boards_readable":    err == nil,
 		},
 		"captured_at":  time.Now().UTC().Format(time.RFC3339),
-		"dropped_logs": s.dropped,
+		"dropped_logs": dropped,
 		"redaction":    "sensitive fields, known secrets and bearer tokens are replaced with " + redacted,
 	}
 	data, err := json.MarshalIndent(facts, "", "  ")

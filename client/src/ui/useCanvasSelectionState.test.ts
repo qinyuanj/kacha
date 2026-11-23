@@ -56,7 +56,6 @@ describe("选区", () => {
 
   it("交给 useCanvasInteraction 的句柄把 setter 与 ref 都接出去", async () => {
     await show(boardOf("a"));
-    expect(state.selection.nodes).toBe(state.selectedRef);
     // 连线选区 ref 只在 hook 内部（拼 selection），对外不单独暴露。
     expect(state.selection.edges.current).toEqual(new Set());
     await run(() => state.selection.setNodes(new Set(["a"])));

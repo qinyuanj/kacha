@@ -1,6 +1,6 @@
 // 高级设置文件状态的文案（#137）：ok 时没有提示，其余各给一句。
 import { describe, expect, it } from "vitest";
-import { SETTINGS_UNREADABLE_TEXT, settingsFileProblem, settingsNewerText } from "./settingsText";
+import { settingsFileProblem } from "./settingsText";
 
 describe("设置文件状态的文案", () => {
   it("ok：没有提示", () => {
@@ -8,7 +8,8 @@ describe("设置文件状态的文案", () => {
   });
 
   it("newer：说明由更新版本写入", () => {
-    expect(settingsFileProblem("newer", 2)).toBe(settingsNewerText(2));
+    expect(settingsFileProblem("newer", 2)).toContain("format_version 2");
+    expect(settingsFileProblem("newer", 2)).toContain("不会覆盖");
   });
 
   it("corrupt：说明已损坏并给出原因", () => {
@@ -17,6 +18,7 @@ describe("设置文件状态的文案", () => {
   });
 
   it("unreadable：说明读不到", () => {
-    expect(settingsFileProblem("unreadable")).toBe(SETTINGS_UNREADABLE_TEXT);
+    expect(settingsFileProblem("unreadable")).toContain("无法从本机存储读取 settings.json");
+    expect(settingsFileProblem("unreadable")).toContain("不会覆盖");
   });
 });
