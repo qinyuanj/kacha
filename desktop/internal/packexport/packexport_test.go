@@ -119,7 +119,7 @@ func TestExportWritesWholePackWithoutOmittedEntries(t *testing.T) {
 	root, spec, png := seedRoot(t)
 	target := filepath.Join(t.TempDir(), "往返.ugcpack")
 	var progress []Progress
-	result, err := Export(root, target, spec, func(p Progress) { progress = append(progress, p) }, nil)
+	result, err := Export(root, target, spec, false, func(p Progress) { progress = append(progress, p) }, nil)
 	if err != nil {
 		t.Fatalf("Export: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestExportCancelLeavesNoTarget(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "取消.ugcpack")
 	calls := 0
-	_, err := Export(root, target, spec, nil, func() bool {
+	_, err := Export(root, target, spec, false, nil, func() bool {
 		calls++
 		return calls > 2
 	})
@@ -182,7 +182,7 @@ func TestExportRejectsOutsideSourceAndUnsafeEntry(t *testing.T) {
 	}
 	bad = spec
 	bad.Files = []FileEntry{{Source: filepath.Join(root, "导入参考图", "abc.png"), Entry: "../越界.png"}}
-	if _, err := Export(root, filepath.Join(t.TempDir(), "x.ugcpack"), bad, nil, nil); err == nil || err.Kind != KindInvalid {
+	if _, err := Export(root, filepath.Join(t.TempDir(), "x.ugcpack"), bad, false, nil, nil); err == nil || err.Kind != KindInvalid {
 		t.Fatalf("越界条目应被拒：%+v", err)
 	}
 }
@@ -190,7 +190,7 @@ func TestExportRejectsOutsideSourceAndUnsafeEntry(t *testing.T) {
 func TestExportThenImportRoundTrip(t *testing.T) {
 	root, spec, png := seedRoot(t)
 	pack := filepath.Join(t.TempDir(), "往返.ugcpack")
-	if _, err := Export(root, pack, spec, nil, nil); err != nil {
+	if _, err := Export(root, pack, spec, false, nil, nil); err != nil {
 		t.Fatalf("Export: %v", err)
 	}
 	importRoot := t.TempDir()
@@ -216,5 +216,81 @@ func TestExportThenImportRoundTrip(t *testing.T) {
 	board, err := os.ReadFile(filepath.Join(importRoot, filepath.FromSlash(report.Boards[0])))
 	if err != nil || !strings.Contains(string(board), "往返画板") {
 		t.Fatalf("导入的画板读不出来：%v %s", err, board)
+	}
+}
+
+// existingTarget 造一个「已经存在」的导出目标，返回目标与它原来的字节。
+func existingTarget(t *testing.T) (string, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "覆盖.ugcpack")
+	old := "旧的包"
+	if err := os.WriteFile(target, []byte(old), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return dir, target, old
+}
+
+// 用户在系统对话框确认覆盖：目标换成新包，目录里不留临时产物。
+func TestExportReplacesTargetAfterConfirmedOverwrite(t *testing.T) {
+	root, spec, _ := seedRoot(t)
+	dir, target, old := existingTarget(t)
+
+	result, err := Export(root, target, spec, true, nil, nil)
+	if err != nil {
+		t.Fatalf("确认覆盖后应能导出：%+v", err)
+	}
+	if result.TaskDirs != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+	if data, readErr := os.ReadFile(target); readErr != nil || string(data) == old {
+		t.Fatalf("目标没有被新包替换：%v %q", readErr, data)
+	}
+	entries := entriesOf(t, target)
+	if !strings.Contains(entries["manifest.json"], "pack_format_version") {
+		t.Fatalf("覆盖后的目标不是完整画板包：%+v", entries)
+	}
+	left, readErr := os.ReadDir(dir)
+	if readErr != nil || len(left) != 1 {
+		t.Fatalf("目标目录有残留：%+v %v", left, readErr)
+	}
+}
+
+// 没有明确确认覆盖：拒绝，原文件一个字节都不动。
+func TestExportKeepsTargetWithoutOverwriteConfirmation(t *testing.T) {
+	root, spec, _ := seedRoot(t)
+	dir, target, old := existingTarget(t)
+
+	if _, err := Export(root, target, spec, false, nil, nil); err == nil || err.Kind != KindInvalid {
+		t.Fatalf("未确认覆盖应被拒：%+v", err)
+	}
+	if data, readErr := os.ReadFile(target); readErr != nil || string(data) != old {
+		t.Fatalf("未确认覆盖时原文件被改：%v %q", readErr, data)
+	}
+	left, _ := os.ReadDir(dir)
+	if len(left) != 1 {
+		t.Fatalf("被拒的导出留下临时产物：%+v", left)
+	}
+}
+
+// 确认了覆盖但导出中途取消：原文件留着，临时产物由打包器清掉。
+func TestExportCancelKeepsExistingTarget(t *testing.T) {
+	root, spec, _ := seedRoot(t)
+	dir, target, old := existingTarget(t)
+	calls := 0
+
+	_, err := Export(root, target, spec, true, nil, func() bool {
+		calls++
+		return calls > 2
+	})
+	if err == nil || err.Kind != KindCancelled {
+		t.Fatalf("取消的结局 = %+v, want cancelled", err)
+	}
+	if data, readErr := os.ReadFile(target); readErr != nil || string(data) != old {
+		t.Fatalf("取消时原文件被改：%v %q", readErr, data)
+	}
+	left, _ := os.ReadDir(dir)
+	if len(left) != 1 {
+		t.Fatalf("取消留下临时产物：%+v", left)
 	}
 }

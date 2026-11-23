@@ -183,6 +183,12 @@ export interface DesktopExportSnapshot {
   outcome: DesktopExportOutcome | null;
 }
 
+/** Go 侧选导出目标的结局：path 为空表示取消；overwrite 表示用户已在确认框里同意覆盖已存在的目标。 */
+export interface DesktopExportTarget {
+  path: string;
+  overwrite: boolean;
+}
+
 /** Go 侧画板包服务（Pack 服务）：导入 + 导出都在这里。 */
 export interface DesktopPackBridge {
   pick(): Promise<string>;
@@ -190,9 +196,10 @@ export interface DesktopPackBridge {
   snapshot(): Promise<DesktopPackSnapshot>;
   cancel(): Promise<void>;
   /** 导出能力：目标选择、事实、打包、进度与取消；旧替身没有这些时按 unavailable 处理。 */
-  pickExport?(name: string): Promise<string>;
+  pickExport?(name: string): Promise<DesktopExportTarget>;
   facts?(spec: Pick<PackExportSpec, "task_dirs" | "files">): Promise<PackEntryFact[]>;
-  exportPack?(target: string, spec: PackExportSpec): Promise<DesktopExportOutcome>;
+  /** overwrite 只在用户确认过覆盖时为 true：已存在的目标由此才允许替换。 */
+  exportPack?(target: string, spec: PackExportSpec, overwrite: boolean): Promise<DesktopExportOutcome>;
   exportSnapshot?(): Promise<DesktopExportSnapshot>;
   cancelExport?(): Promise<void>;
 }
