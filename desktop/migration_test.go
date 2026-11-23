@@ -43,7 +43,7 @@ func TestMigrationMovesRealDataAndServices(t *testing.T) {
 	roots := dataroot.NewRoots(source)
 	store := localstore.NewFollowing(roots)
 	shell := shellapp.NewFollowing("1.6.0", roots)
-	svc := storage.New(roots, statePath)
+	svc := storage.NewWithBusy(roots, statePath, nil)
 	target := filepath.Join(base, "新位置")
 
 	out := svc.Move(target)
@@ -102,7 +102,7 @@ func TestMigrationRejectsWritesToOldRoot(t *testing.T) {
 	roots := dataroot.NewRoots(source)
 	store := localstore.NewFollowing(roots)
 	target := filepath.Join(base, "新位置")
-	if out := storage.New(roots, statePath).Move(target); !out.OK {
+	if out := storage.NewWithBusy(roots, statePath, nil).Move(target); !out.OK {
 		t.Fatalf("迁移失败：%+v", out)
 	}
 

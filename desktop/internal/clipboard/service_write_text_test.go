@@ -21,28 +21,19 @@ type fakeTextReader struct{ clipboard string }
 
 func (f fakeTextReader) ReadText() string { return f.clipboard }
 
-// TestServiceWriteTextUsesTextWriter 文本写必须交给注入的写入端，并在读回一致时报成功。
-func TestServiceWriteTextUsesTextWriter(t *testing.T) {
+// TestWriteTextUsesTextWriter 文本写必须交给注入的写入端，并在读回一致时报成功。
+//
+// 页面的调用入口是 Clipboard.WriteText，也就是 Bound（wiring.go 绑的是 NewBound）；
+// 这里直接从 Bound 进，同时覆盖它到 Service 的那一层转交。
+func TestWriteTextUsesTextWriter(t *testing.T) {
 	w := &fakeTextWriter{}
-	out := Service{TextWriter: w, TextReader: fakeTextReader{clipboard: "kacha:clip:v1:3"}}.WriteText("kacha:clip:v1:3")
+	bound := Bound{Service: Service{TextWriter: w, TextReader: fakeTextReader{clipboard: "kacha:clip:v1:3"}}, read: func(string) ([]byte, error) { return nil, nil }}
+	out := bound.WriteText("kacha:clip:v1:3")
 	if !out.OK {
 		t.Fatalf("结局 = %+v，期望成功", out)
 	}
 	if w.calls != 1 || w.got != "kacha:clip:v1:3" {
 		t.Fatalf("文本写入端收到 calls=%d got=%q", w.calls, w.got)
-	}
-}
-
-// TestBoundWriteTextUsesTextWriter 绑定服务（页面经 Clipboard.WriteText 调到）同样走文本写入端。
-func TestBoundWriteTextUsesTextWriter(t *testing.T) {
-	w := &fakeTextWriter{}
-	bound := Bound{Service: Service{TextWriter: w, TextReader: fakeTextReader{clipboard: "复制的节点标记"}}, read: func(string) ([]byte, error) { return nil, nil }}
-	out := bound.WriteText("复制的节点标记")
-	if !out.OK {
-		t.Fatalf("结局 = %+v，期望成功", out)
-	}
-	if w.calls != 1 || w.got != "复制的节点标记" {
-		t.Fatalf("绑定服务没把文本交给写入端：calls=%d got=%q", w.calls, w.got)
 	}
 }
 

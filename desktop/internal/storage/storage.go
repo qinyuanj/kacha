@@ -13,9 +13,6 @@ import (
 	"github.com/qinyuanj/kacha/desktop/internal/moveroot"
 )
 
-// openDialog 选目标目录；测试替换掉，不弹窗。
-var openDialog = func(opts mygo.OpenDialogOptions) ([]string, error) { return mygo.Dialog.Open(opts) }
-
 // Outcome 是一次迁移的结局：成功带新数据根，失败带类别与可显示的原因。
 type Outcome struct {
 	OK      bool   `json:"ok"`
@@ -40,7 +37,6 @@ type Status struct {
 type Service struct {
 	roots     *dataroot.Roots
 	statePath string
-	pick      func() (string, error)
 
 	mu    sync.Mutex
 	done  int
@@ -49,29 +45,18 @@ type Service struct {
 	busy func() string
 }
 
-// New 用共享数据根与状态文件位置造服务；不建目录、不读磁盘。
-func New(roots *dataroot.Roots, statePath string) *Service {
-	return NewWithBusy(roots, statePath, nil)
-}
-
-// NewWithBusy 额外装一个「有没有别的操作在跑」的检查：返回非空原因就拒绝迁移。
+// NewWithBusy 用共享数据根与状态文件位置造服务，并装一个「有没有别的操作在跑」的检查：
+// 返回非空原因就拒绝迁移。busy 可为 nil，表示没有在途操作。
 //
 // 检查是构造参数而不是导出的方法：绑定给页面的服务会暴露全部导出方法，
 // 一个 func() string 的参数没法编码成 JSON，绑定时会直接 panic。
 func NewWithBusy(roots *dataroot.Roots, statePath string, busy func() string) *Service {
-	s := &Service{roots: roots, statePath: statePath, busy: busy}
-	s.pick = s.pickDirectory
-	return s
+	return &Service{roots: roots, statePath: statePath, busy: busy}
 }
 
 // Pick 让用户选一个新的数据位置；取消时返回空串。
 func (s *Service) Pick() (string, error) {
-	return s.pick()
-}
-
-// pickDirectory 弹系统目录选择框。
-func (s *Service) pickDirectory() (string, error) {
-	paths, err := openDialog(mygo.OpenDialogOptions{
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 		Title:             "选择本机数据位置",
 		Directory:         true,
 		CreateDirectories: true,
@@ -100,10 +85,14 @@ func (s *Service) Move(target string) Outcome {
 	if !s.roots.BeginMove() {
 		return Outcome{Kind: "busy", Message: "已有迁移在进行，请等它结束"}
 	}
-	defer s.roots.EndMove()
-	s.mu.Lock()
-	s.done, s.total = 0, 0
-	s.mu.Unlock()
+	// 退出迁移状态与清掉进度在同一把锁里：Status 读到的 Moving 与 Done/Total 不会互相矛盾
+	// （迁移结束后进度必须是 0/0，页面不会把上一次迁移的数字当成本次）。
+	defer func() {
+		s.mu.Lock()
+		s.done, s.total = 0, 0
+		s.roots.EndMove()
+		s.mu.Unlock()
+	}()
 	if busy := s.busy; busy != nil {
 		if reason := busy(); reason != "" {
 			return Outcome{Kind: "busy", Message: reason}
