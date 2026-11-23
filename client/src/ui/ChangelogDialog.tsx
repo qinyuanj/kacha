@@ -50,7 +50,7 @@ export function ChangelogDialog({ currentVersion, onClose }: { currentVersion: s
         onKeyDown={(event) => handleDialogKey(event, onClose, closeRef.current, contentRef.current)}
       >
         <div className="modal-head">
-          <strong id="changelog-title">更新内容</strong>
+          <h2 id="changelog-title">更新内容</h2>
           <button ref={closeRef} className="icon-button" aria-label="关闭" onClick={onClose}>✕</button>
         </div>
         <div ref={contentRef} className="changelog-releases" tabIndex={0} aria-label="各版本更新说明">

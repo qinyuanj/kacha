@@ -64,6 +64,12 @@
   /* 卡片自己不裁剪：端口手柄、参数浮层与比例下拉列表要露到卡片外（#223）。 */
   overflow: visible;
 }
+/* Light Studio（#226）：卡片面与画布底同为 #ffffff，1px 描边独自承担边界。
+ * --border-3 对白 3.037:1，达到 3:1；暗色沿用 --border，不动。
+ * 警告 / 错误态有自己的 2px 彩色边框，这里用 :not 排除，不改它们的语义色。 */
+:root[data-theme="light"] .node:not(.node-warn):not(.node-error) {
+  border-color: var(--border-3);
+}
 .react-flow__node.selected .node {
   outline: 2px solid var(--accent-strong);
 }
@@ -324,7 +330,7 @@
   height: 100px;
   display: grid;
   place-items: center;
-  color: var(--danger);
+  color: var(--danger-inline-text);
 }
 .badge {
   display: inline-block;
@@ -334,23 +340,6 @@
   background: var(--accent-soft);
   font-size: 11px;
 }
-.warn-list,
-.error-list,
-.hint-list {
-  margin: 6px 0 0;
-  padding-left: 16px;
-  font-size: 11px;
-}
-.warn-list {
-  color: var(--warning-text);
-}
-.error-list {
-  color: var(--danger);
-}
-.hint-list {
-  color: var(--text-2);
-}
-
 .field {
   display: flex;
   align-items: center;
@@ -572,7 +561,7 @@ body[data-port-drag="ok"] * {
   border-radius: 50%;
   border: 1px solid var(--danger);
   background: var(--surface);
-  color: var(--danger);
+  color: var(--danger-inline-text);
   line-height: 18px;
   cursor: pointer;
 }
@@ -721,12 +710,6 @@ body[data-port-drag="ok"] * {
   /* 从属于上一行原图：缩进，不像独立的用户端口。 */
   padding-left: 24px;
 }
-.badge-warn {
-  padding: 0 4px;
-  border-radius: 4px;
-  background: var(--warning-soft);
-  border: 1px solid var(--warning);
-}
 .context-menu {
   position: fixed;
   z-index: 1000;
@@ -839,13 +822,10 @@ body[data-port-drag="ok"] * {
   overflow: hidden;
 }
 .hover-error {
-  color: var(--danger);
+  color: var(--danger-inline-text);
 }
 .hover-warn {
   color: var(--warning-text);
-}
-.region-limit-exceeded {
-  color: var(--danger);
 }
 
 /* ---- 任务节点常驻的尺寸行：分辨率档 + 宽高比（组合框 / 下拉）+ 发送像素 ---- */
@@ -883,7 +863,7 @@ body[data-port-drag="ok"] * {
 }
 .ratio-unsupported,
 .ratio-unsupported input {
-  color: var(--danger);
+  color: var(--danger-inline-text);
   border-color: var(--danger);
 }
 .ratio-combo-list {

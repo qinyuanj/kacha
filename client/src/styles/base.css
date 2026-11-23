@@ -206,3 +206,45 @@ progress::-moz-progress-bar {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
+
+/* ---- 从画布/弹窗层归位过来的通用规则（#224）：只换归属层；危险文字色按 #242 走语义别名 ---- */
+.badge-warn {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--warning-soft);
+  border: 1px solid var(--warning);
+}
+.warn-list,
+.error-list,
+.hint-list {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-size: 11px;
+}
+.warn-list {
+  color: var(--warning-text);
+}
+.error-list {
+  color: var(--danger-inline-text);
+}
+.hint-list {
+  color: var(--text-2);
+}
+/* 图标按钮（关闭）：只有图标，不占标题栏的横向空间；按钮变体归全局基础层。 */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--text-2);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.icon-button:hover {
+  color: var(--text-1);
+  background: var(--control-hover);
+}

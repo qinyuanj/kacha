@@ -64,6 +64,8 @@
   --danger-soft: rgb(248 81 73 / 15%);
   --danger-soft-weak: rgb(248 81 73 / 8%);
   --danger-text: #ff7b72;
+  /* 内联危险文字：暗色沿用 --danger，保持原有对比度与观感（#242）。 */
+  --danger-inline-text: var(--danger);
   --final: #d9a521;
 
   /* 透明图棋盘格（随主题，不设开关） */
@@ -157,6 +159,8 @@
   --danger-soft: #ffebe9;
   --danger-soft-weak: #fff5f5;
   --danger-text: #c0392b;
+  /* 内联危险文字：浅色用专用 token，4.5:1 达标（#242）。 */
+  --danger-inline-text: var(--danger-text);
   --final: #d4a017;
 
   --checker-a: #eeeeee;

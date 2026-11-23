@@ -64,7 +64,7 @@ export function RunConfirmDialog({ items, scope, onConfirm, onCancel }: Props) {
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}>
       <div className="modal modal-wide" role="dialog" aria-label="确认运行">
         <div className="modal-head">
-          <strong>确认运行（{scope === "selection" ? "选中子图" : "整个画板"}）</strong>
+          <h2>确认运行（{scope === "selection" ? "选中子图" : "整个画板"}）</h2>
         </div>
         <ul className="confirm-list">
           {items.map((item, index) => (

@@ -587,24 +587,9 @@
 }
 
 /* ---- 反馈弹窗：纵向字段行、截图附件、脱敏预览、令牌提示与回执 ---- */
-/* 图标按钮（关闭）：只有图标，不占标题栏的横向空间。
- * 布局与状态色归这里；普通按钮的默认外观归 base.css 的按钮体系。 */
-.icon-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  color: var(--text-2);
-  background: none;
-  border: none;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-}
-.icon-button:hover {
-  color: var(--text-1);
-  background: var(--control-hover);
+/* 图标按钮（关闭）归 base.css 的按钮体系；区域超限提示只在这里消费。 */
+.region-limit-exceeded {
+  color: var(--danger-inline-text);
 }
 .feedback-pick-row {
   align-items: flex-start;

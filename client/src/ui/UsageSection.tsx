@@ -56,7 +56,7 @@ function CleanConfirm({ usage, busy, onConfirm, onCancel }: { usage: Usage; busy
     <div className="modal-backdrop">
       <div className="modal" role="dialog" aria-label="清理未引用任务目录">
         <div className="modal-head">
-          <strong>清理未引用任务目录</strong>
+          <h2>清理未引用任务目录</h2>
         </div>
         <p className="muted small">以下 {dirs.length} 个任务目录没有任何画板引用，将移入回收区。被引用的结果不在清单里。</p>
         <ul className="usage-candidates">
