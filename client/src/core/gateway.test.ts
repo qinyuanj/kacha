@@ -172,6 +172,25 @@ describe("Seedream 5.5 请求体（复用 Flash 请求形状，只换 model）",
     expect(buildGenerationRequest(input({ references: [alpha] })).body).not.toHaveProperty("background");
     expect(() => buildGenerationRequest(input({ references: [alpha], transparentBackground: true, outputOptions: { output_format: "jpeg", response_format: "url", watermark: false } }))).toThrow(/PNG/);
   });
+
+  const transparentBoundaryCases: { name: string; patch: Partial<GenerationInput> }[] = [
+    { name: "无图", patch: { references: [] } },
+    { name: "多图", patch: { references: [{ mediaType: "image/png", bytes: PNG_BYTES, hasAlpha: true }, { mediaType: "image/png", bytes: PNG_BYTES, hasAlpha: true }] } },
+    { name: "无 alpha", patch: { references: [{ mediaType: "image/png", bytes: PNG_BYTES, hasAlpha: false }] } },
+    { name: "未知 alpha", patch: { references: [{ mediaType: "image/png", bytes: PNG_BYTES }] } },
+    { name: "JPEG 输出", patch: { outputOptions: { output_format: "jpeg", response_format: "url", watermark: false } } },
+  ];
+  it.each(transparentBoundaryCases)("网关发送边界拒绝 $name 的透明组合", ({ patch }) => {
+    const transparentInput = (): GenerationInput => ({
+      model: findModel(BUILTIN_TABLE, "doubao-seedream-5-0-flash-260915")!,
+      text: "改色",
+      nativeNegativePrompt: null,
+      size: { width: 1024, height: 1024 },
+      references: [{ mediaType: "image/png", bytes: PNG_BYTES, hasAlpha: true }],
+      transparentBackground: true,
+    });
+    expect(() => buildGenerationRequest({ ...transparentInput(), ...patch })).toThrow();
+  });
 });
 
 describe("Flash 真实脱敏夹具回放（替代字节为合成，不证明视觉语义）", () => {
@@ -459,7 +478,7 @@ describe("网关适配器：Seedream 请求形态对照夹具", () => {
   });
 
   it("透明背景：能力表不支持的 qwen 即使开关打开也不发 background", () => {
-    expect(JSON.stringify(buildGenerationRequest(textInput({ references: [png], transparentBackground: true })).body)).not.toContain("transparent");
+    expect(buildGenerationRequest(textInput({ references: [png], transparentBackground: true })).body).not.toHaveProperty("background");
   });
 
   it("出图取顶层 data[].url，不看 metadata.output.choices", async () => {
@@ -470,13 +489,6 @@ describe("网关适配器：Seedream 请求形态对照夹具", () => {
     expect(requestId).toBe(fixture.response.headers["X-Oneapi-Request-Id"]);
   });
 
-  it("超参考图上限 HTTP 400 → 网关拒绝，带网关原文", async () => {
-    const fixture = loadFixture(SEEDREAM_DIR, "pro-limit-11.json");
-    const { fetch } = replay(fixture);
-    const error = await generate({ baseUrl: BASE, apiKey: "k", fetch }, textInput({ model: seedreamPro, references: Array(11).fill(png) })).catch((e) => e);
-    expect(error).toMatchObject({ category: "rejected", status: 400 });
-    expect(error.message).toContain("number of reference images cannot exceed 10");
-  });
 });
 
 /** 回放用输入：Seedream 夹具按文件名前缀选模型（响应按请求形态解析），其余按 qwen。 */
@@ -521,6 +533,7 @@ describe("网关适配器：夹具响应回放", () => {
         expect(error.category).toBe(expectations[exchange.response.status]);
         expect(error.status).toBe(exchange.response.status);
         expect(error.requestId).toBe(exchange.response.headers["X-Oneapi-Request-Id"]);
+        if (name.includes("pro-limit-11")) expect(error.message).toContain("number of reference images cannot exceed 10");
       }
     });
   }

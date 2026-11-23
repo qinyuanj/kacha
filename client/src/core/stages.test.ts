@@ -16,6 +16,7 @@ const staged = (): Board => ({
 describe("阶段在画布上的呈现", () => {
   it("收起的阶段里的节点不显示；展开的照常", () => {
     expect([...collapsedMembers(staged())]).toEqual(["c"]);
+    expect([...collapsedMembers(staged(), true)]).toEqual([]);
   });
 
   it("阶段框包住全部成员并留边距；显示尺寸优先于存的尺寸，不在画板上的成员忽略", () => {

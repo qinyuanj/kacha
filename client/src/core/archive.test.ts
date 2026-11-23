@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { isArchivedPath, readOnlyMenu } from "./archive";
-import { collapsedMembers } from "./stages";
-import { newBoard } from "./board";
 import type { MenuItem } from "./contextMenu";
 
 describe("归档画板的位置（#90）", () => {
@@ -14,13 +12,6 @@ describe("归档画板的位置（#90）", () => {
   });
 });
 
-describe("归档画板的只读查看", () => {
-  it("默认展开收起阶段，不改归档内容", () => {
-    const board = { ...newBoard("归档"), nodes: [{ id: "p", type: "prompt" as const, pos: [0, 0] as [number, number], size: [1, 1] as [number, number], extra: {}, text: "a" }], stages: [{ id: "s", name: "阶段", nodes: ["p"], collapsed: true, extra: {} }] };
-    expect([...collapsedMembers(board, true)]).toEqual([]);
-    expect(board.stages[0].collapsed).toBe(true);
-  });
-});
 
 describe("归档画板的只读菜单", () => {
   const item = (action: MenuItem["action"], separatorBefore = false): MenuItem => ({ action, label: action, disabledReason: null, ...(separatorBefore ? { separatorBefore } : {}) });

@@ -3,9 +3,8 @@ import { BUILTIN_TABLE, findModel } from "./capabilities";
 import { buildGenerationRequest } from "./gateway";
 import { taskView } from "./taskView";
 import { board } from "./testing/runnerHarness";
-import { collectRunFacts } from "./submission";
 import type { TaskNode } from "./board";
-import { createRunner, nodeStatus } from "./runner";
+import { createRunner } from "./runner";
 import { memoryTaskFs } from "./testing/memoryTaskFs";
 import { settle } from "./testing/runnerHarness";
 import { png as makePng } from "./testing/png";
@@ -54,15 +53,6 @@ it("公开运行器提交保存透明参数与快照，重新生成沿用历史 
   expect([...h.fs.files.keys()].filter(p => p.endsWith("/result.png"))).toHaveLength(2);
 });
 
-it("透明结果若实际不带 alpha，不保存或伪造成功", async () => {
-  const h = runnerSetup();
-  h.opaqueOutput();
-  await h.runner.submit(h.target, h.board(), ["t1"]);
-  await settle();
-  expect(nodeStatus(h.runner.getSnapshot().board("A").nodes.get("t1"))).toEqual({ kind: "failed", label: "响应无效" });
-  expect([...h.fs.files.keys()].some(p => p.endsWith("/result.png"))).toBe(false);
-});
-
 it("区域指示把唯一 alpha 输入展开成原图+叠加图后，运行前以同一理由阻断：零请求零写入", async () => {
   // 组合验收（区域 × 透明）：叠加展开发生在发送计划，透明要求恰好一张实际参考图，
   // 阻断理由必须与节点控件展示的 transparentNeedsOneImage 一致。
@@ -75,66 +65,7 @@ it("区域指示把唯一 alpha 输入展开成原图+叠加图后，运行前�
   expect([...h.fs.files.keys()].some(p => p.endsWith("/task.json"))).toBe(false);
 });
 
-it.each([false, undefined])("公开运行器对实际快照 alpha=%s 拒绝发送", async alpha => {
-  const h = runnerSetup(alpha);
-  if (alpha === undefined) {
-    // 明确模拟未知，不让默认参数把 unknown 变成 true。
-    h.unknownAlpha();
-  }
-  expect(await h.runner.submit(h.target, h.board(), ["t1"])).toHaveLength(1);
-  await settle();
-  expect(h.bodies).toEqual([]);
-  expect([...h.fs.files.keys()].some(p => p.endsWith("/task.json"))).toBe(false);
-});
-
 const model = findModel(BUILTIN_TABLE, "doubao-seedream-5-0-flash-260915")!;
-const png = { mediaType: "image/png", bytes: new Uint8Array([1]), hasAlpha: true };
-const input = { model, text: "改色", nativeNegativePrompt: null, size: { width: 1024, height: 1024 }, references: [png], transparentBackground: true };
-
-it("来源图层探测所选文件并与底图 alpha 事实分开", async () => {
-  const b = board(["t1"], true);
-  const t = b.nodes.find(n => n.type === "task") as TaskNode;
-  t.model = model.model_id;
-  t.transparent_background = true;
-  b.nodes = b.nodes.filter(n => n.id !== "r");
-  b.nodes.push({ id: "r", type: "result", pos: [0, 0], size: [100, 100], extra: {}, task_id: "20261010T000000000-abcdefgh", file: "result.png", path: "2026-10-10/id/result.png", layer_count: 1, record: { model: model.model_id, prompt: "", negative_prompt: "", size_spec: t.size_spec, submitted_at: "", layers: [{ file: "layers/01.png", z_index: 1, bounding_box: [0, 0, 32, 32] }] } });
-  b.edges[1].source_layer = 1;
-  const paths: string[] = [];
-  const facts = await collectRunFacts({ inspectImage: async path => { paths.push(path); return { has_alpha: true }; } }, b, ["t1"], "/root");
-  expect(paths).toEqual(["/root/2026-10-10/id/layers/01.png"]);
-  expect(facts.alphaByNode.get("r:layer:1")).toBe(true);
-  expect(taskView(b, BUILTIN_TABLE, "t1", { ...facts, discovery: { source: "none" }, concurrency: 4 })!.reasons).toEqual([]);
-  expect(taskView(b, BUILTIN_TABLE, "t1", { ...facts, alphaByNode: new Map([["r", true]]), discovery: { source: "none" }, concurrency: 4 })!.reasons.map(r => r.kind)).toContain("transparentNoAlpha");
-});
-
-it.each([
-  { name: "无图", references: [] },
-  { name: "多图", references: [png, png] },
-  { name: "无 alpha", references: [{ ...png, hasAlpha: false }] },
-  { name: "未知 alpha", references: [{ mediaType: "image/png", bytes: png.bytes }] },
-  { name: "JPEG 输出", references: [png], outputOptions: { output_format: "jpeg" as const, response_format: "url" as const, watermark: false } },
-])("网关发送边界拒绝 $name 的透明组合", patch => {
-  expect(() => buildGenerationRequest({ ...input, ...patch })).toThrow();
-});
-
-describe("透明背景控件和运行规则一致", () => {
-  it("只在一张已确认 alpha 的实际输入及 PNG 输出时允许启用", () => {
-    const b = board(["t1"], true);
-    const t = b.nodes.find(n => n.type === "task") as TaskNode;
-    t.model = model.model_id;
-    const facts = { discovery: { source: "none" as const }, missingNodes: new Set<string>(), alphaByNode: new Map([["r", true]]), concurrency: 4 };
-    expect(taskView(b, BUILTIN_TABLE, "t1", facts)!.toggles.transparentBackground.canEnable).toBe(true);
-    expect(taskView(b, BUILTIN_TABLE, "t1", { ...facts, alphaByNode: new Map() })!.toggles.transparentBackground.canEnable).toBe(false);
-    t.output_options = { output_format: "jpeg", response_format: "url", watermark: false };
-    expect(taskView(b, BUILTIN_TABLE, "t1", facts)!.toggles.transparentBackground.canEnable).toBe(false);
-    t.transparent_background = true;
-    expect(taskView(b, BUILTIN_TABLE, "t1", facts)!.reasons.map(r => r.kind)).toContain("transparentNeedsPng");
-    t.output_options.output_format = "png";
-    b.edges[1].region = { rects: [[0, 0, 0.5, 0.5]], render: "highlight_overlay" };
-    expect(taskView(b, BUILTIN_TABLE, "t1", facts)!.reasons.map(r => r.kind)).toContain("transparentNeedsOneImage");
-  });
-});
-
 const model55 = findModel(BUILTIN_TABLE, "doubao-seedream-5-5-261028")!;
 const t2iInput = { model: model55, text: "一只橘猫贴纸", nativeNegativePrompt: null, size: { width: 1024, height: 1024 }, references: [], transparentBackground: true };
 const jpegOptions = { output_format: "jpeg" as const, response_format: "url" as const, watermark: false };

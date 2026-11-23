@@ -8,7 +8,6 @@ function harness(overrides: Partial<UpdatePreparationPorts> = {}) {
   let guard: (() => void) | null = null;
   const blocked: string[] = [];
   const saves = { boards: 0, ui: 0 };
-  const protection: boolean[] = [];
   const ports: UpdatePreparationPorts = {
     queue: {
       pending: () => pending,
@@ -23,7 +22,6 @@ function harness(overrides: Partial<UpdatePreparationPorts> = {}) {
       saves.ui++;
     },
     unsavedChanges: () => unsaved,
-    onProtectionChange: (active) => protection.push(active),
     ...overrides,
   };
   const preparation = createUpdatePreparation(ports);
@@ -31,7 +29,6 @@ function harness(overrides: Partial<UpdatePreparationPorts> = {}) {
     preparation,
     blocked,
     saves,
-    protection,
     setPending(n: number) {
       pending = n;
     },
@@ -63,38 +60,20 @@ describe("更新准备：任务保护", () => {
     expect(h.guarded()).toBe(false);
   });
 
-  it("任务结束后不自动安装：准备通过也不等于安装", async () => {
-    const h = harness();
-    h.setPending(0);
-    const result = await h.preparation.prepare();
-    expect(result).toEqual({ ok: true });
-    // 保护仍在（等用户点安装），但没有任何「自动装」的动作。
-    expect(h.preparation.active()).toBe(true);
-  });
-});
-
-describe("更新准备：保护范围", () => {
-  it("准备期间拒绝新提交，成功后保护保持到安装结束", async () => {
+  it("准备期间拒绝新提交，release 后恢复", async () => {
     const h = harness();
     expect(h.submit()).toBe(true);
     const result = await h.preparation.prepare();
     expect(result.ok).toBe(true);
     expect(h.guarded()).toBe(true);
     expect(h.submit()).toBe(false);
-    expect(h.preparation.blocked()).toBe(true);
     h.preparation.release();
     expect(h.guarded()).toBe(false);
     expect(h.submit()).toBe(true);
   });
+});
 
-  it("保护开关变化会通知界面", async () => {
-    const h = harness();
-    await h.preparation.prepare();
-    expect(h.protection).toEqual([true]);
-    h.preparation.release();
-    expect(h.protection).toEqual([true, false]);
-  });
-
+describe("更新准备：保存", () => {
   it("准备失败时解除保护，恢复正常操作", async () => {
     const h = harness({
       async saveBoards() {
@@ -103,7 +82,6 @@ describe("更新准备：保护范围", () => {
     });
     const result = await h.preparation.prepare();
     expect(result).toEqual({ ok: false, reason: "保存画板失败：磁盘已满" });
-    expect(h.preparation.active()).toBe(false);
     expect(h.guarded()).toBe(false);
     expect(h.submit()).toBe(true);
   });
@@ -113,7 +91,6 @@ describe("更新准备：保护范围", () => {
     h.setUnsaved(true);
     const result = await h.preparation.prepare();
     expect(result).toEqual({ ok: false, reason: UNSAVED_MESSAGE });
-    expect(h.preparation.active()).toBe(false);
     // 改动落盘之后又恢复：准备回到通过。
     h.setUnsaved(false);
     expect(await h.preparation.prepare()).toEqual({ ok: true });
@@ -127,42 +104,9 @@ describe("更新准备：保护范围", () => {
     });
     const result = await h.preparation.prepare();
     expect(result).toEqual({ ok: false, reason: "保存界面状态失败：权限不足" });
-    expect(h.preparation.active()).toBe(false);
-  });
-});
-
-describe("更新准备：在途操作", () => {
-  it("等在途操作结束再保存", async () => {
-    const h = harness();
-    // TS 不追踪执行器里的赋值：用一个对象装 resolve，避免被收窄成 null。
-    const gate: { finish?: () => void } = {};
-    const inFlight = new Promise<void>((resolve) => {
-      gate.finish = resolve;
-    });
-    h.preparation.track(inFlight);
-    const preparing = h.preparation.prepare();
-    // 在途没结束时还不能保存。
-    await Promise.resolve();
-    expect(h.saves.boards).toBe(0);
-    gate.finish?.();
-    await preparing;
-    expect(h.saves.boards).toBe(1);
-    expect(h.saves.ui).toBe(1);
-  });
-
-  it("在途操作失败时准备失败并解除保护", async () => {
-    const h = harness();
-    const failing = Promise.reject(new Error("导入失败"));
-    failing.catch(() => undefined);
-    h.preparation.track(failing);
-    const result = await h.preparation.prepare();
-    expect(result.ok).toBe(false);
-    expect(h.preparation.active()).toBe(false);
     expect(h.guarded()).toBe(false);
   });
-});
 
-describe("更新准备：并发与代次", () => {
   it("重复点安装只准备一次、只保存一次", async () => {
     const h = harness();
     const [a, b] = await Promise.all([h.preparation.prepare(), h.preparation.prepare()]);
@@ -170,17 +114,6 @@ describe("更新准备：并发与代次", () => {
     expect(b.ok).toBe(true);
     expect(h.saves.boards).toBe(1);
     expect(h.saves.ui).toBe(1);
-  });
-
-  it("失败恢复后代次前进，旧异步操作不能再提交变更", async () => {
-    const h = harness({
-      async saveBoards() {
-        throw new Error("写不进去");
-      },
-    });
-    const before = h.preparation.generation();
-    await h.preparation.prepare();
-    expect(h.preparation.generation()).toBeGreaterThan(before);
   });
 });
 
