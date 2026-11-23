@@ -73,8 +73,12 @@ func TestWriteKeepsBackup(t *testing.T) {
 	}
 }
 
-// 写失败不留半截文件：目标目录建不出来时失败，原有文件不变，目录里没有临时文件。
-func TestWriteFailureKeepsOldContentAndLeavesNoTemp(t *testing.T) {
+// 目标目录建不出来时写入失败，挡路的那个文件不被改动。
+//
+// 这里不查临时文件：失败发生在 MkdirAll，writeAtomic 根本没跑，目录里不可能出现临时文件
+// （那条循环永远抓不到回归）。写进只读文件、临时文件确实被建出来又清掉的证明在
+// boards_test.go 的 TestWriteFailureKeepsOldContentByteForByteAndCleansTemp。
+func TestWriteFailureKeepsOldContentWhenDirUnreachable(t *testing.T) {
 	root := t.TempDir()
 	s := New(root)
 
@@ -92,11 +96,8 @@ func TestWriteFailureKeepsOldContentAndLeavesNoTemp(t *testing.T) {
 	if err != nil || string(data) != "keep" {
 		t.Fatalf("blocker = %q, %v", data, err)
 	}
-	entries, _ := os.ReadDir(root)
-	for _, e := range entries {
-		if filepath.Ext(e.Name()) == ".tmp" {
-			t.Fatalf("临时文件留下了：%s", e.Name())
-		}
+	if got.Kind != KindFailed || got.Message == "" {
+		t.Fatalf("失败结局 = %+v, want kind %q 且带原因", got, KindFailed)
 	}
 }
 
@@ -115,11 +116,13 @@ func TestWriteLeavesNoTempFiles(t *testing.T) {
 	}
 }
 
-// 删除画板：主文件与 .bak 移进回收区，画板目录里不再有它。
+// 删除画板：主文件与 .bak 一起移进回收区（可恢复），画板目录里不再有它。
 func TestRemoveBoardMovesToRecycle(t *testing.T) {
 	s := New(t.TempDir())
 	path := filepath.Join(s.BoardDir(), "画板"+BoardExt)
 	s.WriteBoard(path, "{\"a\":1}", WriteOptions{CreateOnly: true})
+	// 写第二次留下 .bak：删画板时它必须跟着进回收区，否则只搬走一半。
+	s.WriteBoard(path, "{\"a\":2}", WriteOptions{})
 
 	if got := s.RemoveBoard(path, ""); !got.OK {
 		t.Fatalf("RemoveBoard: %+v", got)
@@ -127,10 +130,19 @@ func TestRemoveBoardMovesToRecycle(t *testing.T) {
 	if s.IsFile(path) {
 		t.Fatalf("画板仍在原处")
 	}
+	if s.IsFile(path + ".bak") {
+		t.Fatalf(".bak 仍留在画板目录")
+	}
 	recycle := filepath.Join(s.Root(), RecycleDir)
-	entries, err := os.ReadDir(recycle)
-	if err != nil || len(entries) == 0 {
-		t.Fatalf("回收区是空的：%v", err)
+	base := filepath.Base(path)
+	for want, content := range map[string]string{base: "{\"a\":2}", base + ".bak": "{\"a\":1}"} {
+		data, err := os.ReadFile(filepath.Join(recycle, want))
+		if err != nil {
+			t.Fatalf("回收区缺 %s：%v", want, err)
+		}
+		if string(data) != content {
+			t.Fatalf("回收区 %s = %q, want %q", want, data, content)
+		}
 	}
 }
 
