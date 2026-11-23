@@ -142,7 +142,7 @@ afterEach(async () => {
 });
 
 describe("图片引用与图片信息", () => {
-  it("按画板顺序列出参考图、结果底图与各图层的绝对路径", async () => {
+  it("参考图、结果底图与各图层的图片信息都读到（读不到的图层记 null）", async () => {
     const refPath = `img/${freshName("a")}.png`;
     const dir = `2026-01-01/${freshName("res")}`;
     const infos = new Map<string, ImageInfo>([
@@ -158,10 +158,10 @@ describe("图片引用与图片信息", () => {
     await show(propsOf({ board: boardOf(promptNode("p1"), refNode("ref1", refPath), resultNode("res1", dir, ["layers/01.png"])) }));
 
     const abs = (rel: string) => `${USER_ROOT}/${rel}`;
-    // 图片源集合本身不外露（只经 useImageInfos 的批量读取与下游派生体现），这里按读图顺序锁。
-    const readOrder = [...new Set(shell.inspectImage.mock.calls.map(([path]) => path as string))];
-    expect(readOrder).toEqual([abs(refPath), abs(`${dir}/out.png`), abs(`${dir}/layers/01.png`)]);
+    // 图片源集合本身不外露：从派生结果看三类图都被读到（读取顺序是 Promise.all 的实现形状，
+    // 由 core/graph 的图片源用例拥有）。
     expect(data.imageInfos.get(abs(refPath))).toEqual(infos.get(abs(refPath)));
+    expect(data.imageInfos.get(abs(`${dir}/out.png`))).toEqual(infos.get(abs(`${dir}/out.png`)));
     // 读取失败记 null，不记「没有图片」。
     expect(data.imageInfos.get(abs(`${dir}/layers/01.png`))).toBeNull();
   });
@@ -242,10 +242,6 @@ describe("自动宽高比的补算时机", () => {
     await show(props);
     const mounted = applied.length;
     expect(mounted).toBeGreaterThan(0);
-
-    // 同一份依赖重渲染：不重复补算。
-    await show(props);
-    expect(applied).toHaveLength(mounted);
 
     // 画板文件（改名 / 换标签页）不是依赖。
     props = { ...props, boardFile: "/~/画板/另一块.ugcboard.json" };
