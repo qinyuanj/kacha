@@ -3,6 +3,7 @@ import { type CapabilityTable, type ModelCapability, modelsByTier } from "./capa
 import { ERROR_CATEGORY_LABELS, GatewayError, listModels, type FetchLike } from "./gateway";
 import { errorText } from "./errors";
 import { DEFAULT_FEEDBACK_RELAY_URL } from "./feedback";
+import { DEFAULT_THEME_CHOICE, parseThemeChoice, type ThemeChoice } from "./theme";
 
 export { DEFAULT_FEEDBACK_RELAY_URL } from "./feedback";
 
@@ -19,6 +20,11 @@ export interface Settings {
   feedback_relay_url: string;
   /** 全局队列的并发上限。 */
   concurrency: number;
+  /**
+   * 主题档位（#221）：可选字段，不升 format_version。
+   * 未写或写坏都按默认暗色；真源仍在这里，首帧镜像只是窗口外观的缓存。
+   */
+  theme: ThemeChoice;
   extra: Json;
 }
 
@@ -28,6 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // 空字符串是「没有显式覆盖」；内置默认由 Go 壳的环境变量/常量决定（#205/#209）。
   feedback_relay_url: "",
   concurrency: 4,
+  theme: DEFAULT_THEME_CHOICE,
   extra: {},
 };
 
@@ -54,7 +61,8 @@ export function mayOverwriteSettings(kind: LoadedSettings["kind"]): boolean {
   }
 }
 
-const KNOWN_KEYS = ["format_version", "base_url", "feedback_relay_url", "concurrency"];
+// 已知字段不落进 extra：theme 漏了这一行会被当未知字段，永远读不回 settings.theme（#221）。
+const KNOWN_KEYS = ["format_version", "base_url", "feedback_relay_url", "concurrency", "theme"];
 const isObject = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function corrupt(reason: string): LoadedSettings {
@@ -94,6 +102,8 @@ function parseSettingsFields(raw: Json): LoadedSettings {
       base_url: baseUrl,
       feedback_relay_url: normalizeFeedbackRelayUrl(raw.feedback_relay_url ?? ""),
       concurrency: concurrency as number,
+      // 主题是可选字段：非法值不整份判损坏，回退默认暗色并保留其它字段（#221）。
+      theme: parseThemeChoice(raw.theme),
       extra,
     },
   };

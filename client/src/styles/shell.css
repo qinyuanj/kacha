@@ -1,0 +1,495 @@
+/* 工作台外壳（#222）：顶栏标签页、画板工具栏、更新入口、提示横条、空态/致命错误态与 toast。
+ *
+ * 颜色一律引用 tokens.css 的语义变量，两套主题共用同一套规则；本文件不写具体色号。
+ * 层叠顺序由 styles/index.css 固定：tokens → base → shell → canvas → dialogs。
+ */
+
+/* ---- 工作台骨架 ---- */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ---- 顶部提示横条 ----
+ * 语气（错误 / 警告 / 只读 / 用量越线 / 更新）只由左侧色条与低饱和底色承担，
+ * 正文永远是正文色：横条要读得清，但不能比画布内容更抢眼。 */
+.bar {
+  --bar-tone: var(--border-3);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px 6px 9px;
+  border-left: 3px solid var(--bar-tone);
+  border-bottom: 1px solid var(--border-1);
+  background: var(--app-chrome-soft);
+  color: var(--text-1);
+}
+.bar span {
+  flex: 1;
+  min-width: 0;
+}
+.bar-error {
+  --bar-tone: var(--danger);
+  background: var(--danger-soft);
+}
+.bar-warn {
+  --bar-tone: var(--warning);
+  background: var(--warning-soft);
+}
+/* 归档画板的只读横条（#90）：中性语气，只说明「现在不能改」。 */
+.bar-info {
+  --bar-tone: var(--border-3);
+  background: var(--app-chrome-soft);
+}
+/* 用量与体量越线（alert 档）：是提醒不是故障，语气比错误轻一档。 */
+.bar-alert {
+  --bar-tone: var(--danger);
+  background: var(--danger-soft-weak);
+}
+/* 横条里的动作：外观（边框 / 圆角 / 底色 / 悬停 / 禁用）全由 base 的中性按钮承担，
+ * 这里只收尺寸，让它与正文同一条基线。 */
+.bar button {
+  flex: none;
+  height: 24px;
+  padding: 0 8px;
+  line-height: 22px;
+  white-space: nowrap;
+}
+/* 「关闭」这类轻量动作走 base 的链接样式，只收掉横条按钮的盒尺寸。 */
+.bar button.link {
+  height: auto;
+  padding: 0 4px;
+  line-height: inherit;
+}
+.bar button.link:hover {
+  color: var(--accent-hover);
+}
+
+/* ---- 顶栏与标签页 ----
+ * 标签排在外壳色上；激活标签抬到与下方画板工具栏同一层底色，并用顶部主色强调条钉住，
+ * 视线从激活标签直接落到工具栏，说明「这一行属于当前画板」。 */
+.topbar {
+  display: flex;
+  align-items: stretch;
+  background: var(--app-chrome);
+  border-bottom: 1px solid var(--border-1);
+}
+.tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 8px 0;
+  background: var(--toolbar-bg);
+  border-bottom: 1px solid var(--border-1);
+  overflow-x: auto;
+}
+.topbar .tabs {
+  flex: 1;
+  border-bottom: none;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  color: var(--text-2);
+  cursor: default;
+  user-select: none;
+}
+.tab:hover {
+  background: var(--control-hover);
+  color: var(--text-1);
+}
+/* 激活标签：抬到面板层，与下方工具栏同一条底色带 + 顶部强调条。 */
+.tab-active {
+  background: var(--surface);
+  border-color: var(--border-1);
+  color: var(--text-1);
+  font-weight: 600;
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.tab-active:hover {
+  background: var(--surface);
+}
+.tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 异常标签（读不出来 / 保存失败）：左侧红点 + 红字，一眼能从正常标签里挑出来。 */
+.tab-bad {
+  color: var(--danger);
+}
+.tab-bad .tab-title {
+  color: var(--danger);
+}
+.tab-bad::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+.tab-bad.tab-active {
+  box-shadow: inset 0 2px 0 var(--danger);
+}
+/* 标签栏右端的两个轻量入口：与标签同高，去掉原生按钮外观，不抢激活态。 */
+.tabs .tab-new,
+.tabs .tab-list {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: none;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.tabs .tab-new:hover,
+.tabs .tab-list:hover {
+  background: var(--control-hover);
+  color: var(--text-1);
+}
+/* 「画板列表」入口比标签小一号，并与最后一个标签留一点间距（原写在 dialogs.css，归外壳）。 */
+.tabs .tab-list {
+  margin-left: 6px;
+  font-size: 12px;
+}
+.tab-close {
+  flex: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  line-height: 1;
+}
+.tab-close:hover {
+  background: var(--control-active);
+  color: var(--text-1);
+}
+
+.workspace {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--canvas-bg);
+}
+
+/* ---- 画板工具栏 ----
+ * 第二行：左侧画板工具栏（画布 portal 进来或置灰占位），右侧运行指示 / 画板包 / 版本 / 更新 / 反馈 / 主题 / 设置。
+ * 行内按钮与下拉统一 28px 高、1px 边框、6px 圆角、同一条文字基线；组之间用细竖线分隔。
+ * 图标按钮（撤销 / 重做）靠语义类名 toolbar-icon 区分，不再用中文 aria-label 当样式钩子。 */
+.board-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  row-gap: 6px;
+  padding: 6px 10px;
+  background: var(--toolbar-bg);
+  border-bottom: 1px solid var(--border-1);
+}
+/* 外观（边框 / 圆角 / 底色 / 文字 / 悬停 / 按下 / 原生禁用）来自 base 的中性按钮与下拉，
+ * 这里只声明工具栏自己的尺寸与「永不被压窄」。
+ * flex: none 是窄窗口的护栏：放不下就整组换行，绝不把按钮缩到文字被裁、互相压住。 */
+.board-toolbar button,
+.board-toolbar select {
+  flex: none;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 10px;
+  line-height: 26px;
+  white-space: nowrap;
+}
+.board-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+/* 工具栏按钮的「不可用」有原生 disabled 与 aria-disabled 两种表达，都要看得出置灰。 */
+.board-toolbar button[aria-disabled="true"] {
+  background-color: var(--surface-sunken);
+}
+.board-toolbar button.primary {
+  background: var(--success-fill);
+  border-color: var(--success);
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+.board-toolbar button.primary:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--success-fill-pressed);
+  border-color: var(--success-border-pressed);
+}
+/* 箭头由 base 层统一给（随主题换描边色），这里只留工具栏的加宽内边距。 */
+.board-toolbar select {
+  padding-right: 26px;
+  text-overflow: ellipsis;
+}
+/* 槽位不许被压到 0：留出工具组的真实宽度，工具栏才知道该换行而不是硬挤。 */
+.board-toolbar-slot {
+  flex: 1 1 auto;
+}
+.board-toolbar-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  row-gap: 6px;
+}
+.toolbar-group {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+/* 组分隔线：新建类 / 撤销重做 / 运行 / 整理 四组层次分明。 */
+.toolbar-group + .toolbar-group {
+  margin-left: 4px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border-1);
+}
+/* 撤销 / 重做：方形图标按钮（图标与文字按钮同高，图标自身居中） */
+.toolbar-group > .toolbar-icon {
+  width: 28px;
+  padding: 0;
+  font-size: 15px;
+}
+/* 「＋ 生成任务」与模型下拉拼成一体 */
+.toolbar-pair {
+  display: inline-flex;
+  align-items: stretch;
+}
+.toolbar-pair > button {
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+.toolbar-pair > .toolbar-model {
+  max-width: 200px;
+  margin-left: -1px;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+/* 右侧组：放不下时整组落到第二行并靠右；自己一行也放不下时内部再换行。 */
+.board-toolbar-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  row-gap: 6px;
+  margin-left: auto;
+}
+.board-toolbar-right .run-indicator {
+  margin: 0;
+}
+/* 顶栏按钮（.topbar-button）：都长在画板工具栏里，外观与 .board-toolbar button 同一条，
+ * 状态色只由各自的 tone 类（如 .topbar-update-*）叠加，不再另起一套盒子。 */
+
+/* ---- 更新入口（#181） ----
+ * 「已更新」提示条：外层只负责排版与成功底色，语气条只由 .bar-error / -warn / -alert / -info
+ * 这些语义类承担（本提示条不加）；状态色一律由按钮本体 topbar-update-latest / -action / -bad
+ * 承担，避免外层与内层抢着配色。 */
+.update-notice {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  background: var(--success-soft);
+}
+.update-notice > span {
+  flex: 1 1 130px;
+}
+/* 更新状态提示条（#180）：与「已更新」提示条同一套位置与观感，只多一条阶段标记。 */
+.update-status {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.topbar-update {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.topbar-update .topbar-update-install {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* 更新按钮跟着阶段变色（#181）：绿 = 已是最新，红 = 有更新或失败，中性 = 其余阶段。 */
+.topbar-update-btn.topbar-update-latest {
+  border-color: var(--success);
+  color: var(--success);
+}
+.topbar-update-btn.topbar-update-action {
+  border-color: var(--danger);
+  color: var(--danger);
+  font-weight: 600;
+}
+.topbar-update-btn.topbar-update-bad {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.topbar-update-link {
+  font-size: 12px;
+  color: var(--link);
+  text-decoration: none;
+}
+.topbar-update-link:hover {
+  text-decoration: underline;
+}
+.topbar-update-error {
+  font-size: 12px;
+  color: var(--danger-text);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- 运行指示（顶栏右侧的运行任务下拉） ---- */
+.run-indicator {
+  position: relative;
+  margin: 4px 0 4px 8px;
+}
+.run-indicator > button {
+  height: 100%;
+}
+.run-list {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  top: calc(100% + 4px);
+  width: 360px;
+  padding: 8px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+}
+.run-list ul {
+  max-height: 280px;
+  margin: 0 0 8px;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.run-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* 下拉里的行是列表项，不是工具栏按钮：去掉按钮外观，配色仍交给 .link。 */
+.run-list li button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: auto;
+  padding: 3px 0;
+  border: none;
+  background: none;
+  text-align: left;
+}
+.run-list li button:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.run-list li button:last-child {
+  flex: none;
+}
+.run-list .status {
+  margin-left: 0;
+}
+
+/* ---- 空态与致命错误态 ----
+ * 居中、单列：说明 → 可读的等宽路径 → 动作按钮，逐级递减。
+ * .app 与 .fatal 两个类名被 e2e 用例定位（client/e2e/board.spec.ts），不可改名。 */
+.empty,
+.fatal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 100%;
+  padding: 48px 24px;
+  color: var(--text-2);
+  text-align: center;
+}
+.fatal {
+  color: var(--danger-text);
+}
+.empty .mono,
+.fatal .mono {
+  max-width: 720px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text-2);
+  text-align: left;
+}
+/* 空态里的动作：主要动作走 button.primary，其余是 base 的次级按钮，这里只定尺寸与语气。 */
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.empty-actions button:not(.primary) {
+  height: 28px;
+  padding: 0 12px;
+}
+
+/* ---- toast 浮层 ----
+ * 屏幕下方居中、窄条：与画布拉开对比，但幅度小、时间短，且不吃点击，不挡住主流程。 */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(560px, calc(100vw - 48px));
+  padding: 8px 16px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  background: var(--toast-bg);
+  color: var(--toast-text);
+  box-shadow: var(--shadow-popover);
+  text-align: center;
+  pointer-events: none;
+  z-index: 300;
+}
+
+/* ---- #221 新增：顶栏主题切换入口（三档分段控件）----
+ * 与顶栏按钮同一套高度与边框语言，只是拼成一体；选中档用主色柔和填充标出来。 */
+.theme-switch {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--control-bg);
+  overflow: hidden;
+}
+/* 选择器带 .theme-switch 是为了压过 .board-toolbar button 的统一高度与边框。 */
+.theme-switch .theme-switch-option {
+  height: 26px;
+  padding: 0 8px;
+  border: none;
+  border-left: 1px solid var(--border-1);
+  border-radius: 0;
+  background: none;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 24px;
+  white-space: nowrap;
+}
+.theme-switch .theme-switch-option:first-child {
+  border-left: none;
+}
+.theme-switch .theme-switch-option:hover:not([aria-pressed="true"]) {
+  background: var(--control-hover);
+  color: var(--text-1);
+}
+.theme-switch .theme-switch-option[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+  font-weight: 600;
+}

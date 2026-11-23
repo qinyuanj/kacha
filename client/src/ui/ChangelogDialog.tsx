@@ -51,7 +51,7 @@ export function ChangelogDialog({ currentVersion, onClose }: { currentVersion: s
       >
         <div className="modal-head">
           <strong id="changelog-title">更新内容</strong>
-          <button ref={closeRef} className="link" onClick={onClose}>关闭</button>
+          <button ref={closeRef} className="icon-button" aria-label="关闭" onClick={onClose}>✕</button>
         </div>
         <div ref={contentRef} className="changelog-releases" tabIndex={0} aria-label="各版本更新说明">
           {error && <div className="notice notice-warn">更新说明暂时显示不了：{error}</div>}

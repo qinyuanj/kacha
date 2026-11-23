@@ -139,7 +139,12 @@ function DeleteConfirm({
       }}
     >
       <div className="modal" role="dialog" aria-label="删除画板" onClick={(e) => e.stopPropagation()}>
-        <h2>删除画板「{title}」？</h2>
+        <div className="modal-head">
+          <h2>删除画板「{title}」？</h2>
+          <button className="icon-button" aria-label="关闭" onClick={onCancel} disabled={busy}>
+            ✕
+          </button>
+        </div>
         <ul className="delete-notes">
           <li>画板里的生成结果仍保留在任务目录中，删除画板不会删除图片。</li>
           <li>删除后不能在客户端撤销，请先备份数据根。</li>
@@ -184,7 +189,12 @@ function ArchiveConfirm({
       }}
     >
       <div className="modal" role="dialog" aria-label="归档画板" onClick={(e) => e.stopPropagation()}>
-        <h2>归档画板「{title}」？</h2>
+        <div className="modal-head">
+          <h2>归档画板「{title}」？</h2>
+          <button className="icon-button" aria-label="关闭" onClick={onCancel} disabled={busy}>
+            ✕
+          </button>
+        </div>
         <p className="archive-confirm-text">{ARCHIVE_TEXT.confirm}</p>
         {error && <div className="bar bar-error">归档失败：{error}</div>}
         <div className="modal-foot">
@@ -264,7 +274,12 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}>
-        <h2>{title}</h2>
+        <div className="modal-head">
+          <h2>{title}</h2>
+          <button className="icon-button" aria-label="关闭" onClick={onClose}>
+            ✕
+          </button>
+        </div>
         <p className="muted">{listDescription(manage)}</p>
         {error && <div className="bar bar-error">读取画板列表失败：{error}</div>}
         {actionError && (
@@ -276,7 +291,7 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
         <BoardListBody listing={listing} error={error} manage={manage} openPaths={openPaths} onOpen={onOpen} onClose={onClose} actions={actions} />
         <div className="modal-foot">
           <button onClick={refresh}>刷新</button>
-          <button className="primary" onClick={onClose}>关闭</button>
+          <button onClick={onClose}>关闭</button>
         </div>
       </div>
       {deleting && (

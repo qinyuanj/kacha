@@ -2,6 +2,7 @@
 // 缺的能力由 features 提前关掉，
 // 或在调用时返回 kind: "unavailable"，界面据此隐藏入口而不是失败得很晚。
 import { errorText } from "../core/errors";
+import type { ThemeChoice } from "../core/theme";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
 import { FEEDBACK_FAILURE_MESSAGES } from "../core/feedback";
 import type { ImportOptions, ImportResult, PackEntryFact, PackExportSpec, PackFs, PackIo } from "../core/boardPack";
@@ -341,6 +342,11 @@ export interface UiStore {
   isEditableTarget(target: EventTarget | null): boolean;
   /** 装上页面级输入接管（#97），返回卸载函数。 */
   installInputTakeover(): () => void;
+  /**
+   * 通知宿主壳当前主题档位（#221）：Windows 原生标题栏与窗口底色跟着切。
+   * 界面已经本地生效，这条通知是尽力而为的旁路——失败不阻塞切换，调用方自行吞掉拒绝。
+   */
+  setNativeTheme(choice: ThemeChoice): Promise<void>;
 }
 
 /** 数据位置的状态：页面显示当前数据根与迁移进度。 */

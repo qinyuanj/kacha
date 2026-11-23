@@ -70,7 +70,7 @@ export function PreviewFooter(props: {
     <div className="modal-foot">
       {editing ? (
         <>
-          <span className={overRegionLimit(first + rects.length) ? "region-limit-exceeded" : "muted"}>
+          <span className={"modal-foot-note " + (overRegionLimit(first + rects.length) ? "region-limit-exceeded" : "muted")}>
             拖拽空白处画新矩形；拖动矩形移动，拖动角柄缩放。提示词里写「区域N」指代对应区域，每个任务最多 {MAX_REGIONS} 个。{regionMode === "point" && "坐标点取每个框的中心，影响范围由模型判断。"}
           </span>
           <button disabled={selected === null} onClick={props.onRemove}>
@@ -86,7 +86,7 @@ export function PreviewFooter(props: {
         </>
       ) : (
         <>
-          <span className="muted">
+          <span className="muted modal-foot-note">
             {targets.length > 0 && (
               <>
                 框选修改区域：

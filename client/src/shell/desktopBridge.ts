@@ -82,6 +82,8 @@ export function mygoBridge(): DesktopBridge {
   };
   return {
     info: () => call("Shell.Info") as Promise<DesktopInfo>,
+    // 原生主题（#221）：与 Go 侧 shellService.SetTheme 对齐；档位原文交给 Go 映射。
+    setTheme: (choice) => call("Shell.SetTheme", choice) as Promise<void>,
     dataRoot,
     local,
     clipboard,

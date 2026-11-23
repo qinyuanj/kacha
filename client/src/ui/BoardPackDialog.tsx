@@ -60,7 +60,7 @@ function ConfirmExport({ state, onExport, onClose }: { state: Extract<PackDialog
       </div>
       <div>{exportSummary(state.plan.taskDirs.length, state.plan.files.length)}</div>
       <div className="pack-estimate">{estimateText(state.contents.bytes, state.contents.totalBytes)}</div>
-      <div className="badge-warn">包含完整提示词与任务记录，不脱敏；请只发给可信的人。</div>
+      <div className="badge-warn pack-warning">包含完整提示词与任务记录，不脱敏；请只发给可信的人。</div>
       {state.plan.missing.length > 0 && (
         <>
           <div>以下 {state.plan.missing.length} 张图片缺失，导出后在导入端仍为缺图占位：</div>
@@ -90,7 +90,7 @@ function ImportDone({ state, onClose }: { state: Extract<PackDialogState, { stag
       <div className="modal-head">
         <strong>{state.message}</strong>
       </div>
-      {state.notice && <div className="badge-warn">{state.notice}</div>}
+      {state.notice && <div className="badge-warn pack-warning">{state.notice}</div>}
       {state.conflicts.length > 0 && (
         <>
           <div>以下内容与本机已有的不一致，已跳过、未覆盖：</div>

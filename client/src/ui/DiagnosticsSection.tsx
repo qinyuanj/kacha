@@ -34,9 +34,9 @@ export function DiagnosticsSection() {
   return (
     <>
       <div className="form-row">
-        <span>排障信息</span>
+        <span className="form-row-label">排障信息</span>
         <button onClick={() => void exportDiagnostics()} disabled={busy}>{busy ? "导出中…" : "导出诊断包"}</button>
-        <span className="muted small">只含版本、平台、运行状态与脱敏日志；不含密钥、鉴权头或画板内容。</span>
+        <span className="form-row-hint">只含版本、平台、运行状态与脱敏日志；不含密钥、鉴权头或画板内容。</span>
       </div>
       {message && <div className="muted small form-hint">{message}</div>}
     </>

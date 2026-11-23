@@ -9,6 +9,7 @@ import { shouldShowUpdateNotice } from "./core/changelog";
 import { useUsageLimit } from "./ui/useUsageLimit";
 import { useRunner } from "./ui/useRunner";
 import { useSettings } from "./ui/useSettings";
+import { useAppTheme } from "./ui/useAppTheme";
 import { resolveFeedbackRelayAddress } from "./core/settings";
 import { useBoardPack } from "./ui/useBoardPack";
 import { useRunCallbacks } from "./ui/appRunHooks";
@@ -87,6 +88,8 @@ export function App({ version }: AppProps) {
   const store = useAppState();
   const { state } = store;
   const settings = useSettings();
+  // 主题（#221）：接线收在 ui/useAppTheme，这里只拿到当前档位与切换动作。
+  const theme = useAppTheme({ settings, ui: port.ui });
   const [table, setTable] = useState<CapabilityTable>(BUILTIN_TABLE);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -408,6 +411,7 @@ export function App({ version }: AppProps) {
           onRegenerate: doRegenerate,
           onViewSendText: (id) => void viewSendText(id),
           toolbarSlot,
+          theme: theme.effective,
           readOnly: view.activeArchived,
           modalOpen,
           focus: focusFor(state.focus, view.active),
@@ -453,6 +457,7 @@ export function App({ version }: AppProps) {
         importDisabled={view.importDisabled}
         onOpenFeedback={() => setFeedbackOpen(true)}
         feedbackAvailable={port.features.feedback}
+        theme={theme}
         onToolbarSlot={setToolbarSlot}
       />
       <AppOverlays

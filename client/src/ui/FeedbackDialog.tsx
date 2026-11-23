@@ -215,44 +215,59 @@ interface FeedbackFormProps {
 function FeedbackForm(props: FeedbackFormProps) {
   return (
     <>
-      <label className='form-row'>标题（可选）<input value={props.title} onChange={(event) => props.setTitle(event.target.value)} /></label>
-      <label className='form-row'>分类<select value={props.category} onChange={(event) => props.setCategory(event.target.value)}>{FEEDBACK_CATEGORIES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>
-      <label className='form-row'>正文<textarea value={props.body} onChange={(event) => props.setBody(event.target.value)} rows={8} /></label>
-      <label className='form-row'>称呼或联系方式（可选，默认匿名）<input value={props.contact} placeholder='匿名' onChange={(event) => props.setContact(event.target.value)} /></label>
-      <label className='form-row'>Gitea token（仅本次提交）<input type={props.tokenVisible ? 'text' : 'password'} value={props.token} placeholder='粘贴你的 Gitea token' onChange={(event) => props.setToken(event.target.value)} /></label>
-      <div className='form-row'>
+      <label className='form-row'>
+        <span className='form-row-label'>标题（可选）</span>
+        <input value={props.title} onChange={(event) => props.setTitle(event.target.value)} />
+      </label>
+      <label className='form-row'>
+        <span className='form-row-label'>分类</span>
+        <select value={props.category} onChange={(event) => props.setCategory(event.target.value)}>{FEEDBACK_CATEGORIES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select>
+      </label>
+      <label className='form-row'>
+        <span className='form-row-label'>正文</span>
+        <textarea value={props.body} onChange={(event) => props.setBody(event.target.value)} rows={8} />
+      </label>
+      <label className='form-row'>
+        <span className='form-row-label'>称呼或联系方式（可选，默认匿名）</span>
+        <input value={props.contact} placeholder='匿名' onChange={(event) => props.setContact(event.target.value)} />
+      </label>
+      <label className='form-row'>
+        <span className='form-row-label'>Gitea token（仅本次提交）</span>
+        <input type={props.tokenVisible ? 'text' : 'password'} value={props.token} placeholder='粘贴你的 Gitea token' onChange={(event) => props.setToken(event.target.value)} />
+      </label>
+      <div className='form-row feedback-actions'>
         <button type='button' onClick={() => props.setTokenVisible(!props.tokenVisible)}>{props.tokenVisible ? '隐藏 token' : '显示 token'}</button>
-        <span className='muted small'>仅本次提交给 kacha-feedback 的中继，不保存、不进预览。</span>
+        <span className='form-row-hint'>仅本次提交给 kacha-feedback 的中继，不保存、不进预览。</span>
       </div>
-      <div className='form-row'>
-        <span>截图（可粘贴，0–5 张 PNG/JPG，单张 ≤10MB）</span>
+      <div className='form-row feedback-pick-row'>
+        <span className='form-row-label'>截图（可粘贴，0–5 张 PNG/JPG，单张 ≤10MB）</span>
         <button type='button' onClick={props.onPick}>选择截图</button>
       </div>
       {props.screenshots.length > 0 && (
         <ul className='feedback-attachments'>
           {props.screenshots.map((shot, index) => (
-            <li key={`${shot.name}-${index}`}>
-              {shot.name}
-              <button type='button' aria-label={`移除 ${shot.name}`} onClick={() => props.setScreenshots((items) => items.filter((_, i) => i !== index))}>移除</button>
+            <li className='feedback-attachment' key={`${shot.name}-${index}`}>
+              <span className='feedback-attachment-name'>{shot.name}</span>
+              <button className='feedback-attachment-remove' type='button' aria-label={`移除 ${shot.name}`} onClick={() => props.setScreenshots((items) => items.filter((_, i) => i !== index))}>移除</button>
             </li>
           ))}
         </ul>
       )}
-      <div className='form-row'>
+      <div className='form-row feedback-actions'>
         {props.diagnosticsAvailable ? (
           <>
             <button type='button' aria-pressed={props.diagnosticsPack !== null} onClick={() => props.onToggleDiagnostics(props.diagnosticsPack === null)}>
               {props.diagnosticsPack ? '取消附带脱敏诊断包' : '附带脱敏诊断包'}
             </button>
-            <span className='muted small'>仅版本、平台、运行状态与脱敏日志；不含密钥、凭据、主机名或画板内容。</span>
+            <span className='form-row-hint'>仅版本、平台、运行状态与脱敏日志；不含密钥、凭据、主机名或画板内容。</span>
           </>
         ) : (
-          <span className='muted small'>诊断包导出暂不可用，反馈正文仍可发送。</span>
+          <span className='form-row-hint'>诊断包导出暂不可用，反馈正文仍可发送。</span>
         )}
       </div>
-      {props.attachmentError && <div className='form-error' role='alert'>{props.attachmentError}</div>}
+      {props.attachmentError && <div className='form-alert form-alert-error' role='alert'>{props.attachmentError}</div>}
       <div className='modal-foot'>
-        {!props.token.trim() && <span className='form-error' role='alert'>{FEEDBACK_TOKEN_REQUIRED}</span>}
+        {!props.token.trim() && <span className='form-error modal-foot-note' role='alert'>{FEEDBACK_TOKEN_REQUIRED}</span>}
         <button onClick={props.onClose}>取消</button>
         <button className='primary' onClick={props.onPreview} disabled={!props.body.trim() || !props.token.trim()}>预览</button>
       </div>
@@ -275,19 +290,28 @@ function FeedbackPreview(props: FeedbackPreviewProps) {
       <div className='feedback-preview'>
         {/* 可编辑控件一律绑定原始值：绑脱敏值会让用户看到「<已隐藏>」，一编辑又把原文写回 state，
             输入框随即回弹（#229 复审必修 1）。 */}
-        <label className='form-row'>标题（可选）<input value={props.title} onChange={(event) => props.setTitle(event.target.value)} /></label>
-        <label className='form-row'>分类<select value={props.category} onChange={(event) => props.setCategory(event.target.value)}>{FEEDBACK_CATEGORIES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>
-        <label className='form-row'>正文（可修改）<textarea value={props.body} onChange={(event) => props.setBody(event.target.value)} rows={6} /></label>
-        <div className='feedback-preview-submit'>
+        <label className='form-row'>
+          <span className='form-row-label'>标题（可选）</span>
+          <input value={props.title} onChange={(event) => props.setTitle(event.target.value)} />
+        </label>
+        <label className='form-row'>
+          <span className='form-row-label'>分类</span>
+          <select value={props.category} onChange={(event) => props.setCategory(event.target.value)}>{FEEDBACK_CATEGORIES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select>
+        </label>
+        <label className='form-row'>
+          <span className='form-row-label'>正文（可修改）</span>
+          <textarea value={props.body} onChange={(event) => props.setBody(event.target.value)} rows={6} />
+        </label>
+        <div className='feedback-preview-submit feedback-summary'>
           <p className='feedback-preview-heading'>将要提交的内容（已脱敏，不可在此修改）</p>
-          <p>标题：{props.spec.title || '（无）'}</p>
-          <p>分类：{feedbackCategoryLabel(props.spec.category)}</p>
-          <p>正文：{props.spec.body}</p>
+          <p className='feedback-line'>标题：{props.spec.title || '（无）'}</p>
+          <p className='feedback-line'>分类：{feedbackCategoryLabel(props.spec.category)}</p>
+          <p className='feedback-line'>正文：{props.spec.body}</p>
           <p className='feedback-preview-meta'>自动元数据：版本 {props.spec.version}（build {props.spec.build || '未知'}）、系统 {props.spec.os}、当前画板 {props.spec.board_name || '（未打开画板）'}；只含画板名字，不含路径或密钥。</p>
           <p className='feedback-token-notice'>{FEEDBACK_TOKEN_NOTICE}</p>
           <p className='feedback-token-scope'>{FEEDBACK_TOKEN_SCOPE}</p>
-          <p>提交者：{props.spec.contact ?? '匿名'}</p>
-          <p>附件摘要：{props.attachmentSummary}。</p>
+          <p className='feedback-line'>提交者：{props.spec.contact ?? '匿名'}</p>
+          <p className='feedback-line'>附件摘要：{props.attachmentSummary}。</p>
         </div>
       </div>
       <div className='modal-foot'>
@@ -304,7 +328,7 @@ interface FeedbackSuccessProps { outcome: FeedbackOutcome; }
 function FeedbackSuccess({ outcome }: FeedbackSuccessProps) {
   return (
     <div className='feedback-receipt'>
-      <p>已提交 {outcome.number ? <a href={outcome.url} target='_blank' rel='noreferrer'>#{outcome.number}</a> : ''}</p>
+      <p className='feedback-receipt-title'>已提交 {outcome.number ? <a href={outcome.url} target='_blank' rel='noreferrer'>#{outcome.number}</a> : ''}</p>
       {outcome.url && <p className='feedback-url'>{outcome.url}</p>}
     </div>
   );
@@ -318,7 +342,7 @@ interface FeedbackFailureProps {
 function FeedbackFailure(props: FeedbackFailureProps) {
   return (
     <>
-      <div className='form-error' role='alert'><p>{feedbackMessage(props.outcome)}</p></div>
+      <div className='form-alert form-alert-error' role='alert'><p>{feedbackMessage(props.outcome)}</p></div>
       {props.outcome.url && (
         <p className='feedback-return-link'>返回链接：<a href={props.outcome.url} target='_blank' rel='noreferrer'>{props.outcome.number ? `#${props.outcome.number}` : '查看反馈'}</a></p>
       )}

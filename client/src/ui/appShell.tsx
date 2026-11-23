@@ -5,6 +5,7 @@ import { AppBoardList, AppPackMenu, AppToolbar, AppTopBar, AppWorkspace } from "
 import { AppNotices } from "./appNotices";
 import type { AppView } from "./appView";
 import type { UpdateStatusView } from "./updateStatusView";
+import type { ThemeControl } from "./useTheme";
 import type { UpdateControl } from "./useUpdate";
 import type { Session } from "./useBoardSessions";
 
@@ -26,6 +27,8 @@ export function AppShell(props: {
   updateStatus: UpdateStatusView;
   /** 更新入口的接线（#181）：首页版本号旁的检查与安装。 */
   update: UpdateControl;
+  /** 主题切换入口的接线（#221）。 */
+  theme: ThemeControl;
   onDeferUpdate(): void;
   /** 提示条要的参数。 */
   tableError: string | null;
@@ -116,6 +119,7 @@ export function AppShell(props: {
         settingsLoaded={props.settingsLoaded}
         onOpenSettings={props.onOpenSettings}
         update={props.update}
+        theme={props.theme}
       />
       {props.packMenu && (
         <AppPackMenu

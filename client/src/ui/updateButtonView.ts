@@ -2,7 +2,7 @@
 //
 // 纯逻辑，不碰 DOM：组件只负责把这里的结果摆成按钮。
 // 颜色语义与项目既有约定一致：绿 = 已是最新（与 .ok-text 同色），红 = 有事要做
-// （与 --red 同色），其余阶段保持中性。
+// （与 --danger 同色），其余阶段保持中性。
 import { progressText, type UpdatePhase, type UpdateSnapshot } from "../core/update";
 
 /** 按钮的色调。 */

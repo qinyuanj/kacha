@@ -56,6 +56,7 @@ export function emptyFakeCalls(): FakeCalls {
     inspectImage: [],
     list: 0,
     uiStateWrites: [],
+    nativeTheme: [],
   };
 }
 

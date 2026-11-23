@@ -2,6 +2,7 @@
 // 文件状态的文案在 ui/settingsText.ts，各操作在 ui/useSettingsOps.ts（#137），这里只留接线。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type Discovery, type ModelsCache, type Settings } from "../core/settings";
+import type { ThemeChoice } from "../core/theme";
 import { useShell } from "./shell";
 import {
   discoveryApplies,
@@ -10,6 +11,7 @@ import {
   refreshModelsState,
   saveProblemOf,
   saveSettingsState,
+  setThemeState,
   type ConnectionResult,
   type SettingsState,
 } from "./useSettingsOps";
@@ -79,5 +81,18 @@ export function useSettings() {
     [refreshModels],
   );
 
-  return { ...state, save, testConnection: refreshModels };
+  /**
+   * 切主题（#221）：不走 save——那条路会连带处理密钥与模型发现，切个外观不该打网关。
+   * 写不写盘由 setThemeState 按 mayOverwriteSettings 判定。
+   */
+  const setTheme = useCallback(
+    async (choice: ThemeChoice): Promise<void> => {
+      const next = await setThemeState(settingsPorts, stateRef.current, choice);
+      stateRef.current = next;
+      setState(next);
+    },
+    [settingsPorts],
+  );
+
+  return { ...state, save, testConnection: refreshModels, setTheme };
 }

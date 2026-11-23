@@ -1,0 +1,276 @@
+/* Design Tokens（#221）：暗色 Dark Studio（默认）与浅色 Light Studio 两套完整语义变量。
+ *
+ * 层级约定（层叠顺序由 styles/index.css 固定）：
+ *   tokens → base → shell → canvas → dialogs
+ * 主题由文档根上的 data-theme="dark" | "light" 选择（core/theme.ts 的 THEME_ATTRIBUTE 是唯一属性名来源）。
+ * 没有属性时就是暗色：冷启动首帧由 ui/startDesktop 在挂载前写入。
+ *
+ * 域模块只引用这里的变量，不再写具体色号；新增变量请追加到文件末尾的「补充」小节。
+ */
+
+/* ---- 暗色（Dark Studio）：产品默认，也是没有 data-theme 时的取值 ---- */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* 底色层级：应用 < 画布 < 外壳条 < 面板/节点 < 浮层 */
+  --app-bg: #111318;
+  --canvas-bg: #0f1217;
+  --canvas-dot: #2b323b;
+  --app-chrome: #161a20;
+  --app-chrome-soft: #1a1f26;
+  --toolbar-bg: #14181e;
+  --surface: #1b2027;
+  --surface-raised: #222831;
+  --surface-sunken: #0f1318;
+  --control-bg: #1b2027;
+  --control-hover: #252c35;
+  --control-active: #2e3640;
+
+  /* 三级边框 */
+  --border-1: #2a313a;
+  --border-2: #3a434e;
+  --border-3: #4d5761;
+
+  /* 三级文字 + 主色上的反白 */
+  --text-1: #e6edf3;
+  --text-2: #a6b0bb;
+  --text-3: #6f7a85;
+  --text-on-accent: #ffffff;
+
+  /* 冷静专业蓝主色及其悬停 / 按下 / 柔和填充 / 边框态 */
+  --accent: #4c8dff;
+  --accent-hover: #6ea3ff;
+  --accent-active: #3b7bef;
+  --accent-soft: rgb(76 141 255 / 16%);
+  --accent-border: rgb(76 141 255 / 50%);
+  --accent-strong: #1f8fff;
+  --link: #6ea3ff;
+  --focus-ring: #6ea3ff;
+
+  /* 语义状态色：成功绿 / 警告黄 / 错误红 / 定稿金 */
+  --success: #3fb950;
+  --success-fill: #238636;
+  --success-fill-hover: #2ea043;
+  --success-soft: rgb(63 185 80 / 15%);
+  --success-border: rgb(63 185 80 / 40%);
+  --warning: #d29922;
+  --warning-text: #e3b341;
+  --warning-soft: rgb(210 153 34 / 16%);
+  --warning-soft-weak: rgb(210 153 34 / 8%);
+  --danger: #f85149;
+  --danger-fill: #da3633;
+  --danger-fill-hover: #b62324;
+  --danger-soft: rgb(248 81 73 / 15%);
+  --danger-soft-weak: rgb(248 81 73 / 8%);
+  --danger-text: #ff7b72;
+  --final: #d9a521;
+
+  /* 透明图棋盘格（随主题，不设开关） */
+  --checker-a: #23282f;
+  --checker-b: #1a1f26;
+
+  /* 端口与连线类型色：色相归属不变，只按暗底调明度 */
+  --port-image: #2ec4a6;
+  --port-positive: #8b8fff;
+  --port-negative: #e56cc4;
+  --edge-system: #6e7681;
+  --lineage-glow: rgb(120 170 255 / 55%);
+  --lineage-soft: rgb(120 170 255 / 8%);
+  --lineage-edge: rgb(120 170 255 / 40%);
+
+  /* 阴影梯度与遮罩 */
+  --shadow-1: 0 1px 3px rgb(0 0 0 / 40%);
+  --shadow-2: 0 2px 8px rgb(0 0 0 / 45%);
+  --shadow-3: 0 0 0 1px rgb(0 0 0 / 45%);
+  --shadow-popover: 0 6px 18px rgb(0 0 0 / 50%);
+  --shadow-modal: 0 16px 40px rgb(0 0 0 / 60%);
+  --scrim: rgb(1 4 9 / 60%);
+  --toast-bg: #e6edf3;
+  --toast-text: #0d1117;
+  --scrollbar-thumb: #3a434e;
+  --scrollbar-track: transparent;
+
+  /* React Flow 主题变量映射（#223 的画布接线直接引用这些别名） */
+  --rf-background: var(--canvas-bg);
+  --rf-dot: var(--canvas-dot);
+  --rf-minimap-bg: var(--surface);
+  --rf-minimap-mask: rgb(1 4 9 / 60%);
+  --rf-controls-bg: var(--surface-raised);
+  --rf-controls-border: var(--border-1);
+  --rf-controls-icon: var(--text-1);
+  --rf-selection-bg: var(--accent-soft);
+  --rf-selection-border: var(--accent-border);
+  --rf-handle-bg: var(--surface);
+  --rf-handle-border: var(--border-2);
+  --rf-edge-default: var(--edge-system);
+  --rf-attribution-bg: transparent;
+}
+
+/* ---- 浅色（Light Studio）---- */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --app-bg: #f6f7f9;
+  --canvas-bg: #ffffff;
+  --canvas-dot: #d0d7de;
+  --app-chrome: #e6e9ee;
+  --app-chrome-soft: #eef2f7;
+  --toolbar-bg: #f6f8fa;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunken: #f6f8fa;
+  --control-bg: #ffffff;
+  --control-hover: #f3f4f6;
+  --control-active: #e9ecef;
+
+  --border-1: #d0d7de;
+  --border-2: #b6bec7;
+  --border-3: #8c959f;
+
+  --text-1: #1f2328;
+  --text-2: #57606a;
+  --text-3: #8c959f;
+  --text-on-accent: #ffffff;
+
+  --accent: #0969da;
+  --accent-hover: #0860c4;
+  --accent-active: #0550a8;
+  --accent-soft: #ddf4ff;
+  --accent-border: #7cc0ff;
+  --accent-strong: #1f8fff;
+  --link: #0969da;
+  --focus-ring: #0969da;
+
+  --success: #1a7f37;
+  --success-fill: #1f883d;
+  --success-fill-hover: #1a7f37;
+  --success-soft: #dafbe1;
+  --success-border: #aceebb;
+  --warning: #d4a72c;
+  --warning-text: #7d4e00;
+  --warning-soft: #fff8c5;
+  --warning-soft-weak: #fffbe6;
+  --danger: #cf222e;
+  --danger-fill: #cf222e;
+  --danger-fill-hover: #a40e26;
+  --danger-soft: #ffebe9;
+  --danger-soft-weak: #fff5f5;
+  --danger-text: #c0392b;
+  --final: #d4a017;
+
+  --checker-a: #eeeeee;
+  --checker-b: #ffffff;
+
+  --port-image: #0f9d8a;
+  --port-positive: #5b5fd6;
+  --port-negative: #c2359c;
+  --edge-system: #8c959f;
+  --lineage-glow: rgb(9 105 218 / 55%);
+  --lineage-soft: rgb(9 105 218 / 5%);
+  --lineage-edge: rgb(9 105 218 / 35%);
+
+  --shadow-1: 0 1px 3px rgb(0 0 0 / 8%);
+  --shadow-2: 0 2px 8px rgb(0 0 0 / 12%);
+  --shadow-3: 0 0 0 1px rgb(0 0 0 / 15%);
+  --shadow-popover: 0 4px 12px rgb(0 0 0 / 12%);
+  --shadow-modal: 0 12px 32px rgb(0 0 0 / 25%);
+  --scrim: rgb(31 35 40 / 45%);
+  --toast-bg: #24292f;
+  --toast-text: #ffffff;
+  --scrollbar-thumb: #c9d1d9;
+  --scrollbar-track: transparent;
+
+  --rf-minimap-mask: rgb(31 35 40 / 30%);
+}
+
+/* ---- 两套主题共用的形态 token 与根级基础 ---- */
+:root {
+  /* 圆角梯度 */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-pill: 999px;
+
+  /* 区域指示三色是发给模型的颜色指代契约（core/overlay.ts 的 REGION_COLORS）：
+   * 字面值不随主题改，这里只是给样式一个具名引用。
+   * 契约值见 core/overlay.ts，改这里等于改模型约定。 */
+  --region-1: rgb(128 0 255 / 90%);
+  --region-1-half: rgb(128 0 255 / 50%);
+
+  font-family: system-ui, "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 13px;
+  color: var(--text-1);
+  background: var(--app-bg);
+}
+
+/* ---- 补充（#221 之前被引用却未定义、以及历史别名的落点）---- */
+
+/* 历史变量名继续可用：域模块里已有的 var(--border/--muted) 不再各自兜底。
+ * 历史红 / 黄 / 绿别名已全部迁到语义名 --danger / --warning / --success，别再加回来。 */
+:root,
+:root[data-theme="dark"],
+:root[data-theme="light"] {
+  --border: var(--border-1);
+  /* 之前三处引用未定义：--muted（参考图说明）、--accent / --danger（更新入口）。 */
+  --muted: var(--text-3);
+}
+
+/* 浅色下画布点阵与迷你地图遮罩跟外壳一致；暗色的映射已在上面给出。 */
+:root[data-theme="light"] {
+  --rf-background: var(--canvas-bg);
+  --rf-dot: var(--canvas-dot);
+  --rf-minimap-bg: var(--surface);
+  --rf-controls-bg: var(--surface-raised);
+  --rf-controls-border: var(--border-1);
+  --rf-controls-icon: var(--text-1);
+  --rf-selection-bg: var(--accent-soft);
+  --rf-selection-border: var(--accent-border);
+  --rf-handle-bg: var(--surface);
+  --rf-handle-border: var(--border-2);
+  --rf-edge-default: var(--edge-system);
+  --rf-attribution-bg: transparent;
+}
+
+/* ---- 补充（#221 从域模块里收编的具体色号：只在原处出现过一次的语义）---- */
+
+/* 主题无关：覆盖在图片上的白字 / 白色手柄 / 参考图区域提示红。
+ * 它们表达的是「在图片上可见」，不随工作台主题变。 */
+:root {
+  --text-on-media: #ffffff;
+  --media-shadow: rgb(0 0 0 / 90%);
+  --guide-outline: #ff3333;
+  --guide-fill: rgb(255 0 0 / 20%);
+  /* 定稿金填充上的文字色（供 #223 的定稿角标使用）：深棕 #3d2b00 在两种金上实测
+   * 浅色 #d4a017 → 5.68:1、暗色 #d9a521 → 6.04:1，都 ≥4.5:1；白字在同样的金上只有约 2.4:1。 */
+  --text-on-final: #3d2b00;
+}
+
+:root,
+:root[data-theme="dark"] {
+  /* 填充用主色（#221 补充）：带白字的小号角标要 ≥4.5:1，--accent 的 #4c8dff 只有 3.2:1，
+   * 所以另给一枚更深的填充色（白字 4.63:1）。浅色的 --accent 本身是 5.22:1，与之同值。 */
+  --accent-fill: #1f6feb;
+  --success-fill-pressed: #196c2e;
+  --success-border-pressed: #238636;
+  --accent-soft-strong: rgb(76 141 255 / 24%);
+  --border-subtle: rgb(140 149 159 / 10%);
+  --warning-strong: #f0883e;
+}
+
+:root[data-theme="light"] {
+  /* 填充用主色：浅色下 --accent 本身已有 5.22:1，不再分叉。 */
+  --accent-fill: #0969da;
+  --success-fill-pressed: #176f2f;
+  --success-border-pressed: #176f2f;
+  --accent-soft-strong: rgb(221 244 255 / 90%);
+  --border-subtle: rgb(140 149 159 / 6%);
+  --warning-strong: #bc4c00;
+}
+
+/* ---- 补充（#223 画布）：迷你地图里的节点方块色，跟三级边框走 ---- */
+:root {
+  --rf-minimap-node: var(--border-3);
+}
