@@ -60,6 +60,16 @@ describe("原地复制", () => {
     expect(r.board.nodes.find((x) => x.id === "new1")).toMatchObject({ pos: [50, 60], text: "a" });
     expect(r.board.nodes).toHaveLength(3);
   });
+
+  it("多选副本按拖选顺序追加，pairs 与 starts 对上原节点", () => {
+    let n = 0;
+    const r = duplicateNodes(board([prompt("a", [10, 20]), prompt("b", [0, 0])]), ["b", "a"], () => `copy-${++n}`, 0);
+    expect(r.ids).toEqual(["copy-1", "copy-2"]);
+    expect(r.pairs).toEqual([["a", "copy-1"], ["b", "copy-2"]]);
+    expect(r.board.nodes.map((x) => x.id)).toEqual(["a", "b", "copy-1", "copy-2"]);
+    expect(r.board.nodes.find((x) => x.id === "copy-1")).toMatchObject({ text: "a", pos: [10, 20] });
+    expect(r.board.nodes.find((x) => x.id === "copy-2")).toMatchObject({ text: "b", pos: [0, 0] });
+  });
 });
 
 describe("滚轮 / 触控板", () => {

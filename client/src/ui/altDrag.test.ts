@@ -90,7 +90,12 @@ describe("松手对调", () => {
   const pending = { pairs: [["a", "n1"]] as [string, string][], starts: [["a", [10, 20]]] as [string, [number, number]][] };
 
   it("换成 settleDrag 变更，copies = 对调节点数", () => {
-    expect(altDragSettle(pending, 9)).toEqual({ kind: "settleDrag", drag: { id: 9, copies: 1 }, pairs: pending.pairs, starts: pending.starts });
+    expect(altDragSettle(pending, 9)).toEqual({
+      kind: "settleDrag",
+      drag: { id: 9, copies: 1 },
+      pairs: [["a", "n1"]],
+      starts: [["a", [10, 20]]],
+    });
   });
 
   it("没有待办复制时不写画板", () => {
