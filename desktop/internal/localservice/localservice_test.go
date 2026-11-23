@@ -53,20 +53,33 @@ func TestInspectImage(t *testing.T) {
 	}
 }
 
-// 读文件返回 base64，页面侧能还原字节。
+// 读文件返回标准 base64，页面侧能还原字节；三种余数的补齐也要对。
+// 期望值都是手写的标准 base64 字面量，不由被测代码现算（否则库错了也跟着错）。
 func TestReadFileReturnsBase64(t *testing.T) {
 	store := localstore.New(t.TempDir())
 	svc := New(store)
-	path := filepath.Join(store.Root(), "字节.bin")
-	if err := os.WriteFile(path, []byte{0, 1, 2, 3}, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
+	cases := []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{"4 字节", []byte{0, 1, 2, 3}, "AAECAw=="},
+		{"1 字节", []byte{1}, "AQ=="},
+		{"2 字节", []byte{1, 2}, "AQI="},
+		{"3 字节", []byte{1, 2, 3}, "AQID"},
 	}
-	got, err := svc.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	if got != "AAECAw==" {
-		t.Fatalf("base64 = %q, want AAECAw==", got)
+	for _, c := range cases {
+		path := filepath.Join(store.Root(), c.name+".bin")
+		if err := os.WriteFile(path, c.data, 0o644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", c.name, err)
+		}
+		got, err := svc.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", c.name, err)
+		}
+		if got != c.want {
+			t.Fatalf("%s base64 = %q, want %q", c.name, got, c.want)
+		}
 	}
 }
 
