@@ -265,13 +265,13 @@ describe("原生快照的其余结局（壳端口读到什么就照什么分派�
     expect(toast).toHaveBeenCalledWith(PASTE_TEXT.staleNodeClip);
   });
 
-  it.each([
-    { name: "内容格式不受支持", snapshot: { kind: "unsupported", reason: "format" }, text: PASTE_TEXT.unsupported },
-    { name: "剪贴板被占用", snapshot: { kind: "busy", reason: "busy" }, text: PASTE_TEXT.busy },
-    { name: "单张超过上限", snapshot: { kind: "unsupported", reason: "tooLarge" }, text: PASTE_TEXT.tooLarge },
-    { name: "剪贴板里只有文件", snapshot: { kind: "unsupported", reason: "files" }, text: PASTE_TEXT.filesNotReadable },
+  it.each<{ name: string; snapshot: ClipboardContent; text: string }>([
+    { name: "内容格式不受支持", snapshot: { kind: "unsupported", text: null, images: [], reason: "format", readFailureCount: 0 }, text: PASTE_TEXT.unsupported },
+    { name: "剪贴板被占用", snapshot: { kind: "busy", text: null, images: [], reason: "busy", readFailureCount: 0 }, text: PASTE_TEXT.busy },
+    { name: "单张超过上限", snapshot: { kind: "unsupported", text: null, images: [], reason: "tooLarge", readFailureCount: 0 }, text: PASTE_TEXT.tooLarge },
+    { name: "剪贴板里只有文件", snapshot: { kind: "unsupported", text: null, images: [], reason: "files", readFailureCount: 0 }, text: PASTE_TEXT.filesNotReadable },
   ])("$name：明确提示，不落图", async ({ snapshot, text }) => {
-    await withSnapshot({ kind: "empty", text: null, images: [], reason: null, readFailureCount: 0, ...snapshot } as ClipboardContent);
+    await withSnapshot(snapshot);
     await paste({});
     expect(importPastedImages).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith(text);

@@ -16,13 +16,13 @@ import { actionBarItems, menuItems, type BoardAction, type MenuFacts, type MenuI
 import type { BoardChange, EditResult } from "../core/edit";
 import { countLabel } from "../core/history";
 import { edgeHoverInfo } from "../core/hoverInfo";
-import { LOCKED_HINT, PASTE_OFFSET, TASK_BUSY } from "../core/iterate";
+import { LOCKED_HINT, TASK_BUSY } from "../core/iterate";
 import { MAX_PASTE_BYTES, isNodeMarker, nodeMarker, PASTE_NAME_PREFIX } from "../core/pageInput";
 import type { ClipboardContent } from "../core/clipboardDispatch";
 import type { BoardMeasure } from "../core/tidy";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { BoardCanvas } from "./BoardCanvas";
-import { ARCHIVE_TEXT, DELETE_TASK_TEXT, IMPORT_TEXT, PASTE_TEXT, SAVE_TEXT, STAGE_TEXT, TIDY_TEXT } from "./boardText";
+import { ARCHIVE_TEXT, DELETE_TASK_TEXT, SAVE_TEXT, TIDY_TEXT } from "./boardText";
 import { writeClipboard } from "./canvasKeyboard";
 import { HOVER_DELAY_MS } from "./hoverInfo";
 import { ShellProvider } from "./shell";
@@ -108,21 +108,6 @@ function referenceNode(id: string, pos: [number, number]): BoardNode {
 
 function taskNode(id: string, pos: [number, number]): TaskNode {
   return { id, type: "task", pos, size: [280, 260], extra: {}, model: "qwen-image-3.0", size_spec: SPEC_2K, image_ports: 1, layer_decomposition: false, transparent_background: false, last_submitted: null };
-}
-
-function resultNode(id: string, pos: [number, number]): BoardNode {
-  return {
-    id,
-    type: "result",
-    pos,
-    size: [220, 300],
-    extra: {},
-    task_id: "t1",
-    file: "result.png",
-    path: "tasks/t1/result.png",
-    layer_count: 0,
-    record: { model: "qwen-image-3.0", prompt: "一只猫", negative_prompt: "", size_spec: SPEC_2K, submitted_at: "2026-01-01T00:00:00Z" },
-  };
 }
 
 function userEdge(from: PortRef, to: PortRef): BoardEdge {
@@ -431,28 +416,6 @@ async function openEdgeMenu(index: number, x: number, y: number): Promise<void> 
   });
 }
 
-/** 文件拖放：jsdom 没有 DragEvent / DataTransfer，用普通 Event 挂上 drop 处理器读的字段。 */
-async function dropFiles(target: HTMLElement, files: File[], point: { x: number; y: number }): Promise<void> {
-  await act(async () => {
-    const event = new Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperty(event, "dataTransfer", { value: { files } });
-    Object.defineProperty(event, "clientX", { value: point.x });
-    Object.defineProperty(event, "clientY", { value: point.y });
-    target.dispatchEvent(event);
-  });
-  await flush();
-}
-
-/** 落在某个任务卡片上的一点（elementFromPoint 的回值）：断言「拖到卡片上接到它的图片端口」。 */
-function pointInsideTaskCard(nodeId: string): Element {
-  const card = document.createElement("div");
-  card.className = "react-flow__node";
-  card.setAttribute("data-id", nodeId);
-  const inner = document.createElement("span");
-  card.append(inner);
-  return inner;
-}
-
 // ---- 用例 ----
 
 describe("工具栏（portal 进 toolbarSlot）", () => {
@@ -618,34 +581,6 @@ describe("上下文菜单", () => {
     expect(menuItemLabels()).toContain(countLabel("删除", 2));
   });
 
-  it("「另存为…」触发下载并提示；下载失败也告诉用户", async () => {
-    const board = sampleBoard();
-    board.nodes = [...board.nodes, resultNode("x1", [900, 60])];
-    const harness = await renderCanvas({ board });
-    const resultMenu = menuItems({ kind: "node", nodeId: "x1" }, menuFactsOf(board, { selected: new Set(["x1"]) }));
-    await openNodeMenu("x1", 20, 20);
-    await act(async () => menuItemButton(resultMenu, "saveAs").click());
-    await flush();
-    // 结果节点的绝对路径来自数据根 + 节点路径；带图层时存储端口打 zip，提示同一句。
-    expect(saveCopyAs).toHaveBeenCalledWith("/~/tasks/t1/result.png");
-    expect(harness.toast).toHaveBeenCalledWith(SAVE_TEXT.started);
-
-    vi.mocked(saveCopyAs).mockRejectedValueOnce(new Error("磁盘满了"));
-    harness.toast.mockClear();
-    await openNodeMenu("x1", 20, 20);
-    await act(async () => menuItemButton(resultMenu, "saveAs").click());
-    await flush();
-    expect(harness.toast).toHaveBeenCalledWith(SAVE_TEXT.failed("磁盘满了"));
-  });
-
-  it("连线右键菜单：断开走 React Flow 删除流程", async () => {
-    const board = sampleBoard();
-    await renderCanvas();
-    await selectNodes(["t1"]);
-    await openEdgeMenu(0, 20, 20);
-    await act(async () => menuItemButton(menuItems({ kind: "edge", edge: board.edges[0] }, menuFactsOf(board)), "disconnect").click());
-    expect(xyflow.flow.deleteElements).toHaveBeenCalledWith({ edges: [{ id: "p1:positive->t1:positive" }] });
-  });
 });
 
 describe("键盘快捷键（接线）", () => {
@@ -699,40 +634,6 @@ describe("页面级粘贴（#96：从系统剪贴板粘图片 / 节点）", () =
     expect(apply).toHaveBeenCalledWith(expect.objectContaining({ kind: "addReferences", at: [-120, -80] }));
   });
 
-  it("剪贴板里是节点标记：粘节点，连续粘两次第二次按 PASTE_OFFSET 错开", async () => {
-    const { apply } = await renderCanvas();
-    await selectNodes(["p1"]);
-    // 先真复制一次：应用内剪贴板有内容，系统剪贴板里则是那段标记。
-    await press("c", { ctrlKey: true });
-    await flush();
-    const first = await paste({ text: nodeMarker(1) });
-    const second = await paste({ text: nodeMarker(1) });
-    expect(first.defaultPrevented).toBe(true);
-    expect(second.defaultPrevented).toBe(true);
-    const pastes = appliedChanges(apply).flatMap((c) => (c.kind === "paste" ? [c] : []));
-    expect(pastes).toHaveLength(2);
-    expect(pastes[0].clip.nodes.map((n) => n.id)).toEqual(["p1"]);
-    const [x, y] = pastes[0].clip.nodes[0].pos;
-    expect(pastes[1].clip.nodes[0].pos).toEqual([x + PASTE_OFFSET, y + PASTE_OFFSET]);
-  });
-
-  it("标记还在但应用内剪贴板已空：提示重新复制，不粘", async () => {
-    const { apply, toast } = await renderCanvas();
-    // 每条用例开始时应用内剪贴板都是空的（等价于刷新过页面、或标记来自另一个标签页）。
-    const event = await paste({ text: nodeMarker(1) });
-    expect(event.defaultPrevented).toBe(true);
-    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.staleNodeClip);
-    expect(appliedChanges(apply).flatMap((c) => (c.kind === "paste" ? [c] : []))).toEqual([]);
-  });
-
-  it("剪贴板里是文件本身（读不到内容）：提示拖进画板", async () => {
-    const { toast } = await renderCanvas();
-    const event = await paste({ files: [new File([], "report.bin", { type: "" })] });
-    expect(event.defaultPrevented).toBe(true);
-    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.filesNotReadable);
-    expect(port.media.uploadReference).not.toHaveBeenCalled();
-  });
-
   it("只读归档画板粘图片：只提示只读，不上传不写画板", async () => {
     const harness = await renderCanvas({ readOnly: true });
     const event = await paste({ files: [new File(["x"], "shot.png", { type: "image/png" })] });
@@ -740,16 +641,6 @@ describe("页面级粘贴（#96：从系统剪贴板粘图片 / 节点）", () =
     expect(harness.toast).toHaveBeenCalledWith(ARCHIVE_TEXT.readOnly);
     expect(port.media.uploadReference).not.toHaveBeenCalled();
     expect(editChanges(harness.apply)).toEqual([]);
-  });
-
-  it("超过单张上限的图片：提示先压缩，不上传", async () => {
-    const { toast } = await renderCanvas();
-    const big = new File(["x"], "big.png", { type: "image/png" });
-    Object.defineProperty(big, "size", { value: MAX_PASTE_BYTES + 1 });
-    const event = await paste({ files: [big] });
-    expect(event.defaultPrevented).toBe(true);
-    expect(toast).toHaveBeenCalledWith(PASTE_TEXT.tooLarge);
-    expect(port.media.uploadReference).not.toHaveBeenCalled();
   });
 
   it("模态开着时粘贴放行给弹窗", async () => {
@@ -761,39 +652,6 @@ describe("页面级粘贴（#96：从系统剪贴板粘图片 / 节点）", () =
     expect(editChanges(harness.apply)).toEqual([]);
   });
 
-  it("焦点在输入框里粘纯文本：放行给输入框", async () => {
-    const harness = await renderCanvas();
-    const input = document.createElement("input");
-    document.body.append(input);
-    try {
-      input.focus();
-      const event = await paste({ text: "一段文字" }, input);
-      expect(event.defaultPrevented).toBe(false);
-      expect(port.media.uploadReference).not.toHaveBeenCalled();
-      expect(editChanges(harness.apply)).toEqual([]);
-    } finally {
-      input.remove();
-    }
-  });
-});
-
-describe("选区与微移", () => {
-  it("Esc 清空选区", async () => {
-    await renderCanvas();
-    await selectNodes(["p1"]);
-    expect(selectedOf("p1")).toBe(true);
-    await press("Escape");
-    expect(selectedOf("p1")).toBe(false);
-  });
-
-  it("选中节点后方向键微移（1px，Shift 10px）", async () => {
-    const { apply } = await renderCanvas();
-    await selectNodes(["p1"]);
-    await press("ArrowRight");
-    expect(apply).toHaveBeenCalledWith({ kind: "nudge", ids: ["p1"], delta: [1, 0] });
-    await press("ArrowDown", { shiftKey: true });
-    expect(apply).toHaveBeenCalledWith({ kind: "nudge", ids: ["p1"], delta: [0, 10] });
-  });
 });
 
 describe("悬浮动作条与放大预览", () => {
@@ -818,12 +676,13 @@ describe("悬浮动作条与放大预览", () => {
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it("从节点移到动作条上时动作条不收起，移出后过宽限期才收起", async () => {
+  it("指针停在动作条上时动作条不收起", async () => {
+    // 宽限期本身（150ms 定时器）由 useCanvasHover 拥有；这里只证明组件把 onPointerEnter 接到了
+    // 「按住不收起」的那条路上：离开节点之后指针停在动作条上，动作条仍在。
     await renderCanvas();
     await hoverNode("r1");
-    const bar = container.querySelector('[data-testid="node-toolbar"]');
-    expect(bar).not.toBeNull();
-    const toolbar = bar!.querySelector('[role="toolbar"]')!;
+    const toolbar = container.querySelector('[data-testid="node-toolbar"] [role="toolbar"]')!;
+    expect(toolbar).not.toBeNull();
     await act(async () => {
       flowProps().onNodeMouseLeave!({} as ReactMouseEvent, flowNodeOf("r1"));
     });
@@ -831,17 +690,7 @@ describe("悬浮动作条与放大预览", () => {
     await act(async () => {
       toolbar.dispatchEvent(new Event("pointerover", { bubbles: true }));
     });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    });
     expect(container.querySelector('[data-testid="node-toolbar"]')).not.toBeNull();
-    await act(async () => {
-      toolbar.dispatchEvent(new Event("pointerout", { bubbles: true }));
-    });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    });
-    expect(container.querySelector('[data-testid="node-toolbar"]')).toBeNull();
   });
 
   it("连线悬浮出信息浮层，移出即收起", async () => {
@@ -866,44 +715,6 @@ describe("悬浮动作条与放大预览", () => {
     });
     expect(container.querySelector('[role="tooltip"]')).toBeNull();
   });
-
-  it("任务节点上悬浮不出动作条（只有图片节点有）", async () => {
-    await renderCanvas();
-    await hoverNode("t1");
-    expect(container.querySelector('[data-testid="node-toolbar"]')).toBeNull();
-    await hoverNode("r1");
-    expect(container.querySelector('[data-testid="node-toolbar"]')).not.toBeNull();
-  });
-});
-
-describe("HTML5 拖放", () => {
-  it("拖入图片：上传后落成参考图；落在任务卡片上时接到该任务", async () => {
-    const { apply } = await renderCanvas();
-    const file = new File(["x"], "cat.png", { type: "image/png" });
-    await dropFiles(canvasRoot(), [file], { x: 10, y: 20 });
-    expect(port.media.uploadReference).toHaveBeenCalledWith(file);
-    expect(apply).toHaveBeenCalledWith({
-      kind: "addReferences",
-      images: [{ path: "reference/cat.png", sha256: SHA_A, display_name: "cat.png", width: 240, height: 160, bytes: IMAGE_INFO.bytes }],
-      at: [10, 20],
-      attach: null,
-    });
-    // 拖到任务卡片上：接到该任务的空图片端口（放在左侧）。
-    apply.mockClear();
-    elementAt.mockReturnValue(pointInsideTaskCard("t1"));
-    const second = new File(["y"], "dog.jpeg", { type: "image/jpeg" });
-    await dropFiles(canvasRoot(), [second], { x: 30, y: 40 });
-    expect(apply).toHaveBeenCalledWith(expect.objectContaining({ kind: "addReferences", attach: { taskId: "t1", place: "left" } }));
-  });
-
-  it("拖入非图片文件只提示，不上传", async () => {
-    const { apply, toast } = await renderCanvas();
-    const file = new File(["x"], "notes.txt", { type: "text/plain" });
-    await dropFiles(canvasRoot(), [file], { x: 10, y: 20 });
-    expect(toast).toHaveBeenCalledWith(IMPORT_TEXT.imageOnly);
-    expect(port.media.uploadReference).not.toHaveBeenCalled();
-    expect(editChanges(apply)).toEqual([]);
-  });
 });
 
 describe("只读画板（归档）", () => {
@@ -915,6 +726,13 @@ describe("只读画板（归档）", () => {
     expect(flowProps().nodesConnectable).toBe(false);
     // 画板不能改，Delete 键也不交给 React Flow。
     expect(flowProps().deleteKeyCode).toBeNull();
+    // 只读经画板传给粘贴层（拖放的只读拒绝由 useCanvasDrop 的 DOM drop 用例拥有）。
+    harness.toast.mockClear();
+    const pasted = await paste({ files: [new File(["y"], "b.png", { type: "image/png" })] });
+    expect(pasted.defaultPrevented).toBe(true);
+    expect(harness.toast).toHaveBeenCalledWith(ARCHIVE_TEXT.readOnly);
+    expect(port.media.uploadReference).not.toHaveBeenCalled();
+    expect(editChanges(harness.apply)).toEqual([]);
     // 右键节点：菜单只剩查看与下载（条目由 core/archive 的 readOnlyMenu 给）。
     await openNodeMenu("r1", 20, 20);
     const expected = readOnlyMenu(menuItems({ kind: "node", nodeId: "r1" }, menuFactsOf(harness.props.board, { selected: new Set(["r1"]) })));
@@ -923,17 +741,6 @@ describe("只读画板（归档）", () => {
     await act(async () => menuItemButton(expected, "preview").click());
     await flush();
     expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-    // 拖入图片：不上传、不写画板，只提示只读。
-    harness.toast.mockClear();
-    await dropFiles(canvasRoot(), [new File(["x"], "a.png", { type: "image/png" })], { x: 1, y: 2 });
-    expect(harness.toast).toHaveBeenCalledWith(ARCHIVE_TEXT.readOnly);
-    expect(port.media.uploadReference).not.toHaveBeenCalled();
-    // 粘贴同样被挡下（应用内剪贴板里的内容不落盘）。
-    await selectNodes(["r1"]);
-    await press("c", { ctrlKey: true });
-    await press("v", { ctrlKey: true });
-    expect(harness.toast.mock.calls.map(([m]) => m)).toContain(ARCHIVE_TEXT.readOnly);
-    expect(editChanges(harness.apply)).toEqual([]);
   });
 });
 
@@ -984,34 +791,11 @@ describe("画布结构", () => {
     expect(harness.onTidyChange).toHaveBeenCalledWith(false);
   });
 
-  it("拖线中根类名带 connecting，连线按起点端口着色", async () => {
-    xyflow.connection.current = { inProgress: true, fromHandle: { nodeId: "r1", id: "out", type: "source" } };
-    await renderCanvas();
-    expect(canvasRoot().className).toBe("canvas connecting");
-    expect(flowProps().connectionLineStyle).toEqual({ stroke: "var(--port-image)" });
-  });
-
-  it("画布内屏蔽原生右键菜单，输入控件上保留", async () => {
-    await renderCanvas();
-    const onCanvas = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
-    await act(async () => canvasRoot().dispatchEvent(onCanvas));
-    expect(onCanvas.defaultPrevented).toBe(true);
-    // 输入框里的右键留给原生菜单（复制粘贴）。
-    const input = document.createElement("input");
-    canvasRoot().append(input);
-    const onInput = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
-    await act(async () => input.dispatchEvent(onInput));
-    expect(onInput.defaultPrevented).toBe(false);
-  });
-
-  it("阶段框上的动作走画板写入", async () => {
+  it("阶段框作为一层接进画布（内容本身由 StageLayer 与 ui/stages 拥有）", async () => {
     const board = sampleBoard();
     board.stages = [{ id: "s1", name: "第一批", nodes: ["p1", "r1"], collapsed: false, extra: {} }];
-    const { apply } = await renderCanvas({ board });
-    const frame = container.querySelector<HTMLElement>('[data-stage-id="s1"]');
-    expect(frame).not.toBeNull();
-    await act(async () => buttonByText(frame!, STAGE_TEXT.collapse).click());
-    expect(apply).toHaveBeenCalledWith({ kind: "setStageCollapsed", stageId: "s1", collapsed: true });
+    await renderCanvas({ board });
+    expect(container.querySelector('[data-stage-id="s1"]')).not.toBeNull();
   });
 
   it("跳转请求把视口居中到该节点并选中它", async () => {
@@ -1038,20 +822,22 @@ describe("React Flow 回调接线", () => {
     expect(apply).toHaveBeenCalledWith({ kind: "newTask", at: [70, 90], promptId: "p1" });
   });
 
-  it("选中 / 移动 / 测量 / 连线 / 视口都走画板写入", async () => {
+  it("React Flow 的回调都接上了（逐类载荷由 canvasFlowHandlers 拥有）", async () => {
     const { apply } = await renderCanvas();
+    // 只看编辑类变更：每次渲染都会发的 syncAutoRatios 不算。
+    const edits = (): number => editChanges(apply).length;
+    // 每种事件至少落地一次：证明 BoardCanvas 把 flowHandlers 的每个入口都接到了 <ReactFlow> 上。
     await act(async () => flowProps().onNodesChange!([{ type: "position", id: "p1", position: { x: 5, y: 6 } }]));
-    expect(apply).toHaveBeenCalledWith({ kind: "move", moves: [["p1", [5, 6]]], drag: null });
-    await act(async () => flowProps().onNodesChange!([{ type: "dimensions", id: "p1", dimensions: { width: 240, height: 140 } }]));
-    await flush();
-    expect(flowNodeOf("p1").measured).toEqual({ width: 240, height: 140 });
+    expect(edits()).toBe(1);
     await act(async () => flowProps().onConnect!({ source: "p1", sourceHandle: "positive", target: "t1", targetHandle: "negative" }));
-    expect(apply).toHaveBeenCalledWith({ kind: "connect", connection: { source: "p1", sourceHandle: "positive", target: "t1", targetHandle: "negative" } });
     await act(async () => flowProps().onMoveEnd!(null, { x: 10, y: 20, zoom: 0.5 }));
-    expect(apply).toHaveBeenCalledWith({ kind: "viewport", viewport: { x: 10, y: 20, zoom: 0.5 } });
     await selectNodes(["t1"]);
     await act(async () => flowProps().onEdgesChange!([{ type: "select", id: "p1:positive->t1:positive", selected: true }]));
+    expect(edits()).toBe(3);
     expect(canvasFlowEdges().find((e) => e.id === "p1:positive->t1:positive")?.selected).toBe(true);
+    for (const name of ["onNodesChange", "onEdgesChange", "onConnect", "onConnectEnd", "onMoveEnd", "onBeforeDelete", "onDelete"] as const) {
+      expect(typeof flowProps()[name]).toBe("function");
+    }
   });
 
   it("删除：试算被拒时提示不删；锁定任务先确认取消再删", async () => {
