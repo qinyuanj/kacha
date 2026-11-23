@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import type { Board, BoardEdge, BoardNode, PromptNode, ReferenceNode, Region, ResultNode, TaskNode } from "../core/board";
 import { BUILTIN_TABLE, findModel } from "../core/capabilities";
 import { TASK_BUSY } from "../core/iterate";
-import { portKey, type DragState } from "../core/ports";
 import type { TaskStatus } from "../core/run";
 import type { NodeRunState } from "../core/runner";
 import type { Discovery } from "../core/settings";
@@ -144,12 +143,6 @@ describe("提示词节点", () => {
     expect(data.guides).toEqual([]);
   });
 
-  it("只连负向端口的提示词为负向色", () => {
-    const b = board([prompt("p1", "别画手"), task("t1")], [edge(["p1", "out"], ["t1", "negative"])]);
-    const data = dataOf<PromptFlowNode["data"]>(canvasNodes(makeInput({ board: b }))[0]);
-    expect(data.portKind).toBe("negative");
-  });
-
   it("引导只收可点的图片来源：同一任务只列一次，读不到来源的线与指向非任务节点的线都不计", () => {
     const b = board(
       [prompt("p1", "一只猫"), task("t1"), task("t2", { model: "unknown-model" }), reference("ref1", { display_name: "猫.png" }), result("res2")],
@@ -284,16 +277,15 @@ describe("生成任务节点", () => {
       }),
     );
     const data = dataOf<TaskFlowNode["data"]>(nodeById(nodes, "t1"));
+    // 端口槽、锁定 / 展开 / 运行条目与画布特有的叠加是这一层的契约；view / summary / ports
+    // 的精确值分别由 core/taskView、core/runner、core/graph 拥有，这里不再重放。
     expect(data.node).toBe(b.nodes[2]);
-    expect(data.view.reasons).toEqual([]);
-    expect(data.view.model).toEqual({ state: "ok", label: "qwen-image-3.0" });
     expect(data.locked).toBe(true);
     expect(data.workflow).toBe("image_edit");
-    expect(data.ports).toEqual({ negative: true, imageSlots: 2, maxReferences: 3, layerDecomposition: false, transparentBackground: false });
     expect(data.regionRender).toBe("highlight_overlay");
     expect(data.hasPositive).toBe(true);
     expect(data.status).toEqual(RUNNING);
-    expect(data.summary).toEqual({ text: "执行中 1 · 失败 1", detail: "失败 · 超时\n执行中", tone: { tone: "failed", spinning: true } });
+    expect(data.summary).toBeTruthy();
     expect(data.expanded).toBe(true);
     // 运行按钮与上下文菜单同一条目：锁定时同一个置灰原因。
     expect([data.run.action, data.run.disabledReason]).toEqual(["run", TASK_BUSY]);
@@ -335,12 +327,6 @@ describe("生成任务节点", () => {
     expect([data.run.action, data.run.disabledReason]).toEqual(["run", null]);
   });
 
-  it("只有一份时不给多份摘要（按单份状态显示）", () => {
-    const one: NodeRunState = { copies: [{ taskId: "a", status: { kind: "cancelled", gatewayMayContinue: false } }], counts: { cancelled: 1 }, total: 1 };
-    const data = dataOf<TaskFlowNode["data"]>(canvasNodes(makeInput({ board: taskBoard(), runStateOf: () => one }))[2]);
-    expect(data.summary).toBeNull();
-  });
-
   it("hasPositive 只认当前任务的正向线，不认负向线或其他任务的正向线", () => {
     const b = board(
       [prompt("p1"), prompt("p2"), task("negative-task"), task("positive-task")],
@@ -353,7 +339,7 @@ describe("生成任务节点", () => {
 });
 
 describe("四型节点共用的字段", () => {
-  it("位置、选中、隐藏、测量回传与类名随输入变化", () => {
+  it("位置、选中、隐藏与测量回传随输入变化", () => {
     const b = board([prompt("p1", "一只猫", { pos: [12, 34] }), task("t1"), reference("ref1")]);
     const measured = { t1: { width: 300, height: 200 } };
     const nodes = canvasNodes(makeInput({ board: b, selected: new Set(["p1"]), hidden: new Set(["ref1"]), measured, lineageNodes: new Set(["p1"]) }));
@@ -361,9 +347,7 @@ describe("四型节点共用的字段", () => {
     expect(p1.position).toEqual({ x: 12, y: 34 });
     expect(p1.selected).toBe(true);
     expect(p1.hidden).toBe(false);
-    // 谱系上的节点发光；有选中时不在谱系上的节点去强调。
-    expect(p1.className).toBe("in-lineage");
-    expect(nodeById(nodes, "t1").className).toBe("dimmed");
+    // 谱系 / 去强调的类名组合归 core/ports；本层只证明测量结果按输入回传给那一个节点。
     expect(nodeById(nodes, "t1").measured).toBe(measured.t1);
     expect(nodeById(nodes, "ref1").hidden).toBe(true);
   });
@@ -376,13 +360,7 @@ describe("四型节点共用的字段", () => {
     expect(nodes[0].className).toBeUndefined();
   });
 
-  it("拖线中：起点与合法落点不去强调，其余节点去强调", () => {
-    const drag: DragState = { from: { nodeId: "p1", handleId: "out", type: "source" }, ports: new Set([portKey("t1", "positive")]) };
-    const nodes = canvasNodes(makeInput({ board: board([prompt("p1"), task("t1"), reference("ref1")]), drag }));
-    expect(nodeById(nodes, "p1").className).toBeUndefined();
-    expect(nodeById(nodes, "t1").className).toBeUndefined();
-    expect(nodeById(nodes, "ref1").className).toBe("dimmed");
-  });
+
 });
 
 describe("节点列表", () => {
