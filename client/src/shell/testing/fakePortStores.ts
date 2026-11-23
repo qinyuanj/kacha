@@ -1,6 +1,7 @@
 // 内存壳端口的各个分组（#137）：从 shell/testing/fakePort.ts 拆出，一个分组一个函数。
 // 拆开之后每个函数的复杂度单独看得到，门禁也按函数计。
 import type { ImportOptions, ImportResult } from "../../core/boardPack";
+import { sha256Hex } from "../../core/sha256";
 import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, UpdatePort, UsagePort } from "../types";
 import { emptySnapshot, type UpdateSnapshot } from "../../core/update";
 import { PortError, type BoardStore, type DataRootMoveResult, type DataRootStatus, type DataRootStore, type FeatureId, type FileStore, type MediaStore, type MetaStore, type PackStore, type PortFailureKind, type UiStore } from "../port";
@@ -41,16 +42,27 @@ export function toImportResult(outcome: FakeImportOutcome): ImportResult {
   }
 }
 
+/**
+ * 写入前的四条拒绝，判据逐条对齐真实壳（desktop/internal/localstore/localstore.go:341-347）：
+ * 注入的失败、只新建撞名、带版本但主文件不在（missing）、带版本但内容变了（conflict）。
+ */
+function assertWritable(path: string, existing: FakeBoard | undefined, writeOptions: BoardWriteOptions | undefined, options: FakePortOptions): void {
+  const failure = options.writeFailures?.get(path);
+  if (failure) throw fakeFailureOf(failure, failure === "conflict" ? "画板已在别处修改" : "写入失败");
+  if (writeOptions?.createOnly && existing) throw fakeFailureOf("alreadyExists", "目标已存在，只新建不覆盖");
+  if (writeOptions?.version && !existing) throw fakeFailureOf("missing", "画板不存在，可能已在别处改名或删除");
+  if (writeOptions?.version && existing && existing.version !== writeOptions.version) throw fakeFailureOf("conflict", "画板已在别处修改");
+}
+
 /** 写一份画板：新建则只新建不覆盖；版本不符是冲突。 */
 export function fakeWrite(boards: Map<string, FakeBoard>, calls: FakeCalls, options: FakePortOptions) {
   return async (path: string, text: string, writeOptions?: BoardWriteOptions) => {
     calls.write.push({ path, text, options: writeOptions });
-    const failure = options.writeFailures?.get(path);
-    if (failure) throw fakeFailureOf(failure, failure === "conflict" ? "画板已在别处修改" : "写入失败");
     const existing = boards.get(path);
-    if (writeOptions?.createOnly && existing) throw fakeFailureOf("alreadyExists", "目标已存在，只新建不覆盖");
-    if (writeOptions?.version && existing && existing.version !== writeOptions.version) throw fakeFailureOf("conflict", "画板已在别处修改");
-    boards.set(path, { path, main: text, bak: existing?.main ?? null, version: `v-${calls.write.length}` });
+    assertWritable(path, existing, writeOptions, options);
+    // 版本号是内容字节的 sha256，与真实壳同形（localstore.go:358 返回 hashOf([]byte(text))）：
+    // 客户端保存后按同一摘要回写版本，写成 `v-N` 会让同一画板的第二次保存永远判冲突（#225）。
+    boards.set(path, { path, main: text, bak: existing?.main ?? null, version: await sha256Hex(new TextEncoder().encode(text)) });
   };
 }
 
