@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 )
 
 // 受控网关替身（#153）：Go 服务按已记录契约发一次 POST，再按响应 URL 取图。
@@ -46,7 +48,7 @@ func TestGenerationRequestAndBinaryResultThroughGateway(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := New(t.TempDir() + "/api-key.protected")
+	svc := NewFollowing(dataroot.NewRoots(t.TempDir()))
 	requestBody := `{"model":"qwen-image-3.0-pro","prompt":"一只橘猫","n":1,"size":"1024x1024"}`
 	headers := map[string]string{"Authorization": "Bearer " + syntheticKey, "Accept": "application/json", "Content-Type": "application/json"}
 	res, err := svc.Request(server.URL+"/v1/images/generations", "POST", headers, requestBody)
