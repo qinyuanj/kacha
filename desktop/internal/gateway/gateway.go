@@ -26,17 +26,10 @@ type credentialStore interface {
 }
 
 // Service 持有一个受保护密钥文件的位置；每次调用都重新读文件，不缓存明文。
+// roots 是可切换的数据根（迁移 #161）：迁移把整份数据根（含密钥文件）复制过去，
+// 所以切换后同一份凭据仍然可用。
 type Service struct {
-	credPath string
-	creds    credentialStore
-	// roots 是可切换的数据根（迁移 #161）：装了它，密钥文件跟着新位置走。
-	// 迁移把整份数据根（含密钥文件）复制过去，所以切换后同一份凭据仍然可用。
 	roots *dataroot.Roots
-}
-
-// New 用数据根下的密钥文件路径造服务；不创建文件。
-func New(credPath string) *Service {
-	return &Service{credPath: credPath, creds: newCredentialStore(credPath)}
 }
 
 // NewFollowing 造一个跟着共享数据根走的服务：密钥文件在数据根下，切换后落到新位置。
@@ -46,17 +39,11 @@ func NewFollowing(roots *dataroot.Roots) *Service {
 
 // credFile 返回当前的密钥文件路径。
 func (s *Service) credFile() string {
-	if s.roots != nil {
-		return filepath.Join(s.roots.Current(), keyFile)
-	}
-	return s.credPath
+	return filepath.Join(s.roots.Current(), keyFile)
 }
 
 // store 返回当前密钥文件的持久化实现；位置变了就换一个，不缓存明文。
 func (s *Service) store() credentialStore {
-	if s.roots == nil {
-		return s.creds
-	}
 	return newCredentialStore(s.credFile())
 }
 

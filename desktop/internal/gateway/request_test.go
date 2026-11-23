@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 )
 
 // 连接测试与模型发现都经 Go 发真实 HTTP：Authorization、方法与响应原文按网关契约走。
@@ -23,7 +25,7 @@ func TestRequestExecutesGatewayModelsCall(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := New(t.TempDir() + "/api-key.protected")
+	svc := NewFollowing(dataroot.NewRoots(t.TempDir()))
 	res, err := svc.Request(server.URL+"/v1/models", "GET", map[string]string{"Authorization": "Bearer " + syntheticKey, "Accept": "application/json"}, "")
 	if err != nil {
 		t.Fatalf("Request: %v", err)
@@ -49,7 +51,7 @@ func TestRequestRedactsSecretAndFailsNetworkCleanly(t *testing.T) {
 		_, _ = io.WriteString(w, "{\"error\":{\"message\":\"bad token "+syntheticKey+"\"}}")
 	}))
 	headers := map[string]string{"Authorization": "Bearer " + syntheticKey}
-	svc := New(t.TempDir() + "/api-key.protected")
+	svc := NewFollowing(dataroot.NewRoots(t.TempDir()))
 	res, err := svc.Request(server.URL+"/v1/models", "GET", headers, "")
 	server.Close()
 	if err != nil {
@@ -77,7 +79,7 @@ func TestRequestCarriesPostBody(t *testing.T) {
 		_, _ = io.WriteString(w, "{}")
 	}))
 	defer server.Close()
-	svc := New(t.TempDir() + "/api-key.protected")
+	svc := NewFollowing(dataroot.NewRoots(t.TempDir()))
 	if _, err := svc.Request(server.URL+"/v1/images/generations", "POST", map[string]string{}, "{\"prompt\":\"x\"}"); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
@@ -130,7 +132,7 @@ func TestRequestRoundTripsBinaryLargerThanTwoMiB(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := New(t.TempDir() + "/api-key.protected")
+	svc := NewFollowing(dataroot.NewRoots(t.TempDir()))
 	res, err := svc.Request(server.URL+"/files/result.png", "GET", map[string]string{"Accept": "image/*"}, "")
 	if err != nil {
 		t.Fatalf("Request: %v", err)
@@ -153,7 +155,7 @@ func TestRequestRejectsResponseOverDeclaredLimit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := New(t.TempDir() + "/api-key.protected")
+	svc := NewFollowing(dataroot.NewRoots(t.TempDir()))
 	res, err := svc.Request(server.URL+"/files/result.png", "GET", map[string]string{"Accept": "image/*"}, "")
 	if err == nil {
 		t.Fatalf("超过上限仍当成功返回：%d 字节的 body_base64", len(res.BodyBase64))

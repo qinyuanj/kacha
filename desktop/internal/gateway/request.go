@@ -42,9 +42,10 @@ func timeoutFor(method string, url string) time.Duration {
 	return requestTimeout
 }
 
-// maxResponseBytes 是单次网关响应的上限，取能力表声明的单图上限（30000000 字节，见
-// client/src/core/capabilities.builtin.json 的 max_bytes）：结果图比旧的 2 MiB 大得多，
-// 按旧的固定读数会被静默截断成半张图。超过上限按失败结束，不交回被截断的字节。
+// maxResponseBytes 是单次网关响应体的硬上限，按已验收的生成响应取 30000000 字节：
+// 结果图比旧的 2 MiB 大得多，按旧的固定读数会被静默截断成半张图。能力表的 max_bytes
+// 属于 input_image_rule，且逐模型不同，不作为这个响应上限的来源；超限按失败结束，
+// 不交回被截断的字节。
 const maxResponseBytes = 30000000
 
 // Request 经 Go 的 net/http 发真实请求。Authorization 等请求头只从这里进入，
