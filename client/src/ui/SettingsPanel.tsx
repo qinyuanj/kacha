@@ -71,14 +71,12 @@ function ConnectionRow({
 /** 并发上限那一行。 */
 function ConcurrencyRow({
   draft,
-  concurrency,
   highConcurrency,
   concurrencyHint,
   onChange,
   onBlur,
 }: {
   draft: string;
-  concurrency: number;
   highConcurrency: boolean;
   concurrencyHint: string;
   onChange(value: string): void;
@@ -92,7 +90,6 @@ function ConcurrencyRow({
         <span className="muted small">{concurrencyHint}</span>
       </label>
       {highConcurrency && <div className="muted small form-hint">qwen 模型曾在 6 个以上并发时触发网关限流；限流时整条队列会暂停等待。</div>}
-      <span hidden data-concurrency={concurrency} />
     </>
   );
 }
@@ -183,7 +180,6 @@ export function SettingsPanel({ settings, onClose, dataRoot }: Props) {
 
         <ConcurrencyRow
           draft={concurrencyDraft}
-          concurrency={view.concurrency}
           highConcurrency={view.highConcurrency}
           concurrencyHint={view.concurrencyHint}
           onChange={setConcurrencyDraft}

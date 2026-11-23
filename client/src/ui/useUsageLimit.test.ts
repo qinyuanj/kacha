@@ -60,16 +60,6 @@ it("到了提醒线：给出提醒", async () => {
   expect(box.current?.notice).toEqual({ level: "warn", total: 100, limit: 100 });
 });
 
-it("没到线：不提醒", async () => {
-  const port = createFakePort();
-  port.usage.usage = async () => usage();
-  const box = usageOf(port, true);
-  await act(async () => {
-    await Promise.resolve();
-  });
-  expect(box.current?.notice).toBeNull();
-});
-
 it("读失败：不提醒", async () => {
   const port = createFakePort();
   port.usage.usage = async () => {

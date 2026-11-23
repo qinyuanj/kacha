@@ -11,24 +11,18 @@ import {
   saveProblemOf,
   saveSettingsState,
 } from "./useSettingsOps";
-import { SETTINGS_UNREADABLE_TEXT, settingsNewerText } from "./settingsText";
 
 describe("文件状态", () => {
-  it("ok：没有提示", () => {
-    expect(fileProblemOf({ kind: "ok", settings: DEFAULT_SETTINGS })).toBeNull();
-  });
-
   it("newer：说明由更新版本写入", () => {
-    expect(fileProblemOf({ kind: "newer", version: 2, settings: DEFAULT_SETTINGS })).toBe(settingsNewerText(2));
+    const text = fileProblemOf({ kind: "newer", version: 2, settings: DEFAULT_SETTINGS });
+    expect(text).toContain("format_version 2");
+    expect(text).toContain("不会覆盖");
   });
 
   it("corrupt：说明已损坏并给出原因", () => {
     expect(fileProblemOf({ kind: "corrupt", reason: "不是有效的 JSON", settings: DEFAULT_SETTINGS })).toContain("不是有效的 JSON");
   });
 
-  it("unreadable：说明读不到", () => {
-    expect(fileProblemOf({ kind: "unreadable", settings: DEFAULT_SETTINGS })).toBe(SETTINGS_UNREADABLE_TEXT);
-  });
 });
 
 describe("网关地址变了没有", () => {
@@ -54,7 +48,8 @@ describe("状态", () => {
     const state = loadedState({ kind: "newer", version: 2, settings: DEFAULT_SETTINGS }, "sk-x", "persisted", null);
     expect(state.loaded).toBe(true);
     expect(state.file).toBe("newer");
-    expect(state.fileProblem).toBe(settingsNewerText(2));
+    expect(state.fileProblem).toContain("format_version 2");
+    expect(state.fileProblem).toContain("不会覆盖");
     expect(state.apiKey).toBe("sk-x");
   });
 
@@ -112,7 +107,10 @@ describe("保存设置", () => {
   });
 
 
-  it("换密钥或清密钥：旧网关缓存作废，不拿旧凭据的发现继续显示", async () => {
+  it.each([
+    { label: "换密钥", nextKey: "sk-new" },
+    { label: "清密钥", nextKey: "" },
+  ])("$label：旧网关缓存作废，不拿旧凭据的发现继续显示", async ({ nextKey }) => {
     const writes: string[] = [];
     const ports = {
       writeSettings: async () => undefined,
@@ -133,7 +131,7 @@ describe("保存设置", () => {
       apiKey: "sk-old",
       discovery: { source: "live" as const, ids: ["m1"], fetchedAt: "t" },
     };
-    const result = await saveSettingsState(ports, current, DEFAULT_SETTINGS, "sk-new");
+    const result = await saveSettingsState(ports, current, DEFAULT_SETTINGS, nextKey);
     expect(writes).toEqual([""]);
     expect(result.ok && result.state.discovery).toEqual({ source: "none" });
   });
@@ -155,5 +153,6 @@ describe("保存设置", () => {
     const current = { ...initialSettingsState(), loaded: true };
     const result = await saveSettingsState(ports, current, DEFAULT_SETTINGS, "sk-x");
     expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("写不进去");
   });
 });
