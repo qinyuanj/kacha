@@ -2,6 +2,8 @@ package localservice
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"image"
 	"image/color"
 	"image/png"
@@ -45,8 +47,10 @@ func TestInspectImage(t *testing.T) {
 	if info.Bytes != int64(buf.Len()) {
 		t.Fatalf("bytes = %d, want %d", info.Bytes, buf.Len())
 	}
-	if len(info.SHA256) != 64 {
-		t.Fatalf("sha256 = %q", info.SHA256)
+	// 期望摘要由测试自己算：同长度的错值不能过。
+	wantSum := sha256.Sum256(buf.Bytes())
+	if want := hex.EncodeToString(wantSum[:]); info.SHA256 != want {
+		t.Fatalf("sha256 = %q, want %q", info.SHA256, want)
 	}
 	if info.HasAlpha {
 		t.Fatalf("不透明图不该报 alpha")
