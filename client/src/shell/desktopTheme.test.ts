@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 // 原生主题同步（#221）：桌面适配器把档位原文交给 Go 侧 Shell.SetTheme。
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const runtimeCall = vi.fn();
+vi.mock("mygo-runtime", () => ({ call: (method: string, ...args: unknown[]) => runtimeCall(method, ...args) }));
 
 import { createDesktopPort, type DesktopBridge, type DesktopInfo } from "./desktop";
 import { mygoBridge } from "./desktopBridge";
@@ -21,7 +24,8 @@ function recordingBridge(handlers: Record<string, (...args: unknown[]) => Promis
     const handler = handlers[method];
     return handler ? handler(...args) : Promise.reject(new Error("没实现：" + method));
   };
-  return { bridge: mygoBridge(callFn), calls };
+  runtimeCall.mockImplementation(callFn);
+  return { bridge: mygoBridge(), calls };
 }
 
 describe("原生主题同步（#221）", () => {
