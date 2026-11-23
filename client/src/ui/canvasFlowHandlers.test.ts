@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // 画布的 React Flow 事件：节点 / 连线变更、拖拽与缩放的合并编号、拖线松手的三种落点、
 // 删除前的「先取消再删除」确认、视口变更与跳转居中。替身注入选区句柄与写入入口，落点命中用替身元素。
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -144,8 +145,16 @@ const paneElement = () => element({ ".react-flow__node": null, ".react-flow": {}
 /** 工具栏 / 小地图 / 控件（不是落点）。 */
 const chromeElement = () => element({ ".react-flow__node": null, ".react-flow": {} as Element, [PANEL]: {} as Element });
 
+/** 松手处的命中元素：jsdom 没有布局，用 document.elementFromPoint 的桩回答（生产走的就是这个调用）。 */
+let hitTarget: Element | null = null;
+function hitAt(el: Element | null): void {
+  hitTarget = el;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  hitAt(null);
+  Object.defineProperty(document, "elementFromPoint", { configurable: true, writable: true, value: () => hitTarget });
 });
 
 describe("跨渲染记账", () => {
@@ -301,7 +310,8 @@ describe("拖线松手", () => {
   });
 
   it("端口状态不完整时不按端口拒绝，仍按实际落点处理", () => {
-    const h = harness({ elementAt: paneElement });
+    hitAt(paneElement());
+    const h = harness();
     flowHandlers(h.deps).onConnectEnd(
       mouseUp,
       dropState({ toHandle: { nodeId: "t1", id: "image:0" }, fromNode: xyNode("ref1"), toNode: null }),
@@ -340,7 +350,8 @@ describe("拖线松手", () => {
   });
 
   it("落在没有被分配 id 的端口上也不报错（handleId 记空串，不是 out 端口，没有可建的节点）", () => {
-    const h = harness({ elementAt: paneElement });
+    hitAt(paneElement());
+    const h = harness();
     flowHandlers(h.deps).onConnectEnd(mouseUp, dropState({ fromHandle: { nodeId: "ref1", id: null, type: "source" } }));
     expect(h.performDragCreate.current).not.toHaveBeenCalled();
     expect(h.toast).not.toHaveBeenCalled();
@@ -366,39 +377,45 @@ describe("拖线松手", () => {
   });
 
   it("落在任务卡片上：接到下一个空端口（走连线生效）", () => {
-    const h = harness({ elementAt: () => nodeCardElement("t1") });
+    hitAt(nodeCardElement("t1"));
+    const h = harness();
     flowHandlers(h.deps).onConnectEnd(mouseUp, dropState());
     expect(h.apply).toHaveBeenCalledWith({ kind: "connect", connection: { source: "ref1", sourceHandle: "out", target: "t1", targetHandle: "image:0" } });
   });
 
   it("落在非任务的卡片上：不给连线也不提示", () => {
-    const h = harness({ elementAt: () => nodeCardElement("ref1") });
+    hitAt(nodeCardElement("ref1"));
+    const h = harness();
     flowHandlers(h.deps).onConnectEnd(mouseUp, dropState());
     expect(h.apply).not.toHaveBeenCalled();
     expect(h.toast).not.toHaveBeenCalled();
   });
 
   it("落在锁定的任务卡片上：提示锁定", () => {
-    const h = harness({ elementAt: () => nodeCardElement("t1"), locked: new Set(["t1"]) });
+    hitAt(nodeCardElement("t1"));
+    const h = harness({ locked: new Set(["t1"]) });
     flowHandlers(h.deps).onConnectEnd(mouseUp, dropState());
     expect(h.toast).toHaveBeenCalledWith(LOCKED_HINT);
     expect(h.apply).not.toHaveBeenCalled();
   });
 
   it("落在空白处：拖线建节点，落点换算成画布坐标", () => {
-    const h = harness({ elementAt: paneElement });
+    hitAt(paneElement());
+    const h = harness();
     flowHandlers(h.deps).onConnectEnd(mouseUp, dropState());
     expect(h.performDragCreate.current).toHaveBeenCalledWith("continueEditing", { nodeId: "ref1", handleId: "out", type: "source" }, { x: 24, y: 68 });
   });
 
   it("落在空白处但没有可建的节点：什么也不做", () => {
-    const h = harness({ elementAt: paneElement });
+    hitAt(paneElement());
+    const h = harness();
     flowHandlers(h.deps).onConnectEnd(mouseUp, dropState({ fromHandle: { nodeId: "ref1", id: "image:0", type: "source" } }));
     expect(h.performDragCreate.current).not.toHaveBeenCalled();
   });
 
   it("落在工具栏 / 控件上：不是落点，什么也不做", () => {
-    const h = harness({ elementAt: chromeElement });
+    hitAt(chromeElement());
+    const h = harness();
     flowHandlers(h.deps).onConnectEnd(mouseUp, dropState());
     expect(h.performDragCreate.current).not.toHaveBeenCalled();
     expect(h.apply).not.toHaveBeenCalled();
