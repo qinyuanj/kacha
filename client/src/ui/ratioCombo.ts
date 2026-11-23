@@ -15,7 +15,7 @@ export function ratioComboText(rule: SizeRule, spec: SizeSpec, unsupported: bool
 
 /** 组合框外层的类名：手动的宽高比在当前档发不出去时标「不支持」。 */
 export function ratioComboClass(unsupported: boolean): string {
-  return unsupported ? "ratio-combo ratio-unsupported" : "ratio-combo ";
+  return unsupported ? "ratio-combo ratio-unsupported" : "ratio-combo";
 }
 
 /** 聚焦时填入输入框的文本：自动从空开始（手填即转手动），否则填当前宽高比。 */
