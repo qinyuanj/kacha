@@ -1001,6 +1001,19 @@ describe("画布结构", () => {
     expect(p.onlyRenderVisibleElements).toBe(true);
     expect(p.minZoom).toBe(0.1);
     expect(p.deleteKeyCode).toEqual(["Delete", "Backspace"]);
+    // 画布导航、框选与缩放的关键取值（canvasFlowProps 的真实消费点就是这里）：
+    // 右键/中键拖平移、空格临时平移、左键拖空白框选 + Shift 加选、滚轮/双指缩放、双击不缩放、
+    // 方向键微移交给自己处理（关掉 React Flow 自带的键盘移动）。
+    expect(p.panOnDrag).toEqual([1, 2]);
+    expect(p.panActivationKeyCode).toBe("Space");
+    expect(p.selectionOnDrag).toBe(true);
+    expect(p.selectionMode).toBe("partial");
+    expect(p.selectionKeyCode).toBeNull();
+    expect(p.multiSelectionKeyCode).toBe("Shift");
+    expect(p.zoomOnScroll).toBe(true);
+    expect(p.zoomOnPinch).toBe(true);
+    expect(p.zoomOnDoubleClick).toBe(false);
+    expect(p.disableKeyboardA11y).toBe(true);
     expect(p.defaultViewport).toEqual(props.board.viewport);
     expect(canvasFlowNodes().map((n) => n.id)).toEqual(["p1", "r1", "t1"]);
     expect(canvasFlowNodes().map((n) => [n.type, n.position.x, n.position.y])).toEqual([
