@@ -9,8 +9,9 @@ import (
 )
 
 // Export 按规格把数据根里的文件写进 target：先写临时文件，全部成功才原子改名。
+// overwrite 表示用户已明确确认覆盖已存在的目标；没有确认就只新建不覆盖。
 // 进度逐条目回报；取消时不留目标文件，也不留临时产物。
-func Export(root, target string, spec Spec, onProgress func(Progress), cancelled func() bool) (Result, *Error) {
+func Export(root, target string, spec Spec, overwrite bool, onProgress func(Progress), cancelled func() bool) (Result, *Error) {
 	items, failure := collect(root, spec, false)
 	if failure != nil {
 		return Result{}, failure
@@ -51,7 +52,9 @@ func Export(root, target string, spec Spec, onProgress func(Progress), cancelled
 	if err := temp.Close(); err != nil {
 		return Result{}, failedf("写包失败：%v", err)
 	}
-	if _, err := os.Stat(target); err == nil {
+	// 覆盖保护留在导出这一侧：只有调用方带上用户的明确确认，才允许替换已存在的目标；
+	// 不依赖系统对话框有没有提示过。
+	if _, err := os.Stat(target); err == nil && !overwrite {
 		return Result{}, invalidf("目标已存在，不覆盖：%s", target)
 	}
 	if err := os.Rename(tempPath, target); err != nil {
