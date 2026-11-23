@@ -1,6 +1,6 @@
 // 放大预览弹窗的状态（#137）：从 ui/PreviewDialog.tsx 拆出的模块级函数，便于单测。
 import type { Point01, Rect01 } from "./rects";
-import { dragHandleOf, rectsAfterDrag, regionSetting, startDrag, type Drag } from "./previewRegion";
+import { dragHandleOf, rectsAfterDrag, regionModeOf, regionSetting, startDrag, type Drag } from "./previewRegion";
 import type { RegionTarget } from "./PreviewDialog";
 
 /** 预览弹窗的编辑状态。 */
@@ -16,7 +16,7 @@ export interface PreviewEditState {
 export function startEditState(target: RegionTarget): PreviewEditState {
   return {
     editing: target,
-    regionMode: target.render === "bbox_tag" ? target.coordinateKind ?? "bbox" : "overlay",
+    regionMode: regionModeOf(target),
     rects: target.rects.map((r) => [...r] as Rect01),
     selected: null,
     drag: null,
