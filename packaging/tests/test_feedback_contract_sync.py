@@ -120,7 +120,10 @@ class FeedbackContractSyncTest(unittest.TestCase):
         js = text(DIALOG)
         secret = r"sk-[A-Za-z0-9_-]{6,}|gh[pousr]_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,}"
         credential = r"api[_-]?key|gateway[_-]?key|token|secret|authorization|bearer"
-        for pattern in (secret, credential):
+        # #229：裸 40 位十六进制 Gitea token 与裸占位符，两端必须用同一组模式。
+        bare_hex = r"\b[0-9a-f]{40}\b"
+        placeholder = r"\{\{SECRET_[A-Za-z0-9_]+\}\}"
+        for pattern in (secret, credential, bare_hex, placeholder):
             self.assertIn(pattern, go, "Go 共享脱敏缺少模式")
             self.assertIn(pattern, js, "JS 预览脱敏模式与 Go 不同步")
 
