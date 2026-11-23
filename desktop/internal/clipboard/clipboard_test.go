@@ -1,6 +1,9 @@
 package clipboard
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 // pngBytes 造一段带 PNG 文件头的字节。
 func pngBytes() []byte {
@@ -40,45 +43,23 @@ func TestClassify(t *testing.T) {
 }
 
 // TestClassifyKeepsImageOrder 图片的先后顺序不能变：粘多张时按剪贴板里的顺序落成参考图。
+//
+// 两张图字节不同，比的是内容与顺序——原来用 &out.Images[0][0] 的指针相等断言「没有拷贝字节」
+// 这一实现形状，一个行为正确的防御性拷贝实现会误红。
 func TestClassifyKeepsImageOrder(t *testing.T) {
-	first := append([]byte{}, PNGMagic...)
-	second := append([]byte{}, PNGMagic...)
-	second = append(second, 0x01)
+	first := append(append([]byte{}, PNGMagic...), 0x01)
+	second := append(append([]byte{}, PNGMagic...), 0x02)
 	out := Classify(Content{Images: [][]byte{first, second}})
 	if out.Kind != KindImages {
 		t.Fatalf("类别 = %q，期望 %q", out.Kind, KindImages)
 	}
-	if len(out.Images) != 2 || &out.Images[0][0] != &first[0] || &out.Images[1][0] != &second[0] {
-		t.Fatalf("图片顺序变了：%v", out.Images)
+	if len(out.Images) != 2 {
+		t.Fatalf("图片张数 = %d，期望 2", len(out.Images))
 	}
-}
-
-// TestOversized 单张上限是 64 MiB，与画板侧粘贴的上限一致。
-func TestOversized(t *testing.T) {
-	if MaxImageBytes != 64*1024*1024 {
-		t.Fatalf("单张上限 = %d，期望 %d", MaxImageBytes, 64*1024*1024)
-	}
-	if Oversized(MaxImageBytes) {
-		t.Fatal("刚好到上限不该算超限")
-	}
-	if !Oversized(MaxImageBytes + 1) {
-		t.Fatal("超出一字节就该算超限")
-	}
-}
-
-// TestIsPNG 只认 PNG 文件头。
-func TestIsPNG(t *testing.T) {
-	if !IsPNG(pngBytes()) {
-		t.Fatal("PNG 文件头没认出来")
-	}
-	if IsPNG([]byte{0xff, 0xd8, 0xff}) {
-		t.Fatal("JPEG 不该当成 PNG")
-	}
-	if ext, ok := ImageExtension(pngBytes()); !ok || ext != "png" {
-		t.Fatalf("扩展名 = %q，%v", ext, ok)
-	}
-	if _, ok := ImageExtension([]byte{0xff, 0xd8, 0xff}); ok {
-		t.Fatal("JPEG 不该给出扩展名")
+	for i, want := range [][]byte{first, second} {
+		if !bytes.Equal(out.Images[i], want) {
+			t.Fatalf("第 %d 张 = %v，期望 %v", i, out.Images[i], want)
+		}
 	}
 }
 

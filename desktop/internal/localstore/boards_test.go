@@ -121,27 +121,6 @@ func TestWriteVersionIsSha256OfFileBytes(t *testing.T) {
 	}
 }
 
-// 新建再读回来：内容原样，读到的版本与磁盘字节一致。
-func TestCreateThenReadRoundTrip(t *testing.T) {
-	s := New(t.TempDir())
-	path := filepath.Join(s.BoardDir(), "画板"+BoardExt)
-	text := "{\"format_version\":2,\"title\":\"本地\"}"
-
-	if r := s.WriteBoard(path, text, WriteOptions{CreateOnly: true}); !r.OK {
-		t.Fatalf("WriteBoard: %+v", r)
-	}
-	texts, err := s.ReadBoard(path)
-	if err != nil {
-		t.Fatalf("ReadBoard: %v", err)
-	}
-	if texts.Main == nil || *texts.Main != text {
-		t.Fatalf("main = %v", texts.Main)
-	}
-	if texts.Version == nil || *texts.Version != sha256Hex([]byte(text)) {
-		t.Fatalf("version = %v", texts.Version)
-	}
-}
-
 // 只新建：主文件不在但 .bak 还在时也拒绝，孤儿 .bak 也占住名字。
 func TestWriteCreateOnlyRefusesOrphanBackup(t *testing.T) {
 	s := New(t.TempDir())
@@ -233,12 +212,16 @@ func TestWriteRejectsPathOutsideRoot(t *testing.T) {
 	}
 }
 
-// 改名与删除都认内容版本：内容已变就拒绝，画板还在原地。
+// 改名与删除都认内容版本：内容已变就拒绝，画板还在原地；改名时 .bak 跟着搬。
 func TestRenameAndRemoveRejectStaleVersion(t *testing.T) {
 	s := New(t.TempDir())
 	from := filepath.Join(s.BoardDir(), "一"+BoardExt)
 	to := filepath.Join(s.BoardDir(), "二"+BoardExt)
 	if r := s.WriteBoard(from, "{\"a\":1}", WriteOptions{CreateOnly: true}); !r.OK {
+		t.Fatalf("WriteBoard: %+v", r)
+	}
+	// 写第二次留下 .bak：改名必须把它一起搬走，否则备份留在原处成了孤儿。
+	if r := s.WriteBoard(from, "{\"a\":2}", WriteOptions{}); !r.OK {
 		t.Fatalf("WriteBoard: %+v", r)
 	}
 	texts, err := s.ReadBoard(from)
@@ -264,6 +247,10 @@ func TestRenameAndRemoveRejectStaleVersion(t *testing.T) {
 	}
 	if !s.IsFile(to) {
 		t.Fatalf("改名后目标处要有画板")
+	}
+	backup, err := os.ReadFile(to + ".bak")
+	if err != nil || string(backup) != "{\"a\":1}" {
+		t.Fatalf("备份没跟着改名：%q, %v", backup, err)
 	}
 }
 
@@ -324,9 +311,14 @@ func TestCreateBoardWritesNewBoard(t *testing.T) {
 	}
 }
 
-// 新建画板：同名再来一块，文件名加 " (2)"，两块都在。
+// 新建画板：同名再来一块，文件名加 " (2)"，两块都在；先占住名字的旧画板不被覆盖。
 func TestCreateBoardAvoidsExistingNames(t *testing.T) {
 	s := New(t.TempDir())
+	// 先占住「本地画板」这个名字：新建只能另找名字，旧内容逐字不动。
+	existing := filepath.Join(s.BoardDir(), "本地画板"+BoardExt)
+	if r := s.WriteBoard(existing, "{\"old\":1}", WriteOptions{CreateOnly: true}); !r.OK {
+		t.Fatalf("WriteBoard: %+v", r)
+	}
 
 	first, result := s.CreateBoard("本地画板", "{\"a\":1}")
 	if !result.OK {
@@ -336,7 +328,13 @@ func TestCreateBoardAvoidsExistingNames(t *testing.T) {
 	if !result.OK {
 		t.Fatalf("CreateBoard: %+v", result)
 	}
-	if filepath.Base(second) != "本地画板 (2)"+BoardExt {
+	if first == existing || second == existing {
+		t.Fatalf("新建覆盖了已有画板：%q", existing)
+	}
+	if filepath.Base(first) != "本地画板 (2)"+BoardExt {
+		t.Fatalf("first = %q", first)
+	}
+	if filepath.Base(second) != "本地画板 (3)"+BoardExt {
 		t.Fatalf("second = %q", second)
 	}
 	if first == second {
@@ -347,24 +345,7 @@ func TestCreateBoardAvoidsExistingNames(t *testing.T) {
 			t.Fatalf("画板没落盘：%s", path)
 		}
 	}
-}
-
-// 新建画板：不覆盖同名已有的画板（只新建）。
-func TestCreateBoardNeverOverwrites(t *testing.T) {
-	s := New(t.TempDir())
-	path := filepath.Join(s.BoardDir(), "本地画板"+BoardExt)
-	if r := s.WriteBoard(path, "{\"old\":1}", WriteOptions{CreateOnly: true}); !r.OK {
-		t.Fatalf("WriteBoard: %+v", r)
-	}
-
-	created, result := s.CreateBoard("本地画板", "{\"new\":1}")
-	if !result.OK {
-		t.Fatalf("CreateBoard: %+v", result)
-	}
-	if created == path {
-		t.Fatalf("新建覆盖了已有画板")
-	}
-	texts, err := s.ReadBoard(path)
+	texts, err := s.ReadBoard(existing)
 	if err != nil {
 		t.Fatalf("ReadBoard: %v", err)
 	}

@@ -160,6 +160,8 @@ func TestSniff(t *testing.T) {
 		want Container
 	}{
 		{"PNG", fixture(t, "alpha.png"), ContainerPNG},
+		// 只认文件头、不解码整张图：PNGMagic 开头就算 PNG（IsPNG 的全部契约）。
+		{"PNG 文件头", append(append([]byte{}, PNGMagic...), "garbage"...), ContainerPNG},
 		{"JPEG", fixture(t, "photo.jpg"), ContainerJPEG},
 		{"WebP", fixture(t, "photo.webp"), ContainerWebP},
 		{"TIFF", fixture(t, "photo.tiff"), ContainerTIFF},

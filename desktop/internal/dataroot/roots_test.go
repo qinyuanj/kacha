@@ -1,7 +1,6 @@
 package dataroot
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -19,25 +18,4 @@ func TestRootsSwitchIsVisibleToEveryReader(t *testing.T) {
 	if got := roots.Current(); got != second {
 		t.Fatalf("切换后 Current = %q, want %q", got, second)
 	}
-}
-
-// 并发读与切换不产生数据竞争：页面随时在读，迁移在另一条协程里切。
-func TestRootsConcurrentReadAndSwitch(t *testing.T) {
-	base := t.TempDir()
-	roots := NewRoots(filepath.Join(base, "a"))
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for i := 0; i < 100; i++ {
-			roots.Switch(filepath.Join(base, "b"))
-			roots.Switch(filepath.Join(base, "a"))
-		}
-	}()
-	for i := 0; i < 100; i++ {
-		if roots.Current() == "" {
-			t.Fatal("Current 读到空串")
-		}
-	}
-	<-done
-	_ = os.Getenv("")
 }

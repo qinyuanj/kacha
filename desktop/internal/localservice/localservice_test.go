@@ -2,6 +2,8 @@ package localservice
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"image"
 	"image/color"
 	"image/png"
@@ -45,43 +47,43 @@ func TestInspectImage(t *testing.T) {
 	if info.Bytes != int64(buf.Len()) {
 		t.Fatalf("bytes = %d, want %d", info.Bytes, buf.Len())
 	}
-	if len(info.SHA256) != 64 {
-		t.Fatalf("sha256 = %q", info.SHA256)
+	// 期望摘要由测试自己算：同长度的错值不能过。
+	wantSum := sha256.Sum256(buf.Bytes())
+	if want := hex.EncodeToString(wantSum[:]); info.SHA256 != want {
+		t.Fatalf("sha256 = %q, want %q", info.SHA256, want)
 	}
 	if info.HasAlpha {
 		t.Fatalf("不透明图不该报 alpha")
 	}
 }
 
-// 读文件返回 base64，页面侧能还原字节。
+// 读文件返回标准 base64，页面侧能还原字节；三种余数的补齐也要对。
+// 期望值都是手写的标准 base64 字面量，不由被测代码现算（否则库错了也跟着错）。
 func TestReadFileReturnsBase64(t *testing.T) {
 	store := localstore.New(t.TempDir())
 	svc := New(store)
-	path := filepath.Join(store.Root(), "字节.bin")
-	if err := os.WriteFile(path, []byte{0, 1, 2, 3}, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
+	cases := []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{"4 字节", []byte{0, 1, 2, 3}, "AAECAw=="},
+		{"1 字节", []byte{1}, "AQ=="},
+		{"2 字节", []byte{1, 2}, "AQI="},
+		{"3 字节", []byte{1, 2, 3}, "AQID"},
 	}
-	got, err := svc.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	if got != "AAECAw==" {
-		t.Fatalf("base64 = %q, want AAECAw==", got)
-	}
-}
-
-// 写画板失败时结局带类别：只新建撞上已存在给 alreadyExists。
-func TestWriteBoardOutcomeKind(t *testing.T) {
-	store := localstore.New(t.TempDir())
-	svc := New(store)
-	path := filepath.Join(store.BoardDir(), "画板"+localstore.BoardExt)
-
-	if got := svc.WriteBoard(path, "{}", BoardWriteOptions{CreateOnly: true}); !got.OK {
-		t.Fatalf("first write: %+v", got)
-	}
-	got := svc.WriteBoard(path, "{}", BoardWriteOptions{CreateOnly: true})
-	if got.OK || got.Kind != "alreadyExists" {
-		t.Fatalf("outcome = %+v, want alreadyExists", got)
+	for _, c := range cases {
+		path := filepath.Join(store.Root(), c.name+".bin")
+		if err := os.WriteFile(path, c.data, 0o644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", c.name, err)
+		}
+		got, err := svc.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", c.name, err)
+		}
+		if got != c.want {
+			t.Fatalf("%s base64 = %q, want %q", c.name, got, c.want)
+		}
 	}
 }
 

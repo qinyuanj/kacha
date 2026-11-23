@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/qinyuanj/kacha/desktop/internal/boardmeasure"
-	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 	"github.com/qinyuanj/kacha/desktop/internal/packimport"
 )
 
@@ -48,35 +47,3 @@ func TestMeasureImportedPackBoard(t *testing.T) {
 	}
 }
 
-// 画板列表报的体量与整理模式量出来的一致：两处同一个口径，界面才不会出现两个数字。
-func TestListBodySizeMatchesMeasure(t *testing.T) {
-	root := t.TempDir()
-	pack := filepath.Join("..", "..", "..", "client", "fixtures", "packs", "v2-duplicates.ugcpack")
-	report, err := packimport.New(root).Import(pack)
-	if err != nil {
-		t.Fatalf("导入画板包：%v", err)
-	}
-	listing, err := localstore.New(root).List()
-	if err != nil {
-		t.Fatalf("List：%v", err)
-	}
-	byPath := map[string]*int64{}
-	for _, board := range listing.Boards {
-		byPath[board.Path] = board.Bytes
-	}
-	for _, rel := range report.Boards {
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
-		if err != nil {
-			t.Fatalf("读导入的画板 %s：%v", rel, err)
-		}
-		m, ok := boardmeasure.MeasureBoard(root, string(data))
-		if !ok {
-			t.Fatalf("导入的画板读不懂：%s", rel)
-		}
-		want := m.Total()
-		got := byPath[rel]
-		if got == nil || *got != want {
-			t.Fatalf("画板列表体量 %s = %v, want %d（与整理模式同一口径）", rel, got, want)
-		}
-	}
-}

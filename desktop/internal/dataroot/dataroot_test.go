@@ -48,6 +48,10 @@ func TestResolvePrefersRememberedRoot(t *testing.T) {
 	if got != first {
 		t.Fatalf("root = %q, want remembered %q", got, first)
 	}
+	// 重复启动也只激活记下的那一份：再解析一次不会在旁边多出一份目录。
+	if again, err := Resolve(statePath, second); err != nil || again != first {
+		t.Fatalf("repeated Resolve = %q, %v, want remembered %q", again, err, first)
+	}
 	if _, err := os.Stat(second); !os.IsNotExist(err) {
 		t.Fatalf("default root created despite remembered one: %v", err)
 	}
@@ -96,32 +100,6 @@ func TestResolveRepairsBrokenState(t *testing.T) {
 	state, err := os.ReadFile(statePath)
 	if err != nil || len(state) == 0 || string(state) == "not json" {
 		t.Fatalf("state not repaired: %q, %v", state, err)
-	}
-}
-
-// 只有一份：状态文件里的位置就是唯一一份数据根，Resolve 不产生第二份目录。
-func TestResolveKeepsSingleRoot(t *testing.T) {
-	base := t.TempDir()
-	statePath := filepath.Join(base, "state.json")
-	root := filepath.Join(base, "data")
-
-	for i := 0; i < 3; i++ {
-		if _, err := Resolve(statePath, root); err != nil {
-			t.Fatalf("Resolve #%d: %v", i, err)
-		}
-	}
-	entries, err := os.ReadDir(base)
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
-	}
-	var dirs []string
-	for _, e := range entries {
-		if e.IsDir() {
-			dirs = append(dirs, e.Name())
-		}
-	}
-	if len(dirs) != 1 || dirs[0] != "data" {
-		t.Fatalf("dirs = %v, want exactly [data]", dirs)
 	}
 }
 
