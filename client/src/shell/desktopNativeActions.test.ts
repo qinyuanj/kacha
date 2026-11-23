@@ -2,6 +2,15 @@
 // 桌面壳的原生剪贴板与另存为（#124 A1 / A2）：桌面适配器走 Go 绑定。
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const runtimeCall = vi.fn();
+vi.mock("mygo-runtime", () => ({ call: (method: string, ...args: unknown[]) => runtimeCall(method, ...args) }));
+
+function bridgeWith(callFn: (method: string, ...args: unknown[]) => Promise<unknown>) {
+  runtimeCall.mockImplementation(callFn);
+  return mygoBridge();
+}
+
+
 import { createDesktopPort, type DesktopBridge, type DesktopInfo, type DesktopLocalBridge } from "./desktop";
 import { mygoBridge } from "./desktopBridge";
 
@@ -21,7 +30,7 @@ function recordingBridge(handlers: Record<string, (...args: unknown[]) => Promis
     if (handler) return handler(...args);
     return Promise.reject(new Error("没实现：" + method));
   };
-  return { bridge: mygoBridge(callFn), calls };
+  return { bridge: bridgeWith(callFn), calls };
 }
 
 /** 只实现一个方法的本地桥，其余拒绝。 */

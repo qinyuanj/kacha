@@ -151,20 +151,10 @@ function fileUrl(absPath: string): string {
 }
 
 /** 浏览器能力那一组。 */
-export function desktopMediaStore(root: string): MediaStore {
+export function desktopMediaStore(root: string): Pick<MediaStore, "imageUrl" | "thumbUrl"> {
   return {
     imageUrl: (absPath: string) => servedFileUrl(root, absPath),
     thumbUrl: (absPath: string) => servedFileUrl(root, absPath),
-    pickImages: async (): Promise<never> => unavailable("generation"),
-    pickPackFile: async (): Promise<never> => unavailable("packExport"),
-    uploadReference: async (): Promise<never> => unavailable("generation"),
-    copyText: async (): Promise<never> => unavailable("copyText"),
-    // 各能力用自己的名字，别把「生成尚不可用」当成保存 / 下载的理由（C4）。
-    copyImage: async (): Promise<never> => unavailable("copyImage"),
-    readClipboard: async (): Promise<null> => null,
-    saveCopyAs: async (): Promise<never> => unavailable("saveImage"),
-    downloadImage: async (): Promise<never> => unavailable("downloadImage"),
-    downloadBoardResults: async (): Promise<never> => unavailable("downloadResults"),
   };
 }
 

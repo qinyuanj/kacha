@@ -1,5 +1,14 @@
 // 桌面画板包导出（票 160）：目标选择、facts、后台导出进度、取消与结局都走本机 Pack 服务。
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const runtimeCall = vi.fn();
+vi.mock("mygo-runtime", () => ({ call: (method: string, ...args: unknown[]) => runtimeCall(method, ...args) }));
+
+function bridgeWith(callFn: (method: string, ...args: unknown[]) => Promise<unknown>) {
+  runtimeCall.mockImplementation(callFn);
+  return mygoBridge();
+}
+
 
 import type { PackExportSpec } from "../core/boardPack";
 import { createDesktopPort, type DesktopBridge, type DesktopInfo } from "./desktop";
@@ -28,7 +37,7 @@ function bridgeOf(handlers: Record<string, (...args: unknown[]) => unknown>): { 
     const fn = handlers[method];
     return fn ? Promise.resolve(fn(...args)) : Promise.reject(new Error("未实现：" + method));
   };
-  return { bridge: mygoBridge(callFn), calls };
+  return { bridge: bridgeWith(callFn), calls };
 }
 
 const DONE = {

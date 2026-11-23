@@ -1,7 +1,16 @@
 // 真实桌面桥（#127 / #129）：把 MyGo 绑定折成 DesktopBridge。
 // 这里钉住「页面调用名 = Go 侧绑定名」：名字错了 Go 会返回 notBound，前端只会静默退回
 // paste 事件——原生粘贴那条路就白做了，而且没有任何报错。
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const runtimeCall = vi.fn();
+vi.mock("mygo-runtime", () => ({ call: (method: string, ...args: unknown[]) => runtimeCall(method, ...args) }));
+
+function bridgeWith(callFn: (method: string, ...args: unknown[]) => Promise<unknown>) {
+  runtimeCall.mockImplementation(callFn);
+  return mygoBridge();
+}
+
 
 import type { DesktopInfo } from "./desktop";
 import { mygoBridge } from "./desktopBridge";
@@ -25,15 +34,10 @@ function recordingBridge() {
     if (method === "Local.ArchiveBoard" || method === "Local.UnarchiveBoard") return Promise.resolve({ ok: true, kind: "", message: "", version: "" });
     return Promise.reject(new Error("没实现：" + method));
   };
-  return { bridge: mygoBridge(callFn), calls };
+  return { bridge: bridgeWith(callFn), calls };
 }
 
 describe("网关与密钥句柄（#152）", () => {
-  it("桥上有 gateway 句柄：测试连接与密钥读写都走 Go 绑定", () => {
-    const { bridge } = recordingBridge();
-    expect(bridge.gateway).toBeDefined();
-  });
-
   it("gateway.request() 调用 Gateway.Request——与 Go 侧 BindAs(\"Gateway\", ...) 一致", async () => {
     const { calls } = recordingBridge();
     const res = { status: 200, headers: {}, body: "{}" };
@@ -42,14 +46,14 @@ describe("网关与密钥句柄（#152）", () => {
       if (method === "Gateway.Request") return Promise.resolve(res);
       return Promise.reject(new Error("没实现：" + method));
     };
-    const direct = mygoBridge(callFn);
+    const direct = bridgeWith(callFn);
     await expect(direct.gateway!.request("http://gw/v1/models", "GET", { Accept: "application/json" })).resolves.toEqual(res);
     expect(calls.map((c) => c.method)).toEqual(["Gateway.Request"]);
   });
 
   it("密钥读写与清除分别调用 Gateway.ReadApiKey / WriteApiKey / DeleteApiKey", async () => {
     const calls: string[] = [];
-    const direct = mygoBridge((method) => {
+    const direct = bridgeWith((method) => {
       calls.push(method);
       if (method === "Gateway.ReadApiKey") return Promise.resolve("sk-synthetic");
       return Promise.resolve(undefined);
@@ -62,11 +66,6 @@ describe("网关与密钥句柄（#152）", () => {
 });
 
 describe("剪贴板句柄（#129）", () => {
-  it("桥上有 clipboard 句柄：没有它，readClipboard 恒为 null，原生粘贴不会被调用", () => {
-    const { bridge } = recordingBridge();
-    expect(bridge.clipboard).toBeDefined();
-  });
-
   it("clipboard.read() 调用 Clipboard.Read——与 Go 侧 BindAs(\"Clipboard\", ...) 一致", async () => {
     const { bridge, calls } = recordingBridge();
     await bridge.clipboard!.read();
@@ -115,7 +114,7 @@ describe("本机用量句柄（#159）", () => {
 describe("反馈句柄（#205 / #207）", () => {
   it("feedback.send() 调 Feedback.Send——与 Go 侧 BindAs(\"Feedback\", ...) 一致", async () => {
     const calls: { method: string; args: unknown[] }[] = [];
-    const direct = mygoBridge((method, ...args) => {
+    const direct = bridgeWith((method, ...args) => {
       calls.push({ method, args });
       if (method === "Feedback.Send") return Promise.resolve(FEEDBACK_SUCCESS);
       return Promise.reject(new Error("没实现：" + method));
@@ -128,7 +127,7 @@ describe("反馈句柄（#205 / #207）", () => {
     const calls: { method: string; args: unknown[] }[] = [];
     const spec = { ...FEEDBACK_SPEC, screenshots: [{ name: "a.png", content_type: "image/png", data: "iVBORw==" }] };
     const pack = { kind: "saved" as const, name: "diagnostics.zip", contentType: "application/zip", data: "UEsDBA==" };
-    const direct = mygoBridge((method, ...args) => {
+    const direct = bridgeWith((method, ...args) => {
       calls.push({ method, args });
       if (method === "Feedback.Send") return Promise.resolve(FEEDBACK_SUCCESS);
       if (method === "Diagnostics.Bundle") return Promise.resolve(pack);
