@@ -191,57 +191,7 @@
   margin: 0;
   background: var(--accent-soft-strong);
 }
-/* 定稿：金色描边，角标排在最前。 */
-.node.node-image.node-final {
-  outline: 3px solid var(--final);
-  outline-offset: 1px;
-}
-.node-final .image-badges .badge:first-child {
-  background: var(--final);
-  /* 金底配深色字（#221 的 --text-on-final）：白字压金底只有 2.24 / 2.38:1。 */
-  color: var(--text-on-final);
-  font-weight: 600;
-}
-/* 阶段框：画在节点之下，框不挡指针，只有标题栏可点。 */
-.stage-frame {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: -1;
-  border: 2px dashed var(--border-3);
-  border-radius: 8px;
-  background: var(--border-subtle);
-  pointer-events: none;
-}
-.stage-frame.collapsed {
-  border-style: solid;
-  background: var(--surface-sunken);
-}
-.stage-header {
-  position: absolute;
-  left: 0;
-  bottom: 100%;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 4px 4px;
-  white-space: nowrap;
-  font-size: 13px;
-  pointer-events: auto;
-}
-.stage-frame.collapsed .stage-header {
-  position: static;
-  padding: 4px 8px;
-}
-.stage-name {
-  font-weight: 600;
-  cursor: text;
-}
-.stage-count {
-  color: var(--text-2);
-}
-/* 阶段标题栏与整理条里的按钮：画布域自己的一套外观（base 只给了 primary / danger 变体）。 */
-.stage-header button,
+/* 整理条里的按钮：画布域自己的一套外观（base 只给了 primary / danger 变体）。 */
 .tidy-bar button:not(.primary) {
   padding: 1px 8px;
   font-size: 12px;
@@ -251,54 +201,17 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
-.stage-header button:hover:not(:disabled),
 .tidy-bar button:not(.primary):hover:not(:disabled) {
   background: var(--control-hover);
   border-color: var(--border-3);
 }
-.stage-header button:disabled,
 .tidy-bar button:not(.primary):disabled {
   color: var(--text-3);
   background: var(--surface-sunken);
   border-color: var(--border-1);
   cursor: default;
 }
-.stage-name-input {
-  min-width: 96px;
-  padding: 1px 4px;
-  font-weight: 600;
-}
-/* 整理态两个动作的色调分开：建议保留跟主色（正向），收掉未定稿跟警告色（会删结果）。
- * :not(:disabled) 必须保留 —— 这两条与上面的禁用规则同权重又写在后面，少了它会把置灰按钮染回彩色。 */
-.stage-header button.stage-keep:not(:disabled) {
-  color: var(--accent);
-}
-.stage-header button.stage-prune:not(:disabled) {
-  color: var(--warning-text);
-}
-/* 整理模式（#92）：阶段框加深、标出体量；未定稿结果半透明；顶部浮着整理前后对比。 */
-.stage-frame.tidying {
-  border: 2px solid var(--accent);
-  background: var(--lineage-soft);
-}
-.stage-size {
-  color: var(--accent);
-  font-weight: 600;
-}
-.canvas.tidying .react-flow__node-result .node-image:not(.node-final) {
-  opacity: 0.4;
-}
-/* 建议保留（#144）：系统推断该留的那一张不跟着未定稿一起压暗，标记也排在角标最前。 */
-.canvas.tidying .react-flow__node-result .node-image.node-suggest:not(.node-final) {
-  opacity: 1;
-}
-/* 主色填充 + 反白文字一律用填充主色（--accent 只管文字 / 描边 / 焦点环）：暗色下 #4c8dff 配白字只有 3.20:1。
- * 填充主色见 tokens.css 的 --accent-fill：暗色 #1f6feb 配白字 4.63:1、浅色 #0969da 配白字 5.19:1。 */
-.node-suggest .image-badges .badge:first-child {
-  background: var(--accent-fill);
-  color: var(--text-on-accent);
-  font-weight: 600;
-}
+/* 整理条：浮在画布顶部，显示整理前后的体量对比（#92）。 */
 .tidy-bar {
   position: absolute;
   top: 10px;

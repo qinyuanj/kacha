@@ -17,7 +17,6 @@ import { removeMovedStage } from "./moveOut";
 import { duplicateNodes, nudgeNodes, settleAltDrag } from "./selection";
 import type { Discovery } from "./settings";
 import { autoSizeSpec, manualSizeSpec, withSizeTier } from "./size";
-import { pruneStages } from "./stages";
 
 type Pos = [number, number];
 
@@ -492,9 +491,9 @@ function draft(board: Board, change: BoardChange, env: EditEnv): Draft {
 }
 
 
-/** 后置管线：阶段成员同步 → 图片端口同步 → 自动宽高比重算（锁定任务不动）。无变化时返回原画板。 */
+/** 后置管线：图片端口同步 → 自动宽高比重算（锁定任务不动）。无变化时返回原画板。 */
 function settle(board: Board, env: EditEnv): Board {
-  const synced = syncImagePorts(pruneStages(board));
+  const synced = syncImagePorts(board);
   const dims = (nodeId: string) => {
     const node = synced.nodes.find((n) => n.id === nodeId);
     return node?.type === "reference" || node?.type === "result" ? env.imageSize(node.path) : undefined;

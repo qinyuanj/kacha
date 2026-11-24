@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardBytes, nodesBytes, type BoardMeasure } from "./tidy";
+import { boardBytes, type BoardMeasure } from "./tidy";
 
 const A = "2026-10-01/a";
 const B = "2026-10-02/b";
@@ -16,11 +16,5 @@ const measure: BoardMeasure = {
 describe("整理模式的体量（按任务目录，与画板体量同一口径）", () => {
   it("画板体量 = 引用的各任务目录字节之和", () => {
     expect(boardBytes(measure)).toBe(1362);
-  });
-
-  it("一组节点（如一个阶段）的体量：它们引用的任务目录各算一次；不认识的节点按 0", () => {
-    expect(nodesBytes(measure, ["r1", "ref", "r2"])).toBe(1300);
-    expect(nodesBytes(measure, ["t", "gone"])).toBe(50);
-    expect(nodesBytes(measure, [])).toBe(0);
   });
 });

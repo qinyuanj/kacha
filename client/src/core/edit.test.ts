@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { newBoard, stagesOf, type Board, type BoardEdge, type BoardNode, type PromptNode, type ReferenceNode, type ResultNode, type TaskNode, taskCount } from "./board";
+import { newBoard, type Board, type BoardEdge, type BoardNode, type PromptNode, type ReferenceNode, type ResultNode, type TaskNode, taskCount } from "./board";
 import { BUILTIN_TABLE } from "./capabilities";
 import { continueEditingChange, editBoard, type BoardChange, type EditEnv } from "./edit";
 import { cardDropConnection } from "./dragCreate";
@@ -441,7 +441,7 @@ describe("系统变更", () => {
   });
 });
 
-describe("删除节点后的阶段同步：撤销与重做", () => {
+describe("删除节点：撤销与重做", () => {
   /** 应用一次用户变更并落账，再撤销、重做：撤销回到原画板，重做回到变更后的画板。 */
   function undoable(b: Board, change: BoardChange, e = env()) {
     const r = editBoard(b, change, e);
@@ -452,16 +452,12 @@ describe("删除节点后的阶段同步：撤销与重做", () => {
     expect(redo(back.history, back.board, new Set())!.board).toEqual(r.board);
     return r;
   }
-  const stages = (b: Board) => stagesOf(b).map(({ id, name, nodes, collapsed }) => ({ id, name, nodes, collapsed }));
-  const staged = () => ({ ...board([reference("a"), reference("b"), reference("c"), result("r", "t")]), stages: [{ id: "s1", name: "第一轮", nodes: ["a", "b"], collapsed: false, extra: { color: "blue" } }] });
+  const staged = () => board([reference("a"), reference("b"), reference("c"), result("r", "t")]);
 
-  it("删除节点时一并移出阶段，阶段空了随之删去；撤销删除连同阶段一起回来", () => {
+  it("删除节点后撤销回到原画板、重做回到删完的画板", () => {
     const one = undoable(staged(), { kind: "delete", nodes: ["a"], edges: [], cancelled: [] });
-    expect(stages(one.board)).toEqual([{ id: "s1", name: "第一轮", nodes: ["b"], collapsed: false }]);
-    const all = undoable(staged(), { kind: "delete", nodes: ["a", "b"], edges: [], cancelled: [] });
-    expect(stagesOf(all.board)).toEqual([]);
+    expect(one.board.nodes.map((n) => n.id)).not.toContain("a");
   });
-
 });
 
 describe("不同入口发出同一变更、得到同一结果", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approxSizeText, boardSlotsFullText, DELETE_TASK_TEXT, formatBytes, IMPORT_TEXT, isSlotsFullText, PACK_IMPORT_TEXT, PASTE_TEXT, pasteRefusalText, REGION_TEXT, RELOCATE_TEXT, SAVE_TEXT, sizeNoticeText, slotsRefusal, slotsUsageText, STAGE_TEXT, SUGGEST_KEEP_TEXT, TIDY_TEXT, usageLimitText, VARIANT_TEXT } from "./boardText";
+import { approxSizeText, boardSlotsFullText, DELETE_TASK_TEXT, formatBytes, IMPORT_TEXT, isSlotsFullText, PACK_IMPORT_TEXT, PASTE_TEXT, pasteRefusalText, REGION_TEXT, RELOCATE_TEXT, SAVE_TEXT, sizeNoticeText, slotsRefusal, slotsUsageText, TIDY_TEXT, usageLimitText, VARIANT_TEXT } from "./boardText";
 
 // 期望文案照抄票面（#89 已确认的简洁版），独立于源码，防止同义反复。
 describe("画板位文案（#89）", () => {
@@ -115,13 +115,6 @@ describe("画布动作文案", () => {
   });
 });
 
-// 建议保留（#144）：结果节点上的标记。整理模式里阶段框上的「保留这 N 张」随动作一起移除（#249）。
-describe("建议保留文案（#144）", () => {
-  it("结果节点上的标记", () => {
-    expect(SUGGEST_KEEP_TEXT.badge).toBe("建议保留");
-  });
-});
-
 // 整理模式与画板包导入的既有文案：票面要求 boardText 全覆盖，这里把由 App / 整理条调用的条目也锁住。
 // 整理模式里逐阶段 / 整板的「收掉未定稿」与「自动划分阶段」随动作一起移除（#249）。
 describe("整理模式与画板包导入文案", () => {
@@ -139,12 +132,8 @@ describe("整理模式与画板包导入文案", () => {
   });
 });
 
-// 既有条目里此前没人调用的三条（阶段成员数、画板位满的识别、画板位用量）：补上，票面要求本文件全覆盖。
-describe("阶段与画板位的存量文案", () => {
-  it("阶段收起时写成员数", () => {
-    expect(STAGE_TEXT.count(2)).toBe("2 个节点");
-  });
-
+// 既有条目里此前没人调用的两条（画板位满的识别、画板位用量）：补上，票面要求本文件全覆盖。
+describe("画板位的存量文案", () => {
   it("按统一文案的开头认出「画板位满」：其它报错不算", () => {
     expect(isSlotsFullText(boardSlotsFullText({ used: 9, total: 10 }))).toBe(true);
     expect(isSlotsFullText("存储端口返回 HTTP 500")).toBe(false);

@@ -1,5 +1,5 @@
-// 整理模式的体量（#92）：本机存储按任务目录量出画板（每个节点引用哪些任务目录、每个任务目录多少字节），
-// 这里只做集合运算——画板体量与阶段体量。口径与画板体量一致：同一任务目录在一块画板里只算一次。
+// 画板体量（#92）：本机存储按任务目录量出整块画板（每块画板引用的任务目录各多少字节），
+// 这里只做集合运算——整块画板的字节数。口径与画板体量一致：同一任务目录在一块画板里只算一次。
 
 /** 本机存储对一块画板的度量（POST /api/boards/measure）。 */
 export interface BoardMeasure {
@@ -11,10 +11,5 @@ export interface BoardMeasure {
 
 const sumDirs = (measure: BoardMeasure, dirs: Iterable<string>) => [...new Set(dirs)].reduce((s, d) => s + (measure.dirs[d] ?? 0), 0);
 
-const dirsOf = (measure: BoardMeasure, ids: Iterable<string>) => [...ids].flatMap((id) => measure.nodes[id] ?? []);
-
 /** 画板体量：引用的各任务目录字节之和。 */
 export const boardBytes = (measure: BoardMeasure): number => sumDirs(measure, Object.keys(measure.dirs));
-
-/** 一组节点（如一个阶段的成员）的体量：它们引用的任务目录各算一次。 */
-export const nodesBytes = (measure: BoardMeasure, ids: Iterable<string>): number => sumDirs(measure, dirsOf(measure, ids));

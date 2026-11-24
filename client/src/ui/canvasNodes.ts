@@ -37,8 +37,6 @@ export interface CanvasNodeInput {
   selected: ReadonlySet<string>;
   /** React Flow 回传的实测尺寸；还没有的不在表里。 */
   measured: Readonly<Record<string, { width?: number; height?: number }>>;
-  /** 收起的阶段里的成员节点：React Flow 连同其连线一起隐藏。 */
-  hidden: ReadonlySet<string>;
   /** 谱系高亮：选中任一点时其上下游节点（见 core/iterate 的 lineage）。 */
   lineageNodes: ReadonlySet<string>;
   /** 拖线态；未拖线为 null。 */
@@ -49,8 +47,6 @@ export interface CanvasNodeInput {
   promptDrafts: ReadonlyMap<string, string>;
   /** 图片文件读不到的节点 / 图层键。 */
   missing: ReadonlySet<string>;
-  /** 建议保留的结果节点（#144）：只在整理模式里有，空集即不标。 */
-  suggestKeep: ReadonlySet<string>;
   /** 图片绝对路径 → 读到的图片信息；未读到或读不出为 null / 不在表里。 */
   imageInfos: ReadonlyMap<string, ImageInfo | null>;
   /** 节点 id → 是否带透明通道；不在 Map 里 = 未知。 */
@@ -68,8 +64,8 @@ export interface CanvasNodeInput {
   menuFacts: (selected: ReadonlySet<string>) => MenuFacts;
 }
 
-/** 四类节点共用的 React Flow 字段：位置、选中、隐藏、测量回传与类名。 */
-type NodeBase = Pick<Node, "id" | "position" | "selected" | "hidden" | "measured" | "className">;
+/** 四类节点共用的 React Flow 字段：位置、选中、测量回传与类名。 */
+type NodeBase = Pick<Node, "id" | "position" | "selected" | "measured" | "className">;
 
 /** 画布上真的画出来的节点：本版本不认识的类型没有位置（也永远不渲染）。 */
 type PlacedNode = Exclude<BoardNode, { type: "unknown" }>;
@@ -123,14 +119,12 @@ function imageBox(input: CanvasNodeInput, n: ReferenceNode | ResultNode): { widt
   return input.missing.has(n.id) ? { width } : { width, height };
 }
 
-/** 四类节点共用的字段：位置、选中、隐藏、测量回传与类名（谱系 / 去强调 / 拖线态）。 */
+/** 四类节点共用的字段：位置、选中、测量回传与类名（谱系 / 去强调 / 拖线态）。 */
 function baseNodeOf(input: CanvasNodeInput, n: PlacedNode): NodeBase {
   return {
     id: n.id,
     position: { x: n.pos[0], y: n.pos[1] },
     selected: input.selected.has(n.id),
-    // 收起的阶段里的节点：React Flow 连同其连线一起隐藏。
-    hidden: input.hidden.has(n.id),
     // 承重逻辑（xyflow#3816）：开启 onlyRenderVisibleElements 后，React Flow 只强制渲染还没有 handleBounds（未测量）的节点。
     // 重建的节点不带 measured 时，adoptUserNodes 会清空已测得的 handleBounds，节点（含视口外的）被重新强制渲染、连线闪断；
     // 还没回传到这里的（刚测完、setMeasured 未提交）也要带一个空对象，否则这次重建清空后不会再测，节点永远留在 DOM 中。
@@ -155,13 +149,13 @@ function promptNodeOf(input: CanvasNodeInput, n: PromptNode): Node {
   };
 }
 
-/** 结果节点：结果回灌到任务上才按下游模型规则提示；没接任务不提示。建议保留只在整理模式里有。 */
+/** 结果节点：结果回灌到任务上才按下游模型规则提示；没接任务不提示。 */
 function resultNodeOf(input: CanvasNodeInput, n: ResultNode): Node {
   return {
     ...baseNodeOf(input, n),
     ...imageBox(input, n),
     type: "result",
-    data: { node: n, rules: rulesOf(input, n.id), missing: input.missing.has(n.id), suggestKeep: input.suggestKeep.has(n.id) },
+    data: { node: n, rules: rulesOf(input, n.id), missing: input.missing.has(n.id) },
   };
 }
 

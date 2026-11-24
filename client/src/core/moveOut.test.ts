@@ -181,13 +181,13 @@ describe("移出为新画板：原画板", () => {
     return { table: BUILTIN_TABLE, discovery: { source: "none" }, locked: new Set(locked), imageSize: () => undefined, newId: () => `e${++n}` };
   };
 
-  it("删去移出的节点与相关连线，阶段随之消失；是一次可撤销的用户变更，撤销后阶段恢复", () => {
+  it("删去移出的节点与相关连线；是一次可撤销的用户变更", () => {
     const b = big();
     const r = editBoard(b, { kind: "moveOutStage", stageId: "s1" }, env());
     expect(r.step).toEqual({ label: "移出为新画板" });
     expect(r.board.nodes.map((n) => n.id)).toEqual(["ref", "p0", "t0", "r0", "t9"]);
     expect(r.board.edges).toEqual([edge("p0", "t0", "positive"), systemEdge("t0", "r0")]);
-    expect(stagesOf(r.board).map((s) => s.id)).toEqual(["s0"]);
+    // 阶段记录不再随删节点清理：阶段维护（pruneStages）随阶段特性移除（#250），整条移出流程由 #251 删除。
     const back = undo(recordChange(emptyHistory(), b, r.step!, 0), r.board, new Set())!;
     expect(back.board).toEqual(b);
   });

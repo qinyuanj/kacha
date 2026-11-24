@@ -48,7 +48,7 @@
   --link: #6ea3ff;
   --focus-ring: #6ea3ff;
 
-  /* 语义状态色：成功绿 / 警告黄 / 错误红 / 定稿金 */
+  /* 语义状态色：成功绿 / 警告黄 / 错误红 */
   --success: #3fb950;
   --success-fill: #238636;
   --success-fill-hover: #2ea043;
@@ -66,7 +66,6 @@
   --danger-text: #ff7b72;
   /* 内联危险文字：暗色沿用 --danger，保持原有对比度与观感（#242）。 */
   --danger-inline-text: var(--danger);
-  --final: #d9a521;
 
   /* 透明图棋盘格（随主题，不设开关） */
   --checker-a: #23282f;
@@ -78,7 +77,6 @@
   --port-negative: #e56cc4;
   --edge-system: #6e7681;
   --lineage-glow: rgb(120 170 255 / 55%);
-  --lineage-soft: rgb(120 170 255 / 8%);
   --lineage-edge: rgb(120 170 255 / 40%);
 
   /* 阴影梯度与遮罩 */
@@ -161,7 +159,6 @@
   --danger-text: #c0392b;
   /* 内联危险文字：浅色用专用 token，4.5:1 达标（#242）。 */
   --danger-inline-text: var(--danger-text);
-  --final: #d4a017;
 
   --checker-a: #eeeeee;
   --checker-b: #ffffff;
@@ -171,7 +168,6 @@
   --port-negative: #c2359c;
   --edge-system: #8c959f;
   --lineage-glow: rgb(9 105 218 / 55%);
-  --lineage-soft: rgb(9 105 218 / 5%);
   --lineage-edge: rgb(9 105 218 / 35%);
 
   --shadow-1: 0 1px 3px rgb(0 0 0 / 8%);
@@ -247,9 +243,6 @@
   --media-shadow: rgb(0 0 0 / 90%);
   --guide-outline: #ff3333;
   --guide-fill: rgb(255 0 0 / 20%);
-  /* 定稿金填充上的文字色（供 #223 的定稿角标使用）：深棕 #3d2b00 在两种金上实测
-   * 浅色 #d4a017 → 5.68:1、暗色 #d9a521 → 6.04:1，都 ≥4.5:1；白字在同样的金上只有约 2.4:1。 */
-  --text-on-final: #3d2b00;
 }
 
 :root,

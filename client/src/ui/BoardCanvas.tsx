@@ -61,7 +61,6 @@ import { edgeTypes } from "./edges";
 import { HoverProvider, useHoverLayer } from "./hoverInfo";
 import { nodeTypes } from "./nodes";
 import { DragContext } from "./ports";
-import { StageLayer } from "./stages";
 import { actionBarView, useActionBarHover } from "./useCanvasHover";
 import { useBoardKeyboard } from "./useBoardKeyboard";
 import { useCanvasApply } from "./useCanvasApply";
@@ -70,7 +69,7 @@ import { imageImportPorts, useCanvasDrop } from "./useCanvasDrop";
 import { useCanvasInteraction } from "./useCanvasInteraction";
 import { useCanvasOverlaysState } from "./useCanvasOverlaysState";
 import { useCanvasSelectionState } from "./useCanvasSelectionState";
-import { useCanvasStageView } from "./useCanvasStageView";
+import { useTidyMeasure } from "./tidy";
 
 /** 拖线建节点的落点处理：松手处建哪类节点（见 core/dragCreate）。 */
 type DragCreate = (action: BoardAction, from: DragFrom, at: { x: number; y: number }) => void;
@@ -150,7 +149,6 @@ export function BoardCanvas({
   focus,
   tidying,
   onTidyChange,
-  onMoveOutStage,
   readOnly = false,
   modalOpen = false,
   theme,
@@ -173,7 +171,7 @@ export function BoardCanvas({
   const canvasData = useCanvasData({ board, boardFile, userRoot, table, locked, handled, runNodes, applyChange });
   const overlays = useCanvasOverlaysState({ flow, selectedRef, setSelectedNodes, clearPromptFocus: () => requestPromptFocus(null) });
   const actionBar = useActionBarHover();
-  const stageView = useCanvasStageView({ board, readOnly, measured, tidying, toast, onMoveOutStage });
+  const tidyMeasure = useTidyMeasure(board, tidying);
   const nav = useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen: overlays.dialogOpenRef, apply, isEditableTarget: port.ui.isEditableTarget });
   const hover = useHoverLayer();
 
@@ -192,12 +190,12 @@ export function BoardCanvas({
   const nodes = useMemo<Node[]>(
     () =>
       canvasNodes({
-        board, table, userRoot, selected: selectedNodes, measured, hidden: stageView.hidden,
-        lineageNodes: highlighted.nodes, drag, focusPrompt, promptDrafts, missing: canvasData.missing, suggestKeep: stageView.suggestKeep,
+        board, table, userRoot, selected: selectedNodes, measured,
+        lineageNodes: highlighted.nodes, drag, focusPrompt, promptDrafts, missing: canvasData.missing,
         imageInfos: canvasData.imageInfos, alphaByNode: canvasData.alphaByNode, discovery, concurrency, expanded, locked,
         runStateOf: canvasData.runStateOf, statusOf: canvasData.statusOf, menuFacts,
       }),
-    [board, table, userRoot, selectedNodes, measured, stageView.hidden, stageView.suggestKeep, highlighted, drag, focusPrompt, promptDrafts, canvasData.missing, canvasData.imageInfos, canvasData.alphaByNode, discovery, concurrency, expanded, locked, canvasData.runStateOf, canvasData.statusOf, menuFacts],
+    [board, table, userRoot, selectedNodes, measured, highlighted, drag, focusPrompt, promptDrafts, canvasData.missing, canvasData.imageInfos, canvasData.alphaByNode, discovery, concurrency, expanded, locked, canvasData.runStateOf, canvasData.statusOf, menuFacts],
   );
   const edges = useMemo<Edge[]>(
     () => canvasEdges({ board, selectedEdges, selectedNodes, lineageEdges: highlighted.edges, dragging, expanded }),
@@ -368,10 +366,6 @@ export function BoardCanvas({
               minZoom={0.1}
             >
               <Background {...canvasTheme.background} />
-              <StageLayer
-                boxes={stageView.boxes}
-                tidy={stageView.stageTidy}
-              />
               <Controls />
               <MiniMap {...canvasTheme.minimap} />
               <CanvasActionBar
@@ -392,7 +386,7 @@ export function BoardCanvas({
               onClosePreview={overlays.closePreview}
               toast={toast}
               tidying={tidying}
-              tidyMeasure={stageView.tidyMeasure}
+              tidyMeasure={tidyMeasure}
               onTidyDone={() => onTidyChange(false)}
               hoverLayer={hover.layer}
             />

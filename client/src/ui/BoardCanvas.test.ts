@@ -10,7 +10,7 @@ import { createRoot, type Root } from "react-dom/client";
 import type { Edge as FlowEdge, Node as FlowNode, ReactFlowProps } from "@xyflow/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { readOnlyMenu } from "../core/archive";
-import { newBoard, type Board, type BoardEdge, type BoardNode, type PortRef, type TaskNode } from "../core/board";
+import { newBoard, parseBoard, serializeBoard, type Board, type BoardEdge, type BoardNode, type PortRef, type TaskNode } from "../core/board";
 import { BUILTIN_TABLE } from "../core/capabilities";
 import { actionBarItems, menuItems, type BoardAction, type MenuFacts, type MenuItem } from "../core/contextMenu";
 import type { BoardChange, EditResult } from "../core/edit";
@@ -124,6 +124,14 @@ function sampleBoard(): Board {
   board.nodes = [promptNode("p1", [40, 60]), referenceNode("r1", [320, 60]), taskNode("t1", [600, 60])];
   board.edges = [userEdge(["p1", "positive"], ["t1", "positive"]), userEdge(["r1", "out"], ["t1", "image:0"])];
   return board;
+}
+
+/** 旧画板：把 stages 这类历史字段塞回序列化后的 JSON 再解析，等价于打开一份带阶段数据的画板文件。 */
+function legacyBoard(board: Board, extra: Record<string, unknown>): Board {
+  const raw = { ...(JSON.parse(serializeBoard(board)) as Record<string, unknown>), ...extra };
+  const parsed = parseBoard(JSON.stringify(raw));
+  if (parsed.kind !== "ok") throw new Error(`夹具画板应能打开：${parsed.kind === "corrupt" ? parsed.reason : parsed.kind}`);
+  return parsed.board;
 }
 
 // ---- 渲染脚手架 ----
@@ -863,11 +871,14 @@ describe("画布结构", () => {
     expect(harness.onTidyChange).toHaveBeenCalledWith(false);
   });
 
-  it("阶段框作为一层接进画布（内容本身由 StageLayer 与 ui/stages 拥有）", async () => {
-    const board = sampleBoard();
-    board.stages = [{ id: "s1", name: "第一批", nodes: ["p1", "r1"], collapsed: false, extra: {} }];
+  it("带阶段数据的旧画板照常打开：没有阶段框，收起的阶段也不再隐藏成员", async () => {
+    // 阶段特性已移除（#250）：文件里的 stages 不再画成框，collapsed 也不再让成员消失。
+    const board = legacyBoard(sampleBoard(), { stages: [{ id: "s1", name: "第一批", nodes: ["p1", "r1"], collapsed: true }] });
     await renderCanvas({ board });
-    expect(container.querySelector('[data-stage-id="s1"]')).not.toBeNull();
+    expect(container.querySelector('[data-stage-id="s1"]')).toBeNull();
+    expect(container.querySelector(".stage-frame")).toBeNull();
+    expect(canvasFlowNodes().map((n) => n.id)).toEqual(["p1", "r1", "t1"]);
+    expect(canvasFlowNodes().filter((n) => n.hidden)).toEqual([]);
   });
 
   it("跳转请求把视口居中到该节点并选中它", async () => {

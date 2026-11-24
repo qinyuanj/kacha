@@ -11,7 +11,6 @@ import {
   runCopies,
   taskCount,
   uniqueBoardFileName,
-  isFinal,
   stagesOf,
   type Board,
 } from "./board";
@@ -240,7 +239,7 @@ describe("阶段与定稿（format_version 2）", () => {
     const parsed = parseBoard(V1);
     if (parsed.kind !== "ok") throw new Error(parsed.kind);
     expect(stagesOf(parsed.board)).toEqual([]);
-    expect(parsed.board.nodes.some((n) => n.type === "result" && isFinal(n))).toBe(false);
+    expect(parsed.board.nodes.some((n) => n.type === "result" && n.final === true)).toBe(false);
     const raw = JSON.parse(serializeBoard(parsed.board));
     expect(raw.format_version).toBe(2);
     expect(BOARD_FORMAT_VERSION).toBe(2);
@@ -254,7 +253,7 @@ describe("阶段与定稿（format_version 2）", () => {
     const parsed = parseBoard(JSON.stringify(raw));
     if (parsed.kind !== "ok") throw new Error(parsed.kind);
     expect(stagesOf(parsed.board)).toEqual([{ id: "s1", name: "第一轮", nodes: ["r"], collapsed: true, extra: { color: "blue" } }]);
-    expect(isFinal(parsed.board.nodes[0])).toBe(true);
+    expect((parsed.board.nodes[0] as { final?: true }).final).toBe(true);
     const again = JSON.parse(serializeBoard(parsed.board));
     expect(again.stages).toEqual(raw.stages);
     expect(again.nodes[0].final).toBe(true);
