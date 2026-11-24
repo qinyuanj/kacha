@@ -42,6 +42,7 @@ func TestBindServicesExposePageMethods(t *testing.T) {
 		service string
 		methods []string
 	}{
+		{"Feedback", []string{"Feedback.AuthReset", "Feedback.AuthStart", "Feedback.AuthStatus", "Feedback.Send"}},
 		{"Usage", []string{"Usage.Cleanup", "Usage.PurgeExpired", "Usage.Recycle", "Usage.Restore", "Usage.SetLimit", "Usage.Usage"}},
 		{"Clipboard", []string{"Clipboard.CopyImage", "Clipboard.Read", "Clipboard.WriteText"}},
 		{"Pack", []string{"Pack.Cancel", "Pack.CancelExport", "Pack.Export", "Pack.ExportSnapshot", "Pack.Facts", "Pack.Pick", "Pack.PickExport", "Pack.Root", "Pack.Snapshot", "Pack.Start"}},

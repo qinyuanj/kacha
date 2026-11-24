@@ -59,7 +59,7 @@ type Candidate struct {
 	Descriptor Manifest
 }
 
-// ReleaseURL 是这份发行在 Gitea 上的页面，手动下载入口用它。
+// ReleaseURL 是这份发行在 Gitea 上的页面，仅作发行信息保留。
 func ReleaseURL(base, ownerRepo, version string) string {
 	return fmt.Sprintf("%s/%s/releases/tag/v%s", strings.TrimRight(base, "/"), ownerRepo, version)
 }

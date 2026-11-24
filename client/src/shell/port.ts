@@ -306,9 +306,26 @@ export const FEEDBACK_UNAVAILABLE: FeedbackOutcome = {
   url: undefined,
 };
 
-/** 反馈端口：单一 Send(spec) 方法（#205）。 */
+/** Gitea 授权状态：不含 token，页面只按这几个稳定字段分支。 */
+export interface FeedbackAuthStatus {
+  authorized: boolean;
+  pending: boolean;
+  message: string;
+}
+
+/** 一键授权起点；URL 给浏览器没自动打开时复制使用。 */
+export interface FeedbackAuthStart {
+  ok: boolean;
+  url: string;
+  message: string;
+}
+
+/** 反馈端口：发送与 Gitea 本机授权（#205 / #242）。 */
 export interface FeedbackPort {
   send(spec: FeedbackSpec): Promise<FeedbackOutcome>;
+  authStatus(): Promise<FeedbackAuthStatus>;
+  authStart(): Promise<FeedbackAuthStart>;
+  authReset(): Promise<void>;
 }
 
 /** 诊断包导出的类型化结局：取消没有成功提示，失败带可显示的原因。 */

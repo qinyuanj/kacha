@@ -15,8 +15,6 @@ export interface UpdateSectionView {
   /** 当前版本与可更新版本，供面板标题用。 */
   current: string;
   version: string;
-  /** 手动下载入口：检查失败或安装失败时给发行页面。 */
-  pageUrl: string;
   /** 正在准备（保存与等在途操作）：按钮要禁用并说明。 */
   preparing: boolean;
   /** 准备期间被拒绝的原因（任务未完成、保存失败）。 */
@@ -37,8 +35,6 @@ export function updateSectionView(input: {
     progress: progressText(snapshot),
     current: snapshot.current,
     version: snapshot.version,
-    // 只有失败时才给手动下载入口：正常流程里用户不需要它。
-    pageUrl: snapshot.phase === "error" || snapshot.phase === "ready" ? snapshot.page_url : "",
     preparing: input.preparing,
     prepareError: input.prepareError,
   };

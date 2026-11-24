@@ -29,10 +29,10 @@ export const FEEDBACK_FAILURE_MESSAGES = {
 } as const;
 
 /** 预览只说明 token 的去向，不展示 token 值。 */
-export const FEEDBACK_TOKEN_NOTICE = "使用你的 Gitea token 提交到 kacha-feedback";
+export const FEEDBACK_TOKEN_NOTICE = "使用本机 Gitea 授权提交到 kacha-feedback";
 
-/** 预览/发送前必须填写 token：缺 token 时界面给出的明确提示（单一来源）。 */
-export const FEEDBACK_TOKEN_REQUIRED = "请先填写 Gitea token 再预览或发送";
+/** 预览/发送前必须已完成本机授权：缺授权时界面给出的明确提示（单一来源）。 */
+export const FEEDBACK_AUTH_REQUIRED = "请先完成 Gitea 一键授权再预览或发送";
 
 /** 预览里说明 token 的权限范围：只说用途，不展开实现（#216 项3）。 */
 export const FEEDBACK_TOKEN_SCOPE = "权限限于对 kacha-feedback 建 issue、评论、打标签与上传附件";

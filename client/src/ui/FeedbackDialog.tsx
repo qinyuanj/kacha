@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { DiagnosticsPackOutcome, FeedbackAttachment, FeedbackKind, FeedbackOutcome, FeedbackSpec } from '../shell/port';
-import { FEEDBACK_CATEGORIES, FEEDBACK_FAILURE_MESSAGES as FEEDBACK_MESSAGES, FEEDBACK_MAX_SCREENSHOT_BYTES as MAX_SCREENSHOT_BYTES, FEEDBACK_MAX_SCREENSHOTS as MAX_SCREENSHOTS, FEEDBACK_TOKEN_NOTICE, FEEDBACK_TOKEN_REQUIRED, FEEDBACK_TOKEN_SCOPE, feedbackCategoryLabel } from '../core/feedback';
+import type { DiagnosticsPackOutcome, FeedbackAttachment, FeedbackAuthStatus, FeedbackKind, FeedbackOutcome, FeedbackSpec } from '../shell/port';
+import { FEEDBACK_AUTH_REQUIRED, FEEDBACK_CATEGORIES, FEEDBACK_FAILURE_MESSAGES as FEEDBACK_MESSAGES, FEEDBACK_MAX_SCREENSHOT_BYTES as MAX_SCREENSHOT_BYTES, FEEDBACK_MAX_SCREENSHOTS as MAX_SCREENSHOTS, FEEDBACK_TOKEN_NOTICE, FEEDBACK_TOKEN_SCOPE, feedbackCategoryLabel } from '../core/feedback';
 import { useShell } from './shell';
+import { useFeedbackAuth } from './useFeedbackAuth';
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg'];
 
@@ -100,7 +101,6 @@ interface FeedbackSpecInput {
   boardName: string;
   relayUrl?: string;
   contact: string;
-  token: string;
   screenshots: FeedbackAttachment[];
   diagnosticsPack: FeedbackAttachment | null;
 }
@@ -118,7 +118,6 @@ function feedbackSpecOf(input: FeedbackSpecInput): FeedbackSpec {
     board_name: feedbackBoardName(input.boardName),
     ...(input.relayUrl ? { relay_url: input.relayUrl } : {}),
     ...(contact ? { contact } : {}),
-    ...(input.token.trim() ? { gitea_token: input.token.trim() } : {}),
     ...(input.screenshots.length ? { screenshots: input.screenshots } : {}),
     ...(input.diagnosticsPack ? { diagnostics_pack: input.diagnosticsPack } : {}),
   };
@@ -204,12 +203,33 @@ interface FeedbackFormProps {
   category: string; setCategory: Setter<string>;
   body: string; setBody: Setter<string>;
   contact: string; setContact: Setter<string>;
-  token: string; setToken: Setter<string>; tokenVisible: boolean; setTokenVisible: Setter<boolean>;
+  auth: FeedbackAuthStatus; authBusy: boolean; authUrl: string; authMessage: string; onAuthStart(): void;
   screenshots: FeedbackAttachment[]; setScreenshots: Setter<FeedbackAttachment[]>;
   diagnosticsPack: FeedbackAttachment | null; attachmentError: string;
   diagnosticsAvailable: boolean;
   onPick(): void; onToggleDiagnostics(pressed: boolean): void;
   onClose(): void; onPreview(): void;
+}
+
+interface FeedbackAuthRowProps {
+  auth: FeedbackAuthStatus; busy: boolean; url: string; message: string; onStart(): void;
+}
+
+function FeedbackAuthRow(props: FeedbackAuthRowProps) {
+  return (
+    <div className='form-row feedback-auth'>
+      {props.auth.authorized ? (
+        <span className='form-row-hint'>已完成 Gitea 一键授权；发送时由本机安全提供 token，无需粘贴。</span>
+      ) : (
+        <>
+          <button type='button' onClick={props.onStart} disabled={props.busy || props.auth.pending}>{props.auth.pending ? '等待授权…' : '一键授权 Gitea'}</button>
+          <span className='form-row-hint'>授权 token 只保存在本机，提交时随本次请求交给中继。</span>
+          {(props.message || props.auth.message) && <span className='form-error modal-foot-note' role='alert'>{props.message || props.auth.message}</span>}
+          {props.url && <a href={props.url} target='_blank' rel='noreferrer'>打开授权页面</a>}
+        </>
+      )}
+    </div>
+  );
 }
 
 function FeedbackForm(props: FeedbackFormProps) {
@@ -231,14 +251,7 @@ function FeedbackForm(props: FeedbackFormProps) {
         <span className='form-row-label'>称呼或联系方式（可选，默认匿名）</span>
         <input value={props.contact} placeholder='匿名' onChange={(event) => props.setContact(event.target.value)} />
       </label>
-      <label className='form-row'>
-        <span className='form-row-label'>Gitea token（仅本次提交）</span>
-        <input type={props.tokenVisible ? 'text' : 'password'} value={props.token} placeholder='粘贴你的 Gitea token' onChange={(event) => props.setToken(event.target.value)} />
-      </label>
-      <div className='form-row feedback-actions'>
-        <button type='button' onClick={() => props.setTokenVisible(!props.tokenVisible)}>{props.tokenVisible ? '隐藏 token' : '显示 token'}</button>
-        <span className='form-row-hint'>仅本次提交给 kacha-feedback 的中继，不保存、不进预览。</span>
-      </div>
+      <FeedbackAuthRow auth={props.auth} busy={props.authBusy} url={props.authUrl} message={props.authMessage} onStart={props.onAuthStart} />
       <div className='form-row feedback-pick-row'>
         <span className='form-row-label'>截图（可粘贴，0–5 张 PNG/JPG，单张 ≤10MB）</span>
         <button type='button' onClick={props.onPick}>选择截图</button>
@@ -267,9 +280,9 @@ function FeedbackForm(props: FeedbackFormProps) {
       </div>
       {props.attachmentError && <div className='form-alert form-alert-error' role='alert'>{props.attachmentError}</div>}
       <div className='modal-foot'>
-        {!props.token.trim() && <span className='form-error modal-foot-note' role='alert'>{FEEDBACK_TOKEN_REQUIRED}</span>}
+        {!props.auth.authorized && <span className='form-error modal-foot-note' role='alert'>{FEEDBACK_AUTH_REQUIRED}</span>}
         <button onClick={props.onClose}>取消</button>
-        <button className='primary' onClick={props.onPreview} disabled={!props.body.trim() || !props.token.trim()}>预览</button>
+        <button className='primary' onClick={props.onPreview} disabled={!props.body.trim() || !props.auth.authorized}>预览</button>
       </div>
     </>
   );
@@ -373,8 +386,7 @@ export function FeedbackDialog({ version, build, boardName, relayUrl, onClose }:
   const [category, setCategory] = useState<string>(FEEDBACK_CATEGORIES[0].code);
   const [body, setBody] = useState('');
   const [contact, setContact] = useState('');
-  const [token, setToken] = useState('');
-  const [tokenVisible, setTokenVisible] = useState(false);
+  const authView = useFeedbackAuth(port);
   const [screenshots, setScreenshots] = useState<FeedbackAttachment[]>([]);
   const [diagnosticsPack, setDiagnosticsPack] = useState<FeedbackAttachment | null>(null);
   const [attachmentError, setAttachmentError] = useState('');
@@ -389,7 +401,7 @@ export function FeedbackDialog({ version, build, boardName, relayUrl, onClose }:
     closeRef.current?.focus();
   }, []);
 
-  const spec = feedbackSpecOf({ title, category, body, version, build, boardName, relayUrl, contact, token, screenshots, diagnosticsPack });
+  const spec = feedbackSpecOf({ title, category, body, version, build, boardName, relayUrl, contact, screenshots, diagnosticsPack });
   const attachmentSummary = [
     screenshots.length ? `截图 ${screenshots.length} 张（${screenshots.map((a) => a.name).join('、')}）` : '截图 0 张（无）',
     `诊断包 ${diagnosticsPack?.name ?? '未附带'}`,
@@ -409,7 +421,7 @@ export function FeedbackDialog({ version, build, boardName, relayUrl, onClose }:
           <h2 id='feedback-title'>反馈</h2>
           <button ref={closeRef} className='icon-button' aria-label='关闭反馈' onClick={onClose}>✕</button>
         </div>
-        {step === 'form' && <FeedbackForm title={title} setTitle={setTitle} category={category} setCategory={setCategory} body={body} setBody={setBody} contact={contact} setContact={setContact} screenshots={screenshots} setScreenshots={setScreenshots} diagnosticsPack={diagnosticsPack} attachmentError={attachmentError} diagnosticsAvailable={!!port.features.diagnostics} onPick={() => void pick()} onToggleDiagnostics={(pressed) => void toggle(pressed)} token={token} setToken={setToken} tokenVisible={tokenVisible} setTokenVisible={setTokenVisible} onClose={onClose} onPreview={() => setStep('preview')} />}
+        {step === 'form' && <FeedbackForm title={title} setTitle={setTitle} category={category} setCategory={setCategory} body={body} setBody={setBody} contact={contact} setContact={setContact} screenshots={screenshots} setScreenshots={setScreenshots} diagnosticsPack={diagnosticsPack} attachmentError={attachmentError} diagnosticsAvailable={!!port.features.diagnostics} onPick={() => void pick()} onToggleDiagnostics={(pressed) => void toggle(pressed)} auth={authView.auth} authBusy={authView.busy} authUrl={authView.url} authMessage={authView.message} onAuthStart={authView.start} onClose={onClose} onPreview={() => setStep('preview')} />}
         {step === 'preview' && <FeedbackPreview title={title} setTitle={setTitle} category={category} setCategory={setCategory} body={body} setBody={setBody} spec={spec} attachmentSummary={attachmentSummary} sending={sending} onBack={() => setStep('form')} onClose={onClose} onSend={() => void send(spec)} />}
         {step === 'receipt' && outcome && <FeedbackReceipt outcome={outcome} copied={copied} sending={sending} onClose={onClose} onEditAgain={editAgain} onCopy={() => void copyContent()} onRetry={() => void send(submittedSpec ?? spec)} />}
       </div>

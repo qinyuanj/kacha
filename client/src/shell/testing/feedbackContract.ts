@@ -11,7 +11,6 @@ export const FEEDBACK_SPEC: FeedbackSpec = {
   os: "Windows 11",
   board_name: "角色设定",
   contact: "artist@example.com",
-  gitea_token: "user-token-from-spec",
   relay_url: "http://relay.test",
   screenshots: [{ name: "画面.png", content_type: "image/png", data: "iVBORw0KGgo=" }],
   diagnostics_pack: { name: "diagnostics.zip", content_type: "application/zip", data: "UEsDBA==" },

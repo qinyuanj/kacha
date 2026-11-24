@@ -36,7 +36,7 @@ function errorText(error: string, prepareError: string): string {
 
 /**
  * 版本号旁的入口：能力没开时整段不显示；有新版本时多一个「下载并安装」。
- * 状态长句仍由主界面提示条负责，这里只留入口、失败原因与手动下载。
+ * 状态长句仍由主界面提示条负责，这里只留入口与失败原因；安装失败也只给原因，不给旁路下载。
  */
 export function UpdateToolbarControl({ snapshot, state, check, install }: UpdateToolbarControlProps) {
   const port = useShell();
@@ -67,11 +67,6 @@ export function UpdateToolbarControl({ snapshot, state, check, install }: Update
         >
           {installLabel(state.preparing, snapshot.phase)}
         </button>
-      )}
-      {view.pageUrl && (
-        <a className="topbar-update-link" href={view.pageUrl} target="_blank" rel="noreferrer">
-          手动下载
-        </a>
       )}
       {reason && <span className="topbar-update-error">{reason}</span>}
     </div>

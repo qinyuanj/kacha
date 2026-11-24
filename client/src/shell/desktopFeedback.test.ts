@@ -16,13 +16,26 @@ function bridgeFor(outcome: FeedbackOutcome, hasBridge = true, relayConfigured =
   const bridge: DesktopBridge = {
     info: async () => ({ ...INFO, features: { ...INFO.features, feedback: relayConfigured } }),
     local: {} as DesktopLocalBridge,
-    ...(hasBridge ? { feedback: { send: async (spec: FeedbackSpec) => {
-      seen = spec;
-      return outcome;
-    } } } : {}),
+    ...(hasBridge ? { feedback: {
+      send: async (spec: FeedbackSpec) => {
+        seen = spec;
+        return outcome;
+      },
+      authStatus: async () => ({ authorized: true, pending: false, message: "已授权" }),
+      authStart: async () => ({ ok: true, url: "", message: "已开始授权" }),
+      authReset: async () => undefined,
+    } } : {}),
   };
   return { bridge, lastSpec: () => seen };
 }
+
+it("没有 Feedback 绑定时授权方法给出未授权且可安全清除", async () => {
+  const { bridge } = bridgeFor(FEEDBACK_SUCCESS, false);
+  const { port } = await createDesktopPort(bridge);
+  await expect(port.feedback.authStatus()).resolves.toEqual({ authorized: false, pending: false, message: "" });
+  await expect(port.feedback.authStart()).resolves.toEqual({ ok: false, url: "", message: "" });
+  await expect(port.feedback.authReset()).resolves.toBeUndefined();
+});
 
 feedbackPortContract("桌面壳", async (outcome) => {
   const { bridge, lastSpec } = bridgeFor(outcome);

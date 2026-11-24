@@ -116,8 +116,11 @@ describe("首页版本号旁的更新入口", () => {
     expect(hint()).toContain("安装失败");
   });
 
-  it("检查失败时给原因，不给假成功", async () => {
-    await show(createFakePort({ update: { ...emptySnapshot(), phase: "error", error: "网络不可达" } }), { ...emptySnapshot(), phase: "error", error: "网络不可达" });
+  it("检查失败时给原因，不给假成功，也不给手动下载旁路", async () => {
+    const failed = { ...emptySnapshot(), phase: "error" as const, error: "网络不可达", page_url: "https://example.invalid/release" };
+    await show(createFakePort({ update: failed }), failed);
     expect(hint()).toContain("网络不可达");
+    expect(container.querySelector("a.topbar-update-link")).toBeNull();
+    expect(container.textContent).not.toContain("手动下载");
   });
 });

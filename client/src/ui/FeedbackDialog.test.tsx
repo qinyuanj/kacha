@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { ShellProvider } from "./shell";
 import { FeedbackDialog, redactFeedbackText } from "./FeedbackDialog";
-import { FEEDBACK_TOKEN_NOTICE, FEEDBACK_TOKEN_SCOPE } from "../core/feedback";
+import { FEEDBACK_AUTH_REQUIRED, FEEDBACK_TOKEN_NOTICE, FEEDBACK_TOKEN_SCOPE } from "../core/feedback";
 import type { FeedbackAttachment, FeedbackOutcome, FeedbackSpec } from "../shell/port";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -31,10 +31,8 @@ function byText<T extends Element>(selector: string, text: string): T {
   return el;
 }
 
-async function show(port: FakePort, onClose: () => void = () => undefined, relayUrl?: string, token: string | null = "test-token"): Promise<void> {
+async function show(port: FakePort, onClose: () => void = () => undefined, relayUrl?: string): Promise<void> {
   await act(async () => root.render(createElement(ShellProvider, { port, children: createElement(FeedbackDialog, { version: "1.8.0", build: "42", boardName: "/tmp/boards/项目 A.kacha", relayUrl, onClose }) })));
-  // 反馈已要求提交前必须有 Gitea token（#216 项2）：默认预填一个，token 相关的用例再显式覆盖。
-  if (token !== null) await setInput("Gitea token", token);
 }
 
 async function setInput(label: string, value: string): Promise<void> {
@@ -323,7 +321,7 @@ describe("反馈预览、结局与重试（#208）", () => {
     }
   });
 
-  it("失败后返回修改保留标题、分类、正文、附件与 token", async () => {
+  it("失败后返回修改保留标题、分类、正文与附件", async () => {
     const shot = new File([new Uint8Array([137, 80, 78, 71])], "画面.png", { type: "image/png" });
     const port = createFakePort({
       pickImages: [[shot]],
@@ -333,7 +331,6 @@ describe("反馈预览、结局与重试（#208）", () => {
     await show(port);
     await setInput("标题", "原样标题");
     await setInput("正文", "原样正文");
-    await setInput("Gitea token", "keep-this-token");
     await setSelectByVisibleLabel("分类", "建议");
     await click("选择截图");
     await click("附带脱敏诊断包");
@@ -348,13 +345,12 @@ describe("反馈预览、结局与重试（#208）", () => {
     expect((await field("标题") as HTMLInputElement).value).toBe("原样标题");
     expect((await field("分类") as HTMLSelectElement).value).toBe("suggestion");
     expect((await field("正文") as HTMLTextAreaElement).value).toBe("原样正文");
-    expect((await field("Gitea token") as HTMLInputElement).value).toBe("keep-this-token");
     expect(container.textContent).toContain("画面.png");
     expect(findButton("取消附带脱敏诊断包")).not.toBeUndefined();
     expect(port.calls.feedback).toHaveLength(1);
   });
 
-  it("重试直接复用首次提交的完整内容和 token", async () => {
+  it("重试直接复用首次提交的完整内容", async () => {
     let call = 0;
     const port = createFakePort({
       feedbackSend: async () => (call++ === 0 ? { ok: false, kind: "unreachable", message: "不可达" } : SUCCESS),
@@ -362,11 +358,9 @@ describe("反馈预览、结局与重试（#208）", () => {
     await show(port);
     await setInput("标题", "重试标题");
     await setInput("正文", "重试正文");
-    await setInput("Gitea token", "retry-token");
     await click("预览");
     await click("确认发送");
     expect(port.calls.feedback).toHaveLength(1);
-    expect(port.calls.feedback[0].gitea_token).toBe("retry-token");
 
     await click("重试");
     expect(port.calls.feedback).toHaveLength(2);
@@ -374,12 +368,11 @@ describe("反馈预览、结局与重试（#208）", () => {
     expect(byText<HTMLAnchorElement>("a", "#17").href).toBe(SUCCESS.url);
   });
 
-  it("失败后一键复制脱敏内容、绝不复制 token 并禁用已复制按钮", async () => {
+  it("失败后一键复制脱敏内容、不复制正文里的密钥并禁用已复制按钮", async () => {
     const port = createFakePort({ feedbackOutcome: { ok: false, kind: "unreachable", message: "不可达" } });
     await show(port);
     await setInput("标题", "可复制标题");
     await setInput("正文", "打开 C:/secret/项目 失败，api_key: user-api-key-abc");
-    await setInput("Gitea token", "copy-must-not-include-this");
     await click("预览");
     await click("确认发送");
     await click("复制内容");
@@ -390,7 +383,6 @@ describe("反馈预览、结局与重试（#208）", () => {
     expect(copied).toContain("<本地路径>");
     expect(copied).not.toContain("C:/secret/项目");
     expect(copied).not.toContain("user-api-key-abc");
-    expect(copied).not.toContain("copy-must-not-include-this");
     expect(findButton("已复制内容")?.disabled).toBe(true);
   });
 
@@ -425,28 +417,75 @@ describe("反馈预览、结局与重试（#208）", () => {
   });
 });
 
-describe("用户自带 Gitea token（#213）", () => {
-  it("token 输入默认隐藏，可切换显示", async () => {
-    await show(createFakePort());
-    const token = await field("Gitea token") as HTMLInputElement;
-    expect(token.type).toBe("password");
-    await click("显示 token");
-    expect((await field("Gitea token") as HTMLInputElement).type).toBe("text");
-    await click("隐藏 token");
-    expect((await field("Gitea token") as HTMLInputElement).type).toBe("password");
+describe("Gitea 一键授权（#242）", () => {
+  it("未授权时显示一键授权按钮，拦下预览且不发送", async () => {
+    const port = createFakePort({ feedbackAuthStatus: { authorized: false, pending: false, message: "" } });
+    await show(port);
+    await setInput("正文", "未授权正文");
+    expect(findButton("一键授权 Gitea")).not.toBeUndefined();
+    expect(findButton("预览")!.disabled).toBe(true);
+    expect(container.textContent).toContain(FEEDBACK_AUTH_REQUIRED);
+    expect(port.calls.feedback).toHaveLength(0);
   });
 
-  it("预览只说明 token 去向，绝不显示 token 值", async () => {
-    const port = createFakePort();
+  it("点击授权后轮询到已授权即可预览和发送", async () => {
+    const port = createFakePort({ feedbackAuthStatus: { authorized: false, pending: false, message: "" } });
     await show(port);
-    await setInput("正文", "带 token 的反馈");
-    await setInput("Gitea token", "preview-must-not-show-this");
+    const original = port.feedback.authStatus;
+    port.feedback.authStatus = async () => {
+      port.feedback.authStatus = original;
+      return { authorized: true, pending: false, message: "已授权" };
+    };
+    await click("一键授权 Gitea");
+    expect(port.calls.feedbackAuthStart).toBe(1);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1100)); });
+    await setInput("正文", "授权后正文");
+    expect(findButton("预览")!.disabled).toBe(false);
     await click("预览");
-    expect(container.textContent).toContain("使用你的 Gitea token 提交到 kacha-feedback");
-    expect(container.textContent).not.toContain("preview-must-not-show-this");
     await click("确认发送");
-    expect(port.calls.feedback[0].gitea_token).toBe("preview-must-not-show-this");
-    expect(container.textContent).not.toContain("preview-must-not-show-this");
+    expect(port.calls.feedback).toHaveLength(1);
+    expect(port.calls.feedback[0]).not.toHaveProperty("gitea_token");
+  });
+
+  it("一键授权失败时显示可操作原因，不进入等待状态", async () => {
+    const port = createFakePort({
+      feedbackAuthStatus: { authorized: false, pending: false, message: "" },
+      feedbackAuthStart: { ok: false, url: "", message: "本机回调端口不可用" },
+    });
+    await show(port);
+    await click("一键授权 Gitea");
+    await act(async () => undefined);
+    expect(container.textContent).toContain("本机回调端口不可用");
+    expect(findButton("等待授权…")).toBeUndefined();
+  });
+
+  it("浏览器没自动打开时给出可点击的授权地址", async () => {
+    const port = createFakePort({
+      feedbackAuthStatus: { authorized: false, pending: false, message: "" },
+      feedbackAuthStart: { ok: true, url: "https://gitea.test/oauth/authorize", message: "请在浏览器完成授权" },
+    });
+    await show(port);
+    await click("一键授权 Gitea");
+    await act(async () => undefined);
+    const link = [...container.querySelectorAll("a")].find((node) => node.textContent === "打开授权页面") as HTMLAnchorElement;
+    expect(link.href).toContain("https://gitea.test/oauth/authorize");
+  });
+
+  it("授权状态读取失败时不崩，仍给出一键授权入口", async () => {
+    const port = createFakePort();
+    port.feedback.authStatus = async () => { throw new Error("status failure"); };
+    await show(port);
+    expect(findButton("一键授权 Gitea")).not.toBeUndefined();
+  });
+  it("预览只说明本机授权去向与权限范围", async () => {
+    await show(createFakePort());
+    await setInput("正文", "权限说明");
+    await click("预览");
+    expect(container.textContent).toContain("使用本机 Gitea 授权提交到 kacha-feedback");
+    expect(container.textContent).toContain("建 issue");
+    expect(container.textContent).toContain("评论");
+    expect(container.textContent).toContain("打标签");
+    expect(container.textContent).toContain("上传附件");
   });
 
   // #229：脱敏断言必须和输入指向同一个值。逐条先证明它真的在输入里，再证明脱敏后不在了，
@@ -474,32 +513,6 @@ describe("用户自带 Gitea token（#213）", () => {
     expect(redacted).toContain("<已隐藏>");
   });
 
-  it("空 token 时预览按钮禁用并给出明确提示，不发送", async () => {
-    const port = createFakePort();
-    await show(port, undefined, undefined, null);
-    await setInput("正文", "没有 token 的正文");
-    expect(findButton("预览")!.disabled).toBe(true);
-    expect(container.textContent).toContain("请先填写 Gitea token");
-    expect(port.calls.feedback).toHaveLength(0);
-  });
-
-  it("填写 token 后预览按钮可用", async () => {
-    const port = createFakePort();
-    await show(port);
-    await setInput("正文", "有 token 的正文");
-    expect(findButton("预览")!.disabled).toBe(false);
-  });
-
-  it("预览显示 token 权限范围（建 issue、评论、打标签、上传附件）", async () => {
-    await show(createFakePort());
-    await setInput("正文", "权限说明");
-    await click("预览");
-    expect(container.textContent).toContain("建 issue");
-    expect(container.textContent).toContain("评论");
-    expect(container.textContent).toContain("打标签");
-
-    expect(container.textContent).toContain("上传附件");
-  });
 });
 
 describe("裸凭据脱敏（#229）", () => {
@@ -540,7 +553,7 @@ describe("弹窗语义结构（#219）", () => {
     expect(heading.textContent).toBe("反馈");
     expect(dialog.contains(heading)).toBe(true);
     const labels = [...dialog.querySelectorAll(".form-row > .form-row-label")].map((el) => el.textContent);
-    expect(labels).toEqual(expect.arrayContaining(["标题（可选）", "分类", "正文", "Gitea token（仅本次提交）"]));
+    expect(labels).toEqual(expect.arrayContaining(["标题（可选）", "分类", "正文"]));
   });
 
   it("截图说明行把标签与「选择截图」按钮各自成元素，不再压成窄条", async () => {

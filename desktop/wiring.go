@@ -11,6 +11,7 @@ import (
 	"github.com/qinyuanj/kacha/desktop/internal/clipboard"
 	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 	"github.com/qinyuanj/kacha/desktop/internal/diagnostics"
+	"github.com/qinyuanj/kacha/desktop/internal/feedbackauth"
 	"github.com/qinyuanj/kacha/desktop/internal/feedbackservice"
 	"github.com/qinyuanj/kacha/desktop/internal/gateway"
 	"github.com/qinyuanj/kacha/desktop/internal/localservice"
@@ -37,7 +38,9 @@ func bindServices(shell *shellapp.Shell, roots *dataroot.Roots) {
 		relayURL = strings.TrimSpace(value)
 	}
 	shell.WithFeedbackRelay(relayURL)
-	mygo.BindAs("Feedback", feedbackservice.New(feedbackservice.Config{RelayURL: relayURL}))
+	// 反馈授权（#242）：Gitea OAuth 授权码换来的 token 只落本机受保护存储，页面不持有凭据。
+	feedbackAuth := feedbackauth.New(feedbackauth.Config{RootFunc: roots.Current})
+	mygo.BindAs("Feedback", feedbackservice.New(feedbackservice.Config{RelayURL: relayURL, Auth: feedbackAuth}))
 	mygo.BindAs("Local", localservice.New(store))
 	// Usage 是本机用量、未引用清理与回收恢复（#159）：真实数据根扫描，不用前端替身。
 	mygo.BindAs("Usage", usageservice.New(store))

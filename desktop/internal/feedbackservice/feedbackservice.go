@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+
+	"github.com/qinyuanj/kacha/desktop/internal/feedbackauth"
 	"github.com/qinyuanj/kacha/desktop/internal/redaction"
 	"mime/multipart"
 	"net/http"
@@ -89,20 +91,31 @@ type Outcome struct {
 	URL     string `json:"url,omitempty"`
 }
 
+// FeedbackAuth 是反馈发送需要的本机授权能力；接口让发送端契约可独立测试。
+type FeedbackAuth interface {
+	Token() (string, error)
+	Status() feedbackauth.Status
+	Start() feedbackauth.Start
+	Reset() error
+}
+
 // Config 是服务的运行参数；RelayURL 为空且调用方也没有显式覆盖时，发送明确不可用。
 type Config struct {
 	RelayURL string
+	// Auth 是本机 Gitea 授权；发送时从这里取 token，页面不再持有凭据。
+	Auth FeedbackAuth
 }
 
 // Service 持有 HTTP 客户端与配置；无共享可变状态。
 type Service struct {
 	cfg    Config
+	auth   FeedbackAuth
 	client *http.Client
 }
 
 // New 造一个反馈服务；不擅自填默认地址，是否配置由调用方说清楚。
 func New(cfg Config) *Service {
-	return &Service{cfg: cfg, client: &http.Client{Timeout: 20 * time.Second}}
+	return &Service{cfg: cfg, auth: cfg.Auth, client: &http.Client{Timeout: 20 * time.Second}}
 }
 
 // redact 去掉正文中会泄露身份的绝对路径与常见凭据形态；主机名不主动采集。
@@ -133,6 +146,30 @@ func idempotencyKey(spec Spec) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// AuthStatus 只返回授权状态，不返回 token 本身。
+func (s *Service) AuthStatus() feedbackauth.Status {
+	if s.auth == nil {
+		return feedbackauth.Status{Message: feedbackauth.MessageUnauthorized}
+	}
+	return s.auth.Status()
+}
+
+// AuthStart 起一次 Gitea 授权；浏览器地址只用于没自动打开时的兜底。
+func (s *Service) AuthStart() feedbackauth.Start {
+	if s.auth == nil {
+		return feedbackauth.Start{Message: feedbackauth.MessageFailed}
+	}
+	return s.auth.Start()
+}
+
+// AuthReset 清除本机 token，下一次反馈需要重新授权。
+func (s *Service) AuthReset() error {
+	if s.auth == nil {
+		return nil
+	}
+	return s.auth.Reset()
+}
+
 // Send 发送一条文字反馈；失败都返回类型化 Outcome，不把底层错误原文丢给页面。
 func (s *Service) Send(spec Spec) Outcome {
 	relay := strings.TrimSpace(spec.RelayURL)
@@ -145,6 +182,15 @@ func (s *Service) Send(spec Spec) Outcome {
 
 	if oc := validateAttachments(spec); oc != nil {
 		return *oc
+	}
+
+	token := spec.GiteaToken
+	if s.auth != nil {
+		stored, err := s.auth.Token()
+		if err != nil || strings.TrimSpace(stored) == "" {
+			return Outcome{Kind: KindUnauthorized, Message: MessageUnauthorized}
+		}
+		token = strings.TrimSpace(stored)
 	}
 
 	safe := spec
@@ -164,7 +210,7 @@ func (s *Service) Send(spec Spec) Outcome {
 		{"os", strings.TrimSpace(spec.OS)},
 		{"board_name", strings.TrimSpace(spec.BoardName)},
 		{"contact", strings.TrimSpace(spec.Contact)},
-		{"gitea_token", spec.GiteaToken},
+		{"gitea_token", token},
 	}
 	for _, field := range fields {
 		if err := writer.WriteField(field.name, field.value); err != nil {

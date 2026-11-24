@@ -7,7 +7,7 @@
 //
 // 桥（DesktopBridge）是 Go 绑定在页面侧的形状；测试用假桥，不必起窗口。
 // 各组实现（画板、文件、元数据、媒体、画板包、用量）在 shell/desktopStores.ts（#137），这里只做接线。
-import { FEEDBACK_UNAVAILABLE, PortError, portFailureOf, type ClipboardContent, type DataRootStore, type DiagnosticsOutcome, type DiagnosticsPackOutcome, type FeedbackOutcome, type FeedbackPort, type FeedbackSpec, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort, type UpdatePort } from "./port";
+import { FEEDBACK_UNAVAILABLE, PortError, portFailureOf, type ClipboardContent, type DataRootStore, type DiagnosticsOutcome, type DiagnosticsPackOutcome, type FeedbackAuthStart, type FeedbackAuthStatus, type FeedbackOutcome, type FeedbackPort, type FeedbackSpec, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort, type UpdatePort } from "./port";
 import type { PackEntryFact, PackExportSpec } from "../core/boardPack";
 import type { ThemeChoice } from "../core/theme";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
@@ -337,6 +337,9 @@ export interface DesktopDataRootBridge {
 /** Go 侧反馈服务（Feedback.Send）：把文字反馈交给配置的中继。 */
 export interface DesktopFeedbackBridge {
   send(spec: FeedbackSpec): Promise<FeedbackOutcome>;
+  authStatus(): Promise<FeedbackAuthStatus>;
+  authStart(): Promise<FeedbackAuthStart>;
+  authReset(): Promise<void>;
 }
 
 /** MyGo 桥：Go 侧绑定与测试替身都满足它。 */
@@ -644,8 +647,18 @@ function desktopOptionalPorts(bridge: DesktopBridge, info: DesktopInfo, features
   };
   // 反馈（#205）：没有绑定就返回同形 unavailable 结局，界面按能力开关隐藏入口。
   const feedback: FeedbackPort = bridge.feedback
-    ? { send: (spec) => bridge.feedback!.send(spec) }
-    : { send: async () => FEEDBACK_UNAVAILABLE };
+    ? {
+        send: (spec) => bridge.feedback!.send(spec),
+        authStatus: () => bridge.feedback!.authStatus(),
+        authStart: () => bridge.feedback!.authStart(),
+        authReset: () => bridge.feedback!.authReset(),
+      }
+    : {
+        send: async () => FEEDBACK_UNAVAILABLE,
+        authStatus: async (): Promise<FeedbackAuthStatus> => ({ authorized: false, pending: false, message: "" }),
+        authStart: async (): Promise<FeedbackAuthStart> => ({ ok: false, url: "", message: "" }),
+        authReset: async () => undefined,
+      };
   return { usage, update, dataRoot, feedback };
 }
 

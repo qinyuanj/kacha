@@ -171,12 +171,6 @@ describe("工作台", () => {
       setter?.call(textarea, "真实构建标识");
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    const tokenInput = container.querySelector("input[placeholder*='Gitea token']") as HTMLInputElement;
-    await act(async () => {
-      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setValue?.call(tokenInput, "test-token");
-      tokenInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
     const preview = [...container.querySelectorAll("button")].find((button) => button.textContent === "预览");
     await act(async () => preview?.click());
     expect(container.textContent).toContain("build 1.9.9");
@@ -195,12 +189,6 @@ describe("工作台", () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
       setter?.call(textarea, "能力关闭也要能重试");
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const tokenInput = container.querySelector("input[placeholder*='Gitea token']") as HTMLInputElement;
-    await act(async () => {
-      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setValue?.call(tokenInput, "test-token");
-      tokenInput.dispatchEvent(new Event("input", { bubbles: true }));
     });
     const preview = [...container.querySelectorAll("button")].find((button) => button.textContent === "预览");
     await act(async () => preview?.click());

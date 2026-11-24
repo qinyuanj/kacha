@@ -37,7 +37,7 @@ type Snapshot struct {
 	Version string `json:"version"`
 	// Notes 是更新说明（发布侧写的一级标题 + 条目）。
 	Notes string `json:"notes"`
-	// PageURL 是这次发行的页面，失败时作为手动下载入口。
+	// PageURL 是这次发行的页面，仅作发行信息保留；更新入口只走自动安装。
 	PageURL string `json:"page_url"`
 	// Downloaded 与 Total 是下载进度（字节）；未下载时都为 0。
 	Downloaded int64 `json:"downloaded"`

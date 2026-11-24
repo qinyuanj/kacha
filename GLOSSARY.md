@@ -225,9 +225,9 @@ _Avoid_：进阶选项、系统设置、设置
 _Avoid_：报错上报、工单、客服留言
 
 **反馈中继**：
-把反馈转发到 Gitea `kacha-feedback` 仓库并回传 issue 编号与链接的可选单服务。提交反馈的用户自带 Gitea token，权限限于对 `kacha-feedback` 仓库建 issue、写评论与标签、上传附件。反馈中继只在本次请求里转交 token，服务端不持有统一写 token。
+把反馈转发到 Gitea `kacha-feedback` 仓库并回传 issue 编号与链接的可选单服务。提交反馈的用户自带 Gitea token，经本机一键授权取得，权限限于对 `kacha-feedback` 仓库建 issue、写评论与标签、上传附件。反馈中继只在本次请求里转交 token，不保存、不缓存、不复用，服务端不持有统一写 token。
 _Avoid_：反馈后台、反馈服务器、提交队列
 
 **用户自带 token**：
-提交反馈的用户本人的 Gitea 写凭据，只随本次请求由客户端交给中继，不进入客户端产物、仓库或测试夹具；权限限于对 `kacha-feedback` 仓库建 issue、写评论/标签与上传附件。中继不保存、不缓存、不复用它，服务端不持有统一写 token。
+提交反馈的用户本人的 Gitea 写凭据，由用户通过 Gitea OAuth 一键授权取得，属于用户自带；token 只落本机受保护存储，不进入页面、仓库或测试夹具，只随本次请求由客户端交给中继。权限限于对 `kacha-feedback` 仓库建 issue、写评论/标签与上传附件。中继不保存、不缓存、不复用它，服务端不持有统一写 token。
 _Avoid_：服务端 token、统一写凭据、共享 token

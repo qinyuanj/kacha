@@ -3,7 +3,7 @@
 // 形状与真实适配器一致：失败一律是 PortError，类别（conflict / missing / slotsFull / alreadyExists, ...）与
 // 壳端口使用同一套类别，界面按类别分支的分支点因此在替身下也走得到。
 // 各分组的替身在 shell/testing/fakePortStores.ts（#137），这里只把它们拼起来。
-import { FEEDBACK_UNAVAILABLE, type CorePorts, type FeatureId, type FeedbackOutcome, type FeedbackSpec, type ShellPort } from "../port";
+import { FEEDBACK_UNAVAILABLE, type CorePorts, type FeatureId, type FeedbackAuthStart, type FeedbackAuthStatus, type FeedbackOutcome, type FeedbackSpec, type ShellPort } from "../port";
 import type { FakeBoard, FakeCalls, FakePortOptions } from "./fakePortTypes";
 import {
   fakeBoardStore,
@@ -52,6 +52,8 @@ export function emptyFakeCalls(): FakeCalls {
     exportDiagnostics: 0,
     diagnosticsPack: 0,
     feedback: [],
+    feedbackAuthStart: 0,
+    feedbackAuthReset: 0,
     uploadReference: [],
     inspectImage: [],
     list: 0,
@@ -143,6 +145,14 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
         if (missing.has("feedback")) return FEEDBACK_UNAVAILABLE;
         if (options.feedbackSend) return options.feedbackSend(spec);
         return options.feedbackOutcome ?? DEFAULT_FEEDBACK_OUTCOME;
+      },
+      authStatus: async (): Promise<FeedbackAuthStatus> => options.feedbackAuthStatus ?? { authorized: true, pending: false, message: "已授权" },
+      authStart: async (): Promise<FeedbackAuthStart> => {
+        calls.feedbackAuthStart = (calls.feedbackAuthStart ?? 0) + 1;
+        return options.feedbackAuthStart ?? { ok: true, url: "", message: "已开始授权" };
+      },
+      authReset: async (): Promise<void> => {
+        calls.feedbackAuthReset = (calls.feedbackAuthReset ?? 0) + 1;
       },
     },
     core,

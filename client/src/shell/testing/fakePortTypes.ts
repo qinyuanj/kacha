@@ -3,7 +3,7 @@ import type { ImportOptions } from "../../core/boardPack";
 import type { BoardWriteOptions } from "../types";
 import type { ThemeChoice } from "../../core/theme";
 import type { ClipboardContent, ImageCopyResult } from "../port";
-import type { DiagnosticsOutcome, FeatureId, FeedbackOutcome, FeedbackSpec, PortFailureKind } from "../port";
+import type { DiagnosticsOutcome, FeatureId, FeedbackAuthStart, FeedbackAuthStatus, FeedbackOutcome, FeedbackSpec, PortFailureKind } from "../port";
 
 export interface FakeBoard {
   path: string;
@@ -61,6 +61,10 @@ export interface FakePortOptions {
   moveFiles?: number;
   /** 反馈发送的脚本化结局（缺省成功）。 */
   feedbackOutcome?: FeedbackOutcome;
+  /** 反馈授权状态脚本；默认已授权。 */
+  feedbackAuthStatus?: FeedbackAuthStatus;
+  /** 一键授权脚本；默认成功。 */
+  feedbackAuthStart?: FeedbackAuthStart;
   /** 反馈发送的脚本化实现：可测序、返回 pending Promise，优先于 feedbackOutcome。 */
   feedbackSend?: (spec: FeedbackSpec) => Promise<FeedbackOutcome> | FeedbackOutcome;
   /** 反馈诊断包的脚本化结局（缺省成功的小包）。 */
@@ -96,6 +100,10 @@ export interface FakeCalls {
   downloadBoardResults?: string[];
   writeNewFile?: { absPath: string; bytes: Uint8Array }[];
   exportDiagnostics: number;
+  /** 反馈授权按钮点击次数。 */
+  feedbackAuthStart?: number;
+  /** 反馈清除授权点击次数。 */
+  feedbackAuthReset?: number;
   /** 反馈提交收到的 spec（按顺序）。 */
   feedback: FeedbackSpec[];
   /** 反馈诊断包被请求的次数。 */

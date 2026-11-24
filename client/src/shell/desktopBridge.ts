@@ -6,7 +6,7 @@ import { call } from "mygo-runtime";
 
 import type { DesktopBridge, DesktopClipboardBridge, DesktopClipboardSnapshot, DesktopDataRootBridge, DesktopDataRootOutcome, DesktopDataRootStatus, DesktopDiagnosticsBridge, DesktopDiagnosticsBundle, DesktopDiagnosticsOutcome, DesktopExportOutcome, DesktopExportTarget, DesktopFeedbackBridge, DesktopExportSnapshot, DesktopGatewayBridge, DesktopGatewayResponse, DesktopImageCopy, DesktopInfo, DesktopLocalBridge, DesktopPackBridge, DesktopPackOutcome, DesktopPackSnapshot, DesktopTextCopy, DesktopUpdateBridge, DesktopUsageBridge } from "./desktop";
 import type { PackEntryFact } from "../core/boardPack";
-import type { FeedbackOutcome } from "./port";
+import type { FeedbackAuthStart, FeedbackAuthStatus, FeedbackOutcome } from "./port";
 
 /** camelCase 的页面侧方法名 → Go 侧的 PascalCase 绑定名。 */
 function goName(method: string): string {
@@ -72,6 +72,9 @@ export function mygoBridge(): DesktopBridge {
   // 反馈（#205）：与 Go 侧 BindAs("Feedback", feedbackservice.New(...)) 对齐。
   const feedback: DesktopFeedbackBridge = {
     send: (spec) => call("Feedback.Send", spec) as Promise<FeedbackOutcome>,
+    authStatus: () => call("Feedback.AuthStatus") as Promise<FeedbackAuthStatus>,
+    authStart: () => call("Feedback.AuthStart") as Promise<FeedbackAuthStart>,
+    authReset: () => call("Feedback.AuthReset") as Promise<void>,
   };
   // 本机数据位置（#161）：与 Go 侧 BindAs("Storage", storage.NewWithBusy(...)) 对齐。
   // 少这一项时 features.dataRoot 为 false，设置里不会出现迁移入口。

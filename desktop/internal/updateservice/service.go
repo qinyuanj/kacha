@@ -231,7 +231,7 @@ func (s *Service) markUpToDate(gen int64) {
 	s.snap.Total = 0
 }
 
-// fail 把这一轮失败记进快照：旧版本照常可用，界面给重试与手动下载入口。
+// fail 把这一轮失败记进快照：旧版本照常可用，界面给重试与失败原因。
 func (s *Service) fail(gen int64, message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
