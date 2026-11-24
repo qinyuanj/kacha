@@ -11,7 +11,6 @@ import {
   runCopies,
   taskCount,
   uniqueBoardFileName,
-  stagesOf,
   type Board,
 } from "./board";
 
@@ -227,7 +226,7 @@ describe("画板文件读入", () => {
   });
 });
 
-describe("阶段与定稿（format_version 2）", () => {
+describe("已移除的阶段与定稿（format_version 2）", () => {
   // 旧格式画板手写：独立于 serializeBoard，固定 v1 文件的真实形状（防同义反复）。
   const V1 = JSON.stringify({
     format_version: 1,
@@ -239,49 +238,53 @@ describe("阶段与定稿（format_version 2）", () => {
     edges: [],
   });
 
-  it("旧格式画板读入后阶段为空、无定稿；写回升为新版本", () => {
+  it("旧版本画板读入后写回，格式版本升为 2", () => {
     const parsed = parseBoard(V1);
     if (parsed.kind !== "ok") throw new Error(parsed.kind);
-    expect(stagesOf(parsed.board)).toEqual([]);
-    expect(parsed.board.nodes.some((n) => n.type === "result" && n.final === true)).toBe(false);
-    const raw = JSON.parse(serializeBoard(parsed.board));
-    expect(raw.format_version).toBe(2);
+    expect(JSON.parse(serializeBoard(parsed.board)).format_version).toBe(2);
     expect(BOARD_FORMAT_VERSION).toBe(2);
   });
 
-  it("阶段与定稿读写往返；阶段未知字段保留", () => {
-    const raw = JSON.parse(V1);
-    raw.format_version = 2;
-    raw.nodes[0].final = true;
-    raw.stages = [{ id: "s1", name: "第一轮", nodes: ["r"], collapsed: true, color: "blue" }];
+  // 1.7.0 移除了阶段与定稿：旧画板里还留着这两个键，照常打开，写回不再包含。
+  // 手写夹具：v2 时代真实写出来的形状，独立于 serializeBoard（防同义反复）。
+  const LEGACY = JSON.stringify({
+    format_version: 2,
+    title: "旧画板",
+    viewport: { zoom: 1, x: 0, y: 0 },
+    nodes: [
+      { id: "r", type: "result", pos: [0, 0], size: [240, 240], task_id: "20260916T091500Z-3f9c2a1b", file: "result.png", path: "2026-09-16/20260916T091500Z-3f9c2a1b/result.png", layer_count: 0, final: true, record: { model: "m", prompt: "", negative_prompt: "", size_spec: { tier: null, ratio: null, width: null, height: null }, submitted_at: "2026-09-16T09:15:00Z" } },
+    ],
+    edges: [],
+    stages: [{ id: "s1", name: "第一轮", nodes: ["r"], collapsed: true, color: "blue" }],
+  });
+
+  it("旧画板照常打开：写回不再包含阶段与定稿", () => {
+    const parsed = parseBoard(LEGACY);
+    expect(parsed.kind).toBe("ok");
+    if (parsed.kind !== "ok") return;
+    const text = serializeBoard(parsed.board);
+    expect(text).not.toContain("stages");
+    expect(text).not.toContain("final");
+    const again = JSON.parse(text);
+    expect(again).not.toHaveProperty("stages");
+    expect(again.nodes[0]).not.toHaveProperty("final");
+    expect(again.format_version).toBe(2);
+  });
+
+  it("阶段与定稿是认识的键：不落进未知字段，值坏了也不影响打开", () => {
+    const raw = JSON.parse(LEGACY);
+    raw.nodes[0].final = "yes";
+    raw.stages = { any: "thing" };
     const parsed = parseBoard(JSON.stringify(raw));
-    if (parsed.kind !== "ok") throw new Error(parsed.kind);
-    expect(stagesOf(parsed.board)).toEqual([{ id: "s1", name: "第一轮", nodes: ["r"], collapsed: true, extra: { color: "blue" } }]);
-    expect((parsed.board.nodes[0] as { final?: true }).final).toBe(true);
+    expect(parsed.kind).toBe("ok");
+    if (parsed.kind !== "ok") return;
+    // 认识的键被丢弃，不进 extra——否则下一次保存会把它们原样写回来。
+    const node = parsed.board.nodes[0];
+    expect(node.type === "result" ? node.extra : "不是结果节点").toEqual({});
+    expect(parsed.board.extra).toEqual({});
     const again = JSON.parse(serializeBoard(parsed.board));
-    expect(again.stages).toEqual(raw.stages);
-    expect(again.nodes[0].final).toBe(true);
-  });
-
-  it("没有阶段、没有定稿时不写这两个字段", () => {
-    const parsed = parseBoard(V1);
-    if (parsed.kind !== "ok") throw new Error(parsed.kind);
-    const raw = JSON.parse(serializeBoard(parsed.board));
-    expect(raw).not.toHaveProperty("stages");
-    expect(raw.nodes[0]).not.toHaveProperty("final");
-  });
-
-  it("阶段或定稿字段形状不对视为损坏", () => {
-    const bad = (patch: (raw: Record<string, any>) => void) => {
-      const raw = JSON.parse(V1);
-      raw.format_version = 2;
-      patch(raw);
-      return parseBoard(JSON.stringify(raw)).kind;
-    };
-    expect(bad((r) => (r.stages = {}))).toBe("corrupt");
-    expect(bad((r) => (r.stages = [{ id: "s", name: "a", nodes: "r", collapsed: false }]))).toBe("corrupt");
-    expect(bad((r) => (r.stages = [{ id: "s", name: "a", nodes: ["r"], collapsed: "no" }]))).toBe("corrupt");
-    expect(bad((r) => (r.nodes[0].final = "yes"))).toBe("corrupt");
+    expect(again).not.toHaveProperty("stages");
+    expect(again.nodes[0]).not.toHaveProperty("final");
   });
 });
 

@@ -62,7 +62,8 @@ export function fakeWrite(boards: Map<string, FakeBoard>, calls: FakeCalls, opti
     assertWritable(path, existing, writeOptions, options);
     // 版本号是内容字节的 sha256，与真实壳同形（localstore.go:358 返回 hashOf([]byte(text))）：
     // 客户端保存后按同一摘要回写版本，写成 `v-N` 会让同一画板的第二次保存永远判冲突（#225）。
-    boards.set(path, { path, main: text, bak: existing?.main ?? null, version: await sha256Hex(new TextEncoder().encode(text)) });
+    // .bak 只留第一次改写前的那份，之后的写入不覆盖它（与真实壳 localstore.go 的 WriteBoard 同规矩）。
+    boards.set(path, { path, main: text, bak: existing?.bak ?? existing?.main ?? null, version: await sha256Hex(new TextEncoder().encode(text)) });
   };
 }
 

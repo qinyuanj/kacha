@@ -21,7 +21,7 @@ import (
 )
 
 // BoardFormatVersion 是读得懂的画板格式版本上限（与前端 BOARD_FORMAT_VERSION 一致）。
-// 2 加入的阶段与定稿都不带来新的引用，规则不变。
+// 2 只加过阶段与定稿（1.7.0 已移除），两者都不带来新的引用，所以引用规则不变。
 const BoardFormatVersion = 2
 
 // NodeRef 是一个节点引用的条目（任务目录或独立图片，相对数据根、正斜杠）。

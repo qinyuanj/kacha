@@ -73,6 +73,40 @@ func TestWriteKeepsBackup(t *testing.T) {
 	}
 }
 
+// 首次改写前留一份 .bak：.bak 与改写前的主文件逐字节相同；之后再改写不覆盖它；新建画板不留 .bak。
+func TestWriteBacksUpOriginalOnlyOnce(t *testing.T) {
+	s := New(t.TempDir())
+	path := filepath.Join(s.BoardDir(), "画板"+BoardExt)
+	const first = "{\"v\":1}"
+
+	if r := s.WriteBoard(path, first, WriteOptions{CreateOnly: true}); !r.OK {
+		t.Fatalf("WriteBoard: %+v", r)
+	}
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf("新建画板不该留 .bak：%v", err)
+	}
+
+	if r := s.WriteBoard(path, "{\"v\":2}", WriteOptions{}); !r.OK {
+		t.Fatalf("WriteBoard: %+v", r)
+	}
+	backup, err := os.ReadFile(path + ".bak")
+	if err != nil || string(backup) != first {
+		t.Fatalf("bak = %q, %v, want %q", backup, err, first)
+	}
+
+	if r := s.WriteBoard(path, "{\"v\":3}", WriteOptions{}); !r.OK {
+		t.Fatalf("WriteBoard: %+v", r)
+	}
+	backup, err = os.ReadFile(path + ".bak")
+	if err != nil || string(backup) != first {
+		t.Fatalf("第二次改写覆盖了 .bak：%q, %v, want %q", backup, err, first)
+	}
+	main, err := os.ReadFile(path)
+	if err != nil || string(main) != "{\"v\":3}" {
+		t.Fatalf("main = %q, %v", main, err)
+	}
+}
+
 // 目标目录建不出来时写入失败，挡路的那个文件不被改动。
 //
 // 这里不查临时文件：失败发生在 MkdirAll，writeAtomic 根本没跑，目录里不可能出现临时文件
