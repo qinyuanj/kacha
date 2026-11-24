@@ -25,7 +25,7 @@ interface Props {
   /** 取消归档 / 复制为新画板：画板位满时 resolve 统一文案，成功为 null。 */
   onUnarchive(path: string): Promise<string | null>;
   onCopy(path: string): Promise<string | null>;
-  /** 「管理画板」（#88，从用量提醒进入）：标题换成管理画板，各组按体量从大到小排，帮用户决定先整理哪块。 */
+  /** 「管理画板」（从用量提醒进入）：标题换成管理画板，各组按体量从大到小排，方便查看每块画板多大。 */
   manage?: boolean;
 }
 

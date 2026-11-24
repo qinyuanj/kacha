@@ -74,14 +74,14 @@ export function formatBytes(bytes: number): string {
 /** 画板体量一律写「约 X」：本机存储按任务目录累加、不去重，可能略大于导出画板包时的预估（#87）。 */
 export const approxSizeText = (bytes: number) => `约 ${formatBytes(bytes)}`;
 
-/** 用量提醒（#88）里的入口与「管理画板」对话框标题。 */
+/** 用量提醒里的「管理画板」入口与同名对话框标题。 */
 export const MANAGE_BOARDS_TEXT = "管理画板";
 
-/** 用量接近（warn）/ 达到（alert）用量上限时的提醒；只提醒，生成照常。 */
+/** 用量接近（warn）/ 达到（alert）上限时说明当前用量与上限；生成照常，不指向任何整理动作。 */
 export const usageLimitText = (level: "warn" | "alert", total: number, limit: number) =>
   level === "alert"
-    ? `用量已满（${formatBytes(total)} / 上限 ${formatBytes(limit)}），生成不受影响，请整理画板释放空间。`
-    : `用量接近上限（${formatBytes(total)} / 上限 ${formatBytes(limit)}），整理一下画板？`;
+    ? `用量已满（${formatBytes(total)} / 上限 ${formatBytes(limit)}），生成不受影响。`
+    : `用量接近上限（${formatBytes(total)} / 上限 ${formatBytes(limit)}），生成不受影响。`;
 
 /** 粘贴（#96）：被拒时的原因文案与超限提示。只读归档沿用共享的 ARCHIVE_TEXT.readOnly。 */
 export const PASTE_TEXT = {

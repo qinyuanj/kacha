@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qinyuanj/kacha/desktop/internal/boardmeasure"
 	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 )
 
@@ -477,7 +478,7 @@ func TestListFallsBackToBackupForBodySize(t *testing.T) {
 	}
 }
 // 装配走 NewFollowing（共享数据根，Store 没有固定 root）时，列表体量仍按当前数据根量：
-// 同一次统计不能因为 s.root 是空的就算出恒为 0 的体量（期望值 1060 由夹具写入的字节手算）。
+// 同一次统计不能因为 s.root 是空的就算出恒为 0 的体量；列表体量必须与 boardmeasure 对同一块画板的口径一致。
 func TestListBodySizeFollowsSharedDataRoot(t *testing.T) {
 	root := t.TempDir()
 	store := NewFollowing(dataroot.NewRoots(root))
@@ -513,7 +514,12 @@ func TestListBodySizeFollowsSharedDataRoot(t *testing.T) {
 		t.Fatalf("boards = %+v, want 1", listing.Boards)
 	}
 	listed := listing.Boards[0].Bytes
-	if listed == nil || *listed != 1060 {
-		t.Fatalf("列表体量 = %v, want 1060（任务目录 1000 + 独立图片 60）", listed)
+	boardText := text
+	want := boardmeasure.BoardBytes(root, &boardText, nil)
+	if want == nil {
+		t.Fatalf("BoardBytes: 读不懂这块画板")
+	}
+	if listed == nil || *listed != *want {
+		t.Fatalf("列表体量 = %v，boardmeasure = %d，两处口径不一致", listed, *want)
 	}
 }

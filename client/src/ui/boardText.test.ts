@@ -55,9 +55,9 @@ describe("体量换算", () => {
 });
 
 describe("用量提醒", () => {
-  it("接近上限只说整理，达到上限先说生成不受影响", () => {
-    expect(usageLimitText("warn", 900, 1000)).toBe("用量接近上限（900 B / 上限 1000 B），整理一下画板？");
-    expect(usageLimitText("alert", 1000, 1000)).toBe("用量已满（1000 B / 上限 1000 B），生成不受影响，请整理画板释放空间。");
+  it("提醒只报用量事实，不再指向整理动作", () => {
+    expect(usageLimitText("warn", 900, 1000)).toBe("用量接近上限（900 B / 上限 1000 B），生成不受影响。");
+    expect(usageLimitText("alert", 1000, 1000)).toBe("用量已满（1000 B / 上限 1000 B），生成不受影响。");
   });
 });
 
