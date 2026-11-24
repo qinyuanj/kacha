@@ -137,7 +137,9 @@
   --accent-hover: #0860c4;
   --accent-active: #0550a8;
   --accent-soft: #ddf4ff;
-  --accent-border: #7cc0ff;
+  /* 浅色下它只供框选虚线描边使用（#247）：描边压在 #eaf1ff 框选填充上要 ≥3:1，
+   * 原 #7cc0ff 只有 1.71:1；这里用浅色主色本身，对填充 4.58:1、裸白 5.19:1。 */
+  --accent-border: #0969da;
   --accent-strong: #1f8fff;
   --link: #0969da;
   --focus-ring: #0969da;
@@ -270,8 +272,8 @@
   --border-subtle: rgb(140 149 159 / 6%);
   --warning-strong: #bc4c00;
   /* 框选填充：12% 蓝叠在白画布上得 #eaf1ff（对白 1.13:1，框选区域本身仍可辨，
-   * 与暗色 1.24:1 同量级）；虚线描边 #7cc0ff 在该填充上 1.71:1（无填充时对白 1.94:1，
-   * 描边偏软是 --accent-border 自身既有的取值，不是这次引入的）。 */
+   * 与暗色 1.24:1 同量级）；虚线描边取 --accent-border 的 #0969da，在该填充上
+   * 4.58:1、裸白 5.19:1，达到 WCAG 1.4.11 的 3:1（#247：原 #7cc0ff 只有 1.71:1）。 */
   --selection-fill: rgb(76 141 255 / 12%);
 }
 
