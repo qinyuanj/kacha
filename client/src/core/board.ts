@@ -151,9 +151,6 @@ export function findTask(board: Board, id: string): TaskNode | undefined {
 
 export const stagesOf = (board: Board): Stage[] => board.stages ?? [];
 
-/** 是否定稿：只有结果节点能定稿。 */
-export const isFinal = (node: BoardNode): boolean => node.type === "result" && node.final === true;
-
 /** 任务节点的份数：缺省（旧画板、新建节点）为 1。 */
 export function taskCount(task: TaskNode): number {
   return task.count ?? 1;

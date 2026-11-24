@@ -12,14 +12,6 @@ export const MISSING_BOARD_RECOVERY_TEXT = "请勿关闭当前画板；请先恢
 /** 工具栏「新建任务模型」：默认模型 Flash 不在可用列表时的占位项。 */
 export const FLASH_UNAVAILABLE_TEXT = "Flash 不可用，请刷新模型列表";
 
-/** 定稿结果节点上的角标。 */
-export const FINAL_BADGE_TEXT = "定稿";
-
-/** 阶段框标题栏：收起时显示的成员数。 */
-export const STAGE_TEXT = {
-  count: (n: number) => `${n} 个节点`,
-} as const;
-
 /** 画板位已用 / 总数（#89）。 */
 export interface Slots {
   used: number;
@@ -94,12 +86,6 @@ export const usageLimitText = (level: "warn" | "alert", total: number, limit: nu
 /** 当前画板越过体量提醒线时画布顶部的提示。 */
 export const sizeNoticeText = (bytes: number) => `这块画板已经${approxSizeText(bytes)} 了，整理一下？`;
 
-/** 建议保留（#144）：系统在整理模式里推断该留、尚未定稿的结果。只在整理模式里存在，不写进画板。 */
-export const SUGGEST_KEEP_TEXT = {
-  /** 结果节点上的标记。 */
-  badge: "建议保留",
-} as const;
-
 /** 整理模式（#92）。 */
 export const TIDY_TEXT = {
   /** 越线提示与工具栏上进入整理模式的按钮。 */
@@ -108,8 +94,6 @@ export const TIDY_TEXT = {
   measuring: "正在计算体量…",
   /** 量不出来时照实说：读不出画板或读盘失败，不显示成 0。 */
   measureFailed: "体量暂时算不出",
-  /** 整理模式下阶段体量的未知占位。 */
-  sizeUnknown: "未知",
   /** 顶部整理前后的体量对比。 */
   compare: (before: number, now: number) => `整理前${approxSizeText(before)} → 现在${approxSizeText(now)}`,
 } as const;

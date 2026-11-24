@@ -5,7 +5,7 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NodeProps } from "@xyflow/react";
-import type { ResultNode } from "../core/board";
+import { parseBoard, type ResultNode } from "../core/board";
 import { BUILTIN_TABLE, type CapabilityTable, type ModelCapability, type SizeRule } from "../core/capabilities";
 import type { TaskStatus } from "../core/run";
 import type { SizeSpec } from "../core/size";
@@ -439,9 +439,9 @@ describe("RatioCombo", () => {
   });
 });
 
-// ---- 建议保留标记（#144）----
+// ---- 结果节点角标 ----
 
-describe("结果节点上的建议保留标记", () => {
+describe("结果节点上的角标", () => {
   const resultModel = (patch: Partial<ResultNode> = {}): ResultNode => ({
     type: "result",
     id: "r1",
@@ -456,7 +456,15 @@ describe("结果节点上的建议保留标记", () => {
     ...patch,
   });
 
-  const dataOf = (patch: Partial<ResultFlowNode["data"]> = {}): ResultFlowNode["data"] => ({ node: resultModel(), rules: [], missing: false, suggestKeep: false, ...patch });
+  const dataOf = (patch: Partial<ResultFlowNode["data"]> = {}): ResultFlowNode["data"] => ({ node: resultModel(), rules: [], missing: false, ...patch });
+
+  /** 旧画板里的定稿结果节点：文件里带 "final": true，走与打开历史画板同一条解析路径。 */
+  function legacyResult(): ResultNode {
+    const raw = { format_version: 2, title: "旧画板", viewport: { x: 0, y: 0, zoom: 1 }, nodes: [{ ...resultModel(), final: true }], edges: [] };
+    const parsed = parseBoard(JSON.stringify(raw));
+    if (parsed.kind !== "ok") throw new Error("夹具画板应能打开");
+    return parsed.board.nodes[0] as ResultNode;
+  }
 
   /** 结果节点渲染：壳端口给内存替身（图片信息读不到即可），画板上下文照画布那样给。 */
   async function showResult(data: ResultFlowNode["data"]): Promise<void> {
@@ -466,15 +474,8 @@ describe("结果节点上的建议保留标记", () => {
 
   const badgeTexts = () => [...container.querySelectorAll(".badge")].map((b) => b.textContent);
 
-  it("整理模式里带建议保留的结果节点上有标记", async () => {
-    await showResult(dataOf({ suggestKeep: true }));
-    expect(badgeTexts()).toEqual(["建议保留"]);
-    await showResult(dataOf());
+  it("旧画板里定稿的结果只显示任务信息角标（定稿徽标随特性移除）", async () => {
+    await showResult(dataOf({ node: legacyResult() }));
     expect(badgeTexts()).toEqual([]);
-  });
-
-  it("定稿的结果显示定稿角标（建议保留抑制由数据层负责）", async () => {
-    await showResult(dataOf({ node: resultModel({ final: true }) }));
-    expect(badgeTexts()).toEqual(["定稿"]);
   });
 });

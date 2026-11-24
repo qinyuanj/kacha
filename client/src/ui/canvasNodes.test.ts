@@ -83,7 +83,6 @@ function defaults(): CanvasNodeInput {
     userRoot: "/root",
     selected: new Set(),
     measured: {},
-    hidden: new Set(),
     lineageNodes: new Set(),
     drag: null,
     focusPrompt: null,
@@ -95,7 +94,6 @@ function defaults(): CanvasNodeInput {
     concurrency: 1,
     expanded: new Set(),
     locked: new Set(),
-    suggestKeep: new Set(),
     runStateOf: () => undefined,
     statusOf: () => null,
     menuFacts: (selected) => ({ board: b, table: BUILTIN_TABLE, selected, locked: new Set(), expanded: new Set(), undoLabel: null, redoLabel: null }),
@@ -234,13 +232,6 @@ describe("参考图与结果节点", () => {
     const connected = dataOf<ResultFlowNode["data"]>(canvasNodes(makeInput({ board: b }))[0]);
     expect(connected.rules).toEqual([findModel(BUILTIN_TABLE, QWEN)!.input_image_rule]);
   });
-
-  it("建议保留（#144）：只有集合里的结果节点带标记", () => {
-    const b = board([result("res1"), result("res2")]);
-    const nodes = canvasNodes(makeInput({ board: b, suggestKeep: new Set(["res2"]) }));
-    expect(dataOf<ResultFlowNode["data"]>(nodeById(nodes, "res1")).suggestKeep).toBe(false);
-    expect(dataOf<ResultFlowNode["data"]>(nodeById(nodes, "res2")).suggestKeep).toBe(true);
-  });
 });
 
 describe("生成任务节点", () => {
@@ -339,17 +330,15 @@ describe("生成任务节点", () => {
 });
 
 describe("四型节点共用的字段", () => {
-  it("位置、选中、隐藏与测量回传随输入变化", () => {
+  it("位置、选中与测量回传随输入变化", () => {
     const b = board([prompt("p1", "一只猫", { pos: [12, 34] }), task("t1"), reference("ref1")]);
     const measured = { t1: { width: 300, height: 200 } };
-    const nodes = canvasNodes(makeInput({ board: b, selected: new Set(["p1"]), hidden: new Set(["ref1"]), measured, lineageNodes: new Set(["p1"]) }));
+    const nodes = canvasNodes(makeInput({ board: b, selected: new Set(["p1"]), measured, lineageNodes: new Set(["p1"]) }));
     const p1 = nodeById(nodes, "p1");
     expect(p1.position).toEqual({ x: 12, y: 34 });
     expect(p1.selected).toBe(true);
-    expect(p1.hidden).toBe(false);
     // 谱系 / 去强调的类名组合归 core/ports；本层只证明测量结果按输入回传给那一个节点。
     expect(nodeById(nodes, "t1").measured).toBe(measured.t1);
-    expect(nodeById(nodes, "ref1").hidden).toBe(true);
   });
 
   it("还没回传测量结果的节点共用一个空对象（承重：不能让 xyflow 清掉已测得的 handleBounds）", () => {
