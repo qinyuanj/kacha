@@ -1,12 +1,10 @@
-// 阶段框与整理模式（#92、#93）的画布侧接线：收起成员、阶段框尺寸、各阶段体量与「移出为新画板」。
+// 阶段框与整理模式（#92）的画布侧接线：收起成员、阶段框尺寸、各阶段体量。
 // 判定与体量计算都在 core/stages 与 core/tidy，这里只接状态与写入口。
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { Board } from "../core/board";
 import { stagesOf } from "../core/board";
-import { errorText } from "../core/errors";
 import { collapsedMembers, stageBoxes, suggestKeep, type StageBox } from "../core/stages";
 import { nodesBytes } from "../core/tidy";
-import { TIDY_TEXT } from "./boardText";
 import type { StageTidy } from "./stages";
 import { useTidyMeasure, type TidyMeasure } from "./tidy";
 
@@ -17,13 +15,10 @@ interface StageTidyOptions {
   board: Board;
   tidying: boolean;
   tidyMeasure: TidyMeasure;
-  toast: (message: string) => void;
-  onMoveOutStage: (stageId: string) => Promise<string>;
 }
 
-/** 整理模式下阶段框多出的内容：各阶段体量与移出为新画板。不在整理模式为 null。 */
-export function useStageTidy({ board, tidying, tidyMeasure, toast, onMoveOutStage }: StageTidyOptions): StageTidy | null {
-  const [movingOut, setMovingOut] = useState(false);
+/** 整理模式下阶段框多出的内容：各阶段体量。不在整理模式为 null。 */
+export function useStageTidy({ board, tidying, tidyMeasure }: StageTidyOptions): StageTidy | null {
   return useMemo((): StageTidy | null => {
     if (!tidying) return null;
     const { measure } = tidyMeasure;
@@ -31,15 +26,8 @@ export function useStageTidy({ board, tidying, tidyMeasure, toast, onMoveOutStag
     return {
       bytes: (id) => (measure ? nodesBytes(measure, stageNodes(id)) : null),
       sizeFailed: tidyMeasure.failed === true,
-      movingOut,
-      onMoveOut: (id) => {
-        setMovingOut(true);
-        void onMoveOutStage(id)
-          .then(toast, (e) => toast(TIDY_TEXT.moveOutFailed(errorText(e))))
-          .finally(() => setMovingOut(false));
-      },
     };
-  }, [tidying, tidyMeasure, board, toast, movingOut, onMoveOutStage]);
+  }, [tidying, tidyMeasure, board]);
 }
 
 interface Options {
@@ -47,8 +35,6 @@ interface Options {
   readOnly: boolean;
   measured: Record<string, { width?: number; height?: number }>;
   tidying: boolean;
-  toast: (message: string) => void;
-  onMoveOutStage: (stageId: string) => Promise<string>;
 }
 
 export interface CanvasStageView {
@@ -64,7 +50,7 @@ export interface CanvasStageView {
   suggestKeep: ReadonlySet<string>;
 }
 
-export function useCanvasStageView({ board, readOnly, measured, tidying, toast, onMoveOutStage }: Options): CanvasStageView {
+export function useCanvasStageView({ board, readOnly, measured, tidying }: Options): CanvasStageView {
   // 阶段：收起的成员不显示；框按成员的显示尺寸画。
   const hidden = useMemo(() => collapsedMembers(board, readOnly), [board, readOnly]);
   const boxes = useMemo(() => stageBoxes(board, (id) => measured[id], readOnly), [board, measured, readOnly]);
@@ -72,6 +58,6 @@ export function useCanvasStageView({ board, readOnly, measured, tidying, toast, 
   const tidyMeasure = useTidyMeasure(board, tidying);
   // 建议保留（#144）：渲染时现算，退出整理模式即空集——不写画板、不进撤销步，因此不参与脏判据。
   const suggested = useMemo(() => (tidying ? suggestKeep(board) : NO_SUGGESTIONS), [board, tidying]);
-  const stageTidy = useStageTidy({ board, tidying, tidyMeasure, toast, onMoveOutStage });
+  const stageTidy = useStageTidy({ board, tidying, tidyMeasure });
   return { hidden, boxes, tidyMeasure, stageTidy, suggestKeep: suggested };
 }

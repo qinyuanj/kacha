@@ -4,16 +4,12 @@ import type { Stage } from "../core/board";
 import type { StageBox } from "../core/stages";
 import { approxSizeText, STAGE_TEXT, TIDY_TEXT } from "./boardText";
 
-/** 整理模式下阶段框多出的内容：体量与「移出为新画板」。 */
+/** 整理模式下阶段框多出的内容：体量。 */
 export interface StageTidy {
   /** 阶段体量；还没量到或量不了为 null（显示未知，不当作 0）。 */
   bytes: (stageId: string) => number | null;
   /** 这一次量不出来（读不出画板或读盘失败）。 */
   sizeFailed: boolean;
-  /** 移出为新画板（#93）。 */
-  onMoveOut: (stageId: string) => void;
-  /** 正在移出（按钮置灰）。 */
-  movingOut: boolean;
 }
 
 interface Props {
@@ -59,27 +55,18 @@ interface HeaderProps {
   tidy: StageTidy | null;
 }
 
-/** 标题栏：标题、收起时的成员数、整理模式下的阶段动作。 */
+/** 标题栏：标题、收起时的成员数、整理模式下的阶段体量。 */
 function StageHeader({ stage, amount, tidy }: HeaderProps) {
+  const bytes = tidy ? tidy.bytes(stage.id) : null;
   return (
     <div className="stage-header nodrag nopan" onPointerDown={(e) => e.stopPropagation()}>
       <span className="stage-name">{stage.name}</span>
       {stage.collapsed && <span className="stage-count">{STAGE_TEXT.count(amount)}</span>}
-      {tidy && <StageTidyActions stageId={stage.id} tidy={tidy} />}
+      {tidy && (
+        <span className="stage-size" aria-label="阶段体量">
+          {bytes !== null ? approxSizeText(bytes) : tidy.sizeFailed ? TIDY_TEXT.sizeUnknown : "…"}
+        </span>
+      )}
     </div>
-  );
-}
-
-function StageTidyActions({ stageId, tidy }: { stageId: string; tidy: StageTidy }) {
-  const bytes = tidy.bytes(stageId);
-  return (
-    <>
-      <span className="stage-size" aria-label="阶段体量">
-        {bytes !== null ? approxSizeText(bytes) : tidy.sizeFailed ? TIDY_TEXT.sizeUnknown : "…"}
-      </span>
-      <button type="button" className="stage-move-out" disabled={tidy.movingOut} title={TIDY_TEXT.moveOutHint} onClick={() => tidy.onMoveOut(stageId)}>
-        {TIDY_TEXT.moveOut}
-      </button>
-    </>
   );
 }

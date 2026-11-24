@@ -40,8 +40,6 @@ export interface ReferenceNode extends NodeBase {
   path: string;
   sha256: string;
   display_name: string;
-  /** 来源画板名：阶段移出为新画板时，阶段外的上游图片在新画板里成为参考图，记下它来自哪块画板。 */
-  source_board?: string;
 }
 
 export interface TaskNode extends NodeBase {
@@ -237,6 +235,8 @@ function autoRatio(raw: unknown): AutoRatio | null {
   return { ratio: raw.ratio, image, source };
 }
 
+// source_board 是 1.7.0 移除的「移出为新画板」写在参考图上的来源画板名（#251）：认识的键但不读。
+// 留在名单里是为了让它不落进 extra 被原样写回——旧画板不该一直带着已移除的字段。
 const NODE_KEYS = {
   prompt: ["id", "type", "pos", "size", "text"],
   reference: ["id", "type", "pos", "size", "path", "sha256", "display_name", "source_board"],
@@ -278,7 +278,6 @@ function parseNode(raw: unknown): BoardNode {
         path: str(o, "path"),
         sha256: str(o, "sha256"),
         display_name: str(o, "display_name"),
-        ...(o.source_board === undefined ? {} : { source_board: str(o, "source_board") }),
       };
     case "task":
       return parseTaskNode(o, base);

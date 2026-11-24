@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 阶段框标题栏剩下的内容：标题、收起时的成员数、整理模式下的体量与「移出为新画板」（#93）。
+// 阶段框标题栏剩下的内容：标题、收起时的成员数与整理模式下的体量。
 // 框本身画在画布坐标里，ViewportPortal 用替身（vitest 的 include 只收 *.test.ts，所以用 createElement）。
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -32,15 +32,11 @@ const stage = (id: string, nodes: string[] = ["a"]): Stage => ({ id, name: `阶�
 
 const box = (s: Stage): StageBox => ({ stage: s, x: 0, y: 0, width: 300, height: 200, count: s.nodes.length });
 
-/** 整理附加内容的替身：体量由用例摆，移出只记下被点了哪个阶段。 */
-function tidyOf(overrides: Partial<StageTidy> = {}): StageTidy & { moved: string[] } {
-  const moved: string[] = [];
+/** 整理附加内容的替身：体量由用例摆。 */
+function tidyOf(overrides: Partial<StageTidy> = {}): StageTidy {
   return {
     bytes: () => 1536,
     sizeFailed: false,
-    onMoveOut: (id) => void moved.push(id),
-    movingOut: false,
-    moved,
     ...overrides,
   };
 }
@@ -51,7 +47,6 @@ async function showStage(s: Stage, tidy: StageTidy | null): Promise<void> {
 
 const header = (): HTMLElement => container.querySelector(".stage-header") as HTMLElement;
 const frame = (): HTMLElement => container.querySelector(".stage-frame") as HTMLElement;
-const buttonAt = (className: string): HTMLButtonElement => container.querySelector(`.${className}`) as HTMLButtonElement;
 
 describe("阶段框标题栏", () => {
   it("展开时只显示阶段名，不显示成员数", async () => {
@@ -72,12 +67,11 @@ describe("阶段框标题栏", () => {
   });
 });
 
-describe("整理模式下标题栏上的体量与「移出为新画板」", () => {
+describe("整理模式下标题栏上的体量", () => {
   it("不在整理模式时没有整理动作", async () => {
     await showStage(stage("s1"), null);
 
     expect(container.querySelector(".stage-size")).toBeNull();
-    expect(container.querySelector(".stage-move-out")).toBeNull();
   });
 
   it("体量按算出的字节显示；算不出时留占位", async () => {
@@ -92,17 +86,4 @@ describe("整理模式下标题栏上的体量与「移出为新画板」", () =
     expect(container.querySelector(".stage-size")?.textContent).toBe(TIDY_TEXT.sizeUnknown);
   });
 
-  it("「移出为新画板」点了交回该阶段；正在移出时置灰", async () => {
-    const tidy = tidyOf();
-    await showStage(stage("s1"), tidy);
-
-    const move = buttonAt("stage-move-out");
-    expect(move.textContent).toBe(TIDY_TEXT.moveOut);
-    expect(move.title).toBe(TIDY_TEXT.moveOutHint);
-    await act(async () => move.click());
-    expect(tidy.moved).toEqual(["s1"]);
-
-    await showStage(stage("s1"), tidyOf({ movingOut: true }));
-    expect(buttonAt("stage-move-out").disabled).toBe(true);
-  });
 });

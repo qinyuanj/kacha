@@ -125,12 +125,8 @@ describe("建议保留文案（#144）", () => {
 // 整理模式与画板包导入的既有文案：票面要求 boardText 全覆盖，这里把由 App / 整理条调用的条目也锁住。
 // 整理模式里逐阶段 / 整板的「收掉未定稿」与「自动划分阶段」随动作一起移除（#249）。
 describe("整理模式与画板包导入文案", () => {
-  it("整理条的体量对比与移出结局", () => {
+  it("整理条的体量对比", () => {
     expect(TIDY_TEXT.compare(1536, 0)).toBe("整理前约 1.5 KiB → 现在约 0 B");
-    expect(TIDY_TEXT.movedOut("新板")).toBe("已移出为新画板「新板」，可在画板列表里打开。撤销只恢复本画板，新画板保留。");
-    expect(TIDY_TEXT.movedOutKept("新板", "被拒")).toBe("新画板「新板」已建好，但本画板没有删去这些节点：被拒");
-    expect(TIDY_TEXT.movedOutKept("新板", null)).toBe("新画板「新板」已建好，但本画板没有删去这些节点");
-    expect(TIDY_TEXT.moveOutFailed("磁盘满了")).toBe("移出失败：磁盘满了");
   });
 
   it("画板包导入失败的两种说明", () => {
