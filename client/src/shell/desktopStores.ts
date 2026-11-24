@@ -1,7 +1,6 @@
 // 桌面壳端口的各个分组（#137）：从 shell/desktop.ts 拆出，一组一个函数。
 // 拆开之后每个函数的复杂度单独看得到，门禁也按函数计。
 import { FEATURE_LABELS, PortError, type BoardStore, type DataRootMoveResult, type DataRootStatus, type DataRootStore, type FeatureId, type FileStore, type MediaStore, type MetaStore } from "./port";
-import type { BoardMeasure } from "../core/tidy";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
 import type { BoardListing, BoardTexts, BoardWriteOptions, ImageInfo, RecycleEntry, UpdatePort, Usage, UsagePort } from "./types";
 import { base64Of, base64ToBytes } from "../core/base64";
@@ -48,8 +47,8 @@ export function checked(outcome: { ok: boolean; kind: string; message: string; v
   throw new PortError({ kind, code: outcome.kind || "failed", message: outcome.message, status: 0 });
 }
 
-/** 画板那一组；tidy 为假时度量按「尚不可用」拒绝（能力开关与真实实现一起翻，不单独出现）。 */
-export function desktopBoardStore(local: DesktopLocalBridge, userRoot: string, tidy = false): BoardStore {
+/** 画板那一组。 */
+export function desktopBoardStore(local: DesktopLocalBridge, userRoot: string): BoardStore {
   return {
     read: (path: string): Promise<BoardTexts> =>
       localRun(async () => {
@@ -76,10 +75,6 @@ export function desktopBoardStore(local: DesktopLocalBridge, userRoot: string, t
           size_lines: listing.size_lines,
         };
       }),
-    // 整理模式的度量（#158）：请求体是画板原文，未保存的节点改动也能量到。
-    // 读不懂的画板由 Go 侧报错，界面据此显示「算不出」而不是 0 字节。
-    measure: async (text: string): Promise<BoardMeasure> =>
-      tidy ? localRun(() => local.measureBoard(text)) : unavailable("tidy"),
   };
 }
 

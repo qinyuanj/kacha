@@ -21,8 +21,6 @@ type Features struct {
 	PackExport bool `json:"pack_export"`
 	// Archive 是归档与取消归档：本机存储执行画板位与只读约束，端口已接通。
 	Archive bool `json:"archive"`
-	// Tidy 是整理模式（#158）：画板体量由本机存储按任务目录与独立图片量出，端口已接通。
-	Tidy bool `json:"tidy"`
 	// Update 是可信自动更新（#164）：Go 侧真实验签并交给真实安装器。
 	// 只有内置发布者公钥的发布构建才为 true；开发构建为 false，入口按「尚不可用」处理。
 	Update bool `json:"update"`
@@ -30,12 +28,12 @@ type Features struct {
 	Feedback bool `json:"feedback"`
 }
 
-// DesktopFeatures 返回桌面壳的能力开关：归档、画板包导出、本机用量、单份生成与整理都已接通。
+// DesktopFeatures 返回桌面壳的能力开关：归档、画板包导出、本机用量与单份生成都已接通。
 //
 // Update 由 hasPublisherKey 决定：没有内置发布者公钥的构建不能验证更新签名，
 // 宁可让入口显示「尚不可用」，也不能放开一条无法验签的更新路径。
 func DesktopFeatures(hasPublisherKey bool, feedbackRelayConfigured bool) Features {
-	return Features{Generation: true, Usage: true, PackExport: true, Archive: true, Tidy: true, Update: hasPublisherKey, Feedback: feedbackRelayConfigured}
+	return Features{Generation: true, Usage: true, PackExport: true, Archive: true, Update: hasPublisherKey, Feedback: feedbackRelayConfigured}
 }
 
 // Info 是界面启动时读一次的壳信息。

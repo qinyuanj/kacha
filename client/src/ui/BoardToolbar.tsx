@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { textHoverInfo } from "../core/hoverInfo";
 import { HoverButton } from "./hoverInfo";
 import { PASTE_TEXT } from "./boardText";
-import { newTaskHint, newTaskSuffix, redoHint, runHint, runSuffix, tidyHint, tidyLabel, toolbarHint, undoHint } from "./boardToolbarText";
+import { newTaskHint, newTaskSuffix, redoHint, runHint, runSuffix, toolbarHint, undoHint } from "./boardToolbarText";
 
 interface Props {
   /** 没有打开的画板：全部置灰。 */
@@ -24,12 +24,6 @@ interface Props {
   onRun?: () => void;
   /** 生成尚不可用：运行与新建任务入口标「尚不可用」并置灰。 */
   generationUnavailable?: boolean;
-  /** 是否在整理模式；按钮按下态。 */
-  tidying?: boolean;
-  /** 整理尚不可用：整理入口标「尚不可用」并置灰。 */
-  tidyUnavailable?: boolean;
-  /** 进入 / 退出整理模式。 */
-  onTidy?: () => void;
 }
 
 export function BoardToolbar({
@@ -45,9 +39,6 @@ export function BoardToolbar({
   selectedCount = 0,
   onRun,
   generationUnavailable = false,
-  tidying = false,
-  tidyUnavailable = false,
-  onTidy,
 }: Props) {
   const hint = (text: string) => textHoverInfo(toolbarHint(disabled, text));
   return (
@@ -86,17 +77,6 @@ export function BoardToolbar({
           info={hint(runHint(generationUnavailable))}
         >
           ▶ 运行{runSuffix(selectedCount, generationUnavailable)}
-        </HoverButton>
-      </div>
-      <div className="toolbar-group">
-        <HoverButton
-          className={tidying ? "toolbar-tidy active" : "toolbar-tidy"}
-          disabled={disabled || tidyUnavailable}
-          onClick={onTidy}
-          aria-pressed={tidying}
-          info={hint(tidyHint(tidying, tidyUnavailable))}
-        >
-          {tidyLabel(tidyUnavailable)}
         </HoverButton>
       </div>
     </div>

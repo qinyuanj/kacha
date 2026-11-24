@@ -1,12 +1,12 @@
 // Package boardmeasure 量一块画板的体量（#158）：画板文件引用了哪些任务目录与独立图片，
-// 以及每个条目多少字节。
+// 以及整块画板多少字节。
 //
 // 口径与词表里的画板体量一致：一块画板引用的任务目录与独立图片的总字节，同一任务目录在这块画板内
 // 只计一次；它不按节点数计，也不等于按内容去重后的画板包大小。
 //
 // 认引用的两种写法（<日期>/<task_id>/… 的相对路径，以及任务编号里带的 UTC 日期）与清理
 // （usageservice）、导入导出同一套规则，规则本身只在 internal/taskref 里写一份（ADR 0010）。
-// 区别在粒度：这里逐节点归因（阶段体量与「收掉未定稿」预计减少量要它），清理那边整份画板扫一遍。
+// 逐节点收集引用（NodeRefs）也在这里：画板体量的口径就建立在它上面。
 package boardmeasure
 
 import (
@@ -29,23 +29,6 @@ type NodeRef struct {
 	// ID 是节点 id；读不懂、没有 id 的节点为空（其引用仍计入画板体量）。
 	ID    string
 	Items []string
-}
-
-// Measure 是一块画板的度量：节点 → 引用的条目，条目 → 字节数。
-type Measure struct {
-	// Nodes 只列引用非空的节点。
-	Nodes map[string][]string `json:"nodes"`
-	// Dirs 是画板引用的每个条目 → 字节数；引用但不在盘上的条目记 0。
-	Dirs map[string]int64 `json:"dirs"`
-}
-
-// Total 是画板体量：引用的各条目字节之和（同一目录只算一次）。
-func (m Measure) Total() int64 {
-	total := int64(0)
-	for _, n := range m.Dirs {
-		total += n
-	}
-	return total
 }
 
 // refs 收集一个节点的引用。
@@ -187,27 +170,6 @@ func NodeRefs(text string) ([]NodeRef, bool) {
 	return out, true
 }
 
-// MeasureBoard 量一块画板：每个节点引用的条目，以及每个条目的字节数（不存在记 0）。
-// 画板读不懂时 ok 为 false，调用方应把体量显示为未知，而不是 0。
-func MeasureBoard(root, text string) (Measure, bool) {
-	nodeRefs, ok := NodeRefs(text)
-	if !ok {
-		return Measure{}, false
-	}
-	m := Measure{Nodes: map[string][]string{}, Dirs: map[string]int64{}}
-	for _, node := range nodeRefs {
-		for _, item := range node.Items {
-			if _, seen := m.Dirs[item]; !seen {
-				m.Dirs[item] = bytesOf(root, item)
-			}
-		}
-		if node.ID != "" && len(node.Items) > 0 {
-			m.Nodes[node.ID] = node.Items
-		}
-	}
-	return m, true
-}
-
 // BoardBytes 量一块画板文件的体量：主文件读不懂时按备份算（与打开画板时的回退一致），
 // 都读不懂时返回 nil —— 体量未知，不当成 0。
 func BoardBytes(root string, main, bak *string) *int64 {
@@ -215,12 +177,32 @@ func BoardBytes(root string, main, bak *string) *int64 {
 		if text == nil {
 			continue
 		}
-		if m, ok := MeasureBoard(root, *text); ok {
-			total := m.Total()
+		if total, ok := totalBytes(root, *text); ok {
 			return &total
 		}
 	}
 	return nil
+}
+
+// totalBytes 量一块画板原文的体量：引用的各条目字节之和（同一目录只算一次，引用但不在盘上的记 0）。
+// 画板读不懂时 ok 为 false，调用方应把体量显示为未知，而不是 0。
+func totalBytes(root, text string) (int64, bool) {
+	nodeRefs, ok := NodeRefs(text)
+	if !ok {
+		return 0, false
+	}
+	seen := map[string]bool{}
+	total := int64(0)
+	for _, node := range nodeRefs {
+		for _, item := range node.Items {
+			if seen[item] {
+				continue
+			}
+			seen[item] = true
+			total += bytesOf(root, item)
+		}
+	}
+	return total, true
 }
 
 // bytesOf 量一个条目的字节数：目录按其中各文件长度累加，文件按自身长度；读不到记 0。

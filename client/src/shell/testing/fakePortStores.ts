@@ -114,7 +114,6 @@ export function fakeBoardStore(boards: Map<string, FakeBoard>, calls: FakeCalls,
         size_lines: { warn: 500 * 1024 * 1024, alert: 1024 * 1024 * 1024 },
       };
     },
-    measure: async () => ({ nodes: {}, dirs: {} }),
   };
 }
 

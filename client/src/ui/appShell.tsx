@@ -61,8 +61,6 @@ export function AppShell(props: {
   onOpenSettings(): void;
   onManageBoards(): void;
   onDismissUsage(): void;
-  onTidy(): void;
-  onDismissSize(): void;
   onUnarchive(): void;
   onCopyArchived(): void;
   onDismissBoardNotice(): void;
@@ -137,7 +135,6 @@ export function AppShell(props: {
         settingsFileProblem={props.settingsFileProblem}
         settingsOpen={props.settingsOpen}
         usageNotice={props.usageNotice}
-        sizeNotice={view.sizeNotice}
         activeArchived={view.activeArchived}
         boardNotice={view.boardNotice}
         updateStatus={props.updateStatus}
@@ -146,8 +143,6 @@ export function AppShell(props: {
         onOpenSettings={props.onOpenSettings}
         onManageBoards={props.onManageBoards}
         onDismissUsage={props.onDismissUsage}
-        onTidy={props.onTidy}
-        onDismissSize={props.onDismissSize}
         onUnarchive={props.onUnarchive}
         onCopyArchived={props.onCopyArchived}
         onDismissBoardNotice={props.onDismissBoardNotice}

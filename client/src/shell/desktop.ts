@@ -9,7 +9,6 @@
 // 各组实现（画板、文件、元数据、媒体、画板包、用量）在 shell/desktopStores.ts（#137），这里只做接线。
 import { FEEDBACK_UNAVAILABLE, PortError, portFailureOf, type ClipboardContent, type DataRootStore, type DiagnosticsOutcome, type DiagnosticsPackOutcome, type FeedbackOutcome, type FeedbackPort, type FeedbackSpec, type ImageCopyFailure, type ImageCopyResult, type MediaStore, type SaveCopyOutcome, type ShellFeatures, type ShellPort, type UpdatePort } from "./port";
 import type { PackEntryFact, PackExportSpec } from "../core/boardPack";
-import type { BoardMeasure } from "../core/tidy";
 import type { ThemeChoice } from "../core/theme";
 import { installPageInputTakeover, isEditableTarget } from "./pageInput";
 import type { BrowserOptions, ImageInfo, RecycleEntry, UsageCandidate, UsagePort } from "./types";
@@ -47,14 +46,12 @@ export interface DesktopInfo {
   version: string;
   user_data_root: string;
   board_root: string;
-  features: { generation: boolean; usage: boolean; pack_export: boolean; archive?: boolean; tidy?: boolean; update?: boolean; feedback?: boolean };
+  features: { generation: boolean; usage: boolean; pack_export: boolean; archive?: boolean; update?: boolean; feedback?: boolean };
 }
 
 /** Go 侧本地能力（Local 服务）：方法名与 Go 侧绑定名一致。 */
 export interface DesktopLocalBridge {
   readBoard(path: string): Promise<{ main: string | null; bak: string | null; version: string | null }>;
-  /** 整理模式的度量（#158）：请求体是画板原文，返回节点 → 引用的条目、条目 → 字节数。 */
-  measureBoard(text: string): Promise<BoardMeasure>;
   writeBoard(path: string, text: string, options: { version?: string; create_only?: boolean }): Promise<DesktopOutcome>;
   listBoardNames(dir: string): Promise<string[]>;
   listBoards(): Promise<DesktopBoardListing>;
@@ -512,8 +509,6 @@ export function desktopFeatures(bridge: DesktopBridge, info: DesktopInfo): Shell
     packImport: bridge.pack !== undefined,
     // 归档由 Go 本机存储执行（20 画板位与只读都落在服务端），已接通。
     archive: info.features.archive ?? false,
-    // 整理模式（#158）：画板体量由本机存储按任务目录与独立图片量出，Go 侧能力开关说了算。
-    tidy: info.features.tidy ?? false,
     // 诊断包导出（#162）：桥上有真实 Diagnostics 服务才开放。
     diagnostics: bridge.diagnostics !== undefined,
     // 自动更新（#164）：只有内置发布者公钥的构建才有 Update 服务；否则入口按「尚不可用」。
@@ -531,7 +526,7 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
   const local = bridge.local;
   const features: ShellFeatures = desktopFeatures(bridge, info);
 
-  const board = desktopBoardStore(local, info.user_data_root, features.tidy === true);
+  const board = desktopBoardStore(local, info.user_data_root);
 
   const files = desktopFileStore(local);
 

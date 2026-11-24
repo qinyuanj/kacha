@@ -122,8 +122,6 @@ export function createFakePort(options: FakePortOptions = {}): FakePort {
       packImport: !missing.has("packImport"),
       diagnostics: !missing.has("diagnostics"),
       archive: !missing.has("archive"),
-      // 整理模式（#158）：替身默认可用（度量返回空集，界面按 0 显示）；用例可以显式关掉。
-      tidy: !missing.has("tidy"),
       update: !missing.has("update"),
       // 数据位置迁移（#161）：替身默认有；缺这个能力时入口消失。
       dataRoot: !missing.has("dataRoot"),

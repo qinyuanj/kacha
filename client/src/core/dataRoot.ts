@@ -33,17 +33,13 @@ export function remapPath(path: string, fromRoot: string, toRoot: string): strin
 	return [toRoot.replace(/[\\/]+$/, ""), ...rest.split("/")].join(sep);
 }
 
-/** 迁移后界面状态里的路径跟着换位置：打开的画板与体量提示都不指向旧位置。 */
+/** 迁移后界面状态里的路径跟着换位置：打开的画板不指向旧位置。 */
 export function remapUiState(state: UiState, fromRoot: string, toRoot: string): UiState {
-	const notices = state.size_notices
-		? Object.fromEntries(Object.entries(state.size_notices).map(([p, tier]) => [remapPath(p, fromRoot, toRoot), tier]))
-		: undefined;
 	const next: UiState = {
 		open_boards: state.open_boards.map((p) => remapPath(p, fromRoot, toRoot)),
 		active_board: state.active_board ? remapPath(state.active_board, fromRoot, toRoot) : null,
 	};
 	if (state.last_seen_version !== undefined) next.last_seen_version = state.last_seen_version;
-	if (notices) next.size_notices = notices;
 	return next;
 }
 

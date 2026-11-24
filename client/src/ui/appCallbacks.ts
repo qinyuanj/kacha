@@ -6,11 +6,9 @@ import type { RunTarget } from "../core/runner";
 import type { Session } from "./useBoardSessions";
 import { boardRenamedText } from "./appStartup";
 import { errorText } from "../core/errors";
-import { activeSizeNotice } from "./appUiState";
 import { packMenuDisabled } from "./appUiState";
 import { isArchivedPath } from "../core/archive";
 import { redoLabel, undoLabel } from "../core/history";
-import { type SizeTier } from "../core/boardSize";
 
 /** 运行器里用到的那些。 */
 export interface AppRunner {
@@ -122,42 +120,6 @@ export function openManageBoards(flushAll: () => Promise<void>, setManageBoards:
     setManageBoards(true);
     setBoardListOpen(true);
   });
-}
-
-/** 进入整理模式：即算用户已看到这条提醒。 */
-export function enterTidy(notices: Record<string, SizeTier>, path: string, tier: SizeTier, session: Session | undefined, setSizeNotices: (next: Record<string, SizeTier>) => void, setTidyKey: (key: string | null) => void): void {
-  setSizeNotices({ ...notices, [path]: tier });
-  if (session?.status === "ok") setTidyKey(session.key);
-}
-
-/** 关闭体量提示：同样把档位记下（不再提醒）。 */
-export function dismissSizeNotice(notices: Record<string, SizeTier>, path: string, tier: SizeTier, setSizeNotices: (next: Record<string, SizeTier>) => void): void {
-  setSizeNotices({ ...notices, [path]: tier });
-}
-
-/** 当前画板的体量提示：该显示哪一档，以及已提醒到哪一档。 */
-export interface SizeNoticeView {
-  path: string;
-  bytes: number;
-  /** 该显示的档位（null = 不显示）。 */
-  tier: SizeTier | null;
-  /** 已提醒到的档位。 */
-  notified: SizeTier | undefined;
-}
-
-/** 当前画板的体量提示：按体量分档，按已提醒的档位决定要不要再提醒。 */
-export function sizeNoticeOf(size: { path: string; bytes: number; tier: SizeTier | null } | null, notices: Record<string, SizeTier>): SizeNoticeView | null {
-  if (!size) return null;
-  const noticed = activeSizeNotice(size.tier, notices[size.path]);
-  return { path: size.path, bytes: size.bytes, tier: noticed.show, notified: noticed.notified };
-}
-
-/** 体量回落时校正已提醒档位（清除回落那条线的记录）。 */
-export function sizeNoticeUpdated(notices: Record<string, SizeTier>, notice: { path: string; tier: SizeTier | null } | null): Record<string, SizeTier> {
-  if (!notice || !notice.tier) return notices;
-  if (notice.tier === notices[notice.path]) return notices;
-  const { [notice.path]: _dropped, ...rest } = notices;
-  return { ...rest, [notice.path]: notice.tier };
 }
 
 /** 当前画板自己的提示（重命名失败、重新载入失败等）。 */

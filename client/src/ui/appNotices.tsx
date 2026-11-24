@@ -1,7 +1,7 @@
 // 工作台的提示条（#137）：从 src/App.tsx 拆出的子组件，让 App 只留接线。
 import type { Board } from "../core/board";
 import type { SizeTier } from "../core/boardSize";
-import { ArchivedBar, SaveFailureBar, SizeNoticeBar, UpdateStatusBar, UsageLimitBar } from "./appBars";
+import { ArchivedBar, SaveFailureBar, UpdateStatusBar, UsageLimitBar } from "./appBars";
 import type { UpdateStatusView } from "./updateStatusView";
 
 /** 保存失败的画板：说明与操作按钮。 */
@@ -25,9 +25,7 @@ export interface AppNoticesProps {
   settingsOpen: boolean;
   /** 用量提醒。 */
   usageNotice: { level: SizeTier; total: number; limit: number } | null;
-  /** 当前画板的体量提示。 */
-  sizeNotice: { bytes: number; tier: SizeTier } | null;
-  /** 当前画板是归档画板（只读，不能整理）。 */
+  /** 当前画板是归档画板（只读）。 */
   activeArchived: boolean;
   /** 当前画板自己的提示（重命名失败、重新载入失败等）。 */
   boardNotice: string | null;
@@ -37,8 +35,6 @@ export interface AppNoticesProps {
   onOpenSettings(): void;
   onManageBoards(): void;
   onDismissUsage(): void;
-  onTidy(): void;
-  onDismissSize(): void;
   onUnarchive(): void;
   onCopyArchived(): void;
   onDismissBoardNotice(): void;
@@ -91,35 +87,9 @@ function ConfigWarnings({ tableError, settingsFileProblem, settingsOpen, onDismi
   );
 }
 
-/** 用量提醒与当前画板的体量提醒。 */
-function UsageAndSize({ usageNotice, sizeNotice, activeArchived, onManageBoards, onDismissUsage, onTidy, onDismissSize }: { usageNotice: AppNoticesProps["usageNotice"]; sizeNotice: AppNoticesProps["sizeNotice"]; activeArchived: boolean } & Pick<AppNoticesProps, "onManageBoards" | "onDismissUsage" | "onTidy" | "onDismissSize">) {
-  return (
-    <>
-      {usageNotice && (
-        <UsageLimitBar
-          level={usageNotice.level}
-          total={usageNotice.total}
-          limit={usageNotice.limit}
-          onManage={onManageBoards}
-          onDismiss={onDismissUsage}
-        />
-      )}
-      {sizeNotice && (
-        <SizeNoticeBar
-          bytes={sizeNotice.bytes}
-          tier={sizeNotice.tier}
-          canTidy={!activeArchived}
-          onTidy={onTidy}
-          onDismiss={onDismissSize}
-        />
-      )}
-    </>
-  );
-}
-
 /** 工作台的所有提示条。 */
 export function AppNotices(props: AppNoticesProps) {
-  const { failures, tableError, settingsFileProblem, settingsOpen, usageNotice, sizeNotice, activeArchived, boardNotice } = props;
+  const { failures, tableError, settingsFileProblem, settingsOpen, usageNotice, activeArchived, boardNotice } = props;
   return (
     <>
       {props.updateStatus.visible && <UpdateStatusBar view={props.updateStatus} onDefer={props.onDeferUpdate} />}
@@ -137,15 +107,15 @@ export function AppNotices(props: AppNoticesProps) {
         onDismissTableError={props.onDismissTableError}
         onOpenSettings={props.onOpenSettings}
       />
-      <UsageAndSize
-        usageNotice={usageNotice}
-        sizeNotice={sizeNotice}
-        activeArchived={activeArchived}
-        onManageBoards={props.onManageBoards}
-        onDismissUsage={props.onDismissUsage}
-        onTidy={props.onTidy}
-        onDismissSize={props.onDismissSize}
-      />
+      {usageNotice && (
+        <UsageLimitBar
+          level={usageNotice.level}
+          total={usageNotice.total}
+          limit={usageNotice.limit}
+          onManage={props.onManageBoards}
+          onDismiss={props.onDismissUsage}
+        />
+      )}
       {activeArchived && <ArchivedBar onUnarchive={props.onUnarchive} onCopy={props.onCopyArchived} />}
       {boardNotice && (
         <div className="bar bar-warn">

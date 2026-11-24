@@ -191,47 +191,6 @@
   margin: 0;
   background: var(--accent-soft-strong);
 }
-/* 整理条里的按钮：画布域自己的一套外观（base 只给了 primary / danger 变体）。 */
-.tidy-bar button:not(.primary) {
-  padding: 1px 8px;
-  font-size: 12px;
-  color: var(--text-1);
-  background: var(--control-bg);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-.tidy-bar button:not(.primary):hover:not(:disabled) {
-  background: var(--control-hover);
-  border-color: var(--border-3);
-}
-.tidy-bar button:not(.primary):disabled {
-  color: var(--text-3);
-  background: var(--surface-sunken);
-  border-color: var(--border-1);
-  cursor: default;
-}
-/* 整理条：浮在画布顶部，显示整理前后的体量对比（#92）。 */
-.tidy-bar {
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 12px;
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-2);
-  white-space: nowrap;
-}
-.board-toolbar button.toolbar-tidy.active {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
 .thumb {
   display: block;
   width: 100%;

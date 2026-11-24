@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qinyuanj/kacha/desktop/internal/boardmeasure"
 	"github.com/qinyuanj/kacha/desktop/internal/dataroot"
 )
 
@@ -477,8 +476,8 @@ func TestListFallsBackToBackupForBodySize(t *testing.T) {
 		t.Fatalf("按备份算的体量 = %v, want 25", got)
 	}
 }
-// 装配走 NewFollowing（共享数据根，Store 没有固定 root）时，列表体量仍按当前数据根量。
-// 整理模式的度量与列表体量必须是同一口径：同一次统计不能一边算 1060、一边恒为 0。
+// 装配走 NewFollowing（共享数据根，Store 没有固定 root）时，列表体量仍按当前数据根量：
+// 同一次统计不能因为 s.root 是空的就算出恒为 0 的体量（期望值 1060 由夹具写入的字节手算）。
 func TestListBodySizeFollowsSharedDataRoot(t *testing.T) {
 	root := t.TempDir()
 	store := NewFollowing(dataroot.NewRoots(root))
@@ -516,14 +515,5 @@ func TestListBodySizeFollowsSharedDataRoot(t *testing.T) {
 	listed := listing.Boards[0].Bytes
 	if listed == nil || *listed != 1060 {
 		t.Fatalf("列表体量 = %v, want 1060（任务目录 1000 + 独立图片 60）", listed)
-	}
-
-	// 同一批内容按整理模式的度量算：与列表体量必须相等。
-	measure, ok := boardmeasure.MeasureBoard(root, text)
-	if !ok {
-		t.Fatalf("MeasureBoard: 读不懂这块画板")
-	}
-	if measure.Total() != *listed {
-		t.Fatalf("整理模式量 = %d，列表体量 = %d，两处口径不一致", measure.Total(), *listed)
 	}
 }

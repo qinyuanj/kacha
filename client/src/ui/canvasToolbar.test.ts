@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BOARD_FORMAT_VERSION, type Board } from "../core/board";
 import { BUILTIN_TABLE } from "../core/capabilities";
 import { PREFERRED_TASK_MODEL } from "../core/settings";
-import { FLASH_UNAVAILABLE_TEXT, TIDY_TEXT } from "./boardText";
+import { FLASH_UNAVAILABLE_TEXT } from "./boardText";
 import { createFakePort } from "../shell/testing/fakePort";
 import { ShellProvider } from "./shell";
 import { CanvasToolbar, type CanvasToolbarProps } from "./canvasToolbar";
@@ -74,8 +74,6 @@ function blank(): CanvasToolbarProps {
     redoLabel: null,
     selectedCount: 0,
     onRun: vi.fn(),
-    tidying: false,
-    onTidyChange: vi.fn(),
   };
 }
 
@@ -122,8 +120,6 @@ describe("CanvasToolbar", () => {
     expect(button("▶ 运行选中")).toBeTruthy();
     expect(button("↶").getAttribute("aria-disabled")).toBeNull();
     expect(button("↷").getAttribute("aria-disabled")).toBeNull();
-    expect(button(TIDY_TEXT.enter).getAttribute("aria-pressed")).toBe("false");
-    expect(button(TIDY_TEXT.enter)).toBeTruthy();
   });
 
   it("可用列表只有当前模型：不补不可用占位项", async () => {
@@ -153,7 +149,7 @@ describe("CanvasToolbar", () => {
     expect(props.apply).toHaveBeenCalledWith({ kind: "lastModel", model: PREFERRED_TASK_MODEL });
   });
 
-  it("新建类动作与撤销 / 重做、运行、整理都接上了回调", async () => {
+  it("新建类动作与撤销 / 重做、运行都接上了回调", async () => {
     const props = blankWith({ undoLabel: "移动节点", redoLabel: "删除节点", selectedCount: 1 });
     await show(props);
     for (const [text, called] of [
@@ -167,18 +163,6 @@ describe("CanvasToolbar", () => {
       await act(async () => button(text).click());
       expect(called).toHaveBeenCalledTimes(1);
     }
-  });
-
-  it("整理按钮反映整理模式，点它切换", async () => {
-    const props = blankWith({ tidying: true });
-    await show(props);
-    expect(button(TIDY_TEXT.enter).getAttribute("aria-pressed")).toBe("true");
-    await act(async () => button(TIDY_TEXT.enter).click());
-    expect(props.onTidyChange).toHaveBeenCalledWith(false);
-    const idle = blankWith({ tidying: false });
-    await show(idle);
-    await act(async () => button(TIDY_TEXT.enter).click());
-    expect(idle.onTidyChange).toHaveBeenCalledWith(true);
   });
 });
 

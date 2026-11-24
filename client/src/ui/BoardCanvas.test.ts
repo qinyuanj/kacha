@@ -19,10 +19,9 @@ import { edgeHoverInfo } from "../core/hoverInfo";
 import { LOCKED_HINT, TASK_BUSY } from "../core/iterate";
 import { MAX_PASTE_BYTES, isNodeMarker, nodeMarker, PASTE_NAME_PREFIX } from "../core/pageInput";
 import type { ClipboardContent } from "../core/clipboardDispatch";
-import type { BoardMeasure } from "../core/tidy";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { BoardCanvas } from "./BoardCanvas";
-import { ARCHIVE_TEXT, DELETE_TASK_TEXT, IMPORT_TEXT, SAVE_TEXT, TIDY_TEXT } from "./boardText";
+import { ARCHIVE_TEXT, DELETE_TASK_TEXT, IMPORT_TEXT, SAVE_TEXT } from "./boardText";
 import { writeClipboard } from "./canvasKeyboard";
 import { HOVER_DELAY_MS } from "./hoverInfo";
 import { ShellProvider } from "./shell";
@@ -155,7 +154,6 @@ beforeEach(() => {
   nativeClipboard = { kind: "empty", text: null, images: [], reason: null, readFailureCount: 0 };
   port.media.readClipboard = vi.fn(async () => nativeClipboard);
   port.files.inspectImage = vi.fn(async () => IMAGE_INFO);
-  port.board.measure = vi.fn(async () => ({ nodes: {}, dirs: {} } satisfies BoardMeasure));
   port.ui.ask = vi.fn(async () => true);
   port.media.pickImages = vi.fn(async () => [] as File[]);
   port.media.uploadReference = vi.fn(async (file: File) => ({ path: `reference/${file.name}`, sha256: SHA_B }));
@@ -197,7 +195,6 @@ function makeProps(patch: Partial<Props> = {}) {
     onCancelTask: vi.fn(),
     onRegenerate: vi.fn(),
     onViewSendText: vi.fn(),
-    onTidyChange: vi.fn(),
   };
   const props: Props = {
     board: sampleBoard(),
@@ -213,7 +210,6 @@ function makeProps(patch: Partial<Props> = {}) {
     handled: new Set<string>(),
     toolbarSlot: null,
     focus: null,
-    tidying: false,
     theme: "dark",
     ...spies,
     ...patch,
@@ -464,7 +460,7 @@ describe("工具栏（portal 进 toolbarSlot）", () => {
     expect(slot.childElementCount).toBe(0);
   });
 
-  it("撤销 / 重做 / 运行 / 整理按钮接上回调", async () => {
+  it("撤销 / 重做 / 运行按钮接上回调", async () => {
     const harness = await renderCanvas({ toolbarSlot: slot, undoLabel: "移动 2 个节点", redoLabel: "新建提示词" });
     await act(async () => buttonByLabel(slot, "撤销").click());
     expect(harness.onUndo).toHaveBeenCalledTimes(1);
@@ -474,8 +470,6 @@ describe("工具栏（portal 进 toolbarSlot）", () => {
     // 文案在生产侧 BoardToolbar / PreviewDialog（本票未改动的既有组件），这里手抄同源字面量。
     await act(async () => buttonByText(slot, "▶ 运行选中").click());
     expect(harness.onRun).toHaveBeenCalledWith(["p1", "r1"]);
-    await act(async () => buttonByText(slot, TIDY_TEXT.enter).click());
-    expect(harness.onTidyChange).toHaveBeenCalledWith(true);
   });
 
   it("「＋ 参考图…」选好文件后上传并落成参考图", async () => {
@@ -858,16 +852,6 @@ describe("画布结构", () => {
     await renderCanvas({ theme: "dark" });
     expect(flowProps().colorMode).toBe("dark");
     expect(xyflow.captured.plugin.background).toMatchObject({ bgColor: "var(--rf-background)" });
-  });
-
-  it("整理模式：根类名带 tidying、出整理条、可退出", async () => {
-    const harness = await renderCanvas({ tidying: true, toolbarSlot: slot });
-    // 两个标记用空格拼接的写法照原样保留（中间会多一个空格），按 classList 断言不含糊。
-    expect([...canvasRoot().classList]).toEqual(["canvas", "tidying"]);
-    const bar = container.querySelector<HTMLElement>('[role="status"][aria-label="整理模式"]');
-    expect(bar).not.toBeNull();
-    await act(async () => buttonByText(bar!, TIDY_TEXT.done).click());
-    expect(harness.onTidyChange).toHaveBeenCalledWith(false);
   });
 
   it("带阶段数据的旧画板照常打开：没有阶段框，收起的阶段也不再隐藏成员", async () => {

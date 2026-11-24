@@ -191,13 +191,10 @@ export function useSessionArchive(options: {
   apply: (key: string, change: BoardChange) => EditResult | null;
   readOnlyPath: (path: string) => boolean;
   movingSessions: React.MutableRefObject<Set<string>>;
-  onMoved: (from: string, to: string) => void;
 }) {
-  const { userRoot, store, ports, flush, saverOf, dropSession, openPath, apply, readOnlyPath, movingSessions, onMoved } = options;
+  const { userRoot, store, ports, flush, saverOf, dropSession, openPath, apply, readOnlyPath, movingSessions } = options;
   const userRootRef = useRef(userRoot);
   userRootRef.current = userRoot;
-  const onMovedRef = useRef(onMoved);
-  onMovedRef.current = onMoved;
   const closeBoard = useCallback(
     async (key: string) => {
       await flushPending(key, saverOf, flush);
@@ -217,7 +214,6 @@ export function useSessionArchive(options: {
   const movedTo = useCallback((from: string, to: string) => {
     const s = store.sessionsRef.current.find((x) => samePath(x.path, from));
     if (s) store.setSessions(store.sessionsRef.current.map((x) => (x.key === s.key ? { ...x, path: to } : x)));
-    onMovedRef.current(from, to);
   }, [store]);
   /** 归档（#90）：本页开着的先保存再带版本搬，标签页留着、变为只读。 */
   const archiveBoard = useCallback(
@@ -253,7 +249,7 @@ export function useSessionArchive(options: {
   return { closeBoard, deleteBoard, archiveBoard, unarchiveBoard, copyAsNewBoard, keyOf, renameBoard, dismissNotice, retrySave, reload };
 }
 
-export function useBoardSessions(userRoot: string | null, envSource: EnvSource, onMoved: (from: string, to: string) => void = () => undefined) {
+export function useBoardSessions(userRoot: string | null, envSource: EnvSource) {
   const port = useShell();
   const movingSessions = useRef(new Set<string>());
   const { activeKey, activeKeyRef, setActiveKey } = useActiveSession();
@@ -285,7 +281,6 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource, 
     apply: editing.apply,
     readOnlyPath,
     movingSessions,
-    onMoved,
   });
   const { check, apply, undoBoard, redoBoard, getBoard, boardFileName } = editing;
   const { closeAll, openPath, createBoard, openImportedBoard, dropSession } = life;

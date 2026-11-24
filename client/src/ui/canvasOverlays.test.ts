@@ -1,15 +1,13 @@
 // @vitest-environment jsdom
-// 画布浮层：整理条、上下文菜单、放大预览弹窗、悬浮信息层与动作条——各自判空（没开 / 没有条目就不渲染）、
+// 画布浮层：上下文菜单、放大预览弹窗、悬浮信息层与动作条——各自判空（没开 / 没有条目就不渲染）、
 // 位置取自菜单状态、弹窗按 nonce 重挂、条目点击与关闭都接上回调。
 // vitest 的 include 只收 *.test.ts，所以用 createElement 而不是 JSX；@xyflow/react 的 NodeToolbar 用替身，
 // 预览弹窗用替身（它自己要画布上下文与图片信息，那是它自己的测试范围）。
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MenuItem } from "../core/contextMenu";
-import type { ShellPort } from "../shell/port";
 import { createFakePort } from "../shell/testing/fakePort";
-import { TIDY_TEXT } from "./boardText";
 import { CanvasActionBar, CanvasOverlays, type CanvasActionBarProps, type CanvasOverlaysProps } from "./canvasOverlays";
 import { ShellProvider } from "./shell";
 import type { CanvasMenuState, CanvasPreviewState } from "./useCanvasOverlaysState";
@@ -58,10 +56,8 @@ vi.mock("./PreviewDialog", async () => {
 
 let container: HTMLDivElement;
 let root: Root;
-/** 壳端口替身：整理条的确认框走 port.ui.ask（#145）；其它浮层不碰壳。 */
+/** 壳端口替身：这些浮层都不碰壳。 */
 let port: ReturnType<typeof createFakePort>;
-/** 确认框替身：签名借用壳端口，不另写一份。 */
-let ask: Mock<ShellPort["ui"]["ask"]>;
 
 beforeEach(() => {
   container = document.createElement("div");
@@ -70,8 +66,6 @@ beforeEach(() => {
   dialog.mounts = 0;
   dialog.last = null;
   port = createFakePort();
-  ask = vi.fn<ShellPort["ui"]["ask"]>().mockResolvedValue(true);
-  port.ui.ask = ask;
 });
 
 afterEach(async () => {
@@ -99,9 +93,6 @@ function overlays(overrides: Partial<CanvasOverlaysProps> = {}): CanvasOverlaysP
     preview: null,
     onClosePreview: vi.fn(),
     toast: vi.fn(),
-    tidying: false,
-    tidyMeasure: { measure: null, before: null },
-    onTidyDone: vi.fn(),
     hoverLayer: null,
     ...overrides,
   };
@@ -127,32 +118,14 @@ async function show(ui: ReactElement): Promise<void> {
 }
 
 const buttons = (selector = "button"): HTMLButtonElement[] => [...container.querySelectorAll<HTMLButtonElement>(selector)];
-const buttonByText = (text: string): HTMLButtonElement => buttons(".tidy-bar button").find((b) => b.textContent === text)!;
 
 describe("CanvasOverlays", () => {
   it("什么都不开时只渲染空的浮层容器", async () => {
     await show(createElement(CanvasOverlays, overlays()));
-    expect(container.querySelector(".tidy-bar")).toBeNull();
     expect(container.querySelector(".context-menu")).toBeNull();
     expect(container.querySelector('[data-testid="preview-dialog"]')).toBeNull();
     expect(container.querySelector(".hover-info")).toBeNull();
     expect(container.textContent).toBe("");
-  });
-
-  it("整理模式才出整理条，点「完成」退出", async () => {
-    const props = overlays({ tidying: true });
-    await show(createElement(CanvasOverlays, props));
-    const bar = container.querySelector(".tidy-bar")!;
-    expect(bar.getAttribute("aria-label")).toBe("整理模式");
-    expect(bar.textContent).toContain(TIDY_TEXT.measuring);
-    await act(async () => buttonByText(TIDY_TEXT.done).click());
-    expect(props.onTidyDone).toHaveBeenCalledTimes(1);
-  });
-
-  it("整理条：量不出来时说暂时算不出，不写成一个数", async () => {
-    await show(createElement(CanvasOverlays, overlays({ tidying: true, tidyMeasure: { measure: null, before: null, failed: true } })));
-    expect(container.querySelector(".tidy-bar")?.textContent).toContain(TIDY_TEXT.measureFailed);
-    expect(container.querySelector(".tidy-bar")?.textContent).not.toContain(TIDY_TEXT.measuring);
   });
 
   it("上下文菜单落在右键处的窗口坐标上，点条目交给画布执行并关掉菜单", async () => {
@@ -181,7 +154,7 @@ describe("CanvasOverlays", () => {
     expect(dialog.last!.toast).toBe(props.toast);
     expect(dialog.last!.onClose).toBe(props.onClosePreview);
     // 别的状态变化不动弹窗（key 没变就不重挂）。
-    await act(async () => root.render(tree(createElement(CanvasOverlays, { ...props, tidying: true }))));
+    await act(async () => root.render(tree(createElement(CanvasOverlays, { ...props, toast: vi.fn() }))));
     expect(dialog.mounts).toBe(1);
     // 再打开同一个节点：nonce 变了，弹窗从头开始。
     await act(async () => root.render(tree(createElement(CanvasOverlays, { ...props, preview: { ...PREVIEW, nonce: 2 } }))));

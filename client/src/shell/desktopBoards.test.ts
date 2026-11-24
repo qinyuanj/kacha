@@ -34,7 +34,6 @@ function stubBridge(outcomes: { rename?: DesktopOutcome; remove?: DesktopOutcome
       calls.write.push({ path, text, options });
       return outcomes.write ?? { ok: true, kind: "", message: "", version: "v2" };
     },
-    measureBoard: async () => ({ nodes: {}, dirs: {} }),
     listBoardNames: async () => ["本地.ugcboard.json"],
     listBoards: async () => ({ boards: [{ name: "本地.ugcboard.json", path: "画板/本地.ugcboard.json", archived: false, bytes: null }], slots: { used: 1, total: 20 }, size_lines: { warn: 1, alert: 2 } }),
     renameBoard: async (from, to, version) => {

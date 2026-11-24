@@ -69,7 +69,6 @@ import { imageImportPorts, useCanvasDrop } from "./useCanvasDrop";
 import { useCanvasInteraction } from "./useCanvasInteraction";
 import { useCanvasOverlaysState } from "./useCanvasOverlaysState";
 import { useCanvasSelectionState } from "./useCanvasSelectionState";
-import { useTidyMeasure } from "./tidy";
 
 /** 拖线建节点的落点处理：松手处建哪类节点（见 core/dragCreate）。 */
 type DragCreate = (action: BoardAction, from: DragFrom, at: { x: number; y: number }) => void;
@@ -111,9 +110,6 @@ interface Props {
   toolbarSlot: HTMLElement | null;
   /** 运行指示跳转：居中并选中该节点；nonce 变化即再跳一次。 */
   focus: { nodeId: string; nonce: number } | null;
-  /** 整理模式（#92）：画布的一种界面状态，其它编辑照常可用。 */
-  tidying: boolean;
-  onTidyChange: (tidying: boolean) => void;
   /** 归档画板（#90）：能看、放大、下载结果，不能编辑（不拖动、不连线、不删、菜单只剩查看与下载）。 */
   readOnly?: boolean;
   /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框）：粘贴放行给它们，不落到背后的画板（#96）。 */
@@ -145,8 +141,6 @@ export function BoardCanvas({
   onViewSendText,
   toolbarSlot,
   focus,
-  tidying,
-  onTidyChange,
   readOnly = false,
   modalOpen = false,
   theme,
@@ -169,7 +163,6 @@ export function BoardCanvas({
   const canvasData = useCanvasData({ board, boardFile, userRoot, table, locked, handled, runNodes, applyChange });
   const overlays = useCanvasOverlaysState({ flow, selectedRef, setSelectedNodes, clearPromptFocus: () => requestPromptFocus(null) });
   const actionBar = useActionBarHover();
-  const tidyMeasure = useTidyMeasure(board, tidying);
   const nav = useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen: overlays.dialogOpenRef, apply, isEditableTarget: port.ui.isEditableTarget });
   const hover = useHoverLayer();
 
@@ -299,7 +292,7 @@ export function BoardCanvas({
         <DragContext.Provider value={drag}>
           {/* 画布内屏蔽 WebView 默认右键菜单；可编辑元素保留原生菜单（复制粘贴）。 */}
           <div
-            className={canvasClassName(dragging, tidying)}
+            className={canvasClassName(dragging)}
             ref={wrapper}
             onContextMenu={(e) => blockNativeContextMenu(port.ui.isEditableTarget, e)}
             onPointerDownCapture={nav.onPointerDownCapture}
@@ -322,8 +315,6 @@ export function BoardCanvas({
               redoLabel={redoLabel}
               selectedCount={selectedNodes.size}
               onRun={() => onRun([...selectedNodes])}
-              tidying={tidying}
-              onTidyChange={onTidyChange}
             />
             <ReactFlow
               {...nav.flowProps}
@@ -383,9 +374,6 @@ export function BoardCanvas({
               preview={overlays.preview}
               onClosePreview={overlays.closePreview}
               toast={toast}
-              tidying={tidying}
-              tidyMeasure={tidyMeasure}
-              onTidyDone={() => onTidyChange(false)}
               hoverLayer={hover.layer}
             />
           </div>
