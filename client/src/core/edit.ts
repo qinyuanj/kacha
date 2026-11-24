@@ -13,7 +13,6 @@ import { addAsReference, addAsReferenceTarget, continueEditing, LOCKED_HINT, pas
 import { addResultNode, PROMPT_NODE_SIZE, type RunResult } from "./layout";
 import { IMAGE_NODE_WIDTH, imageNodeSize } from "./nodeSize";
 import { setEdgeRegion } from "./region";
-import { removeMovedStage } from "./moveOut";
 import { duplicateNodes, nudgeNodes, settleAltDrag } from "./selection";
 import type { Discovery } from "./settings";
 import { autoSizeSpec, manualSizeSpec, withSizeTier } from "./size";
@@ -102,8 +101,6 @@ export type BoardChange =
   | { kind: "addAsReference"; resultId: string; selected: string[]; sourceLayer: number | null }
   /** 缺图节点重新定位：picked = 用户手选的文件（参考图随之改显示名）；fileName 为新文件名。 */
   | { kind: "relocate"; nodeId: string; path: string; sha256: string; fileName: string; picked: boolean }
-  /** 移出为新画板之后，原画板删去移出的节点（见 moveOut.movedIds）；新画板已由界面写好，撤销只恢复本画板。 */
-  | { kind: "moveOutStage"; stageId: string }
   // ---- 视图变更 ----
   | { kind: "viewport"; viewport: Board["viewport"] }
   /** 工具栏的新建任务模型：偏好不是编辑。 */
@@ -413,12 +410,6 @@ function edgeDraft(board: Board, change: ChangeOf<"moveImagePort" | "setRegion">
   }
 }
 
-// ---- 移出为新画板 ----
-
-function moveOutDraft(board: Board, change: ChangeOf<"moveOutStage">): Draft {
-  return { board: removeMovedStage(board, change.stageId), step: { label: "移出为新画板" }, selection: [] };
-}
-
 // ---- 视图与系统 ----
 
 const sameViewport = (a: Board["viewport"], b: Board["viewport"]) => a.x === b.x && a.y === b.y && a.zoom === b.zoom;
@@ -475,7 +466,6 @@ const HANDLERS: DraftHandlers = {
   setModel: modelDraft,
   moveImagePort: edgeDraft,
   setRegion: edgeDraft,
-  moveOutStage: moveOutDraft,
   viewport: viewDraft,
   lastModel: viewDraft,
   title: viewDraft,
