@@ -120,7 +120,7 @@ describe("画板列表", () => {
     expect(container.querySelector('[role="status"]')?.textContent).toContain("删除不再需要的画板后才能新建");
   });
 
-  it("体量档位：越过提醒线才有档位", async () => {
+  it("体量档位：高于阈值才有档位", async () => {
     const port = createFakePort();
     port.board.list = async () => listing({ boards: [
       { name: "a.ugcboard.json", path: "/~/a.ugcboard.json", archived: false, bytes: 50 },

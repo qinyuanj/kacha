@@ -70,7 +70,7 @@ type Slots struct {
 	Total int `json:"total"`
 }
 
-// SizeLines 是体量提醒线（字节）。
+// SizeLines 是画板列表体量分档阈值（字节）。
 type SizeLines struct {
 	Warn  int64 `json:"warn"`
 	Alert int64 `json:"alert"`
@@ -135,7 +135,7 @@ func (s *Service) ListBoardNames(dir string) ([]string, error) {
 	return s.store.ListBoardNames(dir)
 }
 
-// ListBoards 列出画板目录与归档目录里的画板，以及画板位与体量提醒线。
+// ListBoards 列出画板目录与归档目录里的画板，以及画板位与画板体量分档阈值。
 func (s *Service) ListBoards() (BoardListing, error) {
 	listing, err := s.store.List()
 	if err != nil {

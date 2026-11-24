@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { bySizeDescending, sizeTier } from "./boardSize";
 
-// 期望值按票面规则手写：黄线 500、红线 1000（测试用小数），超过才算越线。
+// 期望值按票面规则手写：黄线 500、红线 1000（测试用小数），高于阈值才算该档。
 const lines = { warn: 500, alert: 1000 };
 
 describe("画板体量档位", () => {
-  it("超过黄线标黄、超过红线标红，线上不算越线", () => {
+  it("高于黄线标黄、高于红线标红，等于阈值不算该档", () => {
     expect(sizeTier(0, lines)).toBeNull();
     expect(sizeTier(500, lines)).toBeNull();
     expect(sizeTier(501, lines)).toBe("warn");

@@ -13,7 +13,7 @@ interface BoardRow {
   title: string;
   /** 本页已经打开着。 */
   isOpen: boolean;
-  /** 体量档位（越过提醒线时才有）。 */
+  /** 体量档位（高于分档阈值时才有）。 */
   tier: SizeTier | null;
   /** 归档画板。 */
   archived: boolean;
