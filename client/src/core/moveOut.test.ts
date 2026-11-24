@@ -1,5 +1,5 @@
 // 「移出为新画板」（#93）的拆分那一半已在 1.7.0 移除（#251）；这里守的是原画板这一侧：
-// 画板变更 moveOutStage 删去移出的阶段节点（该变更随 #249 一起删除，届时本文件与 moveOut.ts 一并消失）。
+// 画板变更 moveOutStage 删去移出的阶段节点。界面不再产生这个变更，收口留给 #255 的死代码清理。
 import { describe, expect, it } from "vitest";
 import { newBoard, stagesOf, type Board, type BoardEdge, type BoardNode, type ResultNode } from "./board";
 import { removeMovedStage } from "./moveOut";

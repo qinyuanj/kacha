@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardBytes, nodesBytes, pruneSavings, type BoardMeasure } from "./tidy";
+import { boardBytes, nodesBytes, type BoardMeasure } from "./tidy";
 
 const A = "2026-10-01/a";
 const B = "2026-10-02/b";
@@ -22,13 +22,5 @@ describe("整理模式的体量（按任务目录，与画板体量同一口径�
     expect(nodesBytes(measure, ["r1", "ref", "r2"])).toBe(1300);
     expect(nodesBytes(measure, ["t", "gone"])).toBe(50);
     expect(nodesBytes(measure, [])).toBe(0);
-  });
-
-  it("收掉一些节点预计减少的体量：只算不再被其它节点引用的任务目录", () => {
-    // 参考图还引用着 A：收掉 r1 画板不会变小。
-    expect(pruneSavings(measure, ["r1"])).toBe(0);
-    expect(pruneSavings(measure, ["r1", "ref"])).toBe(1000);
-    expect(pruneSavings(measure, ["r2", "r3"])).toBe(307);
-    expect(pruneSavings(measure, [])).toBe(0);
   });
 });
