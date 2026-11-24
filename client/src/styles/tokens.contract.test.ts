@@ -162,3 +162,43 @@ describe("框选遮罩半透明契约（浅色下整块挡住节点）", () => {
     }
   });
 });
+
+/* ---- 框选虚线描边对比度契约（#247，WCAG 1.4.11）--------------------------------
+ * 浅色主题的框选矩形先铺 --selection-fill，再画 1px 虚线描边（canvas.css:23 的
+ * --xy-selection-border）。描边压在填充上必须 ≥3:1，否则框选边界只能靠填充辨认。
+ * 期望值由本文件独立算出：按 tokens.css 的级联把两枚 token 解析到底，把半透明填充
+ * 叠到画布底色上得到真实像素，再走 WCAG 2.1 相对亮度公式——不读取实现侧的任何
+ * 颜色计算（样式侧本来也没有），所以色值被改回低对比度时这条断言会真的红。
+ */
+function channelsOf(colour: string): { rgb: [number, number, number]; alpha: number } {
+  if (colour.startsWith("#")) {
+    const rgb = [1, 3, 5].map((i) => parseInt(colour.slice(i, i + 2), 16)) as [number, number, number];
+    return { rgb, alpha: alphaOf(colour) };
+  }
+  const [r, g, b] = (colour.match(/[\d.]+/g) ?? []).map(Number);
+  return { rgb: [r, g, b], alpha: alphaOf(colour) };
+}
+
+/** 半透明颜色叠到不透明底色后的实际像素，返回 #rrggbb。 */
+function over(colour: string, backdrop: string): string {
+  const front = channelsOf(colour);
+  const back = channelsOf(backdrop);
+  const mixed = front.rgb.map((channel, i) => Math.round(front.alpha * channel + (1 - front.alpha) * back.rgb[i]));
+  return "#" + mixed.map((channel) => channel.toString(16).padStart(2, "0")).join("");
+}
+
+describe("框选虚线描边对比度契约（#247）", () => {
+  it("浅色下描边对框选填充至少 3:1，暗色描边保持原值", () => {
+    const light = tokensFor("light");
+    // 框选矩形先铺半透明填充、再画描边：先叠到画布底色上，得到描边实际压着的像素。
+    const fill = over(resolveToken(light, "--selection-fill"), resolveToken(light, "--canvas-bg"));
+    const border = resolveToken(light, "--rf-selection-border");
+    expect(
+      contrastOf(border, fill),
+      "浅色框选描边 " + border + " 对框选填充 " + fill + " 的对比度不足 3:1（WCAG 1.4.11）",
+    ).toBeGreaterThanOrEqual(3);
+
+    // 暗色框选描边在暗底上本来就够可见：这条边必须与修复前逐字相同。
+    expect(resolveToken(tokensFor("dark"), "--rf-selection-border")).toBe("rgb(76 141 255 / 50%)");
+  });
+});
