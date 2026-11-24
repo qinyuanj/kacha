@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
-// 画布浮层：整理条、上下文菜单、放大预览弹窗、悬浮信息层与动作条——各自判空（没开 / 没有条目就不渲染）、
+// 画布浮层：上下文菜单、放大预览弹窗、悬浮信息层与动作条——各自判空（没开 / 没有条目就不渲染）、
 // 位置取自菜单状态、弹窗按 nonce 重挂、条目点击与关闭都接上回调。
 // vitest 的 include 只收 *.test.ts，所以用 createElement 而不是 JSX；@xyflow/react 的 NodeToolbar 用替身，
 // 预览弹窗用替身（它自己要画布上下文与图片信息，那是它自己的测试范围）。
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MenuItem } from "../core/contextMenu";
-import type { ShellPort } from "../shell/port";
 import { createFakePort } from "../shell/testing/fakePort";
 import { CanvasActionBar, CanvasOverlays, type CanvasActionBarProps, type CanvasOverlaysProps } from "./canvasOverlays";
 import { ShellProvider } from "./shell";
@@ -57,10 +56,8 @@ vi.mock("./PreviewDialog", async () => {
 
 let container: HTMLDivElement;
 let root: Root;
-/** 壳端口替身：整理条的确认框走 port.ui.ask（#145）；其它浮层不碰壳。 */
+/** 壳端口替身：这些浮层都不碰壳。 */
 let port: ReturnType<typeof createFakePort>;
-/** 确认框替身：签名借用壳端口，不另写一份。 */
-let ask: Mock<ShellPort["ui"]["ask"]>;
 
 beforeEach(() => {
   container = document.createElement("div");
@@ -69,8 +66,6 @@ beforeEach(() => {
   dialog.mounts = 0;
   dialog.last = null;
   port = createFakePort();
-  ask = vi.fn<ShellPort["ui"]["ask"]>().mockResolvedValue(true);
-  port.ui.ask = ask;
 });
 
 afterEach(async () => {

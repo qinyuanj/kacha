@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // 画板工具栏的可见行为（#137）：置灰时的文案、撤销 / 重做的可用性、运行按钮的「选中」后缀、
-// 生成与整理尚不可用时的标记与置灰。
+// 生成尚不可用时的标记与置灰。
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

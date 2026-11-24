@@ -149,7 +149,7 @@ describe("CanvasToolbar", () => {
     expect(props.apply).toHaveBeenCalledWith({ kind: "lastModel", model: PREFERRED_TASK_MODEL });
   });
 
-  it("新建类动作与撤销 / 重做、运行、整理都接上了回调", async () => {
+  it("新建类动作与撤销 / 重做、运行都接上了回调", async () => {
     const props = blankWith({ undoLabel: "移动节点", redoLabel: "删除节点", selectedCount: 1 });
     await show(props);
     for (const [text, called] of [
