@@ -156,48 +156,6 @@ describe("收起的阶段与阶段框", () => {
   });
 });
 
-describe("新建阶段", () => {
-  it("建好后新阶段直接进入改名，改名结束清除", async () => {
-    const stale = boardOf([promptNode("a")]);
-    // 环境取最新画板：ref 里已有一个阶段，所以新阶段名是「阶段 2」。
-    const latest = boardOf([promptNode("a")], [stage("s0", ["a"])]);
-    const created = stage("s-new", ["a"]);
-    applyResult = { board: boardOf([promptNode("a")], [latest.stages![0], created]), step: { label: "建阶段" } };
-
-    await show(propsOf(stale, { boardRef: { current: latest } }));
-    await run(() => view.newStage(["a"]));
-
-    // 写字面量：取最新画板算出的名字是「阶段 2」，不用被测函数再算一遍。
-    expect(applied).toEqual([{ kind: "newStage", name: "阶段 2", nodes: ["a"] }]);
-    expect(view.editingStage).toBe("s-new");
-
-    await run(() => view.onEditingDone());
-    expect(view.editingStage).toBeNull();
-  });
-
-  it("apply 返回 null（被拒）时不进入改名", async () => {
-    await show(propsOf(boardOf([promptNode("a")])));
-    applyResult = null;
-    await run(() => view.newStage(["a"]));
-    expect(applied).toHaveLength(1);
-    expect(view.editingStage).toBeNull();
-  });
-
-  it("没有撤销步或没有新阶段时不进入改名", async () => {
-    const board = boardOf([promptNode("a")], [stage("s0", ["a"])]);
-    await show(propsOf(board));
-
-    applyResult = { board, step: null };
-    await run(() => view.newStage(["a"]));
-    expect(view.editingStage).toBeNull();
-
-    // 有撤销步，但返回的画板没有新阶段（拿不到要改名的 id）。
-    applyResult = { board, step: { label: "建阶段" } };
-    await run(() => view.newStage(["a"]));
-    expect(view.editingStage).toBeNull();
-  });
-});
-
 describe("整理模式的度量", () => {
   it("不在整理模式不量；进入后量出当前体量与入场体量，退出即清空", async () => {
     const board = boardOf([promptNode("a"), promptNode("b")]);
@@ -239,68 +197,6 @@ describe("阶段框上的整理附加内容", () => {
 
     expect(view.tidyMeasure.measure).toBeNull();
     expect(view.stageTidy!.bytes("s1")).toBeNull();
-  });
-
-  it("「收掉未定稿」只数未定稿且没被下游用的结果", async () => {
-    const board = boardOf([promptNode("p"), resultNode("r1"), resultNode("r2", true)], [stage("s1", ["r1", "r2"])]);
-    await show(propsOf(board, { tidying: true }));
-
-    // r2 已定稿，保留。
-    expect(view.stageTidy!.prunable("s1")).toBe(1);
-    expect(view.stageTidy!.prunable("不在画板上的阶段")).toBe(0);
-  });
-
-  it("有可收掉的结果：确认后发 pruneUnfinal，确认框带张数与预计减少的体量", async () => {
-    const board = boardOf([promptNode("p"), resultNode("r1")], [stage("s1", ["r1"])]);
-    await show(propsOf(board, { tidying: true }));
-
-    await run(() => view.stageTidy!.onPrune("s1"));
-    await act(async () => {});
-
-    // 预计减少的体量 = r1 独占的 d3（200）——d1 / d2 仍被别的节点引用。
-    // cancelLabel 在源码里是字面量（没有对应文案常量），这里照抄一份，就当作与源码独立的期望值。
-    // r1 是这条结果列的最新一张，所以确认框里点明「其中 1 张是建议保留的」。
-    expect(shell.ask).toHaveBeenCalledWith(TIDY_TEXT.pruneConfirm(1, 200, 1), {
-      title: TIDY_TEXT.pruneTitle,
-      okLabel: TIDY_TEXT.pruneOk,
-      cancelLabel: TIDY_TEXT.cancelLabel,
-    });
-    expect(applied).toEqual([{ kind: "pruneUnfinal", stageIds: ["s1"] }]);
-  });
-
-  it("确认框取消时不动画板", async () => {
-    shell.ask.mockResolvedValue(false);
-    const board = boardOf([promptNode("p"), resultNode("r1")], [stage("s1", ["r1"])]);
-    await show(propsOf(board, { tidying: true }));
-
-    await run(() => view.stageTidy!.onPrune("s1"));
-    await act(async () => {});
-
-    expect(shell.ask).toHaveBeenCalledTimes(1);
-    expect(applied).toEqual([]);
-  });
-
-  it("量不出体量时确认框说明体量暂时算不出", async () => {
-    shell.measureBoard.mockRejectedValue(new Error("断网"));
-    const board = boardOf([promptNode("p"), resultNode("r1")], [stage("s1", ["r1"])]);
-    await show(propsOf(board, { tidying: true }));
-
-    await run(() => view.stageTidy!.onPrune("s1"));
-    await act(async () => {});
-
-    expect(shell.ask).toHaveBeenCalledWith(TIDY_TEXT.pruneConfirm(1, null, 1), expect.anything());
-  });
-
-  it("没有可收掉的结果：只提示，不问也不写", async () => {
-    const board = boardOf([promptNode("p"), resultNode("r1", true)], [stage("s1", ["r1"])]);
-    await show(propsOf(board, { tidying: true }));
-
-    await run(() => view.stageTidy!.onPrune("s1"));
-    await act(async () => {});
-
-    expect(toasts).toEqual([TIDY_TEXT.nothingToPrune]);
-    expect(shell.ask).not.toHaveBeenCalled();
-    expect(applied).toEqual([]);
   });
 
   it("移出为新画板：过程中置灰，成功后提示", async () => {
@@ -356,53 +252,4 @@ describe("建议保留", () => {
     expect([...view.suggestKeep]).toEqual(["r2"]);
   });
 
-  it("阶段框上的「保留这 N 张」：N 是该阶段成员里建议保留的张数", async () => {
-    const board = boardOf(
-      [promptNode("p"), resultNode("r1"), sameColumn(resultNode("r2")), resultNode("r3"), resultNode("r4", true)],
-      [stage("s1", ["r1", "r2"]), stage("s2", ["r3"]), stage("s3", ["r4"])],
-    );
-    await show(propsOf(board, { tidying: true }));
-
-    expect(view.stageTidy!.keepable("s1")).toBe(1);
-    expect(view.stageTidy!.keepable("s2")).toBe(1);
-    expect(view.stageTidy!.keepable("s3")).toBe(0);
-    expect(view.stageTidy!.keepable("不在画板上的阶段")).toBe(0);
-  });
-
-  it("点「保留这 N 张」等价于一次标记定稿", async () => {
-    const board = boardOf([promptNode("p"), resultNode("r1"), resultNode("r2"), resultNode("r3", true)], [stage("s1", ["r1", "r2", "r3"]), stage("s2", ["r3"])]);
-    await show(propsOf(board, { tidying: true }));
-
-    await run(() => view.stageTidy!.onKeep("s1"));
-    // 只标这个阶段里建议保留的：r3 已定稿，r1 / r2 各是一条结果列的最新一张。
-    expect(applied).toEqual([{ kind: "setFinal", nodes: ["r1", "r2"], final: true }]);
-  });
-
-  it("阶段里没有建议保留时不发变更", async () => {
-    const board = boardOf([resultNode("r1", true)], [stage("s1", ["r1"])]);
-    await show(propsOf(board, { tidying: true }));
-
-    await run(() => view.stageTidy!.onKeep("s1"));
-    expect(applied).toEqual([]);
-  });
-
-  it("「收掉未定稿」的确认框写明其中几张是建议保留的", async () => {
-    const board = boardOf([promptNode("p"), resultNode("r1"), resultNode("r2"), resultNode("r3", true)], [stage("s1", ["r1", "r2", "r3"])]);
-    await show(propsOf(board, { tidying: true }));
-
-    await run(() => view.stageTidy!.onPrune("s1"));
-    await act(async () => {});
-
-    // 会收掉 r1、r2（r3 已定稿），其中这两张都是建议保留的；只剩 r1 的 d3 不再被引用（200）。
-    expect(shell.ask).toHaveBeenCalledWith(TIDY_TEXT.pruneConfirm(2, 200, 2), expect.anything());
-  });
-
-  it("建议保留不改变「收掉未定稿」会收掉哪些结果", async () => {
-    // 同一列里旧的一张未定稿、新的一张已定稿：不打标记，但旧的那张照旧会被收掉。
-    const board = boardOf([resultNode("r1"), sameColumn(resultNode("r2", true))], [stage("s1", ["r1", "r2"])]);
-    await show(propsOf(board, { tidying: true }));
-
-    expect(view.suggestKeep.size).toBe(0);
-    expect(view.stageTidy!.prunable("s1")).toBe(1);
-  });
 });

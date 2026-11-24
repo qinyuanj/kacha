@@ -6,7 +6,6 @@ import { imagePortIndex } from "./graph";
 import { countLabel } from "./history";
 import { effectiveRegionRender } from "./region";
 import { addAsReferenceTarget, LOCKED_HINT, regenerateBlocker, TASK_BUSY, variantBlocker } from "./iterate";
-import { anyStaged, finalToggle } from "./stages";
 
 export type MenuTarget = { kind: "pane" } | { kind: "node"; nodeId: string } | { kind: "edge"; edge: BoardEdge };
 
@@ -29,10 +28,6 @@ export type BoardAction =
   | "viewSendText"
   | "disconnect"
   | "editRegion"
-  /** 整理：把选区建为阶段 / 移出所在阶段 / 标记或取消定稿。 */
-  | "newStage"
-  | "removeFromStage"
-  | "toggleFinal"
   | "exportPack"
   /** 将整板生成结果打包下载；是否可用由桌面能力决定。 */
   | "downloadResults"
@@ -93,52 +88,39 @@ function addAsReferenceItem({ board, selected, locked }: MenuFacts): MenuItem {
   return item("addAsReference", "加为参考图", refTarget.ok ? (locked.has(refTarget.taskId) ? LOCKED_HINT : null) : refTarget.reason);
 }
 
-/** 整理作用于整个选区，单选时选区即该节点。 */
-function tidyMenuItems({ board, selected }: MenuFacts): MenuItem[] {
-  const toggle = finalToggle(board, selected);
-  return [
-    item("newStage", "建为阶段"),
-    ...(anyStaged(board, selected) ? [item("removeFromStage", "移出阶段")] : []),
-    ...(toggle ? [item("toggleFinal", toggle.final ? "标记定稿" : "取消定稿")] : []),
-  ];
-}
-
 function nodeMenuItems(nodeId: string, facts: MenuFacts): MenuItem[] {
   const { board, selected, locked } = facts;
   const node = board.nodes.find((n) => n.id === nodeId);
-  const tidy = tidyMenuItems(facts);
-  if (selected.size > 1 && selected.has(nodeId)) return selectionMenuItems(node, facts, tidy);
+  if (selected.size > 1 && selected.has(nodeId)) return selectionMenuItems(node, facts);
   switch (node?.type) {
     case "reference":
-      return grouped([item("continueEditing", "以此继续编辑")], [item("preview", "放大预览"), item("saveAs", "另存为…")], tidy, [item("delete", "删除")]);
+      return grouped([item("continueEditing", "以此继续编辑")], [item("preview", "放大预览"), item("saveAs", "另存为…")], [item("delete", "删除")]);
     case "result": {
       return grouped(
         [item("continueEditing", "以此继续编辑"), addAsReferenceItem(facts), item("generateVariant", "生成变体", variantBlocker(board, node.id, locked))],
         [item("preview", "放大预览"), item("saveAs", "另存为…")],
-        tidy,
         [item("delete", "删除")],
       );
     }
     case "task":
-      return taskMenuItems(node, facts, tidy);
+      return taskMenuItems(node, facts);
     case "prompt":
-      return grouped(tidy, [item("delete", "删除")]);
+      return grouped([item("delete", "删除")]);
     default:
       return [];
   }
 }
 
-function selectionMenuItems(node: BoardNode | undefined, facts: MenuFacts, tidy: MenuItem[]): MenuItem[] {
+function selectionMenuItems(node: BoardNode | undefined, facts: MenuFacts): MenuItem[] {
   const { board, selected } = facts;
   const hasImage = board.nodes.some((n) => selected.has(n.id) && (n.type === "reference" || n.type === "result"));
   return grouped(
     [...(hasImage ? [item("continueEditing", "以此继续编辑")] : []), ...(node?.type === "result" ? [addAsReferenceItem(facts)] : [])],
-    tidy,
     [item("delete", countLabel("删除", selected.size))],
   );
 }
 
-function taskMenuItems(node: TaskNode, facts: MenuFacts, tidy: MenuItem[]): MenuItem[] {
+function taskMenuItems(node: TaskNode, facts: MenuFacts): MenuItem[] {
   const { locked } = facts;
   const busy = locked.has(node.id);
   // 查看发送文本按当前画板现算；排队 / 执行中时看到的不是正在执行的那份输入，故置灰。
@@ -149,7 +131,6 @@ function taskMenuItems(node: TaskNode, facts: MenuFacts, tidy: MenuItem[]): Menu
       item("cancel", "取消", busy ? null : "任务不在排队 / 执行中"),
     ],
     [item("toggleSettings", facts.expanded.has(node.id) ? "收起" : "展开"), item("viewSendText", "查看发送文本", busy ? TASK_BUSY : null)],
-    tidy,
     [item("delete", "删除")],
   );
 }

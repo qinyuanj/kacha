@@ -113,56 +113,24 @@ describe("画布动作文案", () => {
     expect(IMPORT_TEXT.imageOnly).toBe("只支持拖入图片文件");
     expect(IMPORT_TEXT.failed("a.png", "网络失败")).toBe("无法导入 a.png：网络失败");
   });
-
-  it("整理模式的确认框取消按钮也在同一处", () => {
-    expect(TIDY_TEXT.cancelLabel).toBe("取消");
-  });
 });
 
-// 建议保留（#144）：标记、阶段框上的动作、以及「收掉未定稿」确认框里补的那一句。
+// 建议保留（#144）：结果节点上的标记。整理模式里阶段框上的「保留这 N 张」随动作一起移除（#249）。
 describe("建议保留文案（#144）", () => {
-  it("结果节点上的标记、阶段框上的动作与置灰原因", () => {
+  it("结果节点上的标记", () => {
     expect(SUGGEST_KEEP_TEXT.badge).toBe("建议保留");
-    expect(SUGGEST_KEEP_TEXT.keep(3)).toBe("保留这 3 张");
-    expect(SUGGEST_KEEP_TEXT.nothingToKeep).toBe("这个阶段没有建议保留的结果");
-  });
-
-  it("「收掉未定稿」的确认框点明其中几张是建议保留的", () => {
-    expect(SUGGEST_KEEP_TEXT.note(2)).toBe("其中 2 张是建议保留的");
-    expect(TIDY_TEXT.pruneConfirm(2, 2048, 2)).toBe("将收掉 2 张，其中 2 张是建议保留的，画板约减少 2.0 KiB。\n定稿与已被下游使用的结果保留；可以撤销。");
-    expect(TIDY_TEXT.pruneConfirm(2, null, 1)).toBe("将收掉 2 张，其中 1 张是建议保留的，画板体量暂时算不出。\n定稿与已被下游使用的结果保留；可以撤销。");
-  });
-
-  it("没有建议保留时那句话不出现，确认框一字不改", () => {
-    expect(TIDY_TEXT.pruneConfirm(2, 2048, 0)).toBe("将收掉 2 张，画板约减少 2.0 KiB。\n定稿与已被下游使用的结果保留；可以撤销。");
   });
 });
 
-// 整理模式与画板包导入的既有文案：票面要求 boardText 全覆盖，这里把由 App / stages 调用的条目也锁住。
+// 整理模式与画板包导入的既有文案：票面要求 boardText 全覆盖，这里把由 App / 整理条调用的条目也锁住。
+// 整理模式里逐阶段 / 整板的「收掉未定稿」与「自动划分阶段」随动作一起移除（#249）。
 describe("整理模式与画板包导入文案", () => {
-  it("整理条的体量对比、收掉张数与移出结局", () => {
+  it("整理条的体量对比与移出结局", () => {
     expect(TIDY_TEXT.compare(1536, 0)).toBe("整理前约 1.5 KiB → 现在约 0 B");
-    expect(TIDY_TEXT.prune(3)).toBe("收掉未定稿（3）");
-    expect(TIDY_TEXT.pruneConfirm(2, 2048)).toBe("将收掉 2 张，画板约减少 2.0 KiB。\n定稿与已被下游使用的结果保留；可以撤销。");
-    expect(TIDY_TEXT.pruneConfirm(2, null)).toContain("画板体量暂时算不出");
     expect(TIDY_TEXT.movedOut("新板")).toBe("已移出为新画板「新板」，可在画板列表里打开。撤销只恢复本画板，新画板保留。");
     expect(TIDY_TEXT.movedOutKept("新板", "被拒")).toBe("新画板「新板」已建好，但本画板没有删去这些节点：被拒");
     expect(TIDY_TEXT.movedOutKept("新板", null)).toBe("新画板「新板」已建好，但本画板没有删去这些节点");
     expect(TIDY_TEXT.moveOutFailed("磁盘满了")).toBe("移出失败：磁盘满了");
-  });
-
-  it("整理条上的自动划分阶段（#143）：按钮带会建的阶段数，没有可划的时说明原因", () => {
-    expect(TIDY_TEXT.autoStages(3)).toBe("自动划分阶段（3）");
-    expect(TIDY_TEXT.autoStages(0)).toBe("自动划分阶段（0）");
-    expect(TIDY_TEXT.autoStagesEmpty).toBe("没找到可以划成阶段的东西");
-  });
-
-  it("整理条上的「收掉整板未定稿」（#145）：按钮带整板张数，N 为 0 时说明整块画板的口径", () => {
-    expect(TIDY_TEXT.pruneBoard(3)).toBe("收掉整板未定稿（3）");
-    expect(TIDY_TEXT.pruneBoard(0)).toBe("收掉整板未定稿（0）");
-    // 与逐阶段的 nothingToPrune（讲「这个阶段」）不是同一句：整板这条要说清只算阶段里的结果。
-    expect(TIDY_TEXT.nothingToPruneBoard).toBe("整块画板没有可收掉的未定稿结果：只算阶段里的结果，定稿与已被下游使用的结果会保留。");
-    expect(TIDY_TEXT.nothingToPruneBoard).not.toBe(TIDY_TEXT.nothingToPrune);
   });
 
   it("画板包导入失败的两种说明", () => {

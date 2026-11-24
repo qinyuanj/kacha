@@ -173,7 +173,7 @@ export function BoardCanvas({
   const canvasData = useCanvasData({ board, boardFile, userRoot, table, locked, handled, runNodes, applyChange });
   const overlays = useCanvasOverlaysState({ flow, selectedRef, setSelectedNodes, clearPromptFocus: () => requestPromptFocus(null) });
   const actionBar = useActionBarHover();
-  const stageView = useCanvasStageView({ board, boardRef, readOnly, measured, tidying, apply, toast, onMoveOutStage });
+  const stageView = useCanvasStageView({ board, readOnly, measured, tidying, toast, onMoveOutStage });
   const nav = useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen: overlays.dialogOpenRef, apply, isEditableTarget: port.ui.isEditableTarget });
   const hover = useHoverLayer();
 
@@ -267,8 +267,8 @@ export function BoardCanvas({
   );
 
   const commandDeps: CanvasCommandDeps = {
-    apply, flow, boardRef, selectedRef, lockedRef, actions, onUndo, onRedo, onRun, onCancelTask, onRegenerate, onViewSendText,
-    addPrompt, addTask, pickReferences, saveNodeAs, newStage: stageView.newStage, toast, readOnly,
+    apply, flow, selectedRef, lockedRef, actions, onUndo, onRedo, onRun, onCancelTask, onRegenerate, onViewSendText,
+    addPrompt, addTask, pickReferences, saveNodeAs, toast, readOnly,
     toggleExpand: (nodeId) => setExpandOverrides((o) => toggleExpanded(o, selectedRef.current, nodeId)),
   };
   const commands = canvasCommands(commandDeps);
@@ -369,12 +369,7 @@ export function BoardCanvas({
             >
               <Background {...canvasTheme.background} />
               <StageLayer
-                readOnly={readOnly}
                 boxes={stageView.boxes}
-                selected={selectedNodes}
-                apply={(c) => void apply(c)}
-                editing={stageView.editingStage}
-                onEditingDone={stageView.onEditingDone}
                 tidy={stageView.stageTidy}
               />
               <Controls />
@@ -398,9 +393,6 @@ export function BoardCanvas({
               toast={toast}
               tidying={tidying}
               tidyMeasure={stageView.tidyMeasure}
-              board={board}
-              apply={apply}
-              readOnly={readOnly}
               onTidyDone={() => onTidyChange(false)}
               hoverLayer={hover.layer}
             />
