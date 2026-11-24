@@ -93,13 +93,4 @@ describe("画板工具栏", () => {
     await act(async () => run.click());
     expect(onRun).not.toHaveBeenCalled();
   });
-
-  it("整理：不可用时标「尚不可用」并置灰；在整理模式时按钮按下", async () => {
-    await show({ tidyUnavailable: true });
-    const tidy = buttonWithText("整理");
-    expect(tidy.textContent).toBe("整理（" + UNAVAILABLE_TEXT + "）");
-    expect(tidy.getAttribute("aria-disabled")).toBe("true");
-    await show({ tidying: true });
-    expect(buttonWithText("整理").getAttribute("aria-pressed")).toBe("true");
-  });
 });

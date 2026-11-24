@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approxSizeText, boardSlotsFullText, DELETE_TASK_TEXT, formatBytes, IMPORT_TEXT, isSlotsFullText, PACK_IMPORT_TEXT, PASTE_TEXT, pasteRefusalText, REGION_TEXT, RELOCATE_TEXT, SAVE_TEXT, sizeNoticeText, slotsRefusal, slotsUsageText, TIDY_TEXT, usageLimitText, VARIANT_TEXT } from "./boardText";
+import { approxSizeText, boardSlotsFullText, DELETE_TASK_TEXT, formatBytes, IMPORT_TEXT, isSlotsFullText, PACK_IMPORT_TEXT, PASTE_TEXT, pasteRefusalText, REGION_TEXT, RELOCATE_TEXT, SAVE_TEXT, slotsRefusal, slotsUsageText, usageLimitText, VARIANT_TEXT } from "./boardText";
 
 // 期望文案照抄票面（#89 已确认的简洁版），独立于源码，防止同义反复。
 describe("画板位文案（#89）", () => {
@@ -54,14 +54,10 @@ describe("体量换算", () => {
   });
 });
 
-describe("用量与体量提醒", () => {
+describe("用量提醒", () => {
   it("接近上限只说整理，达到上限先说生成不受影响", () => {
     expect(usageLimitText("warn", 900, 1000)).toBe("用量接近上限（900 B / 上限 1000 B），整理一下画板？");
     expect(usageLimitText("alert", 1000, 1000)).toBe("用量已满（1000 B / 上限 1000 B），生成不受影响，请整理画板释放空间。");
-  });
-
-  it("画板越线提示带约数与整理引导", () => {
-    expect(sizeNoticeText(2 * 1024 ** 3)).toBe("这块画板已经约 2.0 GiB 了，整理一下？");
   });
 });
 
@@ -115,13 +111,8 @@ describe("画布动作文案", () => {
   });
 });
 
-// 整理模式与画板包导入的既有文案：票面要求 boardText 全覆盖，这里把由 App / 整理条调用的条目也锁住。
-// 整理模式里逐阶段 / 整板的「收掉未定稿」与「自动划分阶段」随动作一起移除（#249）。
-describe("整理模式与画板包导入文案", () => {
-  it("整理条的体量对比", () => {
-    expect(TIDY_TEXT.compare(1536, 0)).toBe("整理前约 1.5 KiB → 现在约 0 B");
-  });
-
+// 画板包导入的既有文案：票面要求 boardText 全覆盖，这里把由 App 调用的条目也锁住。
+describe("画板包导入文案", () => {
   it("画板包导入失败的两种说明", () => {
     expect(PACK_IMPORT_TEXT.failed("包坏了")).toBe("导入画板包失败：包坏了");
     expect(PACK_IMPORT_TEXT.openFailed("打不开")).toBe("画板已导入，但打开失败：打不开。可从画板列表打开。");

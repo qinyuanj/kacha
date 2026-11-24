@@ -8,7 +8,6 @@ package localservice
 import (
 	"bytes"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -20,7 +19,6 @@ import (
 
 	"github.com/egoist/mygo"
 
-	"github.com/qinyuanj/kacha/desktop/internal/boardmeasure"
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
 )
 
@@ -152,17 +150,6 @@ func (s *Service) ListBoards() (BoardListing, error) {
 		Slots:     Slots{Used: listing.Slots.Used, Total: listing.Slots.Total},
 		SizeLines: SizeLines{Warn: listing.SizeLines.Warn, Alert: listing.SizeLines.Alert},
 	}, nil
-}
-
-// MeasureBoard 量一块画板的体量（#158）：请求体是画板原文，所以未保存的节点改动也能量到。
-// 返回每个节点引用的条目与每个条目的字节数；同一任务目录在板内只算一次，口径与画板体量一致。
-// 画板读不懂时返回错误，让界面显示「未知」而不是 0 字节。
-func (s *Service) MeasureBoard(text string) (boardmeasure.Measure, error) {
-	m, ok := boardmeasure.MeasureBoard(s.store.Root(), text)
-	if !ok {
-		return boardmeasure.Measure{}, errors.New("读不懂这块画板")
-	}
-	return m, nil
 }
 
 // RenameBoard 改画板名：主文件与 .bak 一起搬。带版本时内容已变就拒绝。

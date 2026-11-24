@@ -50,15 +50,12 @@ const notices = (patch: Partial<AppNoticesProps> = {}): AppNoticesProps => ({
   settingsFileProblem: null,
   settingsOpen: false,
   usageNotice: null,
-  sizeNotice: null,
   activeArchived: false,
   boardNotice: null,
   onDismissTableError: vi.fn(),
   onOpenSettings: vi.fn(),
   onManageBoards: vi.fn(),
   onDismissUsage: vi.fn(),
-  onTidy: vi.fn(),
-  onDismissSize: vi.fn(),
   onUnarchive: vi.fn(),
   onCopyArchived: vi.fn(),
   onDismissBoardNotice: vi.fn(),
@@ -244,7 +241,7 @@ describe("工作台外壳的接线", () => {
   const viewOf = (patch: Partial<AppView> = {}): AppView => ({
     active: undefined, openState: "ok", activeArchived: false, archived: null, failures: [],
     undoLabel: null, redoLabel: null, boardNotice: null, exportDisabled: null,
-    downloadDisabled: null, importDisabled: null, sizeNotice: null, titleOf: () => "a", ...patch,
+    downloadDisabled: null, importDisabled: null, titleOf: () => "a", ...patch,
   });
   const indicator = { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() };
 
@@ -259,7 +256,7 @@ describe("工作台外壳的接线", () => {
     onCloseBoardList: vi.fn(), onDeleteBoard: vi.fn(), onArchiveBoard: vi.fn(), onUnarchiveBoard: vi.fn(),
     onCopyBoard: vi.fn(), onExportBoard: vi.fn(), onTogglePackMenu: vi.fn(), onPackMenuPick: vi.fn(),
     onPackMenuClose: vi.fn(), onDismissTableError: vi.fn(), onOpenSettings: vi.fn(), onManageBoards: vi.fn(),
-    onDismissUsage: vi.fn(), onTidy: vi.fn(), onDismissSize: vi.fn(), onUnarchive: vi.fn(),
+    onDismissUsage: vi.fn(), onUnarchive: vi.fn(),
     onCopyArchived: vi.fn(), onDismissBoardNotice: vi.fn(), onReload: vi.fn(), onRetrySave: vi.fn(),
     onExportFailure: vi.fn(), onCloseMissing: vi.fn(), onImportPack: vi.fn(), importDisabled: null,
     onToolbarSlot: vi.fn(), ...patch,

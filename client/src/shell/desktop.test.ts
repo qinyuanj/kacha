@@ -307,28 +307,3 @@ describe("读系统剪贴板（#129）", () => {
 
 });
 
-describe("整理模式的度量（#158）", () => {
-  it("能力打开时真的走本地服务的 measureBoard：节点引用与各条目字节原样交回", async () => {
-    const calls: string[] = [];
-    const info: DesktopInfo = { ...INFO, features: { ...INFO.features, tidy: true } };
-    const local = new Proxy({} as DesktopLocalBridge, {
-      get: (_target, prop: string) => async (...args: unknown[]) => {
-        calls.push(prop);
-        if (prop === "measureBoard") {
-          // Go 侧量出来的是节点 → 条目、条目 → 字节数；界面拿它做集合运算。
-          expect(args[0]).toBe("{\"format_version\":2}");
-          return { nodes: { a: ["d1"], b: ["d1", "d2"] }, dirs: { d1: 1000, d2: 500 } };
-        }
-        throw new Error("没实现的本地调用");
-      },
-    });
-    const { port } = await createDesktopPort({ info: async () => info, local });
-
-    expect(port.features.tidy).toBe(true);
-    const measure = await port.board.measure("{\"format_version\":2}");
-    expect(calls).toContain("measureBoard");
-    expect(measure.nodes).toEqual({ a: ["d1"], b: ["d1", "d2"] });
-    expect(measure.dirs).toEqual({ d1: 1000, d2: 500 });
-  });
-});
-

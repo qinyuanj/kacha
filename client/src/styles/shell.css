@@ -247,7 +247,7 @@
   align-items: center;
   gap: 4px;
 }
-/* 组分隔线：新建类 / 撤销重做 / 运行 / 整理 四组层次分明。 */
+/* 组分隔线：新建类 / 撤销重做 / 运行 三组层次分明。 */
 .toolbar-group + .toolbar-group {
   margin-left: 4px;
   padding-left: 12px;

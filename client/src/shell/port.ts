@@ -12,7 +12,6 @@ import type { SettingsPorts } from "../core/settings";
 import type { ImageProbe } from "../core/submission";
 import type { TaskFs } from "../core/taskDir";
 import type { ClipboardContent } from "../core/clipboardDispatch";
-import type { BoardMeasure } from "../core/tidy";
 import type { LogKind } from "./log";
 import type { BoardListing, BoardTexts, BoardWriteOptions, BrowserOptions, ImageInfo, UsagePort } from "./types";
 
@@ -22,7 +21,7 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "tidy" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics" | "update" | "dataRoot" | "feedback";
+export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics" | "update" | "dataRoot" | "feedback";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
@@ -36,11 +35,6 @@ export interface ShellFeatures {
    * 未声明时按可用处理；实现不可用时明确写 false。
    */
   readonly packImport?: boolean;
-  /**
-   * 整理模式（按任务目录与独立图片量画板体量）：桌面壳由本机存储度量（#158）。
-   * 没实现时入口标「尚不可用」；未声明时按可用处理。
-   */
-  readonly tidy?: boolean;
   /** 脱敏诊断采集与诊断包导出：只有真实 Diagnostics 绑定在桥上时才开。 */
   readonly diagnostics?: boolean;
   /** 归档与取消归档：由本机存储执行只读与画板位约束；未声明时按不可用处理。 */
@@ -137,7 +131,6 @@ export const FEATURE_LABELS: Record<FeatureId, string> = {
   packExport: "画板包导出",
   packImport: "画板包导入",
   archive: "归档",
-  tidy: "整理",
   relay: "结果中转",
   copyImage: "复制图片",
   copyText: "复制文本",
@@ -152,7 +145,7 @@ export const FEATURE_LABELS: Record<FeatureId, string> = {
 
 // ---- 端口分组 ----
 
-/** 画板文件：打开 / 新建 / 保存 / 改名 / 删除 / 归档 / 列表 / 度量。写失败一律是类型化 PortError。 */
+/** 画板文件：打开 / 新建 / 保存 / 改名 / 删除 / 归档 / 列表。写失败一律是类型化 PortError。 */
 export interface BoardStore {
   /** 画板原文与内容版本（sha256）；主文件与 .bak 都可能为 null（画板不存在）。 */
   read(path: string): Promise<BoardTexts>;
@@ -165,7 +158,6 @@ export interface BoardStore {
   unarchive(from: string, to: string): Promise<void>;
   listNames(dir: string): Promise<string[]>;
   list(): Promise<BoardListing>;
-  measure(text: string): Promise<BoardMeasure>;
 }
 
 /** 数据根里的文件：任务目录、参考图、画板包规划都要它。 */

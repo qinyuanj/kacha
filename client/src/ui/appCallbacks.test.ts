@@ -13,8 +13,6 @@ import {
   cancelTaskOn,
   checkActive,
   closeBoardList,
-  dismissSizeNotice,
-  enterTidy,
   failingSessions,
   historyLabels,
   jumpToTask,
@@ -22,8 +20,6 @@ import {
   openManageBoards,
   packMenuPick,
   redoOn,
-  sizeNoticeOf,
-  sizeNoticeUpdated,
   togglePackMenu,
   undoOn,
 } from "./appCallbacks";
@@ -159,40 +155,6 @@ describe("画板变更与撤销", () => {
     const cancel = vi.fn();
     cancelTaskOn({ cancel } as never, null, "t1");
     expect(cancel).not.toHaveBeenCalled();
-  });
-});
-
-describe("体量提示", () => {
-  it("没有体量：没有提示", () => {
-    expect(sizeNoticeOf(null, {})).toBeNull();
-  });
-
-  it("提醒档位变化时更新记录", () => {
-    const updated = sizeNoticeUpdated({ "/~/a": "warn" }, { path: "/~/a", tier: "alert" });
-    expect(updated["/~/a"]).toBe("alert");
-  });
-
-  it("档位没变：记录不动", () => {
-    const updated = sizeNoticeUpdated({ "/~/a": "warn" }, { path: "/~/a", tier: "warn" });
-    expect(updated["/~/a"]).toBe("warn");
-  });
-
-  it("没有提示：记录不动", () => {
-    expect(sizeNoticeUpdated({ "/~/a": "warn" }, null)).toEqual({ "/~/a": "warn" });
-  });
-
-  it("进入整理模式：记下档位并进入整理", () => {
-    const setSizeNotices = vi.fn();
-    const setTidyKey = vi.fn();
-    enterTidy({}, "/~/a", "warn", okSession(), setSizeNotices, setTidyKey);
-    expect(setSizeNotices).toHaveBeenCalledWith({ "/~/a": "warn" });
-    expect(setTidyKey).toHaveBeenCalledWith("k1");
-  });
-
-  it("关闭体量提示：只记档位", () => {
-    const setSizeNotices = vi.fn();
-    dismissSizeNotice({}, "/~/a", "warn", setSizeNotices);
-    expect(setSizeNotices).toHaveBeenCalledWith({ "/~/a": "warn" });
   });
 });
 

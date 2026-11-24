@@ -438,8 +438,7 @@ func (s *Store) List() (BoardListing, error) {
 // bodySize 量一块画板的体量（#158）：引用的任务目录与独立图片各计一次，主文件读不懂时按 .bak 算。
 // 主文件与备份都读不懂时为 nil —— 体量未知，不当成 0，也不等同于按内容去重后的画板包大小。
 //
-// 数据根一律现取 s.Root()：装配走 NewFollowing 时 s.root 是空的，用它会量出恒为 0 的体量，
-// 而整理模式走 localservice.MeasureBoard(s.store.Root(), …)，两处口径就对不上了。
+// 数据根一律现取 s.Root()：装配走 NewFollowing 时 s.root 是空的，用它会量出恒为 0 的体量。
 func (s *Store) bodySize(abs string) *int64 {
 	text := func(path string) *string {
 		data, err := os.ReadFile(path)

@@ -1,7 +1,6 @@
 // 画板工具栏的按钮文字与悬浮提示（#137）：从组件里抽出来的纯文案函数，
 // 组件只留摆放与接线；每个函数一个意思，改文案只改这里。
 import { UNAVAILABLE_TEXT } from "../core/uiText";
-import { TIDY_TEXT } from "./boardText";
 
 /** 没有打开的画板：所有入口都说同一个原因。 */
 export const NO_BOARD = "没有打开的画板";
@@ -47,13 +46,3 @@ export function redoHint(redoLabel: string | null): string {
   return redoLabel ? `重做 ${redoLabel}（Ctrl+Shift+Z）` : "没有可重做的操作";
 }
 
-/** 整理按钮的文字：入口名加上「尚不可用」标记。 */
-export function tidyLabel(tidyUnavailable: boolean): string {
-  return `${TIDY_TEXT.enter}${newTaskSuffix(tidyUnavailable)}`;
-}
-
-/** 整理按钮的悬浮提示：不可用、在整理模式、进入整理模式三种说法。 */
-export function tidyHint(tidying: boolean, tidyUnavailable: boolean): string {
-  if (tidyUnavailable) return "整理" + UNAVAILABLE_TEXT;
-  return tidying ? "退出整理模式" : "整理模式：看各阶段体量，收掉未定稿的结果";
-}

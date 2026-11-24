@@ -83,21 +83,6 @@ export const usageLimitText = (level: "warn" | "alert", total: number, limit: nu
     ? `用量已满（${formatBytes(total)} / 上限 ${formatBytes(limit)}），生成不受影响，请整理画板释放空间。`
     : `用量接近上限（${formatBytes(total)} / 上限 ${formatBytes(limit)}），整理一下画板？`;
 
-/** 当前画板越过体量提醒线时画布顶部的提示。 */
-export const sizeNoticeText = (bytes: number) => `这块画板已经${approxSizeText(bytes)} 了，整理一下？`;
-
-/** 整理模式（#92）。 */
-export const TIDY_TEXT = {
-  /** 越线提示与工具栏上进入整理模式的按钮。 */
-  enter: "整理",
-  done: "完成",
-  measuring: "正在计算体量…",
-  /** 量不出来时照实说：读不出画板或读盘失败，不显示成 0。 */
-  measureFailed: "体量暂时算不出",
-  /** 顶部整理前后的体量对比。 */
-  compare: (before: number, now: number) => `整理前${approxSizeText(before)} → 现在${approxSizeText(now)}`,
-} as const;
-
 /** 粘贴（#96）：被拒时的原因文案与超限提示。只读归档沿用共享的 ARCHIVE_TEXT.readOnly。 */
 export const PASTE_TEXT = {
   /** 剪贴板里的节点标记还在，但应用内剪贴板已空：刷新过页面、或标记来自另一个标签页。 */
