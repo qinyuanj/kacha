@@ -77,26 +77,11 @@ func TestNodeRefsPerNode(t *testing.T) {
 }
 
 // 画板体量 = 引用的各条目字节之和：任务目录 1000 + 独立图片 60，任务节点与结果节点共用目录不重复计。
-func TestMeasureBoardCountsUniqueEntries(t *testing.T) {
+func TestBoardBytesCountsUniqueEntries(t *testing.T) {
 	root := fixtureRoot(t)
-	m, ok := MeasureBoard(root, refBoard)
-	if !ok {
-		t.Fatalf("MeasureBoard: 读不懂这块画板")
-	}
-	if m.Dirs["2026-01-01/20260101T000000Z-aaaaaaaa"] != 1000 {
-		t.Fatalf("任务目录字节 = %d, want 1000", m.Dirs["2026-01-01/20260101T000000Z-aaaaaaaa"])
-	}
-	if m.Dirs["导入参考图/bbbb.png"] != 60 {
-		t.Fatalf("独立图片字节 = %d, want 60", m.Dirs["导入参考图/bbbb.png"])
-	}
-	if len(m.Dirs) != 2 {
-		t.Fatalf("dirs = %v, want 只有两个条目（同一目录只算一次）", m.Dirs)
-	}
-	if total := totalOf(m); total != 1060 {
-		t.Fatalf("画板体量 = %d, want 1060", total)
-	}
-	if got := m.Nodes["i"]; len(got) != 1 || got[0] != "导入参考图/bbbb.png" {
-		t.Fatalf("nodes[i] = %v", got)
+	board := refBoard
+	if total := BoardBytes(root, &board, nil); total == nil || *total != 1060 {
+		t.Fatalf("画板体量 = %v, want 1060（任务目录 1000 + 独立图片 60）", total)
 	}
 
 	// 量的是请求体（画板原文），不是盘上的画板文件：画板还没保存时新加的节点照样计入。
@@ -105,37 +90,27 @@ func TestMeasureBoardCountsUniqueEntries(t *testing.T) {
 	  {"id": "a", "type": "result", "path": "2026-01-01/20260101T000000Z-aaaaaaaa/result.png"},
 	  {"id": "b", "type": "reference", "path": "导入参考图/cccc.png"}
 	]}`
-	grown, ok := MeasureBoard(root, unsaved)
-	if !ok {
-		t.Fatalf("MeasureBoard: 读不懂没保存过的画板原文")
-	}
-	if total := totalOf(grown); total != 1040 {
-		t.Fatalf("含未保存改动的体量 = %d, want 1040（任务目录 1000 + 这张新参考图 40）", total)
+	if total := BoardBytes(root, &unsaved, nil); total == nil || *total != 1040 {
+		t.Fatalf("含未保存改动的体量 = %v, want 1040（任务目录 1000 + 这张新参考图 40）", total)
 	}
 }
 
-// 引用不存在的条目按 0 计：画板体量仍算得出来，不因为缺图变成未知。
-func TestMeasureMissingEntryCountsZero(t *testing.T) {
-	m, ok := MeasureBoard(t.TempDir(), refBoard)
-	if !ok {
-		t.Fatalf("MeasureBoard: 读不懂这块画板")
-	}
-	if total := totalOf(m); total != 0 {
-		t.Fatalf("画板体量 = %d, want 0", total)
-	}
-	if len(m.Dirs) != 2 {
-		t.Fatalf("dirs = %v, want 两个条目都在（各 0 字节）", m.Dirs)
+// 引用不存在的条目按 0 计：画板体量仍算得出来（0），不因为缺图变成未知。
+func TestBoardBytesMissingEntryCountsZero(t *testing.T) {
+	board := refBoard
+	if total := BoardBytes(t.TempDir(), &board, nil); total == nil || *total != 0 {
+		t.Fatalf("不存在的条目算出的体量 = %v, want 0（不是未知）", total)
 	}
 }
 
-// 读不懂的画板（坏 JSON、版本更高、缺 nodes）不能当成没有引用：返回 false，体量为未知。
+// 读不懂的画板（坏 JSON、版本更高、缺 nodes）不能当成没有引用：体量为未知（nil），不是 0。
 func TestUnreadableBoardIsUnknown(t *testing.T) {
 	for _, text := range []string{"{ 不是 JSON", "[]", `{"format_version": 9, "nodes": []}`, `{"format_version": 2}`} {
 		if _, ok := NodeRefs(text); ok {
 			t.Fatalf("读不懂的画板被当成了读得懂：%q", text)
 		}
-		if _, ok := MeasureBoard(t.TempDir(), text); ok {
-			t.Fatalf("读不懂的画板量出了体量：%q", text)
+		if got := BoardBytes(t.TempDir(), &text, nil); got != nil {
+			t.Fatalf("读不懂的画板量出了体量：%q = %d", text, *got)
 		}
 	}
 }
@@ -159,18 +134,23 @@ func TestBoardBytesFallsBackToBackup(t *testing.T) {
 	}
 }
 
-// 越出数据根的引用不读也不计：路径来自画板文件，不能顺着它读盘。
+// 越出数据根的引用不认，也不读盘：路径来自画板文件，不能顺着它读。
 func TestRefsOutsideRootAreSkipped(t *testing.T) {
 	board := `{"format_version": 2, "nodes": [
 	  {"id": "i", "type": "reference", "pos": [0,0], "size": [1,1], "path": "../../secret.png", "sha256": "x", "display_name": "x"},
 	  {"id": "j", "type": "reference", "pos": [0,0], "size": [1,1], "path": "C:/Windows/win.ini", "sha256": "x", "display_name": "x"}
 	], "edges": []}`
-	m, ok := MeasureBoard(t.TempDir(), board)
+	refs, ok := NodeRefs(board)
 	if !ok {
-		t.Fatalf("MeasureBoard: 读不懂这块画板")
+		t.Fatalf("NodeRefs: 读不懂这块画板")
 	}
-	if len(m.Dirs) != 0 {
-		t.Fatalf("dirs = %v, want 空（根外引用不读）", m.Dirs)
+	for _, r := range refs {
+		if len(r.Items) != 0 {
+			t.Fatalf("节点 %q 认出了根外引用：%v", r.ID, r.Items)
+		}
+	}
+	if total := BoardBytes(t.TempDir(), &board, nil); total == nil || *total != 0 {
+		t.Fatalf("根外引用算出的体量 = %v, want 0", total)
 	}
 }
 
@@ -186,12 +166,4 @@ func TestUnknownNodeScansConservatively(t *testing.T) {
 	if got := refs[0].Items; len(got) != 1 || got[0] != "2026-01-01/20260101T000000Z-aaaaaaaa" {
 		t.Fatalf("读不懂节点的引用 = %v", got)
 	}
-}
-
-func totalOf(m Measure) int64 {
-	total := int64(0)
-	for _, n := range m.Dirs {
-		total += n
-	}
-	return total
 }

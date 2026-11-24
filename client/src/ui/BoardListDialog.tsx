@@ -1,5 +1,5 @@
 // 画板列表：重新打开或删除保存在这台电脑上的画板。
-// 列表由本机存储拼好（#87）：每行带画板体量「约 X」，越过本机存储配置的提醒线标黄 / 标红，只提醒。
+// 列表由本机存储拼好（#87）：每行带画板体量「约 X」，高于本机存储配置的阈值标黄 / 标红，只描述大小。
 // 同一对话框也是用量提醒里的「管理画板」（#88），那时按体量从大到小排。
 // 可见判定在 ui/boardListView.ts（#137），这里只留接线与 DOM 摆放。
 import { useCallback, useEffect, useState } from "react";
@@ -25,7 +25,7 @@ interface Props {
   /** 取消归档 / 复制为新画板：画板位满时 resolve 统一文案，成功为 null。 */
   onUnarchive(path: string): Promise<string | null>;
   onCopy(path: string): Promise<string | null>;
-  /** 「管理画板」（#88，从用量提醒进入）：标题换成管理画板，各组按体量从大到小排，帮用户决定先整理哪块。 */
+  /** 「管理画板」（从用量提醒进入）：标题换成管理画板，各组按体量从大到小排，方便查看每块画板多大。 */
   manage?: boolean;
 }
 

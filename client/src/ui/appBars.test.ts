@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-// 工作台的提示条（#137）：保存失败、体量提醒与归档提示。
+// 工作台的提示条（#137）：保存失败与归档提示。
 import { act, createElement } from "react";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Board } from "../core/board";
-import { ArchivedBar, SaveFailureBar, SizeNoticeBar, UsageLimitBar } from "./appBars";
+import { ArchivedBar, SaveFailureBar, UsageLimitBar } from "./appBars";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -43,11 +43,6 @@ describe("提示条", () => {
     expect(container.textContent).toContain("写不进去");
     expect(container.textContent).toContain("重试保存");
     expect(container.textContent).toContain("导出画板包");
-  });
-
-  it("体量提醒：给出整理入口", async () => {
-    await act(async () => dom.render(createElement(SizeNoticeBar, { bytes: 2 * 1024 * 1024, tier: "alert", canTidy: true, onTidy: () => undefined, onDismiss: () => undefined })));
-    expect([...container.querySelectorAll("button")].some((b) => b.textContent?.trim() === "整理")).toBe(true);
   });
 
   it("用量提醒：给出管理画板入口", async () => {

@@ -1,14 +1,11 @@
-// 工具栏文案（#137）：置灰时的统一原因、「尚不可用」标记、撤销 / 重做与整理的说法。
+// 工具栏文案（#137）：置灰时的统一原因、「尚不可用」标记与撤销 / 重做。
 import { describe, expect, it } from "vitest";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
-import { TIDY_TEXT } from "./boardText";
 import {
 
   redoHint,
   runHint,
   runSuffix,
-  tidyHint,
-  tidyLabel,
   toolbarHint,
   undoHint,
   newTaskHint,
@@ -47,13 +44,5 @@ describe("工具栏文案", () => {
     expect(redoHint(null)).toBe("没有可重做的操作");
     expect(undoHint("新建提示词")).toBe("撤销 新建提示词（Ctrl+Z）");
     expect(redoHint("新建提示词")).toBe("重做 新建提示词（Ctrl+Shift+Z）");
-  });
-
-  it("整理按钮：不可用时标出来；在整理模式时说退出", () => {
-    expect(tidyLabel(false)).toBe(TIDY_TEXT.enter);
-    expect(tidyLabel(true)).toBe(`${TIDY_TEXT.enter}（${UNAVAILABLE_TEXT}）`);
-    expect(tidyHint(false, false)).toContain("整理模式");
-    expect(tidyHint(true, false)).toBe("退出整理模式");
-    expect(tidyHint(false, true)).toBe("整理" + UNAVAILABLE_TEXT);
   });
 });

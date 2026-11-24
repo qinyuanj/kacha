@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approxSizeText, boardSlotsFullText, DELETE_TASK_TEXT, formatBytes, IMPORT_TEXT, isSlotsFullText, PACK_IMPORT_TEXT, PASTE_TEXT, pasteRefusalText, REGION_TEXT, RELOCATE_TEXT, SAVE_TEXT, sizeNoticeText, slotsRefusal, slotsUsageText, STAGE_TEXT, SUGGEST_KEEP_TEXT, TIDY_TEXT, usageLimitText, VARIANT_TEXT } from "./boardText";
+import { approxSizeText, boardSlotsFullText, DELETE_TASK_TEXT, formatBytes, IMPORT_TEXT, isSlotsFullText, PACK_IMPORT_TEXT, PASTE_TEXT, pasteRefusalText, REGION_TEXT, RELOCATE_TEXT, SAVE_TEXT, slotsRefusal, slotsUsageText, usageLimitText, VARIANT_TEXT } from "./boardText";
 
 // 期望文案照抄票面（#89 已确认的简洁版），独立于源码，防止同义反复。
 describe("画板位文案（#89）", () => {
@@ -54,14 +54,10 @@ describe("体量换算", () => {
   });
 });
 
-describe("用量与体量提醒", () => {
-  it("接近上限只说整理，达到上限先说生成不受影响", () => {
-    expect(usageLimitText("warn", 900, 1000)).toBe("用量接近上限（900 B / 上限 1000 B），整理一下画板？");
-    expect(usageLimitText("alert", 1000, 1000)).toBe("用量已满（1000 B / 上限 1000 B），生成不受影响，请整理画板释放空间。");
-  });
-
-  it("画板越线提示带约数与整理引导", () => {
-    expect(sizeNoticeText(2 * 1024 ** 3)).toBe("这块画板已经约 2.0 GiB 了，整理一下？");
+describe("用量提醒", () => {
+  it("提醒只报用量事实，不再指向整理动作", () => {
+    expect(usageLimitText("warn", 900, 1000)).toBe("用量接近上限（900 B / 上限 1000 B），生成不受影响。");
+    expect(usageLimitText("alert", 1000, 1000)).toBe("用量已满（1000 B / 上限 1000 B），生成不受影响。");
   });
 });
 
@@ -113,70 +109,18 @@ describe("画布动作文案", () => {
     expect(IMPORT_TEXT.imageOnly).toBe("只支持拖入图片文件");
     expect(IMPORT_TEXT.failed("a.png", "网络失败")).toBe("无法导入 a.png：网络失败");
   });
-
-  it("整理模式的确认框取消按钮也在同一处", () => {
-    expect(TIDY_TEXT.cancelLabel).toBe("取消");
-  });
 });
 
-// 建议保留（#144）：标记、阶段框上的动作、以及「收掉未定稿」确认框里补的那一句。
-describe("建议保留文案（#144）", () => {
-  it("结果节点上的标记、阶段框上的动作与置灰原因", () => {
-    expect(SUGGEST_KEEP_TEXT.badge).toBe("建议保留");
-    expect(SUGGEST_KEEP_TEXT.keep(3)).toBe("保留这 3 张");
-    expect(SUGGEST_KEEP_TEXT.nothingToKeep).toBe("这个阶段没有建议保留的结果");
-  });
-
-  it("「收掉未定稿」的确认框点明其中几张是建议保留的", () => {
-    expect(SUGGEST_KEEP_TEXT.note(2)).toBe("其中 2 张是建议保留的");
-    expect(TIDY_TEXT.pruneConfirm(2, 2048, 2)).toBe("将收掉 2 张，其中 2 张是建议保留的，画板约减少 2.0 KiB。\n定稿与已被下游使用的结果保留；可以撤销。");
-    expect(TIDY_TEXT.pruneConfirm(2, null, 1)).toBe("将收掉 2 张，其中 1 张是建议保留的，画板体量暂时算不出。\n定稿与已被下游使用的结果保留；可以撤销。");
-  });
-
-  it("没有建议保留时那句话不出现，确认框一字不改", () => {
-    expect(TIDY_TEXT.pruneConfirm(2, 2048, 0)).toBe("将收掉 2 张，画板约减少 2.0 KiB。\n定稿与已被下游使用的结果保留；可以撤销。");
-  });
-});
-
-// 整理模式与画板包导入的既有文案：票面要求 boardText 全覆盖，这里把由 App / stages 调用的条目也锁住。
-describe("整理模式与画板包导入文案", () => {
-  it("整理条的体量对比、收掉张数与移出结局", () => {
-    expect(TIDY_TEXT.compare(1536, 0)).toBe("整理前约 1.5 KiB → 现在约 0 B");
-    expect(TIDY_TEXT.prune(3)).toBe("收掉未定稿（3）");
-    expect(TIDY_TEXT.pruneConfirm(2, 2048)).toBe("将收掉 2 张，画板约减少 2.0 KiB。\n定稿与已被下游使用的结果保留；可以撤销。");
-    expect(TIDY_TEXT.pruneConfirm(2, null)).toContain("画板体量暂时算不出");
-    expect(TIDY_TEXT.movedOut("新板")).toBe("已移出为新画板「新板」，可在画板列表里打开。撤销只恢复本画板，新画板保留。");
-    expect(TIDY_TEXT.movedOutKept("新板", "被拒")).toBe("新画板「新板」已建好，但本画板没有删去这些节点：被拒");
-    expect(TIDY_TEXT.movedOutKept("新板", null)).toBe("新画板「新板」已建好，但本画板没有删去这些节点");
-    expect(TIDY_TEXT.moveOutFailed("磁盘满了")).toBe("移出失败：磁盘满了");
-  });
-
-  it("整理条上的自动划分阶段（#143）：按钮带会建的阶段数，没有可划的时说明原因", () => {
-    expect(TIDY_TEXT.autoStages(3)).toBe("自动划分阶段（3）");
-    expect(TIDY_TEXT.autoStages(0)).toBe("自动划分阶段（0）");
-    expect(TIDY_TEXT.autoStagesEmpty).toBe("没找到可以划成阶段的东西");
-  });
-
-  it("整理条上的「收掉整板未定稿」（#145）：按钮带整板张数，N 为 0 时说明整块画板的口径", () => {
-    expect(TIDY_TEXT.pruneBoard(3)).toBe("收掉整板未定稿（3）");
-    expect(TIDY_TEXT.pruneBoard(0)).toBe("收掉整板未定稿（0）");
-    // 与逐阶段的 nothingToPrune（讲「这个阶段」）不是同一句：整板这条要说清只算阶段里的结果。
-    expect(TIDY_TEXT.nothingToPruneBoard).toBe("整块画板没有可收掉的未定稿结果：只算阶段里的结果，定稿与已被下游使用的结果会保留。");
-    expect(TIDY_TEXT.nothingToPruneBoard).not.toBe(TIDY_TEXT.nothingToPrune);
-  });
-
+// 画板包导入的既有文案：票面要求 boardText 全覆盖，这里把由 App 调用的条目也锁住。
+describe("画板包导入文案", () => {
   it("画板包导入失败的两种说明", () => {
     expect(PACK_IMPORT_TEXT.failed("包坏了")).toBe("导入画板包失败：包坏了");
     expect(PACK_IMPORT_TEXT.openFailed("打不开")).toBe("画板已导入，但打开失败：打不开。可从画板列表打开。");
   });
 });
 
-// 既有条目里此前没人调用的三条（阶段成员数、画板位满的识别、画板位用量）：补上，票面要求本文件全覆盖。
-describe("阶段与画板位的存量文案", () => {
-  it("阶段收起时写成员数", () => {
-    expect(STAGE_TEXT.count(2)).toBe("2 个节点");
-  });
-
+// 既有条目里此前没人调用的两条（画板位满的识别、画板位用量）：补上，票面要求本文件全覆盖。
+describe("画板位的存量文案", () => {
   it("按统一文案的开头认出「画板位满」：其它报错不算", () => {
     expect(isSlotsFullText(boardSlotsFullText({ used: 9, total: 10 }))).toBe(true);
     expect(isSlotsFullText("存储端口返回 HTTP 500")).toBe(false);

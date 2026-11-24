@@ -33,10 +33,6 @@ export interface CanvasToolbarProps {
   /** 当前选中节点数：> 0 时运行按钮写「运行选中」。 */
   selectedCount: number;
   onRun: () => void;
-  /** 是否在整理模式：工具栏按钮按下态。 */
-  tidying: boolean;
-  /** 进入 / 退出整理模式。 */
-  onTidyChange: (tidying: boolean) => void;
 }
 
 export function CanvasToolbar(props: CanvasToolbarProps) {
@@ -50,8 +46,6 @@ function ToolbarBody(props: CanvasToolbarProps) {
   if (props.readOnly) return <BoardToolbar disabled />;
   // 入口留着但标成「尚不可用」，不假装能点：生成在 #153 已接通，按端口的能力开关说话。
   const generationOff = !port.features.generation;
-  // tidy 显式 false 时，整理入口标为尚不可用。
-  const tidyOff = port.features.tidy === false;
   return (
     <BoardToolbar
       modelSelect={
@@ -67,9 +61,6 @@ function ToolbarBody(props: CanvasToolbarProps) {
       selectedCount={props.selectedCount}
       onRun={props.onRun}
       generationUnavailable={generationOff}
-      tidying={props.tidying}
-      tidyUnavailable={tidyOff}
-      onTidy={() => props.onTidyChange(!props.tidying)}
     />
   );
 }

@@ -1,15 +1,12 @@
-// 画布上浮在 React Flow 之上的几层：整理条、上下文菜单、放大预览弹窗、共享的悬浮信息层（挂在画布根 div 里，
+// 画布上浮在 React Flow 之上的几层：上下文菜单、放大预览弹窗、共享的悬浮信息层（挂在画布根 div 里，
 // 这些浮层是 position:fixed / 绝对定位，不能进 React Flow 的变换容器），以及悬浮动作条（必须挂在 React Flow 内部，
 // NodeToolbar 靠它的 store 定位）。每个浮层各自判空（没开 / 没有条目就 return null），调用方只按顺序摆放。
 import { NodeToolbar, Position } from "@xyflow/react";
 import type { ReactNode } from "react";
-import type { Board } from "../core/board";
 import type { BoardAction, MenuItem } from "../core/contextMenu";
-import type { BoardChange, EditResult } from "../core/edit";
 import { ActionBar } from "./ActionBar";
 import { ContextMenu } from "./ContextMenu";
 import { PreviewDialog } from "./PreviewDialog";
-import { TidyBar, type TidyMeasure } from "./tidy";
 import type { CanvasMenuState, CanvasPreviewState } from "./useCanvasOverlaysState";
 
 export interface CanvasOverlaysProps {
@@ -23,18 +20,6 @@ export interface CanvasOverlaysProps {
   preview: CanvasPreviewState | null;
   onClosePreview: () => void;
   toast: (message: string) => void;
-  /** 整理模式：false 时不出整理条。 */
-  tidying: boolean;
-  /** 整理模式量到的体量（见 useTidyMeasure）。 */
-  tidyMeasure: TidyMeasure;
-  /** 整理条的「自动划分阶段」按它现算会建几个阶段（#143）。 */
-  board: Board;
-  /** 画板写入的唯一入口（core/edit）。 */
-  apply: (change: BoardChange) => EditResult | null;
-  /** 只读 / 归档画板：自动划分阶段不可点。 */
-  readOnly: boolean;
-  /** 点整理条的「完成」：退出整理模式。 */
-  onTidyDone: () => void;
   /** 共享的悬浮信息层（useHoverLayer().layer）；没有内容时为 null。 */
   hoverLayer: ReactNode;
 }
@@ -42,7 +27,6 @@ export interface CanvasOverlaysProps {
 export function CanvasOverlays(props: CanvasOverlaysProps) {
   return (
     <>
-      <TidyOverlay tidying={props.tidying} measure={props.tidyMeasure} board={props.board} apply={props.apply} readOnly={props.readOnly} onDone={props.onTidyDone} />
       <MenuOverlay menu={props.menu} entries={props.menuEntries} onPick={props.onPickMenu} onClose={props.onCloseMenu} />
       <PreviewOverlay preview={props.preview} toast={props.toast} onClose={props.onClosePreview} />
       {props.hoverLayer}
@@ -70,12 +54,6 @@ export function CanvasActionBar({ present, nodes, items, onPick, onPointerEnter,
       <ActionBar items={items} onPick={onPick} onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave} />
     </NodeToolbar>
   );
-}
-
-/** 整理条（#92）：不在整理模式不出。 */
-function TidyOverlay({ tidying, measure, board, apply, readOnly, onDone }: { tidying: boolean; measure: TidyMeasure; board: Board; apply: (change: BoardChange) => EditResult | null; readOnly: boolean; onDone: () => void }) {
-  if (!tidying) return null;
-  return <TidyBar {...measure} board={board} apply={apply} readOnly={readOnly} onDone={onDone} />;
 }
 
 interface MenuOverlayProps {

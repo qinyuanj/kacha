@@ -1,7 +1,7 @@
 // 工作台顶部的提示条（#137）：从 src/App.tsx 拆出的子组件，让 App 只留接线。
 import type { Board } from "../core/board";
 import type { SizeTier } from "../core/boardSize";
-import { ARCHIVE_TEXT, MANAGE_BOARDS_TEXT, sizeNoticeText, usageLimitText } from "./boardText";
+import { ARCHIVE_TEXT, MANAGE_BOARDS_TEXT, usageLimitText } from "./boardText";
 import { saveFailureNotice } from "./appUiState";
 import type { UpdateStatusView } from "./updateStatusView";
 
@@ -59,40 +59,6 @@ export function UsageLimitBar({
       <span>{usageLimitText(level, total, limit)}</span>
       <button onClick={onManage}>{MANAGE_BOARDS_TEXT}</button>
       <button className="link" aria-label="关闭用量提醒" onClick={onDismiss}>
-        关闭
-      </button>
-    </div>
-  );
-}
-
-/** 当前画板越线提示：只提醒，不碰生成。 */
-export function SizeNoticeBar({
-  bytes,
-  tier,
-  canTidy,
-  onTidy,
-  onDismiss,
-}: {
-  bytes: number;
-  tier: SizeTier;
-  canTidy: boolean;
-  onTidy(): void;
-  onDismiss(): void;
-}) {
-  return (
-    <div className={`bar ${tier === "alert" ? "bar-alert" : "bar-warn"} size-notice`} role="status" data-size-tier={tier}>
-      <span>{sizeNoticeText(bytes)}</span>
-      {/* 归档画板只读，不能整理（#90）。 */}
-      {canTidy && (
-        <button
-          onClick={() => {
-            onTidy();
-          }}
-        >
-          整理
-        </button>
-      )}
-      <button className="link" aria-label="关闭体量提示" onClick={onDismiss}>
         关闭
       </button>
     </div>

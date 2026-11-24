@@ -1,6 +1,6 @@
-// 画板动作分派表：每个 BoardAction 一条，断言对应依赖被调用及参数；反例覆盖只读拒绝、锁定、定稿两态与目标类型不符。
+// 画板动作分派表：每个 BoardAction 一条，断言对应依赖被调用及参数；反例覆盖只读拒绝、锁定与目标类型不符。
 import { describe, expect, it, vi } from "vitest";
-import type { Board, BoardEdge, BoardNode } from "../core/board";
+import type { BoardEdge, BoardNode } from "../core/board";
 import { BUILTIN_TABLE } from "../core/capabilities";
 import type { BoardAction, MenuTarget } from "../core/contextMenu";
 import { LOCKED_HINT } from "../core/iterate";
@@ -11,12 +11,8 @@ import type { BoardActions } from "./context";
 
 const SPEC_2K = { tier: "2K", ratio: "16:9", width: null, height: null };
 
-function board(nodes: BoardNode[] = []): Board {
-  return { format_version: 2, title: "t", viewport: { zoom: 1, x: 0, y: 0 }, nodes, edges: [], extra: {} };
-}
-
-/** 定稿（final）= 结果节点上的标记；定稿动作的两态靠它区分。 */
-function result(id: string, final = false): BoardNode {
+/** 结果节点。 */
+function result(id: string): BoardNode {
   const node = {
     id,
     type: "result" as const,
@@ -29,7 +25,7 @@ function result(id: string, final = false): BoardNode {
     layer_count: 0,
     record: { model: "qwen-image-3.0", prompt: "", negative_prompt: "", size_spec: SPEC_2K, submitted_at: "" },
   };
-  return final ? { ...node, final: true } : node;
+  return node;
 }
 
 const EDGE: BoardEdge = { from: ["p", "out"], to: ["t", "positive"], source_layer: null, region: null, system: false, extra: {} };
@@ -59,7 +55,6 @@ function makeSpies() {
     addTask: vi.fn(),
     pickReferences: vi.fn(),
     saveNodeAs: vi.fn(),
-    newStage: vi.fn(),
     toggleExpand: vi.fn(),
     toast: vi.fn(),
   };
@@ -101,7 +96,6 @@ function harness(options: HarnessOptions = {}) {
   const deps: CanvasCommandDeps = {
     apply: spies.apply,
     flow: { deleteElements: spies.deleteElements },
-    boardRef: { current: board(options.nodes ?? [result("img", true), result("res")]) },
     selectedRef: { current: new Set(options.selected ?? ["img", "res"]) },
     lockedRef: { current: new Set(options.locked ?? []) },
     actions,
@@ -115,7 +109,6 @@ function harness(options: HarnessOptions = {}) {
     addTask: spies.addTask,
     pickReferences: spies.pickReferences,
     saveNodeAs: spies.saveNodeAs,
-    newStage: spies.newStage,
     toggleExpand: spies.toggleExpand,
     toast: spies.toast,
     readOnly: options.readOnly ?? false,
@@ -145,9 +138,6 @@ const NODE_ONLY: readonly BoardAction[] = [
   "toggleSettings",
   "viewSendText",
   "delete",
-  "newStage",
-  "removeFromStage",
-  "toggleFinal",
 ];
 
 /** 只认连线目标的动作。 */
@@ -177,9 +167,6 @@ const CASES: { action: BoardAction; target: MenuTarget; at?: { x: number; y: num
   { action: "toggleSettings", target: NODE, called: ["toggleExpand", "img"] },
   // 删除与断开都走 React Flow 的删除流程，参数形状（{ nodes: [{ id }] } / { edges: [{ id }] }）逐字保留。
   { action: "delete", target: NODE, called: ["deleteElements", { nodes: [{ id: "img" }, { id: "res" }] }] },
-  { action: "newStage", target: NODE, called: ["newStage", ["img", "res"]] },
-  { action: "removeFromStage", target: NODE, called: ["apply", { kind: "removeFromStage", nodes: ["img", "res"] }] },
-  { action: "toggleFinal", target: NODE, called: ["apply", { kind: "setFinal", nodes: ["img", "res"], final: true }] },
   { action: "disconnect", target: EDGE_TARGET, called: ["deleteElements", { edges: [{ id: "p:out->t:positive" }] }] },
   { action: "editRegion", target: EDGE_TARGET, called: ["editRegion", "t", { from: EDGE.from, to: EDGE.to }] },
 ];
@@ -236,34 +223,14 @@ describe("动作分派", () => {
 
   it("右键落在选区内：动作作用于整个选区", () => {
     const { commands, spies } = harness();
-    commands.newStage?.(NODE);
-    expect(spies.newStage).toHaveBeenCalledWith(["img", "res"]);
+    commands.delete?.(NODE);
+    expect(spies.deleteElements).toHaveBeenCalledWith({ nodes: [{ id: "img" }, { id: "res" }] });
   });
 
   it("锁定节点上的动作照常分派：置灰由菜单 / 动作条的 disabledReason 负责", () => {
     const { commands, spies } = harness({ locked: ["img"] });
     commands.run?.(NODE);
     expect(spies.onRun).toHaveBeenCalledWith(["img"]);
-  });
-});
-
-describe("定稿两态", () => {
-  it("选区里有未定稿的结果：标记定稿", () => {
-    const { commands, spies } = harness({ nodes: [result("img", true), result("res")], selected: ["img", "res"] });
-    commands.toggleFinal?.(NODE);
-    expect(spies.apply).toHaveBeenCalledWith({ kind: "setFinal", nodes: ["img", "res"], final: true });
-  });
-
-  it("选区里的结果都定稿了：取消定稿", () => {
-    const { commands, spies } = harness({ nodes: [result("img", true), result("res", true)], selected: ["img", "res"] });
-    commands.toggleFinal?.(NODE);
-    expect(spies.apply).toHaveBeenCalledWith({ kind: "setFinal", nodes: ["img", "res"], final: false });
-  });
-
-  it("选区里没有结果节点：不写入（菜单也不会给这一项）", () => {
-    const { commands, spies } = harness({ nodes: [], selected: ["img"] });
-    commands.toggleFinal?.(NODE);
-    expect(calledIn(spies)).toEqual([]);
   });
 });
 

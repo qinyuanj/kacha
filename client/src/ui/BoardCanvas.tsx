@@ -61,7 +61,6 @@ import { edgeTypes } from "./edges";
 import { HoverProvider, useHoverLayer } from "./hoverInfo";
 import { nodeTypes } from "./nodes";
 import { DragContext } from "./ports";
-import { StageLayer } from "./stages";
 import { actionBarView, useActionBarHover } from "./useCanvasHover";
 import { useBoardKeyboard } from "./useBoardKeyboard";
 import { useCanvasApply } from "./useCanvasApply";
@@ -70,7 +69,6 @@ import { imageImportPorts, useCanvasDrop } from "./useCanvasDrop";
 import { useCanvasInteraction } from "./useCanvasInteraction";
 import { useCanvasOverlaysState } from "./useCanvasOverlaysState";
 import { useCanvasSelectionState } from "./useCanvasSelectionState";
-import { useCanvasStageView } from "./useCanvasStageView";
 
 /** 拖线建节点的落点处理：松手处建哪类节点（见 core/dragCreate）。 */
 type DragCreate = (action: BoardAction, from: DragFrom, at: { x: number; y: number }) => void;
@@ -112,11 +110,6 @@ interface Props {
   toolbarSlot: HTMLElement | null;
   /** 运行指示跳转：居中并选中该节点；nonce 变化即再跳一次。 */
   focus: { nodeId: string; nonce: number } | null;
-  /** 整理模式（#92）：画布的一种界面状态，其它编辑照常可用。 */
-  tidying: boolean;
-  onTidyChange: (tidying: boolean) => void;
-  /** 把阶段移出为新画板（#93）；返回要提示的话（成功、画板位满或其它拒绝原因）。 */
-  onMoveOutStage: (stageId: string) => Promise<string>;
   /** 归档画板（#90）：能看、放大、下载结果，不能编辑（不拖动、不连线、不删、菜单只剩查看与下载）。 */
   readOnly?: boolean;
   /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框）：粘贴放行给它们，不落到背后的画板（#96）。 */
@@ -148,9 +141,6 @@ export function BoardCanvas({
   onViewSendText,
   toolbarSlot,
   focus,
-  tidying,
-  onTidyChange,
-  onMoveOutStage,
   readOnly = false,
   modalOpen = false,
   theme,
@@ -173,7 +163,6 @@ export function BoardCanvas({
   const canvasData = useCanvasData({ board, boardFile, userRoot, table, locked, handled, runNodes, applyChange });
   const overlays = useCanvasOverlaysState({ flow, selectedRef, setSelectedNodes, clearPromptFocus: () => requestPromptFocus(null) });
   const actionBar = useActionBarHover();
-  const stageView = useCanvasStageView({ board, boardRef, readOnly, measured, tidying, apply, toast, onMoveOutStage });
   const nav = useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen: overlays.dialogOpenRef, apply, isEditableTarget: port.ui.isEditableTarget });
   const hover = useHoverLayer();
 
@@ -192,12 +181,12 @@ export function BoardCanvas({
   const nodes = useMemo<Node[]>(
     () =>
       canvasNodes({
-        board, table, userRoot, selected: selectedNodes, measured, hidden: stageView.hidden,
-        lineageNodes: highlighted.nodes, drag, focusPrompt, promptDrafts, missing: canvasData.missing, suggestKeep: stageView.suggestKeep,
+        board, table, userRoot, selected: selectedNodes, measured,
+        lineageNodes: highlighted.nodes, drag, focusPrompt, promptDrafts, missing: canvasData.missing,
         imageInfos: canvasData.imageInfos, alphaByNode: canvasData.alphaByNode, discovery, concurrency, expanded, locked,
         runStateOf: canvasData.runStateOf, statusOf: canvasData.statusOf, menuFacts,
       }),
-    [board, table, userRoot, selectedNodes, measured, stageView.hidden, stageView.suggestKeep, highlighted, drag, focusPrompt, promptDrafts, canvasData.missing, canvasData.imageInfos, canvasData.alphaByNode, discovery, concurrency, expanded, locked, canvasData.runStateOf, canvasData.statusOf, menuFacts],
+    [board, table, userRoot, selectedNodes, measured, highlighted, drag, focusPrompt, promptDrafts, canvasData.missing, canvasData.imageInfos, canvasData.alphaByNode, discovery, concurrency, expanded, locked, canvasData.runStateOf, canvasData.statusOf, menuFacts],
   );
   const edges = useMemo<Edge[]>(
     () => canvasEdges({ board, selectedEdges, selectedNodes, lineageEdges: highlighted.edges, dragging, expanded }),
@@ -267,8 +256,8 @@ export function BoardCanvas({
   );
 
   const commandDeps: CanvasCommandDeps = {
-    apply, flow, boardRef, selectedRef, lockedRef, actions, onUndo, onRedo, onRun, onCancelTask, onRegenerate, onViewSendText,
-    addPrompt, addTask, pickReferences, saveNodeAs, newStage: stageView.newStage, toast, readOnly,
+    apply, flow, selectedRef, lockedRef, actions, onUndo, onRedo, onRun, onCancelTask, onRegenerate, onViewSendText,
+    addPrompt, addTask, pickReferences, saveNodeAs, toast, readOnly,
     toggleExpand: (nodeId) => setExpandOverrides((o) => toggleExpanded(o, selectedRef.current, nodeId)),
   };
   const commands = canvasCommands(commandDeps);
@@ -303,7 +292,7 @@ export function BoardCanvas({
         <DragContext.Provider value={drag}>
           {/* 画布内屏蔽 WebView 默认右键菜单；可编辑元素保留原生菜单（复制粘贴）。 */}
           <div
-            className={canvasClassName(dragging, tidying)}
+            className={canvasClassName(dragging)}
             ref={wrapper}
             onContextMenu={(e) => blockNativeContextMenu(port.ui.isEditableTarget, e)}
             onPointerDownCapture={nav.onPointerDownCapture}
@@ -326,8 +315,6 @@ export function BoardCanvas({
               redoLabel={redoLabel}
               selectedCount={selectedNodes.size}
               onRun={() => onRun([...selectedNodes])}
-              tidying={tidying}
-              onTidyChange={onTidyChange}
             />
             <ReactFlow
               {...nav.flowProps}
@@ -368,15 +355,6 @@ export function BoardCanvas({
               minZoom={0.1}
             >
               <Background {...canvasTheme.background} />
-              <StageLayer
-                readOnly={readOnly}
-                boxes={stageView.boxes}
-                selected={selectedNodes}
-                apply={(c) => void apply(c)}
-                editing={stageView.editingStage}
-                onEditingDone={stageView.onEditingDone}
-                tidy={stageView.stageTidy}
-              />
               <Controls />
               <MiniMap {...canvasTheme.minimap} />
               <CanvasActionBar
@@ -396,12 +374,6 @@ export function BoardCanvas({
               preview={overlays.preview}
               onClosePreview={overlays.closePreview}
               toast={toast}
-              tidying={tidying}
-              tidyMeasure={stageView.tidyMeasure}
-              board={board}
-              apply={apply}
-              readOnly={readOnly}
-              onTidyDone={() => onTidyChange(false)}
               hoverLayer={hover.layer}
             />
           </div>

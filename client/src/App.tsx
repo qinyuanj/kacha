@@ -4,7 +4,6 @@ import { BUILTIN_TABLE, type CapabilityTable } from "./core/capabilities";
 import type { BoardChange } from "./core/edit";
 import type { Runner, RunTarget } from "./core/runner";
 import type { UpdatePreparationPorts } from "./core/updatePreparation";
-import { useActiveBoardSize } from "./ui/useBoardSize";
 import { shouldShowUpdateNotice } from "./core/changelog";
 import { useUsageLimit } from "./ui/useUsageLimit";
 import { useRunner } from "./ui/useRunner";
@@ -19,7 +18,7 @@ import { useShell } from "./ui/shell";
 import { useUpdate } from "./ui/useUpdate";
 import { useUpdateAutoInstall } from "./ui/useUpdateAutoInstall";
 import { updateStatusView } from "./ui/updateStatusView";
-import { modalOpenOf, noticesAfterMove, uiStateOf, uiStateText } from "./ui/appUiState";
+import { modalOpenOf, uiStateOf, uiStateText } from "./ui/appUiState";
 import { AppOverlays } from "./ui/appDialogs";
 import type { DataRootActions } from "./ui/dataRootMove";
 import { downloadBoardResults } from "./ui/packMenu";
@@ -35,18 +34,12 @@ import {
   usageEnabled,
   versionOrEmpty,
   versionOrUndefined,
-  boardKeyOf,
   canvasBoard,
   createBoardOrExplain,
   dismissBoardNotice,
-  dismissSizeAction,
   focusFor,
   openFromList,
   packMenuPick,
-  sizeQueryOf,
-  tidyAction,
-  tidyKeyAfter,
-  tidyingFor,
   updateNoticeOf,
   usageNoticeOf,
 } from "./ui/appView";
@@ -61,7 +54,6 @@ import {
   openBoardList,
   openManageBoards,
   redoOn,
-  sizeNoticeUpdated,
   togglePackMenu,
   undoOn,
 } from "./ui/appCallbacks";
@@ -100,7 +92,6 @@ export function App({ version }: AppProps) {
   const boards = useBoardSessions(
     userRoot,
     useCallback((key: string) => ({ ...envRef.current, locked: runnerRef.current!.getSnapshot().board(key).locked }), []),
-    useCallback((from: string, to: string) => store.setSizeNotices((s) => noticesAfterMove(s, from, to)), []),
   );
   const { sessions, activeKey, openPath, createBoard } = boards;
 
@@ -286,10 +277,10 @@ export function App({ version }: AppProps) {
   }, [version, store]);
 
   const writeUi = useCallback(() => {
-    const uiState = uiStateOf(boards.snapshot(), state.lastSeenVersion, state.sizeNotices);
+    const uiState = uiStateOf(boards.snapshot(), state.lastSeenVersion);
     const text = uiStateText(uiState);
     return port.meta.writeUiState(text);
-  }, [boards, state.lastSeenVersion, state.sizeNotices, port]);
+  }, [boards, state.lastSeenVersion, port]);
   const persistUi = useUiStateWriter(writeUi);
 
   // 更新安装前的准备依赖（#164）：任务队列用 runner 的真实份数与提交守护，
@@ -325,7 +316,7 @@ export function App({ version }: AppProps) {
   const autoInstall = useUpdateAutoInstall({ snapshot: update.snapshot, loaded: update.loaded, idle: updateIdle, install: update.install });
   const updateStatus = updateStatusView({ snapshot: update.snapshot, auto: autoInstall.view });
 
-  const uiSignature = JSON.stringify([sessions.map((s) => s.path), sessions.find((s) => s.key === activeKey)?.path, state.lastSeenVersion, state.sizeNotices]);
+  const uiSignature = JSON.stringify([sessions.map((s) => s.path), sessions.find((s) => s.key === activeKey)?.path, state.lastSeenVersion]);
   const persistRef = useRef(persistUi);
   persistRef.current = persistUi;
   const ready = state.ready;
@@ -333,19 +324,12 @@ export function App({ version }: AppProps) {
     if (ready) void persistRef.current();
   }, [ready, uiSignature]);
 
-  // 当前画板越线提示（#87）：只提醒，不碰生成。体量回落时校正已提醒档位（清除回落那条线的记录）。
   // 导入与导出是两项能力（#131）：桌面壳能导入、还不能导出。
   const packImportOff = port.features.packImport === false;
-  const sizeQuery = sizeQueryOf(appView({ sessions, activeKey, userRoot, activeSize: null, sizeNotices: state.sizeNotices, packImportOff }).active);
-  const activeSize = useActiveBoardSize(sizeQuery?.path ?? null, sizeQuery?.version ?? null);
-  const view = appView({ sessions, activeKey, userRoot, activeSize, sizeNotices: state.sizeNotices, packImportOff });
+  const view = appView({ sessions, activeKey, userRoot, packImportOff });
   // 用量上限提醒（#88）：只提醒，生成照常。
   const usageLimit = useUsageLimit(usageEnabled(state.metadataReady, userRoot));
   const usageNotice = usageNoticeOf(usageLimit.notice, state.usageDismissed);
-  useEffect(() => {
-    store.setSizeNotices((notices) => sizeNoticeUpdated(notices, view.sizeNotice));
-  }, [view.sizeNotice, store]);
-
   if (state.fatal) return <div className="fatal">启动失败：{state.fatal}</div>;
 
   const updateNotice = updateNoticeOf(ready, versionOrEmpty(version), state.lastSeenVersion, shouldShowUpdateNotice);
@@ -415,9 +399,6 @@ export function App({ version }: AppProps) {
           readOnly: view.activeArchived,
           modalOpen,
           focus: focusFor(state.focus, view.active),
-          tidying: tidyingFor(state.tidyKey, view.active, view.activeArchived),
-          onTidyChange: (on) => store.setTidyKey(tidyKeyAfter(on, view.active)),
-          onMoveOutStage: (stageId) => boards.moveOutStage(boardKeyOf(view.active), stageId),
         }}
         onActivate={(key) => activateBoard(boards.setActiveKey, () => store.setFocus(null), key)}
         onCloseTab={(key) => void closeOne(key)}
@@ -444,8 +425,6 @@ export function App({ version }: AppProps) {
         onOpenSettings={() => store.setSettingsOpen(true)}
         onManageBoards={() => openManageBoards(boards.flushAll, store.setManageBoards, store.setBoardListOpen)}
         onDismissUsage={() => store.setUsageDismissed(usageNotice?.level ?? null)}
-        onTidy={() => tidyAction(view, state.sizeNotices, store.setSizeNotices, store.setTidyKey)}
-        onDismissSize={() => dismissSizeAction(view, state.sizeNotices, store.setSizeNotices)}
         onUnarchive={() => archivedAction(view.archived, boards.unarchiveBoard)}
         onCopyArchived={() => archivedAction(view.archived, boards.copyAsNewBoard)}
         onDismissBoardNotice={() => dismissBoardNotice(view.active, boards.dismissNotice)}

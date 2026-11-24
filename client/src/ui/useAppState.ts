@@ -11,9 +11,7 @@ export interface AppState {
   settingsOpen: boolean;
   changelogOpen: boolean;
   lastSeenVersion: string | undefined;
-  sizeNotices: Record<string, SizeTier>;
   boardListOpen: boolean;
-  tidyKey: string | null;
   manageBoards: boolean;
   usageDismissed: SizeTier | null;
   packMenu: { x: number; y: number } | null;
@@ -33,9 +31,7 @@ export interface AppStore {
   setSettingsOpen(open: boolean): void;
   setChangelogOpen(open: boolean): void;
   setLastSeenVersion(version: SetStateAction<string | undefined>): void;
-  setSizeNotices(next: SetStateAction<Record<string, SizeTier>>): void;
   setBoardListOpen(open: boolean): void;
-  setTidyKey(key: string | null): void;
   setManageBoards(manage: boolean): void;
   setUsageDismissed(level: SetStateAction<SizeTier | null>): void;
   setPackMenu(menu: { x: number; y: number } | null): void;
@@ -58,9 +54,7 @@ export function useAppState(): AppStore {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [lastSeenVersion, setLastSeenVersion] = useState<string | undefined>();
-  const [sizeNotices, setSizeNotices] = useState<Record<string, SizeTier>>({});
   const [boardListOpen, setBoardListOpen] = useState(false);
-  const [tidyKey, setTidyKey] = useState<string | null>(null);
   const [manageBoards, setManageBoards] = useState(false);
   const [usageDismissed, setUsageDismissed] = useState<SizeTier | null>(null);
   const [packMenu, setPackMenu] = useState<{ x: number; y: number } | null>(null);
@@ -79,9 +73,7 @@ export function useAppState(): AppStore {
       settingsOpen,
       changelogOpen,
       lastSeenVersion,
-      sizeNotices,
       boardListOpen,
-      tidyKey,
       manageBoards,
       usageDismissed,
       packMenu,
@@ -97,9 +89,7 @@ export function useAppState(): AppStore {
     setSettingsOpen,
     setChangelogOpen,
     setLastSeenVersion,
-    setSizeNotices,
     setBoardListOpen,
-    setTidyKey,
     setManageBoards,
     setUsageDismissed,
     setPackMenu,

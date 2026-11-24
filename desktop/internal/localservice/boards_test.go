@@ -28,7 +28,7 @@ func TestWriteBoardCreateOnlyConflict(t *testing.T) {
 }
 
 // 服务层画板列表：把本机存储的列表整行映射成页面形状——文件名、相对路径、归档标记、体量，
-// 以及画板位与体量提醒线。漏掉 size_lines 时前端容量提醒会恒为 0，所以这里逐字段钉住。
+// 以及画板位与画板体量分档阈值。漏掉 size_lines 时前端体量分档会恒为 0，所以这里逐字段钉住。
 func TestListBoardsMapsStoreListingToPortShape(t *testing.T) {
 	store := localstore.New(t.TempDir())
 	svc := New(store)

@@ -4,17 +4,11 @@ import { emptyHistory } from "../core/history";
 import type { Session } from "./useBoardSessions";
 import {
   appView,
-  boardKeyOf,
   canvasBoard,
   createBoardOrExplain,
   dismissBoardNotice,
-  dismissSizeAction,
   focusFor,
   openFromList,
-  sizeQueryOf,
-  tidyAction,
-  tidyKeyAfter,
-  tidyingFor,
   updateNoticeOf,
 } from "./appView";
 
@@ -34,7 +28,7 @@ const okSession = (patch: Partial<Extract<Session, { status: "ok" }>> = {}): Ses
 
 describe("工作台视图模型", () => {
   it("派生值一次算好", () => {
-    const view = appView({ sessions: [okSession()], activeKey: "k1", userRoot: "/~", activeSize: null, sizeNotices: {} });
+    const view = appView({ sessions: [okSession()], activeKey: "k1", userRoot: "/~" });
     expect(view.openState).toBe("ok");
     expect(view.activeArchived).toBe(false);
     expect(view.undoLabel).toBeNull();
@@ -42,21 +36,6 @@ describe("工作台视图模型", () => {
     expect(view.titleOf("k1")).toBe("标题");
   });
 
-});
-
-describe("体量查询与提示", () => {
-  it("体量查询：ok 状态才有路径与版本", () => {
-    expect(sizeQueryOf(okSession())).toEqual({ path: "/~/画板/a.ugcboard.json", version: "v1" });
-    expect(sizeQueryOf(undefined)).toBeNull();
-  });
-
-  it("没有体量提示：两个动作都不做", () => {
-    const view = appView({ sessions: [okSession()], activeKey: "k1", userRoot: "/~", activeSize: null, sizeNotices: {} });
-    const setSizeNotices = vi.fn();
-    tidyAction(view, {}, setSizeNotices, vi.fn());
-    dismissSizeAction(view, {}, setSizeNotices);
-    expect(setSizeNotices).not.toHaveBeenCalled();
-  });
 });
 
 describe("用量与更新提示", () => {
@@ -82,22 +61,6 @@ describe("其它判定", () => {
     expect(focusFor({ boardKey: "k1", nodeId: "n", nonce: 1 }, okSession())).toEqual({ boardKey: "k1", nodeId: "n", nonce: 1 });
     expect(focusFor({ boardKey: "k9", nodeId: "n", nonce: 1 }, okSession())).toBeNull();
     expect(focusFor(null, okSession())).toBeNull();
-  });
-
-  it("整理模式：归档画板不能整理", () => {
-    expect(tidyingFor("k1", okSession(), false)).toBe(true);
-    expect(tidyingFor("k1", okSession(), true)).toBe(false);
-    expect(tidyingFor("k9", okSession(), false)).toBe(false);
-  });
-
-  it("整理模式开关：关掉时为 null", () => {
-    expect(tidyKeyAfter(true, okSession())).toBe("k1");
-    expect(tidyKeyAfter(false, okSession())).toBeNull();
-  });
-
-  it("移出阶段的画板 key：没有画板时为空", () => {
-    expect(boardKeyOf(okSession())).toBe("k1");
-    expect(boardKeyOf(undefined)).toBe("");
   });
 
   it("新建画板：画板位满时提示统一文案", async () => {

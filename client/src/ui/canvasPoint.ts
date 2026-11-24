@@ -10,9 +10,9 @@ export function posOf(p: { x: number; y: number }): [number, number] {
   return [Math.round(p.x), Math.round(p.y)];
 }
 
-/** 画布根元素的类名：拖线中与整理模式各加一个标记（标记是 CSS 的消费单位，不带多余空格）。 */
-export function canvasClassName(drag: boolean, tidying: boolean): string {
-  return ["canvas", drag && "connecting", tidying && "tidying"].filter(Boolean).join(" ");
+/** 画布根元素的类名：拖线中加一个标记（标记是 CSS 的消费单位，不带多余空格）。 */
+export function canvasClassName(drag: boolean): string {
+  return ["canvas", drag && "connecting"].filter(Boolean).join(" ");
 }
 
 /** 指针事件的窗口坐标（鼠标或触控）。 */

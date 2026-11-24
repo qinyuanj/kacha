@@ -47,7 +47,7 @@ func TestBindServicesExposePageMethods(t *testing.T) {
 		{"Pack", []string{"Pack.Cancel", "Pack.CancelExport", "Pack.Export", "Pack.ExportSnapshot", "Pack.Facts", "Pack.Pick", "Pack.PickExport", "Pack.Root", "Pack.Snapshot", "Pack.Start"}},
 		{"Gateway", []string{"Gateway.DeleteApiKey", "Gateway.ReadApiKey", "Gateway.Request", "Gateway.WriteApiKey"}},
 		{"Diagnostics", []string{"Diagnostics.Bundle", "Diagnostics.Export", "Diagnostics.Log", "Diagnostics.Root"}},
-		{"Local", []string{"Local.MeasureBoard", "Local.PickImages", "Local.SaveBoardResults", "Local.SaveResult"}},
+		{"Local", []string{"Local.PickImages", "Local.SaveBoardResults", "Local.SaveResult"}},
 		{"Storage", []string{"Storage.Status", "Storage.Pick", "Storage.Move"}},
 		{"Update", []string{"Update.Status", "Update.Check", "Update.Install"}},
 	} {
@@ -62,7 +62,7 @@ func TestBindServicesExposePageMethods(t *testing.T) {
 		}
 	}
 	// 结局键名只在 unique 键上断言；ok/kind/message/data/text 等全文件 grep 会被其它服务满足（#232）。
-	for _, key := range []string{"body_base64", "container", "images", "reason", "moving", "nodes", "dirs"} {
+	for _, key := range []string{"body_base64", "container", "images", "reason", "moving"} {
 		if !strings.Contains(src, key) {
 			t.Fatalf("生成的客户端类型里没有 %q：\n%s", key, src)
 		}

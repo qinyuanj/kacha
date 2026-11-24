@@ -10,14 +10,14 @@ const snapshot = (patch: Partial<Parameters<typeof uiStateOf>[0]> = {}) => ({
 
 describe("界面状态", () => {
   it("没有画板：打开的画板为空", () => {
-    const state = uiStateOf(snapshot(), undefined, {});
+    const state = uiStateOf(snapshot(), undefined);
     expect(state.open_boards).toEqual([]);
     expect(state.active_board).toBeNull();
     expect(uiStateText(state)).toContain("open_boards");
   });
 
   it("有画板：记下路径与当前画板", () => {
-    const state = uiStateOf(snapshot({ sessions: [{ key: "k1", path: "/~/a.ugcboard.json" }], activeKey: "k1" }), "1.0", {});
+    const state = uiStateOf(snapshot({ sessions: [{ key: "k1", path: "/~/a.ugcboard.json" }], activeKey: "k1" }), "1.0");
     expect(state.open_boards).toEqual(["/~/a.ugcboard.json"]);
     expect(state.active_board).toBe("/~/a.ugcboard.json");
     expect(state.last_seen_version).toBe("1.0");

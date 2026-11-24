@@ -22,13 +22,11 @@ describe("落点取整", () => {
 
 describe("画布根元素类名", () => {
   /** 类名的消费单位是 token（CSS 与 classList），按 token 断言，不锁分隔细节。 */
-  const tokens = (drag: boolean, tidying: boolean): string[] => canvasClassName(drag, tidying).split(" ").filter(Boolean);
+  const tokens = (drag: boolean): string[] => canvasClassName(drag).split(" ").filter(Boolean);
 
-  it("拖线中 / 整理模式各加一个标记，都没有时只剩 canvas", () => {
-    expect(tokens(false, false)).toEqual(["canvas"]);
-    expect(tokens(true, false)).toEqual(["canvas", "connecting"]);
-    expect(tokens(false, true)).toEqual(["canvas", "tidying"]);
-    expect(tokens(true, true)).toEqual(["canvas", "connecting", "tidying"]);
+  it("拖线中加一个标记，没有时只剩 canvas", () => {
+    expect(tokens(false)).toEqual(["canvas"]);
+    expect(tokens(true)).toEqual(["canvas", "connecting"]);
   });
 });
 

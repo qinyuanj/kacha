@@ -27,7 +27,7 @@ describe("用量上限提醒", () => {
     expect(usageNoticeOf(usage({ limit_bytes: 1000 }))).toBeNull();
   });
 
-  it("到了提醒线：给出档位与数字", () => {
+  it("达到阈值：给出档位与数字", () => {
     expect(usageNoticeOf(usage({ limit_bytes: 100, limit_level: "warn" }))).toEqual({ level: "warn", total: 100, limit: 100 });
     expect(usageNoticeOf(usage({ limit_bytes: 50, limit_level: "alert" }))).toEqual({ level: "alert", total: 100, limit: 50 });
   });

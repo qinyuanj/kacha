@@ -5,7 +5,7 @@ import type { SizeTier } from "../core/boardSize";
 import type { Session } from "./useBoardSessions";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
 import { usageNoticeVisible } from "./appUiState";
-import { activeSession, archivedPath, boardNoticeText, boardOpenState, boardTitleOf, dismissSizeNotice, enterTidy, failingSessions, historyLabels, packMenuReason, sizeNoticeOf, type FailingSession } from "./appCallbacks";
+import { activeSession, archivedPath, boardNoticeText, boardOpenState, boardTitleOf, failingSessions, historyLabels, packMenuReason, type FailingSession } from "./appCallbacks";
 
 /** 工作台此刻的样子：所有派生值一次算好。 */
 export interface AppView {
@@ -21,7 +21,6 @@ export interface AppView {
   downloadDisabled: string | null;
   /** 导入画板包的置灰原因（端口说这项能力还没有时非空）。 */
   importDisabled: string | null;
-  sizeNotice: { bytes: number; tier: SizeTier; path: string } | null;
   titleOf(key: string): string;
 }
 
@@ -30,16 +29,11 @@ export function appView(input: {
   sessions: readonly Session[];
   activeKey: string | null;
   userRoot: string | null;
-  /** 当前画板的体量（保存后去抖取一次；没有为 null）。 */
-  activeSize: { path: string; bytes: number; tier: SizeTier | null } | null;
-  /** 各画板已提醒到的体量档位。 */
-  sizeNotices: Record<string, SizeTier>;
   /** 端口没有画板包导入能力。 */
   packImportOff?: boolean;
 }): AppView {
   const active = activeSession(input.sessions, input.activeKey);
   const labels = historyLabels(active);
-  const notice = sizeNoticeOf(input.activeSize, input.sizeNotices);
   const archived = archivedPath(active, input.userRoot);
   return {
     active,
@@ -53,15 +47,8 @@ export function appView(input: {
     exportDisabled: packMenuReason(active, "exportPack"),
     downloadDisabled: packMenuReason(active, "downloadResults"),
     importDisabled: input.packImportOff ? "画板包导入" + UNAVAILABLE_TEXT : null,
-    sizeNotice: notice?.tier ? { bytes: notice.bytes, tier: notice.tier, path: notice.path } : null,
     titleOf: (key: string) => boardTitleOf(input.sessions, key),
   };
-}
-
-/** 当前画板的体量查询参数（没有画板时为 null）。 */
-export function sizeQueryOf(session: Session | undefined): { path: string; version: string | null } | null {
-  if (session?.status !== "ok") return null;
-  return { path: session.path, version: session.version };
 }
 
 /** 用量提醒（没到线时为 null）。 */
@@ -91,23 +78,6 @@ export function canvasBoard(session: Session | undefined, empty: Board): Board {
 /** 聚焦请求是不是给当前画板的。 */
 export function focusFor(focus: { boardKey: string; nodeId: string; nonce: number } | null, session: Session | undefined): { boardKey: string; nodeId: string; nonce: number } | null {
   return focus && session?.key === focus.boardKey ? focus : null;
-}
-
-/** 整理模式是不是开着（归档画板只读，不能整理）。 */
-export function tidyingFor(tidyKey: string | null, session: Session | undefined, archived: boolean): boolean {
-  if (archived) return false;
-  return !!session && tidyKey === session.key;
-}
-
-/** 整理模式开关后的画板 key（关掉时为 null）。 */
-export function tidyKeyAfter(on: boolean, session: Session | undefined): string | null {
-  if (!on) return null;
-  return session?.status === "ok" ? session.key : null;
-}
-
-/** 移出阶段用的画板 key（没有画板时为空）。 */
-export function boardKeyOf(session: Session | undefined): string {
-  return session?.status === "ok" ? session.key : "";
 }
 
 /** 缺省值：没有时给一个。 */
@@ -155,17 +125,3 @@ export { packMenuPick } from "./appCallbacks";
 
 /** 从画板列表打开一块画板：打不开时提示。 */
 export { openFromList } from "./appCallbacks";
-
-/** 提示条的动作：整理模式。 */
-export function tidyAction(view: AppView, notices: Record<string, SizeTier>, setSizeNotices: (next: Record<string, SizeTier>) => void, setTidyKey: (key: string | null) => void): void {
-  const notice = view.sizeNotice;
-  if (!notice) return;
-  enterTidy(notices, notice.path, notice.tier ?? "warn", view.active, setSizeNotices, setTidyKey);
-}
-
-/** 提示条的动作：关闭体量提示。 */
-export function dismissSizeAction(view: AppView, notices: Record<string, SizeTier>, setSizeNotices: (next: Record<string, SizeTier>) => void): void {
-  const notice = view.sizeNotice;
-  if (!notice) return;
-  dismissSizeNotice(notices, notice.path, notice.tier ?? "warn", setSizeNotices);
-}

@@ -1,7 +1,7 @@
 // 多画板会话的判定逻辑（#137）：从 ui/useBoardSessions.ts 拆出的纯函数，便于单测。
 // hook 只留接线；这里一个函数一个意思，覆盖率与 CRAP 都能分开看。
 import { isArchivedPath } from "../core/archive";
-import { ARCHIVE_TEXT, BOARD_MISSING_TEXT, MISSING_BOARD_RECOVERY_TEXT, TIDY_TEXT } from "./boardText";
+import { BOARD_MISSING_TEXT, MISSING_BOARD_RECOVERY_TEXT } from "./boardText";
 import { portFailureOf, type PortFailureKind } from "../shell/port";
 
 /** 端口失败里属于「冲突」的一类：桌面适配器按本机写入结局映射。 */
@@ -50,18 +50,4 @@ export function deleteFailureState(e: unknown): { saveError: string | null; conf
   if (isMissing(e)) return { saveError: `${BOARD_MISSING_TEXT}。本页内容仍在。${MISSING_BOARD_RECOVERY_TEXT}`, conflicted: true, missing: true };
   if (isConflict(e)) return { saveError: `删除失败：${portFailureOf(e).message}`, conflicted: true, missing: false };
   return { saveError: null, conflicted: false, missing: false };
-}
-
-/** 移出为新画板：会话不可编辑时的话。 */
-export function moveOutBlockedText(reason: "readOnly" | "notEditable" | "busy" | "stageGone", hint?: string | null): string {
-  switch (reason) {
-    case "readOnly":
-      return ARCHIVE_TEXT.readOnly;
-    case "notEditable":
-      return TIDY_TEXT.moveOutFailed("画板不可编辑");
-    case "busy":
-      return TIDY_TEXT.moveOutBusy;
-    case "stageGone":
-      return hint ?? TIDY_TEXT.moveOutFailed("阶段已不存在");
-  }
 }

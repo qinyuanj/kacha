@@ -12,7 +12,7 @@
 }
 
 /* ---- 顶部提示横条 ----
- * 语气（错误 / 警告 / 只读 / 用量越线 / 更新）只由左侧色条与低饱和底色承担，
+ * 语气（错误 / 警告 / 只读 / 用量分档 / 更新）只由左侧色条与低饱和底色承担，
  * 正文永远是正文色：横条要读得清，但不能比画布内容更抢眼。 */
 .bar {
   --bar-tone: var(--border-3);
@@ -42,7 +42,7 @@
   --bar-tone: var(--border-3);
   background: var(--app-chrome-soft);
 }
-/* 用量与体量越线（alert 档）：是提醒不是故障，语气比错误轻一档。 */
+/* 用量与体量分档（alert 档）：只描述大小，不是故障，语气比错误轻一档。 */
 .bar-alert {
   --bar-tone: var(--danger);
   background: var(--danger-soft-weak);
@@ -247,7 +247,7 @@
   align-items: center;
   gap: 4px;
 }
-/* 组分隔线：新建类 / 撤销重做 / 运行 / 整理 四组层次分明。 */
+/* 组分隔线：新建类 / 撤销重做 / 运行 三组层次分明。 */
 .toolbar-group + .toolbar-group {
   margin-left: 4px;
   padding-left: 12px;

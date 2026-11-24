@@ -36,13 +36,11 @@ describe("路径重映射", () => {
 			open_boards: ["C:\\data\\画板\\a.json", "C:\\out\\b.json"],
 			active_board: "C:\\data\\画板\\a.json",
 			last_seen_version: "1.2.0",
-			size_notices: { "C:\\data\\画板\\a.json": "warn" as const },
 		};
 		const next = remapUiState(state, "C:\\data", "D:\\新位置");
 		expect(next.open_boards).toEqual(["D:\\新位置\\画板\\a.json", "C:\\out\\b.json"]);
 		expect(next.active_board).toBe("D:\\新位置\\画板\\a.json");
 		expect(next.last_seen_version).toBe("1.2.0");
-		expect(next.size_notices).toEqual({ "D:\\新位置\\画板\\a.json": "warn" });
 	});
 });
 

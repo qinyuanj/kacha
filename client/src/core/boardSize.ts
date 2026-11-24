@@ -1,18 +1,16 @@
-// 画板体量（#87）：按本机存储给的提醒线分档，以及当前画板越线提示该不该出现。
-// 体量由本机存储算（画板引用的全部任务目录的字节和）；这里只做档位判断，只提醒、不阻止生成。
+// 画板体量（#87）：按本机存储给的两条阈值给画板分档（「管理画板」里标出较大的那几块）。
+// 体量由本机存储算（画板引用的全部任务目录的字节和）；这里只做档位判断。
 
-/** 越线档位：warn 越过黄线，alert 越过红线。 */
+/** 体量档位：warn 高于黄线，alert 高于红线；只用于画板列表显示，不提供整理动作。 */
 export type SizeTier = "warn" | "alert";
 
-/** 体量提醒线（字节），来自本机存储配置。 */
+/** 画板列表的体量分档阈值（字节），来自本机存储配置。 */
 export interface SizeLines {
   warn: number;
   alert: number;
 }
 
-const RANK: Record<SizeTier, number> = { warn: 1, alert: 2 };
-
-/** 超过红线为 alert，超过黄线为 warn；未越线或体量未知为 null。 */
+/** 高于红线为 alert，高于黄线为 warn；未达到阈值或体量未知为 null。 */
 export function sizeTier(bytes: number | null, lines: SizeLines): SizeTier | null {
   if (bytes === null) return null;
   if (bytes > lines.alert) return "alert";
@@ -25,14 +23,3 @@ export function bySizeDescending<T extends { name: string; bytes: number | null 
   return [...boards].sort((a, b) => (b.bytes ?? -1) - (a.bytes ?? -1) || a.name.localeCompare(b.name));
 }
 
-/**
- * 当前画板的越线提示：`notified` 是这块画板已提醒到（用户关过）的档位，记在 ui-state。
- * 返回此刻该显示的档位（null 不显示）与按当前体量校正后的已提醒档位：回落到某条线下，该线的记录随之清除，
- * 再次越线重新提醒。用户关闭提示时把 `notified` 记为当前档位。
- */
-export function sizeNotice(tier: SizeTier | null, notified: SizeTier | undefined): { show: SizeTier | null; notified: SizeTier | undefined } {
-  if (tier === null) return { show: null, notified: undefined };
-  const kept = notified === undefined ? undefined : RANK[notified] > RANK[tier] ? tier : notified;
-  const show = kept === undefined || RANK[tier] > RANK[kept] ? tier : null;
-  return { show, notified: kept };
-}
