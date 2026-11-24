@@ -121,7 +121,7 @@ go run ./tools/signrelease -installer build/windows-amd64/kacha-setup-<版本>-a
 # 5. 写 SHA256SUMS（只用来发现损坏，不能代替签名）
 # 6. 用内置公钥验一遍描述里的签名（与客户端同一条校验路径）
 go run ./desktop/cmd/verifyrelease -installer build/windows-amd64/kacha-setup-<版本>-amd64.exe -descriptor build/windows-amd64/update-windows-amd64.json
-# 7. 上传（需要 GITEA_TOKEN；脚本会再验一遍签名与包地址）
+# 7. 上传（需要 GITEA_TOKEN；默认读 build/windows-amd64，脚本会再验一遍签名与包地址）
 $env:GITEA_TOKEN = "<token>"
 python packaging\publish_release.py
 ```

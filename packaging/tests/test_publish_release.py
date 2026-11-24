@@ -271,6 +271,60 @@ class PublishCoordinatorTest(RepoFixture):
         self.assertNotIn(("create_release", TAG), self.gitea.calls)
 
 
+class DefaultReleaseDirTest(RepoFixture):
+    """#246：--release-dir 的默认值就是正式构建的输出目录，仓库根的 release/ 不再参与发布。
+
+    照文档直接跑 `python packaging/publish_release.py` 时不会带这个参数；旧默认 <repo>/release
+    会捡到上一次发布的残余资产，或在资产不齐时白跑一次构建与签名（收集阶段才失败）。
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.signature_ok.start()
+        self.addCleanup(self.signature_ok.stop)
+        self.gitea = FakeGitea()
+        self.build_dir = self.root / "build" / "windows-amd64"
+        self.build_dir.mkdir(parents=True)
+
+    def write_build_assets(self):
+        for name, data in ASSETS.items():
+            (self.build_dir / name).write_bytes(data)
+        checksums = "".join(f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in ASSETS.items())
+        (self.build_dir / "SHA256SUMS").write_text(checksums, encoding="utf-8")
+
+    def run_default_publish(self):
+        """不带 --release-dir：走 argparse 的默认值，和文档里的命令一致。"""
+        env = dict(os.environ)
+        env["GITEA_TOKEN"] = "token"
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(out):
+            try:
+                return publish_release.main(
+                    ["--base-url", BASE_URL, "--repo", REPO],
+                    repo_root=self.root,
+                    client_factory=self.gitea.factory,
+                )
+            except SystemExit as error:
+                return str(error)
+
+    def test_default_release_dir_is_the_build_output(self):
+        # 手写期望值（不引用 build_desktop.OUT）：构建输出目录与发布默认值任一侧漂移都会在这里失败。
+        self.assertEqual(publish_release.RELEASE_BUILD_DIR, Path("build") / "windows-amd64")
+        self.assertNotEqual(publish_release.RELEASE_BUILD_DIR, Path("release"))
+        self.assertNotEqual(publish_release.RELEASE_BUILD_DIR, Path("build") / "debug" / "windows-amd64")
+
+    def test_publishes_from_build_output_despite_a_stale_release_dir(self):
+        self.write_build_assets()
+        # 仓库根的 release/ 残留上一次发布的半套资产：旧默认会在这里判「资产不齐」而失败。
+        (self.release_dir / "kacha-setup-1.4.0-amd64.exe").write_bytes(b"stale installer")
+
+        self.assertEqual(self.run_default_publish(), 0)
+        release = self.gitea.releases[TAG]
+        self.assertEqual(self.gitea.names(release["id"]), sorted([*ASSETS, "SHA256SUMS"]))
+        self.assertEqual(self.gitea.data(release["id"], "update-windows-amd64.json"),
+                         ASSETS["update-windows-amd64.json"])
+
+
 @unittest.skipUnless(shutil.which("go"), "需要 Go 工具链才能跑发布验签")
 class BuiltInKeyGateTest(unittest.TestCase):
     """签名私钥与内置发布者公钥不是一对时，发布必须拒绝：客户端装不上不是发布者签的包。

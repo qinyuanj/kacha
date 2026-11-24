@@ -23,8 +23,12 @@ from typing import Protocol
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from release_gate import desktop_version, release_notes_section, relay_asset_name, validate_release_assets  # noqa: E402
+import build_desktop  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# 发布资产目录就是正式构建的产物目录（build_desktop.OUT）；--debug 的 build/debug/windows-amd64 不用于发布。
+# 不再默认仓库根的 release/：那里常残留上一次发布的旧资产，会误判「资产不齐」白跑一次发布（#246）。
+RELEASE_BUILD_DIR = build_desktop.OUT
 DEFAULT_BASE_URL = "http://lzxsvn:3000"
 OWNER_REPO = "qinyuanj/kacha-cd"
 INSTALLER = "kacha-setup-{version}-amd64.exe"
@@ -225,7 +229,8 @@ def publish(api: ReleaseApi, release_dir: Path, version: str, body: str, paths: 
 def main(argv: list[str] | None = None, *, repo_root: Path = REPO_ROOT,
          client_factory: type[ReleaseApi] | object = GiteaClient) -> int:
     parser = argparse.ArgumentParser(description="把完整 Windows 发布资产上传到 Gitea Release")
-    parser.add_argument("--release-dir", default=str(repo_root / "release"))
+    parser.add_argument("--release-dir", default=str(repo_root / RELEASE_BUILD_DIR),
+                        help="发布资产目录（默认：正式构建输出目录 build/windows-amd64）")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--repo", default=OWNER_REPO)
     args = parser.parse_args(argv)
