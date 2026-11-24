@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 工作台的提示条（#137）：保存失败、体量提醒与归档提示。
+// 工作台的提示条（#137）：保存失败与归档提示。
 import { act, createElement } from "react";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

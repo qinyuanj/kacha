@@ -228,7 +228,7 @@
   color: var(--text-2);
   white-space: nowrap;
 }
-/* 画板体量越过提醒线（#87）：黄线标黄、红线标红，只提醒。 */
+/* 画板体量分档（#87）：黄线标黄、红线标红，只描述字节数，不提供动作。 */
 .board-list .board-list-size.size-warn {
   color: var(--warning-text);
   background: var(--warning-soft);
@@ -291,7 +291,7 @@
   line-height: 1.7;
 }
 
-/* ---- 画板包：阶段文案、体量预估与进度 ---- */
+/* ---- 画板包：体量预估与进度 ---- */
 .pack-phase {
   font-size: 12px;
   color: var(--text-2);

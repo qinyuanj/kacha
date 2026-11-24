@@ -30,7 +30,7 @@ export interface BoardListEntry {
   bytes: number | null;
 }
 
-/** 本机存储画板列表：画板、画板位已用 / 总数与体量提醒线（都来自本机存储配置）。 */
+/** 本机存储画板列表：画板、画板位已用 / 总数与画板体量分档阈值（都来自本机存储配置）。 */
 export interface BoardListing {
   boards: BoardListEntry[];
   slots: { used: number; total: number };

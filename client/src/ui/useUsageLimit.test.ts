@@ -50,7 +50,7 @@ const usage = (patch: Partial<Usage> = {}): Usage => ({
   ...patch,
 });
 
-it("到了提醒线：给出提醒", async () => {
+it("达到阈值：给出提醒", async () => {
   const port = createFakePort();
   port.usage.usage = async () => usage({ limit_bytes: 100, limit_level: "warn" });
   const box = usageOf(port, true);
