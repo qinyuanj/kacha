@@ -1,5 +1,5 @@
-// 阶段与定稿（整理的基础）：阶段是画板上一组命名区域，不是节点；定稿是结果节点上的布尔属性。
-// 这里只有纯的画板变换，撤销步描述与归并由 edit 按变更种类决定。无变化时返回原画板（同一引用）。
+// 阶段：画板上一组命名区域，不是节点。这里只剩渲染与不变量要用的纯画板变换
+// （收起的成员、阶段框尺寸、建议保留、删节点后的同步）；阶段自身的增删改随对应动作一起移除（#249）。
 // 不变量：一个节点至多属于一个阶段；阶段只列画板上存在的节点；没有成员的阶段不存在。
 import { isFinal, stagesOf, type Board, type BoardNode, type Stage } from "./board";
 
@@ -48,12 +48,6 @@ export function stageBoxes(board: Board, sizeOf: (id: string) => { width?: numbe
   });
 }
 
-/** 新建阶段的默认名：「阶段 N」，N 从已有阶段数 + 1 起，跳过重名。 */
-export function nextStageName(board: Board): string {
-  const names = new Set(stagesOf(board).map((s) => s.name));
-  for (let i = stagesOf(board).length + 1; ; i++) if (!names.has(`阶段 ${i}`)) return `阶段 ${i}`;
-}
-
 /** 从各阶段里拿走这些节点；空了的阶段删去。 */
 const without = (stages: Stage[], ids: ReadonlySet<string>): Stage[] =>
   stages.flatMap((s) => {
@@ -61,59 +55,6 @@ const without = (stages: Stage[], ids: ReadonlySet<string>): Stage[] =>
     const nodes = s.nodes.filter((id) => !ids.has(id));
     return nodes.length ? [{ ...s, nodes }] : [];
   });
-
-/** 画板上存在、可以进阶段的节点（按给出的顺序、去重）。 */
-function presentIds(board: Board, ids: readonly string[]): string[] {
-  const present = new Set(board.nodes.filter((n) => n.type !== "unknown").map((n) => n.id));
-  return [...new Set(ids)].filter((id) => present.has(id));
-}
-
-/** 建阶段：成员从原阶段带走。名字为空或没有可用节点时不变。 */
-export function createStage(board: Board, id: string, name: string, ids: readonly string[]): Board {
-  const nodes = presentIds(board, ids);
-  const trimmed = name.trim();
-  if (!trimmed || !nodes.length) return board;
-  return withStages(board, [...without(stagesOf(board), new Set(nodes)), { id, name: trimmed, nodes, collapsed: false, extra: {} }]);
-}
-
-/** 改一个阶段；fn 返回同一对象即不变。 */
-function mapStage(board: Board, stageId: string, fn: (s: Stage) => Stage | null): Board {
-  const stages = stagesOf(board);
-  const i = stages.findIndex((s) => s.id === stageId);
-  if (i < 0) return board;
-  const next = fn(stages[i]);
-  if (next === stages[i]) return board;
-  return withStages(board, next ? stages.map((s, k) => (k === i ? next : s)) : stages.filter((_, k) => k !== i));
-}
-
-export function renameStage(board: Board, stageId: string, name: string): Board {
-  const trimmed = name.trim();
-  return mapStage(board, stageId, (s) => (!trimmed || s.name === trimmed ? s : { ...s, name: trimmed }));
-}
-
-export const setStageCollapsed = (board: Board, stageId: string, collapsed: boolean): Board =>
-  mapStage(board, stageId, (s) => (s.collapsed === collapsed ? s : { ...s, collapsed }));
-
-/** 删阶段：只删区域，节点不动。 */
-export const deleteStage = (board: Board, stageId: string): Board => mapStage(board, stageId, () => null);
-
-/** 加入阶段：新成员追加在末尾，并从原阶段带走。 */
-export function addToStage(board: Board, stageId: string, ids: readonly string[]): Board {
-  const stages = stagesOf(board);
-  const target = stages.find((s) => s.id === stageId);
-  if (!target) return board;
-  const fresh = presentIds(board, ids).filter((id) => !target.nodes.includes(id));
-  if (!fresh.length) return board;
-  const moving = new Set(fresh);
-  return withStages(board, stages.flatMap((s) => (s === target ? [{ ...s, nodes: [...s.nodes, ...fresh] }] : without([s], moving))));
-}
-
-/** 移出阶段：节点从所在阶段拿走（仍留在画板上）。 */
-export function removeFromStage(board: Board, ids: readonly string[]): Board {
-  const leaving = new Set(ids);
-  const stages = stagesOf(board);
-  return stages.some((s) => s.nodes.some((id) => leaving.has(id))) ? withStages(board, without(stages, leaving)) : board;
-}
 
 /** 后置不变量：阶段只列画板上存在的节点（删节点后同步），空了的阶段删去。 */
 export function pruneStages(board: Board): Board {
@@ -124,35 +65,10 @@ export function pruneStages(board: Board): Board {
   return gone.size ? withStages(board, without(stages, gone)) : board;
 }
 
-/** 选区的定稿开关：选区里的结果有未定稿的就是标记，否则是取消；没有结果为 null。菜单文案与执行共用。 */
-export function finalToggle(board: Board, ids: Iterable<string>): { nodes: string[]; final: boolean } | null {
-  const wanted = new Set(ids);
-  const results = board.nodes.filter((n) => n.type === "result" && wanted.has(n.id));
-  if (!results.length) return null;
-  return { nodes: results.map((n) => n.id), final: results.some((n) => !isFinal(n)) };
-}
-
-/** 选区里是否有节点在某个阶段里。 */
-export const anyStaged = (board: Board, ids: Iterable<string>): boolean => {
-  const wanted = new Set(ids);
-  return stagesOf(board).some((s) => s.nodes.some((id) => wanted.has(id)));
-};
-
-/**
- * 「收掉未定稿」会收掉的结果：选中阶段里未定稿、且没有下游连线（没被拿去当参考图）的结果节点，按画板顺序。
- * 确认框的张数与变更本身共用这一判定。
- */
-export function prunableResults(board: Board, stageIds: readonly string[]): string[] {
-  const wanted = new Set(stageIds);
-  const members = new Set(stagesOf(board).flatMap((s) => (wanted.has(s.id) ? s.nodes : [])));
-  const downstream = new Set(board.edges.map((e) => e.from[0]));
-  return board.nodes.filter((n) => n.type === "result" && members.has(n.id) && !isFinal(n) && !downstream.has(n.id)).map((n) => n.id);
-}
-
 /**
  * 「建议保留」：每条结果列（结果节点 task_id 相同）里画板顺序上最新的那一张。
- * 只在整理模式里显示，不写进画板、不进撤销步；它不改变「收掉未定稿」会收掉哪些结果。
- * 已定稿、或已有下游连线（被拿去当参考图，本来就不会被收掉）的不参与标记——也不回退到次新的一张。
+ * 只在整理模式里显示，不写进画板、不进撤销步。
+ * 已定稿、或已有下游连线（被拿去当参考图）的不参与标记——也不回退到次新的一张。
  */
 export function suggestKeep(board: Board): ReadonlySet<string> {
   const downstream = new Set(board.edges.map((e) => e.from[0]));
@@ -160,18 +76,4 @@ export function suggestKeep(board: Board): ReadonlySet<string> {
   const latest = new Map<string, BoardNode>();
   for (const n of board.nodes) if (n.type === "result") latest.set(n.task_id, n);
   return new Set([...latest.values()].flatMap((n) => (!isFinal(n) && !downstream.has(n.id) ? [n.id] : [])));
-}
-
-/** 标记 / 取消定稿：只作用于结果节点。 */
-export function setFinal(board: Board, ids: readonly string[], final: boolean): Board {
-  const wanted = new Set(ids);
-  let changed = false;
-  const nodes = board.nodes.map((n): BoardNode => {
-    if (n.type !== "result" || !wanted.has(n.id) || (n.final === true) === final) return n;
-    changed = true;
-    if (final) return { ...n, final: true };
-    const { final: _, ...rest } = n;
-    return rest;
-  });
-  return changed ? { ...board, nodes } : board;
 }

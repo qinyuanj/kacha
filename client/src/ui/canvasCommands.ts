@@ -2,13 +2,12 @@
 // 原来这些判定堆在 BoardCanvas 的 performAction 里；这里给每个动作一个模块顶层的小函数，画布侧只查表调用。
 // 只读画板的前置（readOnly && !isReadOnlyAction(action) → ARCHIVE_TEXT.readOnly）留在查表层 guard() 里：
 // 每个动作入口都先过这一层，顺序与今天的 performAction 首行逐字一致。
-import type { Board, BoardEdge } from "../core/board";
+import type { BoardEdge } from "../core/board";
 import { isReadOnlyAction } from "../core/archive";
 import { selectionForMenu, type BoardAction, type MenuTarget } from "../core/contextMenu";
 import type { BoardChange } from "../core/edit";
 import { LOCKED_HINT } from "../core/iterate";
 import type { DragFrom } from "../core/ports";
-import { finalToggle } from "../core/stages";
 import { ARCHIVE_TEXT } from "./boardText";
 import { edgeIdOf } from "./canvasPoint";
 import type { BoardActions } from "./context";
@@ -31,9 +30,7 @@ export interface CanvasCommandDeps {
   apply: (change: BoardChange) => unknown;
   /** 删除节点 / 断开连线走 React Flow 的删除流程（与 Delete 键同一套规则）。 */
   flow: { deleteElements: (params: { nodes?: { id: string }[]; edges?: { id: string }[] }) => Promise<unknown> };
-  /** 当前画板：取结果节点两态（finalToggle）用。 */
-  boardRef: { readonly current: Board };
-  /** 当前选区：作用于整个选区的动作（删除、建阶段、定稿）用。 */
+  /** 当前选区：作用于整个选区的动作（删除）用。 */
   selectedRef: { readonly current: ReadonlySet<string> };
   /** 排队 / 执行中的任务节点：拖线建节点的「加为参考图」据此拒绝。 */
   lockedRef: { readonly current: ReadonlySet<string> };
@@ -54,8 +51,6 @@ export interface CanvasCommandDeps {
   /** attachTo = 任务节点 id：只选一张，接到该任务的空图片端口。 */
   pickReferences: (at?: { x: number; y: number }, attachTo?: string) => void;
   saveNodeAs: (nodeId: string) => void | Promise<void>;
-  /** 把选区节点建为阶段（新阶段标题进入改名）。 */
-  newStage: (ids: string[]) => void;
   /** 任务节点参数的原地展开切换：画布侧 = setExpandOverrides((o) => toggleExpanded(o, selectedRef.current, nodeId))。 */
   toggleExpand: (nodeId: string) => void;
   toast: (message: string) => void;
@@ -98,13 +93,6 @@ function onEdge(deps: CanvasCommandDeps, act: (deps: CanvasCommandDeps, edge: Bo
   };
 }
 
-/** 标记 / 取消定稿：选区里没有结果节点时无可切换（菜单也不会给这一项）。 */
-function applyFinalToggle(deps: CanvasCommandDeps, ids: string[]): void {
-  const toggle = finalToggle(deps.boardRef.current, ids);
-  if (!toggle) return;
-  void deps.apply({ kind: "setFinal", ...toggle });
-}
-
 const newPromptCommand: CommandFactory = (deps) => (_target, at) => deps.addPrompt(at);
 const newTaskCommand: CommandFactory = (deps) => (_target, at) => deps.addTask(at);
 const addReferencesCommand: CommandFactory = (deps) => (_target, at) => void deps.pickReferences(at);
@@ -124,9 +112,6 @@ const toggleSettingsCommand: CommandFactory = (deps) => onNode(deps, (d, id) => 
 
 // 删除、断开都走 React Flow 的删除流程：删除 / 断开的规则（锁定确认、系统连线）与 Delete 键同一套。
 const deleteCommand: CommandFactory = (deps) => onSelection(deps, (d, ids) => void d.flow.deleteElements({ nodes: ids.map((id) => ({ id })) }));
-const newStageCommand: CommandFactory = (deps) => onSelection(deps, (d, ids) => d.newStage(ids));
-const removeFromStageCommand: CommandFactory = (deps) => onSelection(deps, (d, ids) => void d.apply({ kind: "removeFromStage", nodes: ids }));
-const toggleFinalCommand: CommandFactory = (deps) => onSelection(deps, (d, ids) => applyFinalToggle(d, ids));
 
 const disconnectCommand: CommandFactory = (deps) => onEdge(deps, (d, edge) => void d.flow.deleteElements({ edges: [{ id: edgeIdOf(edge) }] }));
 const editRegionCommand: CommandFactory = (deps) => onEdge(deps, (d, edge) => d.actions.editRegion(edge.to[0], { from: edge.from, to: edge.to }));
@@ -158,9 +143,6 @@ export function canvasCommands(deps: CanvasCommandDeps): CanvasCommandTable {
     viewSendText: entry("viewSendText", viewSendTextCommand),
     disconnect: entry("disconnect", disconnectCommand),
     editRegion: entry("editRegion", editRegionCommand),
-    newStage: entry("newStage", newStageCommand),
-    removeFromStage: entry("removeFromStage", removeFromStageCommand),
-    toggleFinal: entry("toggleFinal", toggleFinalCommand),
     // 导出画板包 / 整板下载结果 / 导入画板包属于标签页，画布不处理（与今天的 performAction 一致）。
     exportPack: undefined,
     downloadResults: undefined,
