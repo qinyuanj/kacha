@@ -1,17 +1,16 @@
 // 多画板会话的各个操作（#137）：从 ui/useBoardSessions.ts 拆出的模块级函数。
 // crapper 按函数各自计复杂度：操作都放这里，hook 里就只剩接线。
-import { moveOutWrite as moveOutWriteTo, writeMovedOut as writeMovedOutTo } from "./boardSessionsMoveOut";
 import { archiveDir } from "../core/archive";
 import { BOARD_EXTENSION, DEFAULT_BOARD_TITLE, newBoard, openBoard, serializeBoard, uniqueBoardFileName, type Board } from "../core/board";
 import { editBoard, type BoardChange, type EditEnv, type EditResult } from "../core/edit";
 import { newId } from "../core/ids";
 import { emptyHistory, recordChange, type History } from "../core/history";
-import { basename, boardsDir, dirname, joinPath, resolveFromRoot } from "../core/paths";
+import { basename, boardsDir, dirname, joinPath } from "../core/paths";
 import { restoreResultLayers } from "../core/taskDir";
-import { slotsRefusal, TIDY_TEXT } from "./boardText";
+import { ARCHIVE_TEXT, slotsRefusal } from "./boardText";
 import { sha256Hex } from "../core/sha256";
 import { errorText } from "../core/errors";
-import { deleteBlockedText, archiveBlockedText, deleteFailureState, isSlotsFull, moveOutBlockedText, samePath } from "./boardSessions";
+import { deleteBlockedText, archiveBlockedText, deleteFailureState, isSlotsFull, samePath } from "./boardSessions";
 import type { Session, OkSession } from "./useBoardSessions";
 
 /** 端口里用到的那些（这里只列用到的，好让各个操作自己接）。 */
@@ -329,7 +328,7 @@ export async function renameBoardSession(
   if (!session || session.status !== "ok" || moving.has(key)) return;
   const title = rawTitle.trim() || DEFAULT_BOARD_TITLE;
   if (title === session.board.title) return;
-  if (readOnlyPath(session.path)) return store.patch(key, (x) => ({ ...x, notice: moveOutBlockedText("readOnly") }));
+  if (readOnlyPath(session.path)) return store.patch(key, (x) => ({ ...x, notice: ARCHIVE_TEXT.readOnly }));
   // 先落盘挂起的修改，避免去抖写入在改名途中把旧文件重新写出来。
   await flush(key);
   const nextPath = await renamedPath(store, ports, session.path, title, key);
@@ -378,84 +377,3 @@ export async function reloadBoardSession(
   }
 }
 
-/**
- * 移出为新画板（#93）：先试算（运行中的任务锁定时拒绝）、查画板位，读阶段外上游结果图的 sha256，
- * 按最新画板拆出新画板只新建不覆盖地写好，最后才在原画板删去这些节点。
- * 任何一步被拒都不改原画板、不写文件。返回要提示的话。
- */
-export async function moveOutStageSession(
-  store: SessionStore,
-  ports: SessionPorts,
-  env: EditEnv,
-  userRoot: string | null,
-  readOnlyPath: (path: string) => boolean,
-  moving: ReadonlySet<string>,
-  movingOut: { current: boolean },
-  apply: (key: string, change: BoardChange) => EditResult | null,
-  key: string,
-  stageId: string,
-): Promise<string> {
-  const boardOf = () => {
-    const session = store.sessionOf(key);
-    return session?.status === "ok" ? session.board : null;
-  };
-  const tryRemove = () => {
-    const board = boardOf();
-    return board ? editBoard(board, { kind: "moveOutStage", stageId }, env) : null;
-  };
-  const blocked = moveOutBlockedReason(store, userRoot, readOnlyPath, moving, movingOut, key, tryRemove);
-  if (blocked) return blocked;
-  movingOut.current = true;
-  try {
-    return await moveOutWrite(store, ports, userRoot!, boardOf, tryRemove, stageId, apply, key);
-  } catch (e) {
-    return TIDY_TEXT.moveOutFailed(errorText(e));
-  } finally {
-    movingOut.current = false;
-  }
-}
-
-/** 移出前的各种拦：只读 / 搬不动 / 阶段没了 / 另一个移出在跑。 */
-function moveOutBlockedReason(
-  store: SessionStore,
-  userRoot: string | null,
-  readOnlyPath: (path: string) => boolean,
-  moving: ReadonlySet<string>,
-  movingOut: { current: boolean },
-  key: string,
-  tryRemove: () => EditResult | null,
-): string | null {
-  const session = store.sessionOf(key);
-  if (session && (readOnlyPath(session.path) || moving.has(key))) return moveOutBlockedText("readOnly");
-  const dry = tryRemove();
-  if (!userRoot || !dry) return moveOutBlockedText("notEditable");
-  if (!dry.step) return moveOutBlockedText("stageGone", dry.hint);
-  if (movingOut.current) return moveOutBlockedText("busy");
-  return null;
-}
-
-/** 移出：查画板位、拆出新画板并写好，最后才在原画板删去这些节点。 */
-async function moveOutWrite(
-  store: SessionStore,
-  ports: SessionPorts,
-  userRoot: string,
-  boardOf: () => Board | null,
-  tryRemove: () => EditResult | null,
-  stageId: string,
-  apply: (key: string, change: BoardChange) => EditResult | null,
-  key: string,
-): Promise<string> {
-  return moveOutWriteTo(
-    {
-      freePathIn: (title) => freePathIn(store, ports, boardsDir(userRoot), "", title),
-      sha256: (path) => ports.files.sha256(resolveFromRoot(userRoot, path)),
-      write: (path, fresh) => writeMovedOutTo(ports, path, fresh),
-      boardOf,
-      tryRemove,
-      apply,
-      board: ports.board,
-    },
-    stageId,
-    key,
-  );
-}

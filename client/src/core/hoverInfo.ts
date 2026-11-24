@@ -86,7 +86,6 @@ export function referenceHoverInfo({
   return [
     ...(missing ? [missingLine(node.path)] : []),
     line("文件", node.display_name),
-    ...(node.source_board !== undefined ? [line("来源", `画板「${node.source_board}」`)] : []),
     line("路径", node.path, { mono: true }),
     ...(image ? [line("像素", `${image.width}×${image.height}`)] : []),
     ...alphaLines(image),

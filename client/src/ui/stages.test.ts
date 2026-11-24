@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 阶段框标题栏上的动作：#92 的体量与「收掉未定稿」、#93 的移出，以及 #144 的「保留这 N 张」。
+// 阶段框标题栏上的动作：#92 的体量与「收掉未定稿」，以及 #144 的「保留这 N 张」。
 // 这里只测标题栏：框本身画在画布坐标里，ViewportPortal 用替身（vitest 的 include 只收 *.test.ts，所以用 createElement）。
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -36,10 +36,9 @@ const stage = (id: string, nodes: string[] = ["a"]): Stage => ({ id, name: `阶�
 const box = (s: Stage): StageBox => ({ stage: s, x: 0, y: 0, width: 300, height: 200, count: s.nodes.length });
 
 /** 整理附加内容的替身：张数由用例摆，动作只记下被点了哪个阶段。 */
-function tidyOf(overrides: Partial<StageTidy> = {}): StageTidy & { kept: string[]; pruned: string[]; moved: string[] } {
+function tidyOf(overrides: Partial<StageTidy> = {}): StageTidy & { kept: string[]; pruned: string[] } {
   const kept: string[] = [];
   const pruned: string[] = [];
-  const moved: string[] = [];
   return {
     bytes: () => 1536,
     sizeFailed: false,
@@ -47,11 +46,8 @@ function tidyOf(overrides: Partial<StageTidy> = {}): StageTidy & { kept: string[
     onPrune: (id) => void pruned.push(id),
     keepable: () => 2,
     onKeep: (id) => void kept.push(id),
-    onMoveOut: (id) => void moved.push(id),
-    movingOut: false,
     kept,
     pruned,
-    moved,
     ...overrides,
   };
 }
@@ -232,7 +228,7 @@ describe("阶段框标题栏上的「加入所选」「删除阶段」「收起 
   });
 });
 
-describe("整理模式下标题栏上的体量与「收掉未定稿」「移出为新画板」", () => {
+describe("整理模式下标题栏上的体量与「收掉未定稿」", () => {
   it("体量按算出的字节显示；算不出时留占位", async () => {
     await showStage(stage("s1"), tidyOf({ bytes: () => 1536 }));
     expect(container.querySelector(".stage-size")?.textContent).toBe(approxSizeText(1536));
@@ -263,20 +259,6 @@ describe("整理模式下标题栏上的体量与「收掉未定稿」「移出�
     expect(buttonAt("stage-prune").disabled).toBe(true);
     expect(buttonAt("stage-prune").title).toBe(TIDY_TEXT.nothingToPrune);
   });
-
-  it("「移出为新画板」点了交回该阶段；正在移出时置灰", async () => {
-    const tidy = tidyOf();
-    await showStage(stage("s1"), tidy);
-
-    const move = buttonAt("stage-move-out");
-    expect(move.textContent).toBe(TIDY_TEXT.moveOut);
-    expect(move.title).toBe(TIDY_TEXT.moveOutHint);
-    await act(async () => move.click());
-    expect(tidy.moved).toEqual(["s1"]);
-
-    await showStage(stage("s1"), tidyOf({ movingOut: true }));
-    expect(buttonAt("stage-move-out").disabled).toBe(true);
-  });
 });
 
 describe("只读画板上的阶段框", () => {
@@ -288,7 +270,6 @@ describe("只读画板上的阶段框", () => {
     expect(labels).not.toContain(STAGE_TEXT.delete);
     expect(labels).not.toContain(STAGE_TEXT.addSelected);
     expect(labels).toContain(TIDY_TEXT.prune(2));
-    expect(labels).toContain(TIDY_TEXT.moveOut);
     expect(labels.some((label) => label?.includes("保留"))).toBe(true);
   });
 

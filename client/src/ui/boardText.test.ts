@@ -140,15 +140,11 @@ describe("建议保留文案（#144）", () => {
 
 // 整理模式与画板包导入的既有文案：票面要求 boardText 全覆盖，这里把由 App / stages 调用的条目也锁住。
 describe("整理模式与画板包导入文案", () => {
-  it("整理条的体量对比、收掉张数与移出结局", () => {
+  it("整理条的体量对比与收掉张数", () => {
     expect(TIDY_TEXT.compare(1536, 0)).toBe("整理前约 1.5 KiB → 现在约 0 B");
     expect(TIDY_TEXT.prune(3)).toBe("收掉未定稿（3）");
     expect(TIDY_TEXT.pruneConfirm(2, 2048)).toBe("将收掉 2 张，画板约减少 2.0 KiB。\n定稿与已被下游使用的结果保留；可以撤销。");
     expect(TIDY_TEXT.pruneConfirm(2, null)).toContain("画板体量暂时算不出");
-    expect(TIDY_TEXT.movedOut("新板")).toBe("已移出为新画板「新板」，可在画板列表里打开。撤销只恢复本画板，新画板保留。");
-    expect(TIDY_TEXT.movedOutKept("新板", "被拒")).toBe("新画板「新板」已建好，但本画板没有删去这些节点：被拒");
-    expect(TIDY_TEXT.movedOutKept("新板", null)).toBe("新画板「新板」已建好，但本画板没有删去这些节点");
-    expect(TIDY_TEXT.moveOutFailed("磁盘满了")).toBe("移出失败：磁盘满了");
   });
 
   it("整理条上的自动划分阶段（#143）：按钮带会建的阶段数，没有可划的时说明原因", () => {

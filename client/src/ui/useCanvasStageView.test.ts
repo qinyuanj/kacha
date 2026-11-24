@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // useCanvasStageView 的接线：阶段收起 / 框尺寸、新建阶段进入改名、整理模式的度量，
-// 以及整理模式下阶段框上的体量 / 收掉未定稿 / 移出为新画板。壳层（确认框、存储端口度量）用替身。
+// 以及整理模式下阶段框上的体量与「收掉未定稿」。壳层（确认框、存储端口度量）用替身。
 import { act, createElement, type MutableRefObject } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -62,7 +62,6 @@ interface ProbeProps {
   tidying: boolean;
   apply: (change: BoardChange) => EditResult | null;
   toast: (message: string) => void;
-  onMoveOutStage: (stageId: string) => Promise<string>;
 }
 
 let container: HTMLDivElement;
@@ -107,7 +106,6 @@ function propsOf(board: Board, overrides: Partial<ProbeProps> = {}): ProbeProps 
     tidying: false,
     apply,
     toast,
-    onMoveOutStage: async () => "新画板",
     ...overrides,
   };
 }
@@ -301,42 +299,6 @@ describe("阶段框上的整理附加内容", () => {
     expect(toasts).toEqual([TIDY_TEXT.nothingToPrune]);
     expect(shell.ask).not.toHaveBeenCalled();
     expect(applied).toEqual([]);
-  });
-
-  it("移出为新画板：过程中置灰，成功后提示", async () => {
-    let resolveMove!: (title: string) => void;
-    const onMoveOutStage = vi.fn(
-      () =>
-        new Promise<string>((resolve) => {
-          resolveMove = resolve;
-        }),
-    );
-    const board = boardOf([promptNode("a")], [stage("s1", ["a"])]);
-    await show(propsOf(board, { tidying: true, onMoveOutStage }));
-    expect(view.stageTidy!.movingOut).toBe(false);
-
-    await run(() => view.stageTidy!.onMoveOut("s1"));
-    expect(onMoveOutStage).toHaveBeenCalledWith("s1");
-    expect(view.stageTidy!.movingOut).toBe(true);
-
-    await act(async () => resolveMove("阶段一"));
-    await act(async () => {});
-    expect(toasts).toEqual(["阶段一"]);
-    expect(view.stageTidy!.movingOut).toBe(false);
-  });
-
-  it("移出失败时提示原因", async () => {
-    const onMoveOutStage = vi.fn(async () => {
-      throw new Error("画板位已满");
-    });
-    const board = boardOf([promptNode("a")], [stage("s1", ["a"])]);
-    await show(propsOf(board, { tidying: true, onMoveOutStage }));
-
-    await run(() => view.stageTidy!.onMoveOut("s1"));
-    await act(async () => {});
-
-    expect(toasts).toEqual([TIDY_TEXT.moveOutFailed("画板位已满")]);
-    expect(view.stageTidy!.movingOut).toBe(false);
   });
 });
 

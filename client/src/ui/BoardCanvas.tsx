@@ -115,8 +115,6 @@ interface Props {
   /** 整理模式（#92）：画布的一种界面状态，其它编辑照常可用。 */
   tidying: boolean;
   onTidyChange: (tidying: boolean) => void;
-  /** 把阶段移出为新画板（#93）；返回要提示的话（成功、画板位满或其它拒绝原因）。 */
-  onMoveOutStage: (stageId: string) => Promise<string>;
   /** 归档画板（#90）：能看、放大、下载结果，不能编辑（不拖动、不连线、不删、菜单只剩查看与下载）。 */
   readOnly?: boolean;
   /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框）：粘贴放行给它们，不落到背后的画板（#96）。 */
@@ -150,7 +148,6 @@ export function BoardCanvas({
   focus,
   tidying,
   onTidyChange,
-  onMoveOutStage,
   readOnly = false,
   modalOpen = false,
   theme,
@@ -173,7 +170,7 @@ export function BoardCanvas({
   const canvasData = useCanvasData({ board, boardFile, userRoot, table, locked, handled, runNodes, applyChange });
   const overlays = useCanvasOverlaysState({ flow, selectedRef, setSelectedNodes, clearPromptFocus: () => requestPromptFocus(null) });
   const actionBar = useActionBarHover();
-  const stageView = useCanvasStageView({ board, boardRef, readOnly, measured, tidying, apply, toast, onMoveOutStage });
+  const stageView = useCanvasStageView({ board, boardRef, readOnly, measured, tidying, apply, toast });
   const nav = useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen: overlays.dialogOpenRef, apply, isEditableTarget: port.ui.isEditableTarget });
   const hover = useHoverLayer();
 

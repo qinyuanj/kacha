@@ -4,7 +4,6 @@ import { emptyHistory } from "../core/history";
 import type { Session } from "./useBoardSessions";
 import {
   appView,
-  boardKeyOf,
   canvasBoard,
   createBoardOrExplain,
   dismissBoardNotice,
@@ -93,11 +92,6 @@ describe("其它判定", () => {
   it("整理模式开关：关掉时为 null", () => {
     expect(tidyKeyAfter(true, okSession())).toBe("k1");
     expect(tidyKeyAfter(false, okSession())).toBeNull();
-  });
-
-  it("移出阶段的画板 key：没有画板时为空", () => {
-    expect(boardKeyOf(okSession())).toBe("k1");
-    expect(boardKeyOf(undefined)).toBe("");
   });
 
   it("新建画板：画板位满时提示统一文案", async () => {
