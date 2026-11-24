@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardListing } from "../shell/types";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { emptySnapshot, type UpdateSnapshot } from "../core/update";
-import { THEME_MIRROR_KEY } from "../core/theme";
+import { THEME_CHOICES, THEME_MIRROR_KEY } from "../core/theme";
 import { ShellProvider } from "./shell";
 import { App } from "../App";
 
@@ -347,10 +347,20 @@ describe("主题切换", () => {
     });
   }
 
-  function option(label: string): HTMLButtonElement {
-    const button = container.querySelector<HTMLButtonElement>(`[aria-label='${label}']`);
-    if (!button) throw new Error("没有找到主题档位：" + label);
-    return button;
+  /** 主题入口是一个三态图标按钮：点它循环切换，直到 aria-label 落到目标档位。 */
+  function option(label: string): { click(): Promise<void> } {
+    const target = label === "暗色" ? "dark" : label === "浅色" ? "light" : "system";
+    return {
+      async click() {
+        for (let i = 0; i < THEME_CHOICES.length; i++) {
+          const button = container.querySelector<HTMLButtonElement>(".theme-switch");
+          if (!button) throw new Error("没有找到主题切换按钮");
+          if (button.getAttribute("aria-label") === label) return;
+          await act(async () => button.click());
+        }
+        throw new Error("切不到主题档位：" + label + "（期望 data-theme-choice=" + target + "）");
+      },
+    };
   }
 
   /** 记下写进 settings.json 的原文（替身默认也写内存，这里换成可断言的记录）。 */
@@ -365,8 +375,10 @@ describe("主题切换", () => {
     port.board.list = async () => listing();
     await show(port);
     await settingsReady();
-    expect(container.querySelector("[aria-label='主题']")).not.toBeNull();
-    for (const label of ["暗色", "浅色", "跟随系统"]) expect(option(label)).not.toBeNull();
+    // 一个三态图标按钮取代三档文字分段控件，点击循环切档，不用打开高级设置。
+    const buttons = container.querySelectorAll(".theme-switch");
+    expect(buttons.length).toBe(1);
+    expect(buttons[0].getAttribute("aria-label")).toBe("暗色");
     // 没有打开设置面板。
     expect(container.querySelector("[aria-label='高级设置']")).toBeNull();
   });

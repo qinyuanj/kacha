@@ -3,6 +3,8 @@ package clipboard
 import (
 	"encoding/base64"
 	"errors"
+	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/egoist/mygo"
@@ -32,6 +34,39 @@ type Writer interface {
 type mygoWriter struct{}
 
 func (mygoWriter) WriteImage(png []byte) error { return mygo.Clipboard.WriteImage(png) }
+
+// ImageFileWriter 把 PNG 与它对应的本机文件路径一起写进系统剪贴板：
+// PNG 供 Word / 画板等按图读取，FileList 在 Windows 上落为 CF_HDROP，
+// 让资源管理器 Ctrl+V 直接把图片保存到目标目录。生产实现是 mygoWriter。
+type ImageFileWriter interface {
+	WriteImageWithFile(png []byte, absPath string) error
+}
+
+// imageFileData 把 PNG 与文件路径折成一条剪贴板条目：两种表示是同一张图的两种读法。
+// 路径必须是绝对路径，与 MyGo transfer.FileData 的约定一致。
+func imageFileData(png []byte, absPath string) (transfer.Data, error) {
+	if !filepath.IsAbs(absPath) {
+		return transfer.Data{}, errors.New("图片路径不是绝对路径")
+	}
+	p := filepath.ToSlash(absPath)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	u := (&url.URL{Scheme: "file", Path: p}).String()
+	return transfer.New(transfer.NewItem(
+		transfer.Bytes(transfer.PNG, png),
+		transfer.Bytes(transfer.URIList, []byte(u)),
+		transfer.Bytes(transfer.FileList, []byte(u)),
+	)), nil
+}
+
+func (mygoWriter) WriteImageWithFile(png []byte, absPath string) error {
+	data, err := imageFileData(png, absPath)
+	if err != nil {
+		return err
+	}
+	return mygo.Clipboard.Write(data)
+}
 
 // TextWriter 把一段文本写进系统剪贴板：生产实现是 MyGo 的 Clipboard.WriteText，测试用替身。
 type TextWriter interface {
@@ -231,7 +266,7 @@ func (b Bound) CopyImage(path, format string) ImageCopyOutcome {
 	if err != nil {
 		return ImageCopyOutcome{Kind: ImageInvalid, Message: "复制图片失败：读不到这张图（" + err.Error() + "），请用该节点的「另存为…」"}
 	}
-	return b.Service.CopyImage(data, format)
+	return b.Service.CopyImageWithPath(data, format, path)
 }
 
 // CopyImage 把一张图写进系统剪贴板（#130）。
@@ -240,6 +275,16 @@ func (b Bound) CopyImage(path, format string) ImageCopyOutcome {
 // 保证可见内容，HEIC / TIFF 明确失败并指向该节点已有的「另存为…」，剪贴板被占用时给可重试的失败。
 // 任何失败都不报成功。
 func (s Service) CopyImage(data []byte, format Format) ImageCopyOutcome {
+	return s.copyImage(data, format, "")
+}
+
+// CopyImageWithPath 与 CopyImage 相同，但额外把本机文件路径一起放进剪贴板，
+// 使 Windows 资源管理器 Ctrl+V 能把图保存成文件（CF_HDROP）。
+func (s Service) CopyImageWithPath(data []byte, format Format, absPath string) ImageCopyOutcome {
+	return s.copyImage(data, format, absPath)
+}
+
+func (s Service) copyImage(data []byte, format Format, absPath string) ImageCopyOutcome {
 	normalized, err := Normalize(data, format)
 	if err != nil {
 		kind := kindOf(err)
@@ -250,12 +295,22 @@ func (s Service) CopyImage(data []byte, format Format) ImageCopyOutcome {
 		}
 		return outcome
 	}
-	if err := s.writer().WriteImage(normalized); err != nil {
+	var writeErr error
+	if absPath != "" {
+		if fileWriter, ok := s.writer().(ImageFileWriter); ok {
+			writeErr = fileWriter.WriteImageWithFile(normalized, absPath)
+		} else {
+			writeErr = s.writer().WriteImage(normalized)
+		}
+	} else {
+		writeErr = s.writer().WriteImage(normalized)
+	}
+	if writeErr != nil {
 		kind := ImageFailed
-		if isBusy(err) {
+		if isBusy(writeErr) {
 			kind = ImageBusy
 		}
-		return ImageCopyOutcome{Kind: kind, Message: copyMessage(kind, err, format)}
+		return ImageCopyOutcome{Kind: kind, Message: copyMessage(kind, writeErr, format)}
 	}
 	return ImageCopyOutcome{OK: true, Kind: ImageOK, Bytes: len(normalized)}
 }

@@ -1,11 +1,14 @@
 package clipboard
 
 import (
+	"bytes"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/transfer"
 )
 
 // mygoClipboardError 拼出 MyGo 在 Windows 上写剪贴板失败时的真实文案形状：
@@ -26,6 +29,19 @@ func (f *fakeWriter) WriteImage(png []byte) error {
 	f.call++
 	f.got = append([]byte{}, png...)
 	return f.err
+}
+
+// recordingFileWriter 记录 PNG 与文件路径一起写进剪贴板的调用。
+type recordingFileWriter struct {
+	png  []byte
+	path string
+}
+
+func (f *recordingFileWriter) WriteImage(png []byte) error { f.png = append([]byte{}, png...); return nil }
+func (f *recordingFileWriter) WriteImageWithFile(png []byte, path string) error {
+	f.png = append([]byte{}, png...)
+	f.path = path
+	return nil
 }
 
 // TestCopyImageWritesPNG 复制成功：交给系统剪贴板的是 PNG，结局是 ok。
@@ -197,5 +213,53 @@ func TestCopyImageOtherFailure(t *testing.T) {
 	out := service.CopyImage(fixture(t, "alpha.png"), "png")
 	if out.OK || out.Kind != ImageFailed {
 		t.Fatalf("结局 = %+v，期望 failed", out)
+	}
+}
+
+// TestBoundCopyImageOffersFileList 绑定路径必须把本机文件路径一起放进剪贴板：
+// 页面只给路径，只有 Bound 知道它，少传一步资源管理器 Ctrl+V 就存不出文件。
+func TestBoundCopyImageOffersFileList(t *testing.T) {
+	writer := &recordingFileWriter{}
+	bound := Bound{Service: Service{Writer: writer}, read: func(string) ([]byte, error) { return fixture(t, "alpha.png"), nil }}
+	path := filepath.Join(t.TempDir(), "图.png")
+	if out := bound.CopyImage(path, "png"); !out.OK {
+		t.Fatalf("结局 = %+v，期望成功", out)
+	}
+	if writer.path != path {
+		t.Fatalf("写进剪贴板的文件路径 = %q，期望 %q", writer.path, path)
+	}
+	if !IsPNG(writer.png) {
+		t.Fatal("PNG 表示丢失")
+	}
+}
+
+// TestImageFileDataOffersPNGAndFileList 资源管理器粘贴能保存文件的前提：
+// 同一条剪贴板数据同时给出 PNG 字节与本机文件路径（Windows 上 FileList 落为 CF_HDROP）。
+func TestImageFileDataOffersPNGAndFileList(t *testing.T) {
+	png := fixture(t, "alpha.png")
+	abs := filepath.Join(t.TempDir(), "图.png")
+	data, err := imageFileData(png, abs)
+	if err != nil {
+		t.Fatalf("构造剪贴板数据失败：%v", err)
+	}
+	gotPNG, err := data.Read(transfer.PNG)
+	if err != nil || !bytes.Equal(gotPNG, png) {
+		t.Fatalf("PNG 表示不对：err=%v bytes=%d", err, len(gotPNG))
+	}
+	for _, format := range []transfer.Format{transfer.FileList, transfer.URIList} {
+		if _, err := data.Read(format); err != nil {
+			t.Fatalf("缺少 %q 表示：%v", format, err)
+		}
+	}
+	files, err := data.Files()
+	if err != nil || len(files) != 1 || files[0] != abs {
+		t.Fatalf("文件路径回读 = %v, err=%v，期望 [%s]", files, err, abs)
+	}
+}
+
+// TestImageFileDataRejectsRelativePath 相对路径交给 MyGo 会被拒，提前失败免得写出一个坏的文件列表。
+func TestImageFileDataRejectsRelativePath(t *testing.T) {
+	if _, err := imageFileData(fixture(t, "alpha.png"), "相对/图.png"); err == nil {
+		t.Fatal("相对路径应被拒绝")
 	}
 }

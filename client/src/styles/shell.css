@@ -458,38 +458,26 @@
   z-index: 300;
 }
 
-/* ---- #221 新增：顶栏主题切换入口（三档分段控件）----
- * 与顶栏按钮同一套高度与边框语言，只是拼成一体；选中档用主色柔和填充标出来。 */
-.theme-switch {
+/* ---- #221 顶栏主题切换：一个三态图标按钮，取代占横向空间的文字分段控件。
+ * 选择器带 .board-toolbar 是为了压过 .board-toolbar button 的统一内边距。 */
+.board-toolbar .theme-switch {
   display: inline-flex;
-  align-items: stretch;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   background: var(--control-bg);
-  overflow: hidden;
-}
-/* 选择器带 .theme-switch 是为了压过 .board-toolbar button 的统一高度与边框。 */
-.theme-switch .theme-switch-option {
-  height: 26px;
-  padding: 0 8px;
-  border: none;
-  border-left: 1px solid var(--border-1);
-  border-radius: 0;
-  background: none;
   color: var(--text-2);
-  font-size: 12px;
-  line-height: 24px;
-  white-space: nowrap;
 }
-.theme-switch .theme-switch-option:first-child {
-  border-left: none;
-}
-.theme-switch .theme-switch-option:hover:not([aria-pressed="true"]) {
+.board-toolbar .theme-switch:hover {
   background: var(--control-hover);
   color: var(--text-1);
 }
-.theme-switch .theme-switch-option[aria-pressed="true"] {
-  background: var(--accent-soft);
-  color: var(--accent-hover);
-  font-weight: 600;
+.board-toolbar .theme-switch svg {
+  width: 15px;
+  height: 15px;
+  display: block;
 }
