@@ -75,16 +75,20 @@ describe("画板文件写出", () => {
     expect(raw.edges[2]).toEqual({ from: ["33333333-3333-4333-8333-333333333333", "result"], to: ["r", "in"], system: true });
   });
 
-  it("参考图的来源画板（移出为新画板）读写往返；不是字符串视为损坏", () => {
-    const board = sample();
-    board.nodes[1] = { ...board.nodes[1], source_board: "大画板" } as Board["nodes"][number];
-    const text = serializeBoard(board);
-    expect(JSON.parse(text).nodes[1].source_board).toBe("大画板");
-    expect(parseBoard(text)).toEqual({ kind: "ok", board });
-    expect(JSON.parse(serializeBoard(sample())).nodes[1]).not.toHaveProperty("source_board");
-    const bad = JSON.parse(text);
-    bad.nodes[1].source_board = 3;
-    expect(parseBoard(JSON.stringify(bad)).kind).toBe("corrupt");
+  it("参考图的来源画板字段已移除（1.7.0）：旧画板照常打开，写回不再包含", () => {
+    // 1.7.0 之前「移出为新画板」会往参考图上写这个键；旧文件里还留着。
+    const raw = JSON.parse(serializeBoard(sample()));
+    raw.nodes[1].source_board = "大画板";
+    const parsed = parseBoard(JSON.stringify(raw));
+    expect(parsed.kind).toBe("ok");
+    if (parsed.kind !== "ok") return;
+    // 认识的键但不读：不能落进 extra，否则旧画板写回时会一直带着这个已移除的字段。
+    const node = parsed.board.nodes[1];
+    expect(node.type === "reference" ? node.extra : "不是参考图").toEqual({});
+    expect(serializeBoard(parsed.board)).not.toContain("source_board");
+    // 值坏了也照常打开：这个字段已经没有人读了。
+    raw.nodes[1].source_board = 3;
+    expect(parseBoard(JSON.stringify(raw)).kind).toBe("ok");
   });
 
   it("读写往返保持一致", () => {

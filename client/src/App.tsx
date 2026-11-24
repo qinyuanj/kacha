@@ -35,7 +35,6 @@ import {
   usageEnabled,
   versionOrEmpty,
   versionOrUndefined,
-  boardKeyOf,
   canvasBoard,
   createBoardOrExplain,
   dismissBoardNotice,
@@ -417,7 +416,6 @@ export function App({ version }: AppProps) {
           focus: focusFor(state.focus, view.active),
           tidying: tidyingFor(state.tidyKey, view.active, view.activeArchived),
           onTidyChange: (on) => store.setTidyKey(tidyKeyAfter(on, view.active)),
-          onMoveOutStage: (stageId) => boards.moveOutStage(boardKeyOf(view.active), stageId),
         }}
         onActivate={(key) => activateBoard(boards.setActiveKey, () => store.setFocus(null), key)}
         onCloseTab={(key) => void closeOne(key)}

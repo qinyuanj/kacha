@@ -17,7 +17,6 @@ import {
   copyAsNewBoardSession,
   createBoardSession,
   deleteBoardSession,
-  moveOutStageSession,
   openBoardPath,
   reloadBoardSession,
   renameBoardSession,
@@ -136,7 +135,7 @@ export function useSessionEditing(options: {
   return { envOf, check, apply, undoBoard, redoBoard, getBoard, boardFileName };
 }
 
-/** 会话的开合接线：打开、新建、关掉与移出。 */
+/** 会话的开合接线：打开、新建与关掉。 */
 export function useSessionLifecycle(options: {
   userRoot: string | null;
   store: ReturnType<typeof useSessionState>;
@@ -144,13 +143,8 @@ export function useSessionLifecycle(options: {
   flush: (key: string) => Promise<void>;
   cancelTimer: (key: string) => void;
   setActiveKey: (next: string | null | ((prev: string | null) => string | null)) => void;
-  apply: (key: string, change: BoardChange) => EditResult | null;
-  envOf: (key: string) => EditEnv;
-  readOnlyPath: (path: string) => boolean;
-  movingSessions: React.MutableRefObject<Set<string>>;
-  movingOut: React.MutableRefObject<boolean>;
 }) {
-  const { userRoot, store, ports, flush, cancelTimer, setActiveKey, apply, envOf, readOnlyPath, movingSessions, movingOut } = options;
+  const { userRoot, store, ports, flush, cancelTimer, setActiveKey } = options;
   const userRootRef = useRef(userRoot);
   userRootRef.current = userRoot;
   const closeBoardRef = useRef<(key: string) => Promise<void>>(async () => undefined);
@@ -165,12 +159,6 @@ export function useSessionLifecycle(options: {
   );
   /** 新建画板并立即落盘占住文件名。画板位满时返回统一文案（#89）。 */
   const createBoard = useCallback(async (): Promise<string | null> => createBoardSession(store, ports, userRoot, flush, setActiveKey), [store, flush, setActiveKey]);
-  /** 移出为新画板（#93）。 */
-  const moveOutStage = useCallback(
-    async (key: string, stageId: string): Promise<string> =>
-      moveOutStageSession(store, ports, envOf(key), userRootRef.current, readOnlyPath, movingSessions.current, movingOut, apply, key, stageId),
-    [store, envOf, apply, readOnlyPath],
-  );
   /** 导入画板由本机存储在锁内写好；本页只打开返回路径。 */
   const openImportedBoard = useCallback(async (path: string): Promise<void> => {
     if (!userRoot) throw new Error("数据根未就绪");
@@ -188,7 +176,7 @@ export function useSessionLifecycle(options: {
     },
     [store, setActiveKey, cancelTimer],
   );
-  return { closeAll, openPath, createBoard, moveOutStage, openImportedBoard, dropSession, closeBoardRef };
+  return { closeAll, openPath, createBoard, openImportedBoard, dropSession, closeBoardRef };
 }
 
 /** 会话的存档接线：关闭、删除、归档、复制、改名与重载。 */
@@ -268,7 +256,6 @@ export function useSessionArchive(options: {
 export function useBoardSessions(userRoot: string | null, envSource: EnvSource, onMoved: (from: string, to: string) => void = () => undefined) {
   const port = useShell();
   const movingSessions = useRef(new Set<string>());
-  const movingOut = useRef(false);
   const { activeKey, activeKeyRef, setActiveKey } = useActiveSession();
   const store = useSessionState();
   const userRootRef = useRef(userRoot);
@@ -286,11 +273,6 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource, 
     flush,
     cancelTimer,
     setActiveKey,
-    apply: editing.apply,
-    envOf: editing.envOf,
-    readOnlyPath,
-    movingSessions,
-    movingOut,
   });
   const archive = useSessionArchive({
     userRoot,
@@ -306,7 +288,7 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource, 
     onMoved,
   });
   const { check, apply, undoBoard, redoBoard, getBoard, boardFileName } = editing;
-  const { closeAll, openPath, createBoard, moveOutStage, openImportedBoard, dropSession } = life;
+  const { closeAll, openPath, createBoard, openImportedBoard, dropSession } = life;
   const { closeBoard, deleteBoard, archiveBoard, unarchiveBoard, copyAsNewBoard, keyOf, renameBoard, dismissNotice, retrySave, reload } = archive;
   life.closeBoardRef.current = closeBoard;
 
@@ -316,7 +298,6 @@ export function useBoardSessions(userRoot: string | null, envSource: EnvSource, 
     setActiveKey,
     openPath,
     createBoard,
-    moveOutStage,
     openImportedBoard,
     closeBoard,
     deleteBoard,

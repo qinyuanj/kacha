@@ -105,11 +105,6 @@ export function tidyKeyAfter(on: boolean, session: Session | undefined): string 
   return session?.status === "ok" ? session.key : null;
 }
 
-/** 移出阶段用的画板 key（没有画板时为空）。 */
-export function boardKeyOf(session: Session | undefined): string {
-  return session?.status === "ok" ? session.key : "";
-}
-
 /** 缺省值：没有时给一个。 */
 export const orDefault = <T,>(value: T | null | undefined, fallback: T): T => (value === null || value === undefined ? fallback : value);
 

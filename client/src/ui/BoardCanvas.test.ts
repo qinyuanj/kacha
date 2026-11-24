@@ -198,7 +198,6 @@ function makeProps(patch: Partial<Props> = {}) {
     onRegenerate: vi.fn(),
     onViewSendText: vi.fn(),
     onTidyChange: vi.fn(),
-    onMoveOutStage: vi.fn(async (_stageId: string) => ""),
   };
   const props: Props = {
     board: sampleBoard(),
