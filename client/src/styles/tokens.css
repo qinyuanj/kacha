@@ -101,7 +101,7 @@
   --rf-controls-bg: var(--surface-raised);
   --rf-controls-border: var(--border-1);
   --rf-controls-icon: var(--text-1);
-  --rf-selection-bg: var(--accent-soft);
+  --rf-selection-bg: var(--selection-fill);
   --rf-selection-border: var(--accent-border);
   --rf-handle-bg: var(--surface);
   --rf-handle-border: var(--border-2);
@@ -230,7 +230,7 @@
   --rf-controls-bg: var(--surface-raised);
   --rf-controls-border: var(--border-1);
   --rf-controls-icon: var(--text-1);
-  --rf-selection-bg: var(--accent-soft);
+  --rf-selection-bg: var(--selection-fill);
   --rf-selection-border: var(--accent-border);
   --rf-handle-bg: var(--surface);
   --rf-handle-border: var(--border-2);
@@ -262,6 +262,10 @@
   --accent-soft-strong: rgb(76 141 255 / 24%);
   --border-subtle: rgb(140 149 159 / 10%);
   --warning-strong: #f0883e;
+  /* 框选填充：遮罩必须能看出「框住了什么」，所以它自己是一枚半透明色，
+   * 不能借用不透明状态的 --accent-soft（浅色 #ddf4ff 会把框下的节点整块抹掉）。
+   * 暗色 16% 与修复前完全一致；--rf-selection-bg 在两套主题里都指向它。 */
+  --selection-fill: rgb(76 141 255 / 16%);
 }
 
 :root[data-theme="light"] {
@@ -272,6 +276,10 @@
   --accent-soft-strong: rgb(221 244 255 / 90%);
   --border-subtle: rgb(140 149 159 / 6%);
   --warning-strong: #bc4c00;
+  /* 框选填充：12% 蓝叠在白画布上得 #eaf1ff（对白 1.13:1，框选区域本身仍可辨，
+   * 与暗色 1.24:1 同量级）；虚线描边 #7cc0ff 在该填充上 1.71:1（无填充时对白 1.94:1，
+   * 描边偏软是 --accent-border 自身既有的取值，不是这次引入的）。 */
+  --selection-fill: rgb(76 141 255 / 12%);
 }
 
 /* ---- 补充（#223 画布）：迷你地图里的节点方块色，跟三级边框走 ---- */

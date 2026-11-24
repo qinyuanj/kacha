@@ -72,3 +72,93 @@ describe("区域指示紫的契约", () => {
     }
   });
 });
+
+
+/* ---- 框选遮罩契约（浅色下曾整块挡住节点）--------------------------------------
+ * .react-flow__selection（拖拽框选矩形）与 .react-flow__nodesselection-rect（选中框）
+ * 都按 canvas.css:22 的 --xy-selection-background-color 上色，真源是 tokens.css 的
+ * --rf-selection-bg。两个矩形都画在节点之上：填充不透明时，框下的节点等于被整块抹掉
+ * （浅色旧值 #ddf4ff：节点文字 #1f2328 在框内变成 #ddf4ff，与同一层框选下的空白画布
+ * 完全不可区分）。所以有两条必须能失败的断言：
+ *   1. 按 tokens.css 的真实级联把 --rf-selection-bg 解析到底，最终颜色的 alpha 必须在
+ *      0 与 1 之间——不透明会遮住内容，全透明会让框选区域看不见；
+ *   2. 两套主题都从同一枚 --selection-fill 取色（颜色只定义一处，域模块只引用变量）。
+ * 解析走级联而不是切字符串：--selection-fill 追加在文件末尾的「补充」小节，位置在两套
+ * 主题的别名之后，按出现位置切片会取错块。
+ */
+interface TokenRule {
+  selector: string;
+  body: string;
+}
+
+function tokenRules(): TokenRule[] {
+  const code = tokens.replace(/\/\*[\s\S]*?\*\//g, "");
+  return [...code.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((hit) => ({ selector: hit[1].trim(), body: hit[2] }));
+}
+
+/** 一条 :root 级规则在哪些主题下生效：裸 :root 两套都算，带 data-theme 的只算自己那套。 */
+function themesOf(selector: string): ("dark" | "light")[] {
+  const themes = new Set<"dark" | "light">();
+  for (const one of selector.split(",")) {
+    const part = one.trim();
+    if (!part.startsWith(":root")) continue;
+    if (part.includes('[data-theme="light"]')) themes.add("light");
+    else if (part.includes('[data-theme="dark"]')) themes.add("dark");
+    else {
+      themes.add("dark");
+      themes.add("light");
+    }
+  }
+  return [...themes];
+}
+
+/** 按源码顺序累加某主题下生效的 :root 自定义属性：后者覆盖前者，即真实级联。 */
+function tokensFor(theme: "dark" | "light"): Map<string, string> {
+  const declared = new Map<string, string>();
+  for (const rule of tokenRules()) {
+    if (!themesOf(rule.selector).includes(theme)) continue;
+    for (const hit of rule.body.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) declared.set(hit[1], hit[2].trim());
+  }
+  return declared;
+}
+
+/** 顺着 var(--x) 引用解析到底（最多 8 跳：写错自引用时失败而不是死循环）。 */
+function resolveToken(declared: Map<string, string>, name: string, depth = 0): string {
+  const value = declared.get(name);
+  if (value === undefined) throw new Error("主题里没有 " + name);
+  if (depth > 8) throw new Error(name + " 的 var() 引用太深或自引用");
+  const reference = value.match(/^var\(\s*(--[\w-]+)\s*\)$/);
+  return reference ? resolveToken(declared, reference[1], depth + 1) : value;
+}
+
+/** CSS 颜色的 alpha：#rrggbb / rgb() 视为 1，带 / 0.12 或 / 12% 的按字面算。 */
+function alphaOf(colour: string): number {
+  if (colour.startsWith("#")) return colour.length === 9 ? parseInt(colour.slice(7, 9), 16) / 255 : 1;
+  const slash = colour.match(/\/\s*([\d.]+)(%)?/);
+  if (!slash) return 1;
+  const amount = Number(slash[1]);
+  return slash[2] === "%" ? amount / 100 : amount;
+}
+
+describe("框选遮罩半透明契约（浅色下整块挡住节点）", () => {
+  for (const theme of ["dark", "light"] as const) {
+    it(theme + "：--rf-selection-bg 解析出的 alpha 在 0 与 1 之间", () => {
+      const resolved = resolveToken(tokensFor(theme), "--rf-selection-bg");
+      const alpha = alphaOf(resolved);
+      expect(
+        alpha,
+        theme + " 的框选填充解析为 " + resolved + "：不透明会把框下的节点整块抹掉（遮罩画在节点之上）",
+      ).toBeLessThan(1);
+      expect(alpha, theme + " 的框选填充解析为 " + resolved + "：alpha 为 0 时框选区域完全看不见").toBeGreaterThan(0);
+    });
+  }
+
+  it("两套主题都从同一个 --selection-fill 取色（改色只改一处）", () => {
+    for (const theme of ["dark", "light"] as const) {
+      expect(
+        tokensFor(theme).get("--rf-selection-bg"),
+        theme + " 的框选填充必须引用 --selection-fill，不要在主题块里另写色号",
+      ).toBe("var(--selection-fill)");
+    }
+  });
+});
