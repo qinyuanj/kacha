@@ -299,7 +299,7 @@ type WriteOptions struct {
 	CreateOnly bool   `json:"create_only"`
 }
 
-// WriteBoard 写画板：原子落盘，覆盖前把旧主文件留成 .bak（只留读得出 JSON 的那份）。
+// WriteBoard 写画板：原子落盘，覆盖前把旧主文件留成 .bak（只留读得出 JSON 的那份；已有的 .bak 不覆盖）。
 //
 // 只新建（createOnly）：主文件或只剩 .bak 的孤儿占住名字都拒绝。
 // 带版本：主文件不在就说画板没了（不凭空建出同名画板），内容变了就是冲突。
@@ -349,8 +349,12 @@ func (s *Store) WriteBoard(path, text string, opts WriteOptions) Result {
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return fail(KindFailed, err.Error())
 	}
+	// 备份只在真正覆盖前发生，而且只留第一次那份：.bak 是这块画板改写前的原样，
+	// 之后的保存不该把它换成更近的内容（否则旧数据只留得住一次）。
 	if exists && isJSON(old) {
-		_ = writeAtomic(abs+".bak", old)
+		if _, err := os.Stat(abs + ".bak"); err != nil {
+			_ = writeAtomic(abs+".bak", old)
+		}
 	}
 	if err := writeAtomic(abs, []byte(text)); err != nil {
 		return fail(KindFailed, err.Error())

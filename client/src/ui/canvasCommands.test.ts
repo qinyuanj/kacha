@@ -11,8 +11,8 @@ import type { BoardActions } from "./context";
 
 const SPEC_2K = { tier: "2K", ratio: "16:9", width: null, height: null };
 
-/** 结果节点：final = 结果节点上的定稿标记（渲染用，画布动作不看它）。 */
-function result(id: string, final = false): BoardNode {
+/** 结果节点。 */
+function result(id: string): BoardNode {
   const node = {
     id,
     type: "result" as const,
@@ -25,7 +25,7 @@ function result(id: string, final = false): BoardNode {
     layer_count: 0,
     record: { model: "qwen-image-3.0", prompt: "", negative_prompt: "", size_spec: SPEC_2K, submitted_at: "" },
   };
-  return final ? { ...node, final: true } : node;
+  return node;
 }
 
 const EDGE: BoardEdge = { from: ["p", "out"], to: ["t", "positive"], source_layer: null, region: null, system: false, extra: {} };
