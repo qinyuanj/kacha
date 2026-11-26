@@ -28,15 +28,16 @@ function recordingBridge(handlers: Record<string, (...args: unknown[]) => Promis
   return { bridge: mygoBridge(), calls };
 }
 
-describe("原生主题同步（#221）", () => {
-  it("档位原文经 Shell.SetTheme 交给壳（system 不翻成 dark）", async () => {
+describe("原生主题同步（#265）", () => {
+  it("固定两态原文经 Shell.SetTheme 交给壳", async () => {
     const { bridge, calls } = recordingBridge({
       "Shell.Info": () => Promise.resolve(INFO),
       "Shell.SetTheme": () => Promise.resolve(undefined),
     });
     const { port } = await createDesktopPort(bridge);
-    for (const choice of ["dark", "light", "system"] as const) await port.ui.setNativeTheme(choice);
-    expect(calls.filter((c) => c.method === "Shell.SetTheme").map((c) => c.args)).toEqual([["dark"], ["light"], ["system"]]);
+    await port.ui.setNativeTheme("dark");
+    await port.ui.setNativeTheme("light");
+    expect(calls.filter((c) => c.method === "Shell.SetTheme").map((c) => c.args)).toEqual([["dark"], ["light"]]);
   });
 
   it("宿主没有这个方法时不算失败：本页已经按自己的主题画好了", async () => {
@@ -45,11 +46,9 @@ describe("原生主题同步（#221）", () => {
     await expect(port.ui.setNativeTheme("dark")).resolves.toBeUndefined();
   });
 
-  it("内存替身同形：记下档位，行为与真实适配器一致", async () => {
+  it("内存替身同形：只记两态档位", async () => {
     const fake = createFakePort();
     await fake.ui.setNativeTheme("light");
-    await fake.ui.setNativeTheme("system");
-    expect(fake.calls.nativeTheme).toEqual(["light", "system"]);
-    expect(typeof fake.ui.setNativeTheme).toBe("function");
+    expect(fake.calls.nativeTheme).toEqual(["light"]);
   });
 });
