@@ -32,12 +32,12 @@ export interface BoardActions {
   /** 任务端口行的「指示区域」：直接编辑该条连线的区域。 */
   editRegion: (taskId: string, ref: { from: PortRef; to: PortRef }) => void;
   /**
-   * 执行一个画板动作：上下文菜单、悬浮动作条、节点上的运行 / 展开按钮共用；条目与置灰原因由 core/contextMenu 给出。
+   * 执行一个画板动作：上下文菜单、节点上的运行 / 展开按钮共用；条目与置灰原因由 core/contextMenu 给出。
    * at = 新建类动作的落点（画布坐标），缺省 = 视口中央。
    */
   perform: (action: BoardAction, target: MenuTarget, at?: { x: number; y: number }) => void;
   /**
-   * 画布只渲染可见节点：节点离开视口即卸载，下面三项把节点上的瞬时状态交给画布保管或在卸载时收尾。
+   * 画布只渲染可见节点：下面两项把节点上的瞬时状态交给画布保管，卸载后再挂载时仍在。
    * 提示词等待三选一的未提交文本（null = 没有），按节点 id 存在画布上，节点卸载后再挂载时仍在。
    */
   setPromptDraft: (promptId: string, text: string | null) => void;
@@ -46,8 +46,6 @@ export interface BoardActions {
    * 不只看节点 data 里的 autoFocus——xyflow 拿到的节点数据会晚画布一次提交。
    */
   takePromptFocus: (promptId: string) => boolean;
-  /** 图片节点卸载（离开视口、被删）：收不到 mouseleave，由它收起该节点的悬浮动作条。 */
-  nodeUnmounted: (nodeId: string) => void;
 }
 
 export const BoardContext = createContext<BoardActions | null>(null);

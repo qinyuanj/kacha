@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // BoardCanvas 顶层接线的行为测试（#101 拆分的回归网）：工具栏 portal、空白右键菜单、快捷键、Esc 清选区、方向键微移、
-// 悬浮动作条与放大预览、HTML5 拖放、只读画板、以及画布交给 React Flow 的契约 props；
+// 图片节点悬浮不再出操作栏、右键与预览保留入口、只读悬浮信息、HTML5 拖放、只读画板、以及画布交给 React Flow 的契约 props；
 // 粘贴（#96）走页面级 paste 事件：粘图片落成参考图、粘节点标记还原节点、模态 / 输入框里放行。
 // vitest 的 include 只收 *.test.ts，所以用 createElement 而不是 JSX。@xyflow/react 用替身：ReactFlow 只渲染一层 div，
 // 收到的 props 存进 xyflow.captured —— 测试用它模拟 React Flow 报来的事件（等价于用户在画布上操作），并断言画布交出去的契约；
@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import { readOnlyMenu } from "../core/archive";
 import { newBoard, parseBoard, serializeBoard, type Board, type BoardEdge, type BoardNode, type PortRef, type TaskNode } from "../core/board";
 import { BUILTIN_TABLE } from "../core/capabilities";
-import { actionBarItems, menuItems, type BoardAction, type MenuFacts, type MenuItem } from "../core/contextMenu";
+import { menuItems, type BoardAction, type MenuFacts, type MenuItem } from "../core/contextMenu";
 import type { BoardChange, EditResult } from "../core/edit";
 import { countLabel } from "../core/history";
 import { edgeHoverInfo } from "../core/hoverInfo";
@@ -394,13 +394,6 @@ async function selectNodes(ids: string[]): Promise<void> {
   });
 }
 
-/** 模拟 React Flow 报来节点悬浮。 */
-async function hoverNode(id: string): Promise<void> {
-  await act(async () => {
-    flowProps().onNodeMouseEnter!({} as ReactMouseEvent, flowNodeOf(id));
-  });
-}
-
 /** 右键事件替身：openMenu 只读 clientX / clientY 与 preventDefault。 */
 function contextMenuEvent(x: number, y: number): ReactMouseEvent {
   return { clientX: x, clientY: y, preventDefault: () => undefined } as unknown as ReactMouseEvent;
@@ -700,43 +693,35 @@ describe("页面级粘贴（#96：从系统剪贴板粘图片 / 节点）", () =
 
 });
 
-describe("悬浮动作条与放大预览", () => {
-  it("悬浮参考图出动作条，点「放大预览」打开弹窗", async () => {
-    await renderCanvas();
-    await hoverNode("r1");
-    const bar = container.querySelector<HTMLElement>('[data-testid="node-toolbar"]');
-    expect(bar).not.toBeNull();
-    expect(bar!.getAttribute("data-node-id")).toBe(JSON.stringify(["r1"]));
-    const expected = actionBarItems("r1", menuFactsOf(sampleBoard())).map((i) => i.label);
-    expect([...bar!.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"))).toEqual(expected);
-    await act(async () => buttonByLabel(bar!, expected[0]).click());
+describe("图片节点悬浮、保留入口与只读悬浮信息", () => {
+  it("悬浮图片节点不再出操作栏，右键预览与另存为仍可用", async () => {
+    const harness = await renderCanvas();
+    // 入口消失：画布不再接节点悬浮事件，也不再渲染 NodeToolbar 或任何图标操作栏。
+    expect(flowProps().onNodeMouseEnter).toBeUndefined();
+    expect(flowProps().onNodeMouseLeave).toBeUndefined();
+    expect(container.querySelector('[data-testid="node-toolbar"]')).toBeNull();
+    expect(container.querySelector(".action-bar")).toBeNull();
+    expect(container.querySelector('[role="toolbar"]')).toBeNull();
+
+    // 右键菜单仍打开，迭代动作、预览与另存为仍是用户可见入口；文案独立手抄，防止菜单自己证明自己。
+    await openNodeMenu("r1", 20, 20);
+    const labels = menuItemLabels();
+    for (const label of ["以此继续编辑", "放大预览", "另存为…"]) expect(labels).toContain(label);
+    const expected = menuItems({ kind: "node", nodeId: "r1" }, menuFactsOf(harness.props.board, { selected: new Set(["r1"]) }));
+
+    // 右键预览是真入口：弹窗打开后 Delete 交给弹窗，不落到背后的画板。
+    await act(async () => menuItemButton(expected, "preview").click());
     await flush();
     const dialog = container.querySelector<HTMLElement>('[role="dialog"]');
     expect(dialog).not.toBeNull();
-    // 参考图的弹窗标题是它的显示名。
     expect(dialog!.getAttribute("aria-label")).toBe("r1.png");
-    // 弹窗开着：Delete 键不交给画布。
     expect(flowProps().deleteKeyCode).toBeNull();
-    // 文案在生产侧 BoardToolbar / PreviewDialog（本票未改动的既有组件），这里手抄同源字面量。
     await act(async () => buttonByText(dialog!, "关闭").click());
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
-  });
 
-  it("指针停在动作条上时动作条不收起", async () => {
-    // 宽限期本身（150ms 定时器）由 useCanvasHover 拥有；这里只证明组件把 onPointerEnter 接到了
-    // 「按住不收起」的那条路上：离开节点之后指针停在动作条上，动作条仍在。
-    await renderCanvas();
-    await hoverNode("r1");
-    const toolbar = container.querySelector('[data-testid="node-toolbar"] [role="toolbar"]')!;
-    expect(toolbar).not.toBeNull();
-    await act(async () => {
-      flowProps().onNodeMouseLeave!({} as ReactMouseEvent, flowNodeOf("r1"));
-    });
-    // React 的 onPointerEnter / onPointerLeave 由 pointerover / pointerout 推导。
-    await act(async () => {
-      toolbar.dispatchEvent(new Event("pointerover", { bubbles: true }));
-    });
-    expect(container.querySelector('[data-testid="node-toolbar"]')).not.toBeNull();
+    // 右键另存为仍经壳端口落文件，不依赖被删的悬浮栏。
+    await openNodeMenu("r1", 30, 30);
+    await act(async () => menuItemButton(expected, "saveAs").click());
+    expect(saveCopyAs).toHaveBeenCalledWith("/~/reference/r1.png");
   });
 
   it("连线悬浮出信息浮层，移出即收起", async () => {
@@ -779,12 +764,8 @@ describe("只读画板（归档）", () => {
     expect(harness.toast).toHaveBeenCalledWith(ARCHIVE_TEXT.readOnly);
     expect(port.media.uploadReference).not.toHaveBeenCalled();
     expect(editChanges(harness.apply)).toEqual([]);
-    // 只读同样进到悬浮动作条：条目与右键菜单同源（core/archive 的 readOnlyMenu）。
-    const expected = readOnlyMenu(menuItems({ kind: "node", nodeId: "r1" }, menuFactsOf(harness.props.board, { selected: new Set(["r1"]) })));
-    await hoverNode("r1");
-    const barButtons = container.querySelectorAll('[data-testid="node-toolbar"] button');
-    expect([...barButtons].map((b) => b.getAttribute("aria-label"))).toEqual(expected.map((i) => i.label));
     // 右键节点：菜单只剩查看与下载（条目同样由 core/archive 的 readOnlyMenu 给）。
+    const expected = readOnlyMenu(menuItems({ kind: "node", nodeId: "r1" }, menuFactsOf(harness.props.board, { selected: new Set(["r1"]) })));
     await openNodeMenu("r1", 20, 20);
     expect(menuItemLabels()).toEqual(expected.map((i) => i.label));
     // 仍可放大预览。
