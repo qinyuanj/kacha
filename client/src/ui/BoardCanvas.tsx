@@ -35,20 +35,18 @@ import {
   deleteKeyCodeFor,
   dragFromOf,
   edgeHoverMove,
-  hoveredActionBarOf,
   menuEntriesOf,
   menuViewFor,
   openEdgeMenu,
   openNodeContextMenu,
   openPaneContextMenu,
   openSelectionContextMenu,
-  pickActionBarAction,
   pickMenuAction,
   pickReferencesOf,
   saveNodeAsOf,
 } from "./canvasFrame";
 import { canvasNodes } from "./canvasNodes";
-import { CanvasActionBar, CanvasOverlays } from "./canvasOverlays";
+import { CanvasOverlays } from "./canvasOverlays";
 import { useCanvasPaste } from "./canvasPaste";
 import { canvasClassName, posOf } from "./canvasPoint";
 import { canvasThemeProps } from "./canvasTheme";
@@ -61,7 +59,6 @@ import { edgeTypes } from "./edges";
 import { HoverProvider, useHoverLayer } from "./hoverInfo";
 import { nodeTypes } from "./nodes";
 import { DragContext } from "./ports";
-import { actionBarView, useActionBarHover } from "./useCanvasHover";
 import { useBoardKeyboard } from "./useBoardKeyboard";
 import { useCanvasApply } from "./useCanvasApply";
 import { useCanvasData } from "./useCanvasData";
@@ -162,7 +159,6 @@ export function BoardCanvas({
   const apply = useCanvasApply({ applyChange, toast, readOnly, setSelectedNodes, setSelectedEdges });
   const canvasData = useCanvasData({ board, boardFile, userRoot, table, locked, handled, runNodes, applyChange });
   const overlays = useCanvasOverlaysState({ flow, selectedRef, setSelectedNodes, clearPromptFocus: () => requestPromptFocus(null) });
-  const actionBar = useActionBarHover();
   const nav = useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen: overlays.dialogOpenRef, apply, isEditableTarget: port.ui.isEditableTarget });
   const hover = useHoverLayer();
 
@@ -212,9 +208,9 @@ export function BoardCanvas({
       canvasBoardActions({
         table, boardFile, userRoot, discovery, concurrency, apply, boardRef, selectedRef, lockedRef,
         focusPromptRef, requestPromptFocus, setPromptDrafts, setExpandOverrides,
-        unhoverNode: actionBar.unhoverNode, showPreview: overlays.openPreview, primeImageInfo, onRegenerate, toast, performRef, port,
+        showPreview: overlays.openPreview, primeImageInfo, onRegenerate, toast, performRef, port,
       }),
-    [table, boardFile, userRoot, discovery, concurrency, apply, requestPromptFocus, setPromptDrafts, setExpandOverrides, actionBar.unhoverNode, overlays.openPreview, onRegenerate, toast, port],
+    [table, boardFile, userRoot, discovery, concurrency, apply, requestPromptFocus, setPromptDrafts, setExpandOverrides, overlays.openPreview, onRegenerate, toast, port],
   );
 
   // 本机图片先上传到数据根的 导入参考图/，再按本机存储给出的路径导入（端口见 canvasDrop 的 ImagePorts）。
@@ -289,7 +285,6 @@ export function BoardCanvas({
 
   const menuView = menuViewFor(readOnly);
   const canvasTheme = canvasThemeProps(theme);
-  const barView = actionBarView({ hovered: actionBar.hovered, nodes: board.nodes, menuOpen: overlays.menu !== null, menuView, facts: menuFacts(selectedNodes) });
 
   return (
     <BoardContext.Provider value={actions}>
@@ -346,8 +341,6 @@ export function BoardCanvas({
               onNodeContextMenu={(e, n) => openNodeContextMenu(overlays.openMenu, port.ui.isEditableTarget, e, n.id)}
               onSelectionContextMenu={(e, ns) => openSelectionContextMenu(overlays.openMenu, e, ns)}
               onEdgeContextMenu={(e, fe) => openEdgeMenu(overlays.openMenu, board, e, fe.id)}
-              onNodeMouseEnter={(_, n) => hoveredActionBarOf(actionBar.showActionBar, n)}
-              onNodeMouseLeave={actionBar.hideActionBarSoon}
               onEdgeMouseMove={(e, fe) => edgeHoverMove(e, fe, hover.controller)}
               onEdgeMouseLeave={(_, fe) => hover.controller.leave(`edge:${fe.id}`)}
               minZoom={0.1}
@@ -355,14 +348,6 @@ export function BoardCanvas({
               <Background {...canvasTheme.background} />
               <Controls />
               <MiniMap {...canvasTheme.minimap} />
-              <CanvasActionBar
-                present={barView.present}
-                nodes={barView.nodes}
-                items={barView.items}
-                onPick={(action) => pickActionBarAction(action, actionBar.hovered, commands)}
-                onPointerEnter={() => actionBar.showActionBar(actionBar.hovered)}
-                onPointerLeave={actionBar.hideActionBarSoon}
-              />
             </ReactFlow>
             <CanvasOverlays
               menu={overlays.menu}

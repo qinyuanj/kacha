@@ -67,13 +67,27 @@ describe("工作台", () => {
     await vi.waitFor(() => expect(container.textContent).toContain("未命名画板"));
   });
 
-  it("顶栏：画板包、设置与版本入口都在", async () => {
+  it("顶栏：画板包与版本入口都在", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     await show(port, { version: "1.2.3" });
     expect(container.textContent).toContain("画板包");
-    expect(container.textContent).toContain("高级设置");
     expect(container.textContent).toContain("Kacha 1.2.3");
+  });
+
+  it("画板包菜单只有导入与导出：整板结果下载不再出现（#262）", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    await show(port);
+    await vi.waitFor(() => expect(container.querySelector(".canvas")).not.toBeNull());
+    const packButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("画板包"));
+    await act(async () => packButton?.click());
+    const items = [...container.querySelectorAll('[role="menuitem"]')];
+    expect(items.map((item) => (item.textContent ?? "").trim())).toEqual(["导入画板包…", "导出画板包…"]);
+    // 保留的相邻能力必须真能触发：点导入确实走到壳端口选包，而不是只剩空菜单。
+    const importItem = items.find((item) => item.textContent?.includes("导入画板包"));
+    await act(async () => (importItem as HTMLElement | undefined)?.click());
+    expect(port.calls.pickPackFile).toHaveLength(1);
   });
 
   it("用量提醒：到了上限时给出提醒与管理画板入口", async () => {
@@ -117,13 +131,13 @@ describe("工作台", () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     await show(port);
-    const settingsButton = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("高级设置"));
+    const settingsButton = container.querySelector<HTMLButtonElement>("button[aria-label='高级设置']");
     await act(async () => settingsButton?.click());
-    const settingsPanel = container.querySelector("[aria-label='高级设置']");
+    const settingsPanel = container.querySelector("[role='dialog'][aria-label='高级设置']");
     expect(settingsPanel).not.toBeNull();
     const close = [...(settingsPanel?.querySelectorAll("button") ?? [])].find((button) => button.getAttribute("aria-label") === "关闭");
     await act(async () => close?.click());
-    expect(container.querySelector("[aria-label='高级设置']")).toBeNull();
+    expect(container.querySelector("[role='dialog'][aria-label='高级设置']")).toBeNull();
   });
 
   it("画板列表：点开列表后显示画板", async () => {
@@ -240,10 +254,13 @@ describe("工作台", () => {
     });
     await show(port);
     await vi.waitFor(() => expect(container.textContent).toContain("管理画板"));
-    for (const label of ["管理画板", "高级设置", "反馈", "画板包", "检查更新"]) {
+    const clickByText = async (label: string): Promise<void> => {
       const button = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(label));
       await act(async () => button?.click());
-    }
+    };
+    await clickByText("管理画板");
+    await act(async () => container.querySelector<HTMLButtonElement>("button[aria-label='高级设置']")?.click());
+    for (const label of ["反馈", "画板包", "检查更新"]) await clickByText(label);
     for (const button of [...container.querySelectorAll<HTMLButtonElement>("button[aria-label*='关闭']")]) {
       await act(async () => button.click());
     }
@@ -330,7 +347,7 @@ describe("主题切换", () => {
   /** 等设置载入完成：高级设置按钮解禁就是信号（主题的宿主同步也在这一刻之后）。 */
   async function settingsReady(): Promise<void> {
     await vi.waitFor(() => {
-      const button = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes("高级设置"));
+      const button = container.querySelector<HTMLButtonElement>("button[aria-label='高级设置']");
       expect(button?.disabled).toBe(false);
     });
   }
@@ -368,7 +385,7 @@ describe("主题切换", () => {
     expect(buttons.length).toBe(1);
     expect(buttons[0].getAttribute("aria-label")).toBe("暗色");
     // 没有打开设置面板。
-    expect(container.querySelector("[aria-label='高级设置']")).toBeNull();
+    expect(container.querySelector("[role='dialog'][aria-label='高级设置']")).toBeNull();
   });
 
   it("点浅色：文档根、首帧镜像、宿主壳与设置文件都跟着变", async () => {

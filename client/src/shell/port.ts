@@ -21,7 +21,7 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics" | "update" | "dataRoot" | "feedback";
+export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "diagnostics" | "update" | "dataRoot" | "feedback";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
@@ -136,7 +136,6 @@ export const FEATURE_LABELS: Record<FeatureId, string> = {
   copyText: "复制文本",
   saveImage: "另存为",
   downloadImage: "下载图片",
-  downloadResults: "下载整板结果",
   diagnostics: "诊断包导出",
   update: "自动更新",
   dataRoot: "本机数据位置",
@@ -232,8 +231,6 @@ export interface MediaStore {
   saveCopyAs(absPath: string): Promise<SaveCopyOutcome>;
   /** 单结果保存（带图层时打 zip）；目标由本机对话框选，取消时返回 cancelled。 */
   downloadImage(path: string, name?: string): Promise<SaveCopyOutcome>;
-  /** 整板结果保存；取消时返回 cancelled。 */
-  downloadBoardResults(boardPath: string): Promise<SaveCopyOutcome>;
 }
 
 /**
