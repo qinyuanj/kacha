@@ -110,7 +110,6 @@ export function AppShell(props: {
         packMenuDisabled={!userRoot}
         onTogglePackMenu={props.onTogglePackMenu}
         version={props.version}
-        ready={ready}
         onOpenChangelog={props.onOpenChangelog}
         onOpenFeedback={props.onOpenFeedback}
         feedbackAvailable={props.feedbackAvailable ?? true}

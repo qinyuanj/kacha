@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
-// 首页版本号旁的更新入口（#164、#180、#181）：只验页面这一侧——按快照显示、只有已验签才能点安装、
-// 准备被拒时不起安装、安装失败后恢复创作、保存没成功时也不装。
+// 单一版本入口（#269）：每阶段只打开本地更新说明；安装准备、失败原因与手动检查按钮移除都要在这里守住。
 // 选版与验签在 Go 侧，替身不重复判定；快照与动作由工作台接线，这里用真 hook 接在替身上。
 import { act, createElement } from "react";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { ShellProvider } from "./shell";
 import { UpdateToolbarControl } from "./UpdateToolbarControl";
@@ -14,8 +13,10 @@ import { UNSAVED_MESSAGE, type UpdatePreparationPorts } from "../core/updatePrep
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const CURRENT_VERSION = "1.7.3";
 let container: HTMLDivElement;
 let dom: ReactRoot;
+
 beforeEach(() => {
   container = document.createElement("div");
   document.body.append(container);
@@ -26,7 +27,6 @@ afterEach(async () => {
   container.remove();
 });
 
-/** 准备依赖的替身；任务队列与保存由各用例覆盖（替身不模拟生成任务）。 */
 const baseDeps: UpdatePreparationPorts = {
   queue: { pending: () => 0, setSubmissionGuard: () => undefined },
   saveBoards: async () => undefined,
@@ -34,7 +34,6 @@ const baseDeps: UpdatePreparationPorts = {
   unsavedChanges: () => false,
 };
 
-/** 已就绪的快照：默认已验签且服务说可装。 */
 const ready = (overrides: Partial<UpdateSnapshot> = {}): UpdateSnapshot => ({
   ...emptySnapshot(),
   phase: "ready",
@@ -44,41 +43,111 @@ const ready = (overrides: Partial<UpdateSnapshot> = {}): UpdateSnapshot => ({
   ...overrides,
 });
 
-/** 把真实的动作 hook 接在替身上：这一段测的就是「准备被拒就不安装」。 */
-function Host({ snapshot, deps }: { snapshot: UpdateSnapshot; deps: UpdatePreparationPorts }): ReturnType<typeof createElement> {
+function Host({
+  snapshot,
+  deps,
+  onOpenChangelog,
+}: {
+  snapshot: UpdateSnapshot;
+  deps: UpdatePreparationPorts;
+  onOpenChangelog: () => void;
+}): ReturnType<typeof createElement> {
   const { state, check, install } = useUpdateActions(deps, async () => undefined);
-  return createElement(UpdateToolbarControl, { snapshot, state, check: () => void check(), install });
+  return createElement(UpdateToolbarControl, {
+    snapshot,
+    state,
+    check: () => void check(),
+    install,
+    version: CURRENT_VERSION,
+    onOpenChangelog,
+  });
 }
 
-async function show(port: FakePort, snapshot: UpdateSnapshot, overrides: Partial<UpdatePreparationPorts> = {}): Promise<void> {
-  await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(Host, { snapshot, deps: { ...baseDeps, ...overrides } }) })));
+async function show(
+  port: FakePort,
+  snapshot: UpdateSnapshot,
+  overrides: Partial<UpdatePreparationPorts> = {},
+): Promise<ReturnType<typeof vi.fn>> {
+  const opens = vi.fn();
+  await act(async () => dom.render(createElement(ShellProvider, {
+    port,
+    children: createElement(Host, { snapshot, deps: { ...baseDeps, ...overrides }, onOpenChangelog: opens }),
+  })));
+  return opens;
 }
 
-/** 按文字找按钮：入口上按钮不多，比 data-testid 更贴近用户看到的东西。 */
+function buttons(): HTMLButtonElement[] {
+  return [...container.querySelectorAll("button")] as HTMLButtonElement[];
+}
+
+function versionButton(): HTMLButtonElement {
+  const found = buttons().find((button) => button.textContent === CURRENT_VERSION);
+  if (!found) throw new Error("没有找到只显示当前安装版本的按钮");
+  return found;
+}
+
 function button(text: string): HTMLButtonElement {
-  const found = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes(text));
+  const found = buttons().find((button) => button.textContent?.includes(text));
   if (!found) throw new Error(`没有找到按钮「${text}」`);
-  return found as HTMLButtonElement;
+  return found;
 }
 
-/** 入口上的文字。 */
 function hint(): string {
   return container.textContent ?? "";
 }
 
-describe("首页版本号旁的更新入口", () => {
-  it("能力没开时整段不显示", async () => {
-    await show(createFakePort({ missing: ["update"] }), emptySnapshot());
-    expect(container.querySelector(".topbar-update")).toBeNull();
+const PHASES: Array<{
+  phase: UpdateSnapshot["phase"];
+  tone: string;
+  status: string;
+  snapshot?: Partial<UpdateSnapshot>;
+  visible?: string;
+}> = [
+  { phase: "disabled", tone: "neutral", status: "自动更新尚不可用" },
+  { phase: "idle", tone: "neutral", status: "尚未检查更新" },
+  { phase: "checking", tone: "neutral", status: "正在检查更新…" },
+  { phase: "up_to_date", tone: "latest", status: "已是最新版本" },
+  { phase: "available", tone: "action", status: "发现新版本 9.9.9，准备下载", snapshot: { version: "9.9.9" } },
+  { phase: "downloading", tone: "action", status: "正在下载 9.9.9（40%）", snapshot: { version: "9.9.9", downloaded: 40, total: 100 }, visible: "正在下载 9.9.9（40%）" },
+  { phase: "ready", tone: "action", status: "新版本 9.9.9 已下载并验签，可安装", snapshot: { version: "9.9.9", verified: true, installable: true }, visible: "新版本 9.9.9 已下载并验签，可安装" },
+  { phase: "installing", tone: "action", status: "正在安装，安装完成后请重新启动", visible: "正在安装，安装完成后请重新启动" },
+  { phase: "error", tone: "neutral", status: "网络不可达", snapshot: { error: "网络不可达" }, visible: "网络不可达" },
+];
+
+describe("单一版本入口（#269）", () => {
+  for (const item of PHASES) {
+    it(item.phase + "：点版本号只打开本地更新说明", async () => {
+      const port = createFakePort();
+      const opens = await show(port, { ...emptySnapshot(), ...item.snapshot, phase: item.phase });
+      const entry = versionButton();
+
+      expect(entry.textContent).toBe(CURRENT_VERSION);
+      expect(entry.dataset.updateTone).toBe(item.tone);
+      expect(entry.title).toContain(item.status);
+      expect(entry.getAttribute("aria-label")).toContain(item.status);
+      expect(entry.getAttribute("aria-haspopup")).toBe("dialog");
+      expect(buttons().some((b) => ["检查更新", "已是最新", "有新版本", "重试检查"].includes((b.textContent ?? "").trim()))).toBe(false);
+      if (item.visible) expect(hint()).toContain(item.visible);
+
+      await act(async () => entry.click());
+      expect(opens).toHaveBeenCalledTimes(1);
+      expect(port.calls.updateCheck).toBe(0);
+      expect(port.calls.updateInstall).toBe(0);
+    });
+  }
+
+  it("更新能力关闭也保留可点版本入口，状态为普通色", async () => {
+    const port = createFakePort({ missing: ["update"] });
+    const opens = await show(port, ready());
+    const entry = versionButton();
+
+    expect(entry.dataset.updateTone).toBe("neutral");
+    expect(entry.title).toContain("自动更新尚不可用");
+    await act(async () => entry.click());
+    expect(opens).toHaveBeenCalledTimes(1);
   });
 
-  it("没有新版本时只摆检查更新，不常驻一个灰的安装按钮", async () => {
-    await show(createFakePort(), emptySnapshot());
-    expect(hint()).toContain("检查更新");
-    expect(container.textContent).not.toContain("下载并安装");
-  });
-
-  it("实现说可装但没验签：仍然不能点（界面不把 installable 当成验签）", async () => {
+  it("已就绪但未验签：安装按钮仍不能点", async () => {
     await show(createFakePort(), ready({ verified: false, installable: true }));
     expect(button("下载并安装").disabled).toBe(true);
   });
@@ -88,12 +157,6 @@ describe("首页版本号旁的更新入口", () => {
     expect(button("下载并安装").disabled).toBe(false);
   });
 
-  it("正在检查时不能重复点检查", async () => {
-    await show(createFakePort(), { ...emptySnapshot(), phase: "checking" });
-    expect(button("检查中").disabled).toBe(true);
-  });
-
-  // #181：按钮跟着状态变文案与颜色。
   it("写盘没抛错但仍有改动没保存：拒绝安装（#180）", async () => {
     const port = createFakePort();
     await show(port, ready(), { unsavedChanges: () => true });
@@ -116,11 +179,10 @@ describe("首页版本号旁的更新入口", () => {
     expect(hint()).toContain("安装失败");
   });
 
-  it("检查失败时给原因，不给假成功，也不给手动下载旁路", async () => {
-    const failed = { ...emptySnapshot(), phase: "error" as const, error: "网络不可达", page_url: "https://example.invalid/release" };
-    await show(createFakePort({ update: failed }), failed);
+  it("检查失败不放外部下载旁路，失败原因保持可见", async () => {
+    const port = createFakePort();
+    await show(port, { ...emptySnapshot(), phase: "error", error: "网络不可达", page_url: "https://example.invalid/release" });
     expect(hint()).toContain("网络不可达");
-    expect(container.querySelector("a.topbar-update-link")).toBeNull();
-    expect(container.textContent).not.toContain("手动下载");
+    expect(container.querySelector("a.topbar-update-link, a[href='https://example.invalid/release']")).toBeNull();
   });
 });

@@ -192,7 +192,6 @@ describe("工具栏", () => {
           packMenuDisabled: false,
           onTogglePackMenu: vi.fn(),
           version: "1.0",
-          ready: true,
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
           onOpenSettings: vi.fn(),
@@ -204,8 +203,8 @@ describe("工具栏", () => {
     expect(container.textContent).toContain("画板包");
   });
 
-  // #181：更新入口在首页版本号旁边，不再藏在高级设置里。
-  it("版本号旁边有检查更新入口", async () => {
+  // #269：版本号与更新入口合并为同一个可点按钮。
+  it("版本号就是更新入口", async () => {
     await act(async () =>
       dom.render(
         createElement(ShellProvider, { port: createFakePort(), children: createElement(AppToolbar, {
@@ -216,7 +215,6 @@ describe("工具栏", () => {
           packMenuDisabled: false,
           onTogglePackMenu: vi.fn(),
           version: "1.6.6",
-          ready: true,
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
           onOpenSettings: vi.fn(),
@@ -224,13 +222,10 @@ describe("工具栏", () => {
         }) }),
       ),
     );
-    const version = container.querySelector(".topbar-version");
-    const entry = container.querySelector(".topbar-update");
-    expect(version).not.toBeNull();
-    expect(entry).not.toBeNull();
-    // 入口紧挨着版本号：两者在同一个工具栏右侧容器里，版本号在前。
-    expect(container.textContent?.indexOf("1.6.6")).toBeLessThan(container.textContent?.indexOf("检查更新") ?? Infinity);
-    expect(entry?.textContent).toContain("检查更新");
+    const entry = container.querySelector<HTMLElement>(".topbar-version");
+    expect(entry?.textContent).toBe("1.6.6");
+    expect(entry?.getAttribute("aria-label")).toContain("当前版本 1.6.6");
+    expect(container.querySelectorAll(".topbar-update-btn")).toHaveLength(1);
   });
 
 });

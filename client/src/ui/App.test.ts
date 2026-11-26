@@ -73,7 +73,7 @@ describe("工作台", () => {
     await show(port, { version: "1.2.3" });
     expect(container.textContent).toContain("画板包");
     expect(container.textContent).toContain("高级设置");
-    expect(container.textContent).toContain("Kacha 1.2.3");
+    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "1.2.3")).toBe(true);
   });
 
   it("用量提醒：到了上限时给出提醒与管理画板入口", async () => {
@@ -266,7 +266,7 @@ describe("工作台", () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     await show(port, { version: "1.2.3" });
-    const versionButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Kacha 1.2.3"));
+    const versionButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "1.2.3");
     await act(async () => versionButton?.click());
     const close = [...container.querySelectorAll("button")].find((button) => button.getAttribute("aria-label") === "关闭");
     await act(async () => close?.click());

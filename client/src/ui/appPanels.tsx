@@ -112,7 +112,6 @@ export function AppToolbar({
   packMenuDisabled,
   onTogglePackMenu,
   version,
-  ready,
   onOpenChangelog,
   settingsLoaded,
   onOpenSettings,
@@ -131,7 +130,6 @@ export function AppToolbar({
   /** 打开菜单时给它的位置（按钮下缘）。 */
   onTogglePackMenu(at: { x: number; y: number }): void;
   version: string | null;
-  ready: boolean;
   onOpenChangelog(): void;
   settingsLoaded: boolean;
   onOpenSettings(): void;
@@ -164,8 +162,7 @@ export function AppToolbar({
         >
           画板包 ▾
         </button>
-        {version && <button className="topbar-button topbar-version" onClick={onOpenChangelog} disabled={!ready} aria-haspopup="dialog" title="查看更新内容">Kacha {version}</button>}
-        <UpdateToolbarControl {...update} />
+        {version && <UpdateToolbarControl {...update} version={version} onOpenChangelog={onOpenChangelog} />}
         <button className="topbar-button" onClick={onOpenFeedback} aria-haspopup="dialog" title={feedbackAvailable ? "提交反馈" : "反馈暂不可用，点击重试"}>
           {feedbackAvailable ? "反馈" : "反馈（暂不可用）"}
         </button>

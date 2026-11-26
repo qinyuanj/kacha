@@ -34,6 +34,8 @@
 
 Windows x64 当前用户安装器由 release 构建产出 `build/windows-amd64/kacha-setup-<版本>-amd64.exe`，不需要管理员权限；安装器未做 Authenticode 代码签名，首次运行可能出现 SmartScreen 提示。自动更新只在构建内置发布者公钥后开放。首日整体验收的通过项与外部阻塞见 [首日验收记录](docs/release/ACCEPTANCE-165.md)。
 
+顶栏更新区只常驻当前安装版本号；点版本号始终打开本地当前版及历史更新说明，不触发检查、下载或安装。更新状态通过绿／红／普通颜色、悬浮提示和无障碍名称表达；启动与每 15 分钟的自动检查、下载进度、失败原因文本和「下载并安装」按钮保持原行为。
+
 产品版本只在 `mygo.config.ts` 声明。[更新说明](docs/release/changelog.md) 描述当前版本的可用能力；[领域词表](GLOSSARY.md) 和 [领域决策](docs/agents/domain.md) 说明画板、任务目录与画板包的语义。
 
 ## 反馈
