@@ -122,8 +122,8 @@ function harness(options: HarnessOptions = {}) {
  */
 const ALL_ACTIONS = Object.keys(canvasCommands(harness().deps)) as readonly BoardAction[];
 
-/** 画布上不执行的动作：导出画板包 / 整板下载结果 / 导入画板包属于标签页。 */
-const NOT_ON_CANVAS: readonly BoardAction[] = ["exportPack", "downloadResults", "importPack"];
+/** 画布上不执行的动作：导出画板包 / 导入画板包属于标签页。 */
+const NOT_ON_CANVAS: readonly BoardAction[] = ["exportPack", "importPack"];
 
 /** 只认节点目标的动作。 */
 const NODE_ONLY: readonly BoardAction[] = [

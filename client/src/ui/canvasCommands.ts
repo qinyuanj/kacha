@@ -143,9 +143,8 @@ export function canvasCommands(deps: CanvasCommandDeps): CanvasCommandTable {
     viewSendText: entry("viewSendText", viewSendTextCommand),
     disconnect: entry("disconnect", disconnectCommand),
     editRegion: entry("editRegion", editRegionCommand),
-    // 导出画板包 / 整板下载结果 / 导入画板包属于标签页，画布不处理（与今天的 performAction 一致）。
+    // 导出画板包 / 导入画板包属于标签页，画布不处理（与今天的 performAction 一致）。
     exportPack: undefined,
-    downloadResults: undefined,
     importPack: undefined,
   };
 }

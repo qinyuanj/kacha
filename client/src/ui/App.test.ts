@@ -76,6 +76,21 @@ describe("工作台", () => {
     expect([...container.querySelectorAll("button")].some((button) => button.textContent === "1.2.3")).toBe(true);
   });
 
+  it("画板包菜单只有导入与导出：整板结果下载不再出现（#262）", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    await show(port);
+    await vi.waitFor(() => expect(container.querySelector(".canvas")).not.toBeNull());
+    const packButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("画板包"));
+    await act(async () => packButton?.click());
+    const items = [...container.querySelectorAll('[role="menuitem"]')];
+    expect(items.map((item) => (item.textContent ?? "").trim())).toEqual(["导入画板包…", "导出画板包…"]);
+    // 保留的相邻能力必须真能触发：点导入确实走到壳端口选包，而不是只剩空菜单。
+    const importItem = items.find((item) => item.textContent?.includes("导入画板包"));
+    await act(async () => (importItem as HTMLElement | undefined)?.click());
+    expect(port.calls.pickPackFile).toHaveLength(1);
+  });
+
   it("用量提醒：到了上限时给出提醒与管理画板入口", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
