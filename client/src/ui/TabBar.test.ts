@@ -196,13 +196,10 @@ describe("标签页栏的行为", () => {
     expect(calls).toEqual(["k"]);
   });
 
-  it("给了画板列表入口就显示并能点，没给就不显示", async () => {
+  it("标签栏不再放全局画板列表入口", async () => {
     await renderBar();
     expect(container.querySelector(".tab-list")).toBeNull();
-    let opened = 0;
-    await renderBar({ onOpenList: () => (opened += 1) });
-    await act(async () => (container.querySelector(".tab-list") as HTMLElement).click());
-    expect(opened).toBe(1);
+    expect(container.textContent).not.toContain("画板列表");
   });
 
   it("新建按钮调 onCreate", async () => {

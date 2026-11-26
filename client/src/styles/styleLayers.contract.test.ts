@@ -26,7 +26,7 @@ const ownership: { selector: string; owner: Layer }[] = [
   { selector: "hint-list", owner: "base" },
   { selector: "icon-button", owner: "base" },
   { selector: "region-limit-exceeded", owner: "dialogs" },
-  { selector: "tab-list", owner: "shell" },
+  { selector: "board-list-popover", owner: "dialogs" },
   { selector: "field-label", owner: "canvas" },
   { selector: "form-row-label", owner: "dialogs" },
 ];

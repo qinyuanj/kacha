@@ -2,7 +2,7 @@
 // 列表由本机存储拼好（#87）：每行带画板体量「约 X」，高于本机存储配置的阈值标黄 / 标红，只描述大小。
 // 同一对话框也是用量提醒里的「管理画板」（#88），那时按体量从大到小排。
 // 可见判定在 ui/boardListView.ts（#137），这里只留接线与 DOM 摆放。
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { BoardListEntry, BoardListing } from "../shell/types";
 import { errorText } from "../core/errors";
 import { useShell } from "./shell";
@@ -27,6 +27,44 @@ interface Props {
   onCopy(path: string): Promise<string | null>;
   /** 「管理画板」（从用量提醒进入）：标题换成管理画板，各组按体量从大到小排，方便查看每块画板多大。 */
   manage?: boolean;
+  /** 锚点：触发按钮的左下角（视口坐标），在 960px 窗口里向内收敛。 */
+  at?: { x: number; y: number } | null;
+  /** 触发按钮；点它不算点击外部，关闭后由外层把焦点还给它。 */
+  trigger?: HTMLElement | null;
+}
+
+function popoverStyleOf(at: { x: number; y: number } | null | undefined) {
+  const view = typeof window === "undefined" ? { innerWidth: 1024, innerHeight: 768 } : window;
+  const width = Math.min(420, Math.max(280, view.innerWidth - 16));
+  const left = Math.max(8, Math.min(at?.x ?? view.innerWidth - width - 8, view.innerWidth - width - 8));
+  const top = Math.max(8, Math.min(at?.y ?? 80, view.innerHeight - 120));
+  const maxHeight = Math.min(560, Math.max(200, view.innerHeight - top - 8));
+  return { left: `${Math.round(left)}px`, top: `${Math.round(top)}px`, width: `${Math.round(width)}px`, maxHeight: `${Math.round(maxHeight)}px` };
+}
+
+/** 非模态弹层的关闭规则：Esc 与点击外部；危险操作确认框打开时不接管。 */
+function usePopoverDismiss(enabled: boolean, onClose: () => void, trigger: HTMLElement | null) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        onClose();
+      }
+    };
+    const onOutside = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && !ref.current?.contains(target) && !trigger?.contains(target)) onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("mousedown", onOutside);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("mousedown", onOutside);
+    };
+  }, [enabled, onClose, trigger]);
+  return ref;
 }
 
 /** 画板位用量那一行。 */
@@ -249,7 +287,7 @@ function useBoardConfirm(refresh: () => void) {
   return { deleting, setDeleting, archiving, setArchiving, confirmDelete, confirmArchive };
 }
 
-export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose, onArchive, onUnarchive, onCopy, manage = false }: Props) {
+export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose, onArchive, onUnarchive, onCopy, manage = false, at, trigger }: Props) {
   const { listing, error, refresh } = useBoardListing();
   const port = useShell();
   const confirm = useBoardConfirm(refresh);
@@ -271,9 +309,10 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
     remove: (entry) => setDeleting({ entry, busy: false, error: null }),
   };
   const title = listTitle(manage, MANAGE_BOARDS_TEXT);
+  const popoverRef = usePopoverDismiss(deleting === null && archiving === null, onClose, trigger ?? null);
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}>
+    <>
+      <div ref={popoverRef} className="board-list-popover" role="dialog" aria-label={title} style={popoverStyleOf(at)}>
         <div className="modal-head">
           <h2>{title}</h2>
           <button className="icon-button" aria-label="关闭" onClick={onClose}>
@@ -314,6 +353,6 @@ export function BoardListDialog({ openPaths, onOpen, onDelete, onExport, onClose
           onCancel={() => setArchiving(null)}
         />
       )}
-    </div>
+    </>
   );
 }

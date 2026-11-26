@@ -11,7 +11,11 @@ import { createFakePort } from "../src/shell/testing/fakePort";
 import { Root } from "../src/ui/Root";
 import { ShellProvider } from "../src/ui/shell";
 
-const port = createFakePort();
+// 长名称画板：列表弹层要在 960px 窗口里截断显示，不能用名称把弹层撑出屏幕。
+const longBoardName = "一个非常非常长的画板名称用来验证顶部第二行弹层在窄窗口下不会溢出".repeat(3);
+const port = createFakePort({
+  boards: [{ path: `/~/画板/${longBoardName}.ugcboard.json`, main: null, version: null, bytes: 12345 }],
+});
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
