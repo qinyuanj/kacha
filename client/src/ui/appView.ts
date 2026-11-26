@@ -4,8 +4,8 @@ import type { Board } from "../core/board";
 import type { SizeTier } from "../core/boardSize";
 import type { Session } from "./useBoardSessions";
 import { UNAVAILABLE_TEXT } from "../core/uiText";
-import { usageNoticeVisible } from "./appUiState";
-import { activeSession, archivedPath, boardNoticeText, boardOpenState, boardTitleOf, failingSessions, historyLabels, packMenuReason, type FailingSession } from "./appCallbacks";
+import { packExportDisabled, usageNoticeVisible } from "./appUiState";
+import { activeSession, archivedPath, boardNoticeText, boardOpenState, boardTitleOf, failingSessions, historyLabels, type FailingSession } from "./appCallbacks";
 
 /** 工作台此刻的样子：所有派生值一次算好。 */
 export interface AppView {
@@ -18,7 +18,6 @@ export interface AppView {
   redoLabel: string | null;
   boardNotice: string | null;
   exportDisabled: string | null;
-  downloadDisabled: string | null;
   /** 导入画板包的置灰原因（端口说这项能力还没有时非空）。 */
   importDisabled: string | null;
   titleOf(key: string): string;
@@ -44,8 +43,7 @@ export function appView(input: {
     undoLabel: labels.undo,
     redoLabel: labels.redo,
     boardNotice: boardNoticeText(active),
-    exportDisabled: packMenuReason(active, "exportPack"),
-    downloadDisabled: packMenuReason(active, "downloadResults"),
+    exportDisabled: packExportDisabled(active),
     importDisabled: input.packImportOff ? "画板包导入" + UNAVAILABLE_TEXT : null,
     titleOf: (key: string) => boardTitleOf(input.sessions, key),
   };

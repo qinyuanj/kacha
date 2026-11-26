@@ -1,10 +1,8 @@
-// Package resultsave 把生成结果保存到用户选的本机位置：单结果带图层时打 zip，
-// 整板结果按画板里的结果节点打包；缺失图片列在包内说明，不静默伪装成完整结果。
+// Package resultsave 把单张生成结果保存到用户选的本机位置：带图层时打 zip。
 package resultsave
 
 import (
 	"archive/zip"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -19,7 +17,6 @@ import (
 const (
 	KindMissing   = "missing"
 	KindForbidden = "forbidden"
-	KindCorrupt   = "corrupt"
 	KindFailed    = "failed"
 )
 
@@ -39,11 +36,10 @@ func failedf(format string, args ...any) *Error {
 	return &Error{Kind: KindFailed, Message: fmt.Sprintf(format, args...)}
 }
 
-// zipItem 是包内一个条目：文本或磁盘上的文件。
+// zipItem 是包内一个条目，指向数据根里的一个文件。
 type zipItem struct {
 	name string
 	path string
-	text string
 }
 
 // SaveResult 保存一张结果：有图层时写底图 + layers.json + layers/* 的 zip，否则原样复制字节。
@@ -66,33 +62,6 @@ func SaveResult(root, src, target string) *Error {
 	return writeZip(target, items)
 }
 
-// SaveBoardResults 按画板的结果节点保存整板：相对路径原样保留，图层跟在各自结果旁边。
-func SaveBoardResults(root, board, target string) *Error {
-	if !pathguard.Inside(root, board) {
-		return &Error{Kind: KindForbidden, Message: "画板不在数据根内，不能另存"}
-	}
-	text, err := os.ReadFile(board)
-	if err != nil {
-		return missingf("画板读不出来：%s", filepath.Base(board))
-	}
-	var parsed struct {
-		Nodes []struct {
-			Type string `json:"type"`
-			Path string `json:"path"`
-		} `json:"nodes"`
-	}
-	if err := json.Unmarshal(text, &parsed); err != nil {
-		return &Error{Kind: KindCorrupt, Message: "画板文件损坏，不能列出结果"}
-	}
-	items, missing := boardItems(root, parsed.Nodes)
-	if len(missing) > 0 {
-		sort.Strings(missing)
-		note := "以下结果在数据根中缺失，未打包（可在画板上重新定位后再保存）：\n" + strings.Join(missing, "\n") + "\n"
-		items = append(items, zipItem{name: "缺失文件.txt", text: note})
-	}
-	return writeZip(target, items)
-}
-
 // SuggestedName 给系统「另存为」对话框一个默认名：带图层的结果用任务编号加 .zip。
 func SuggestedName(root, src string) string {
 	if pathguard.Inside(root, src) {
@@ -101,50 +70,6 @@ func SuggestedName(root, src string) string {
 		}
 	}
 	return filepath.Base(src)
-}
-
-// boardItems 展开每个结果节点与图层；去重后的缺失路径单独返回。
-func boardItems(root string, nodes []struct {
-	Type string `json:"type"`
-	Path string `json:"path"`
-}) ([]zipItem, []string) {
-	items := []zipItem{}
-	missing := []string{}
-	seen := map[string]bool{}
-	for _, node := range nodes {
-		if node.Type != "result" || node.Path == "" || seen[node.Path] {
-			continue
-		}
-		seen[node.Path] = true
-		rel := filepath.FromSlash(strings.ReplaceAll(node.Path, "\\", "/"))
-		abs := rel
-		if !filepath.IsAbs(abs) {
-			abs = filepath.Join(root, rel)
-		}
-		if !pathguard.Inside(root, abs) {
-			missing = append(missing, node.Path)
-			continue
-		}
-		info, err := os.Lstat(abs)
-		if err != nil || !info.Mode().IsRegular() {
-			missing = append(missing, node.Path)
-			continue
-		}
-		entry := filepath.ToSlash(rel)
-		items = append(items, zipItem{name: entry, path: abs})
-		layers, failure := layerItems(abs)
-		if failure == nil {
-			prefix := ""
-			if slash := strings.LastIndex(entry, "/"); slash >= 0 {
-				prefix = entry[:slash+1]
-			}
-			for _, layer := range layers {
-				layer.name = prefix + layer.name
-				items = append(items, layer)
-			}
-		}
-	}
-	return items, missing
 }
 
 // layerItems 读一个结果旁边的 layers.json 与 layers/ 下的图层（不含隐藏项）。
@@ -235,18 +160,10 @@ func writeZip(target string, items []zipItem) *Error {
 	return nil
 }
 
-// writeZipItem 写一个 zip 条目。
+// writeZipItem 写一个 zip 条目：图片原样存放。
 func writeZipItem(zw *zip.Writer, item zipItem) error {
-	method := zip.Store
-	if item.text != "" {
-		method = zip.Deflate
-	}
-	writer, err := zw.CreateHeader(&zip.FileHeader{Name: item.name, Method: method})
+	writer, err := zw.CreateHeader(&zip.FileHeader{Name: item.name, Method: zip.Store})
 	if err != nil {
-		return err
-	}
-	if item.text != "" {
-		_, err = io.WriteString(writer, item.text)
 		return err
 	}
 	file, err := os.Open(item.path)
