@@ -264,7 +264,12 @@ export function BoardCanvas({
   performRef.current = (action, target, at) => commands[action]?.(target, at);
   performDragCreateRef.current = canvasDragCreate(commandDeps);
 
-  useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen: overlays.dialogOpenRef, onUndo, onRedo, toast, port });
+  // 键盘菜单与右键空白菜单共用同一目标与落点判定；焦点先落在画布，关菜单后由菜单返还。
+  const openKeyboardMenu = useCallback(
+    (client: { x: number; y: number }) => overlays.openMenu({ clientX: client.x, clientY: client.y, preventDefault: () => undefined }, { kind: "pane" }),
+    [overlays.openMenu],
+  );
+  useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen: overlays.dialogOpenRef, onUndo, onRedo, onOpenMenu: openKeyboardMenu, toast, port });
   useCanvasDrop({ wrapper, boardRef, screenToFlowPosition: (client) => flow.screenToFlowPosition(client), apply, toast, userRoot, readOnly, port });
   // 页面级粘贴接管（#96）：分派在 core/pageInput（纯逻辑），这里只把落点、模态与图片导入接上。
   useCanvasPaste({
@@ -294,6 +299,7 @@ export function BoardCanvas({
           <div
             className={canvasClassName(dragging)}
             ref={wrapper}
+            tabIndex={-1}
             onContextMenu={(e) => blockNativeContextMenu(port.ui.isEditableTarget, e)}
             onPointerDownCapture={nav.onPointerDownCapture}
             onPointerUpCapture={nav.onPointerUpCapture}
@@ -301,14 +307,6 @@ export function BoardCanvas({
             <CanvasToolbar
               toolbarSlot={toolbarSlot}
               readOnly={readOnly}
-              board={board}
-              table={table}
-              discovery={discovery}
-              availableModels={actions.availableModels}
-              apply={apply}
-              onNewPrompt={() => addPrompt()}
-              onAddReferences={() => void pickReferences()}
-              onNewTask={() => addTask()}
               onUndo={onUndo}
               onRedo={onRedo}
               undoLabel={undoLabel}
