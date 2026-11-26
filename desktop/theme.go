@@ -26,7 +26,7 @@ const (
 //
 // 两色取 client/src/styles/tokens.css 的 --app-bg 亮 / 暗值：不一致时冷启动到首帧之间会闪一下
 // 另一种底色。light-dark(亮, 暗) 由 MyGo 按当前外观选。
-const windowBackgroundColor = "light-dark(#f6f7f9, #111318)"
+const windowBackgroundColor = "light-dark(#d5d5ad, #111318)"
 
 // themeSourceOf 把前端档位映射成 MyGo 主题源。
 //
