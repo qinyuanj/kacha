@@ -38,7 +38,6 @@ describe("归档画板的只读菜单", () => {
     disconnect: true,
     editRegion: true,
     exportPack: true,
-    downloadResults: true,
     importPack: true,
   };
   const editingActions = Object.keys(EDITING_ACTIONS) as Exclude<BoardAction, "preview" | "saveAs">[];

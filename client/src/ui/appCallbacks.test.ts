@@ -87,28 +87,22 @@ describe("保存失败的画板", () => {
 });
 
 describe("画板包菜单", () => {
-  it("点了菜单项：导入、导出、下载各走各的", () => {
+  it("点了菜单项：导入与导出各走各的", () => {
     const importPack = vi.fn();
     const prepareExport = vi.fn();
-    const download = vi.fn();
-    packMenuPick("importPack", okSession(), importPack, prepareExport, download);
+    packMenuPick("importPack", okSession(), importPack, prepareExport);
     expect(importPack).toHaveBeenCalled();
     expect(prepareExport).not.toHaveBeenCalled();
-    packMenuPick("exportPack", okSession(), importPack, prepareExport, download);
+    packMenuPick("exportPack", okSession(), importPack, prepareExport);
     expect(prepareExport).toHaveBeenCalledWith("k1");
-    packMenuPick("downloadResults", okSession(), importPack, prepareExport, download);
-    expect(download).toHaveBeenCalledWith("/~/画板/a.ugcboard.json");
   });
 
-  it("画板打不开：导出与下载都不做", () => {
+  it("画板打不开：导出不做", () => {
     const importPack = vi.fn();
     const prepareExport = vi.fn();
-    const download = vi.fn();
     const broken: Session = { key: "k", path: "/~/a", status: "corrupt", reason: "坏了" };
-    packMenuPick("exportPack", broken, importPack, prepareExport, download);
-    packMenuPick("downloadResults", broken, importPack, prepareExport, download);
+    packMenuPick("exportPack", broken, importPack, prepareExport);
     expect(prepareExport).not.toHaveBeenCalled();
-    expect(download).not.toHaveBeenCalled();
   });
 });
 
