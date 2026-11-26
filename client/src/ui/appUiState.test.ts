@@ -1,6 +1,6 @@
 // 工作台界面状态的判定（#137）：提示、菜单禁用与模态开关。
 import { describe, expect, it } from "vitest";
-import { modalOpenOf, packMenuDisabled, saveFailureNotice, uiStateOf, uiStateText, usageNoticeVisible } from "./appUiState";
+import { modalOpenOf, packExportDisabled, saveFailureNotice, uiStateOf, uiStateText, usageNoticeVisible } from "./appUiState";
 
 const snapshot = (patch: Partial<Parameters<typeof uiStateOf>[0]> = {}) => ({
   sessions: [] as { key: string; path: string }[],
@@ -24,9 +24,9 @@ describe("界面状态", () => {
   });
 
   it("画板位提醒：导不出来时禁用导出", () => {
-    expect(packMenuDisabled(undefined, "exportPack")).toBe("没有打开的画板");
-    expect(packMenuDisabled(undefined, "downloadResults")).toBe("没有打开的画板");
-    expect(packMenuDisabled({ status: "ok" }, "exportPack")).toBeNull();
+    expect(packExportDisabled(undefined)).toBe("没有打开的画板");
+    expect(packExportDisabled({ status: "corrupt" })).toBe("画板无法打开，不能导出");
+    expect(packExportDisabled({ status: "ok" })).toBeNull();
   });
 });
 
