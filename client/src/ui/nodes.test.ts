@@ -70,7 +70,6 @@ function board(overrides: Partial<BoardActions> = {}): BoardActions {
     perform: vi.fn(),
     setPromptDraft: vi.fn(),
     takePromptFocus: () => false,
-    nodeUnmounted: vi.fn(),
     ...overrides,
   };
 }
@@ -244,12 +243,6 @@ describe("ImageNode", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 
-  it("卸载时通知画布收起悬浮动作条", async () => {
-    const actions = board();
-    await show(inBoard(image(), actions));
-    await act(async () => root.unmount());
-    expect(actions.nodeUnmounted).toHaveBeenCalledWith("n1");
-  });
 });
 
 // ---- 宽高比组合框 ----
