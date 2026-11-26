@@ -238,7 +238,6 @@ describe("工具栏", () => {
           packMenuDisabled: false,
           onTogglePackMenu: vi.fn(),
           version: "1.6.6",
-          ready: true,
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
           onOpenSettings: vi.fn(),
