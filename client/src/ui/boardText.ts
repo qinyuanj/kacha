@@ -9,9 +9,6 @@ export const BOARD_MISSING_TEXT = "该画板已不存在，可能已在别处改
 /** 原文件丢失时保留内存改动的恢复指引。 */
 export const MISSING_BOARD_RECOVERY_TEXT = "请勿关闭当前画板；请先恢复原文件路径后重试保存";
 
-/** 工具栏「新建任务模型」：默认模型 Flash 不在可用列表时的占位项。 */
-export const FLASH_UNAVAILABLE_TEXT = "Flash 不可用，请刷新模型列表";
-
 /** 画板位已用 / 总数（#89）。 */
 export interface Slots {
   used: number;

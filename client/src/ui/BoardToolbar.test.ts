@@ -1,13 +1,11 @@
 // @vitest-environment jsdom
-// 画板工具栏的可见行为（#137）：置灰时的文案、撤销 / 重做的可用性、运行按钮的「选中」后缀、
-// 生成尚不可用时的标记与置灰。
+// 精简后画板工具栏的可见契约（#267）：只剩撤销 / 重做 / 运行，从撤销开始；
+// 没有新建节点控件、没有组合模型下拉，也没有它们的禁用占位。运行守卫保持原样。
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { UNAVAILABLE_TEXT } from "../core/uiText";
 import { BoardToolbar } from "./BoardToolbar";
 
-// React 19 的 act() 要在测试环境里显式打开。
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -24,73 +22,68 @@ afterEach(async () => {
   container.remove();
 });
 
-async function show(props: Parameters<typeof BoardToolbar>[0]): Promise<void> {
+async function show(props: Partial<Parameters<typeof BoardToolbar>[0]> = {}): Promise<void> {
   await act(async () => root.render(createElement(BoardToolbar, props)));
 }
 
-/** 按 aria-label 找按钮。 */
-function buttonOf(label: string): HTMLButtonElement {
-  const el = container.querySelector(`button[aria-label="${label}"]`);
-  if (!el) throw new Error(`没有找到按钮 ${label}`);
-  return el as HTMLButtonElement;
+function buttons(): HTMLButtonElement[] {
+  return [...container.querySelectorAll("button")];
 }
 
-/** 按文字找按钮。 */
-function buttonWithText(text: string): HTMLButtonElement {
-  const el = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes(text));
-  if (!el) throw new Error(`没有找到按钮 ${text}`);
-  return el as HTMLButtonElement;
+function byLabel(label: string): HTMLButtonElement {
+  const el = container.querySelector<HTMLButtonElement>('button[aria-label="' + label + '"]');
+  if (!el) throw new Error("没有找到按钮 " + label);
+  return el;
 }
 
-describe("画板工具栏", () => {
-  it("没有画板：所有入口置灰", async () => {
-    await show({ disabled: true });
-    for (const el of container.querySelectorAll("button")) {
-      expect(el.getAttribute("aria-disabled")).toBe("true");
-    }
+function runButton(): HTMLButtonElement {
+  const el = buttons().find((b) => (b.textContent ?? "").includes("运行"));
+  if (!el) throw new Error("没有找到运行按钮");
+  return el;
+}
+
+async function click(el: HTMLButtonElement): Promise<void> {
+  await act(async () => el.click());
+}
+
+describe("精简后的画板工具栏", () => {
+  it("只有撤销、重做、运行，从撤销开始，没有新建按钮或模型下拉", async () => {
+    await show({ undoLabel: "移动 2 个节点", redoLabel: "新建提示词" });
+    expect(buttons().map((b) => b.getAttribute("aria-label") ?? b.textContent?.trim())).toEqual(["撤销", "重做", "▶ 运行"]);
+    expect(container.querySelector("select")).toBeNull();
+    expect(container.textContent).not.toContain("＋");
   });
 
-  it("有画板：入口可点，点击触发各自的回调", async () => {
-    const onNewPrompt = vi.fn();
-    const onAddReferences = vi.fn();
-    const onNewTask = vi.fn();
-    const onRun = vi.fn();
-    await show({ onNewPrompt, onAddReferences, onNewTask, onRun });
-    await act(async () => buttonWithText("＋ 提示词").click());
-    await act(async () => buttonWithText("＋ 参考图").click());
-    await act(async () => buttonWithText("＋ 生成任务").click());
-    await act(async () => buttonWithText("▶ 运行").click());
-    expect(onNewPrompt).toHaveBeenCalled();
-    expect(onAddReferences).toHaveBeenCalled();
-    expect(onNewTask).toHaveBeenCalled();
-    expect(onRun).toHaveBeenCalled();
+  it("没有画板时只有这三个入口置灰，不留禁用占位", async () => {
+    await show({ disabled: true, undoLabel: "移动 2 个节点", redoLabel: "新建提示词" });
+    expect(buttons()).toHaveLength(3);
+    for (const el of buttons()) expect(el.getAttribute("aria-disabled")).toBe("true");
+    expect(container.querySelector("select")).toBeNull();
   });
 
-  it("撤销 / 重做：没有可撤销 / 重做的操作时置灰，有了才可点", async () => {
+  it("撤销 / 重做按有无历史项置灰，点击只触发各自的回调", async () => {
     const onUndo = vi.fn();
-    await show({ onUndo });
-    expect(buttonOf("撤销").getAttribute("aria-disabled")).toBe("true");
-    await show({ onUndo, undoLabel: "新建提示词" });
-    expect(buttonOf("撤销").getAttribute("aria-disabled")).toBeNull();
-    await act(async () => buttonOf("撤销").click());
-    expect(onUndo).toHaveBeenCalled();
+    const onRedo = vi.fn();
+    await show({ onUndo, onRedo, undoLabel: "移动 2 个节点", redoLabel: null });
+    await click(byLabel("撤销"));
+    await click(byLabel("重做"));
+    expect(onUndo).toHaveBeenCalledTimes(1);
+    expect(onRedo).not.toHaveBeenCalled();
+    expect(byLabel("撤销").getAttribute("aria-disabled")).toBeNull();
+    expect(byLabel("重做").getAttribute("aria-disabled")).toBe("true");
   });
 
-  it("运行：有选中时按钮写「运行选中」", async () => {
-    await show({ selectedCount: 0 });
-    expect(buttonWithText("▶ 运行").textContent).toBe("▶ 运行");
-    await show({ selectedCount: 3 });
-    expect(buttonWithText("▶ 运行").textContent).toBe("▶ 运行选中");
-  });
-
-  it("生成尚不可用：新建任务与运行都标「尚不可用」并置灰", async () => {
+  it("运行按钮照旧可点；生成不可用时只拦运行", async () => {
     const onRun = vi.fn();
-    await show({ generationUnavailable: true, onRun });
-    const run = buttonWithText("▶ 运行");
-    expect(run.textContent).toContain("（" + UNAVAILABLE_TEXT + "）");
-    expect(run.getAttribute("aria-disabled")).toBe("true");
-    expect(buttonWithText("＋ 生成任务").getAttribute("aria-disabled")).toBe("true");
-    await act(async () => run.click());
-    expect(onRun).not.toHaveBeenCalled();
+    await show({ onRun, selectedCount: 2 });
+    await click(runButton());
+    expect(onRun).toHaveBeenCalledTimes(1);
+
+    const blocked = vi.fn();
+    await show({ onRun: blocked, generationUnavailable: true, undoLabel: "移动 2 个节点" });
+    expect(runButton().getAttribute("aria-disabled")).toBe("true");
+    await click(runButton());
+    expect(blocked).not.toHaveBeenCalled();
+    expect(byLabel("撤销").getAttribute("aria-disabled")).toBeNull();
   });
 });

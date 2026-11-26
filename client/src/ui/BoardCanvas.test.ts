@@ -432,19 +432,13 @@ function dropFiles(target: HTMLElement, files: File[], point = { x: 30, y: 40 })
 // ---- 用例 ----
 
 describe("工具栏（portal 进 toolbarSlot）", () => {
-  it("工具栏渲染在 toolbarSlot 里，点「＋ 提示词」在视口中央新建", async () => {
-    const { apply } = await renderCanvas({ toolbarSlot: slot });
+  it("工具栏渲染在 toolbarSlot 里，只剩撤销 / 重做 / 运行", async () => {
+    await renderCanvas({ toolbarSlot: slot });
     expect(slot.querySelector('[role="toolbar"][aria-label="画板工具栏"]')).not.toBeNull();
     // portal：渲染在槽里，不在画布根的子树里。
     expect(container.querySelector('[aria-label="画板工具栏"]')).toBeNull();
-    expect(slot.querySelector('select[aria-label="新建任务模型"]')).not.toBeNull();
-    // 文案在生产侧 BoardToolbar / PreviewDialog（本票未改动的既有组件），这里手抄同源字面量。
-    await act(async () => buttonByText(slot, "＋ 提示词").click());
-    // jsdom 里画布 rect 全 0，视口中央 = (-120, -80)（节点半尺寸），坐标取整。
-    expect(apply).toHaveBeenCalledWith({ kind: "newPrompt", at: [-120, -80] });
-    // 文案在生产侧 BoardToolbar / PreviewDialog（本票未改动的既有组件），这里手抄同源字面量。
-    await act(async () => buttonByText(slot, "＋ 生成任务").click());
-    expect(apply).toHaveBeenCalledWith({ kind: "newTask", at: [-120, -80], promptId: null });
+    expect(slot.querySelector("select")).toBeNull();
+    expect([...slot.querySelectorAll("button")].map((b) => b.getAttribute("aria-label") ?? b.textContent?.trim())).toEqual(["撤销", "重做", "▶ 运行"]);
   });
 
   it("没有槽位时不出工具栏", async () => {
@@ -465,22 +459,6 @@ describe("工具栏（portal 进 toolbarSlot）", () => {
     expect(harness.onRun).toHaveBeenCalledWith(["p1", "r1"]);
   });
 
-  it("「＋ 参考图…」选好文件后上传并落成参考图", async () => {
-    const { apply } = await renderCanvas({ toolbarSlot: slot });
-    const file = new File(["x"], "ref.png", { type: "image/png" });
-    vi.mocked(port.media.pickImages).mockResolvedValueOnce([file]);
-    // 文案在生产侧 BoardToolbar / PreviewDialog（本票未改动的既有组件），这里手抄同源字面量。
-    await act(async () => buttonByText(slot, "＋ 参考图…").click());
-    await flush();
-    expect(port.media.pickImages).toHaveBeenCalledWith(true);
-    expect(port.media.uploadReference).toHaveBeenCalledWith(file);
-    expect(apply).toHaveBeenCalledWith({
-      kind: "addReferences",
-      images: [{ path: "reference/ref.png", sha256: SHA_A, display_name: "ref.png", width: 240, height: 160, bytes: IMAGE_INFO.bytes }],
-      at: [-120, -80],
-      attach: null,
-    });
-  });
 });
 
 describe("上下文菜单", () => {
@@ -494,6 +472,28 @@ describe("上下文菜单", () => {
     await act(async () => menuItemButton(expected, "newTask").click());
     expect(apply).toHaveBeenCalledWith({ kind: "newTask", at: [30, 40], promptId: null });
     expect(menuEl()).toBeNull();
+  });
+
+  it("Shift+F10 与菜单键从画布打开菜单，Esc 关闭并焦点返回画布", async () => {
+    await renderCanvas();
+    const expected = menuItems({ kind: "pane" }, menuFactsOf(sampleBoard()));
+    canvasRoot().focus();
+    expect(document.activeElement).toBe(canvasRoot());
+
+    await press("F10", { shiftKey: true }, canvasRoot());
+    expect(menuEl()).not.toBeNull();
+    expect(menuItemLabels()).toEqual(expected.map((i) => i.label));
+    expect(document.activeElement).toBe(menuItemButton(expected, "newPrompt"));
+    await press("Escape");
+    expect(menuEl()).toBeNull();
+    expect(document.activeElement).toBe(canvasRoot());
+
+    canvasRoot().focus();
+    await press("ContextMenu", {}, canvasRoot());
+    expect(menuEl()).not.toBeNull();
+    await press("Escape");
+    expect(menuEl()).toBeNull();
+    expect(document.activeElement).toBe(canvasRoot());
   });
 
   it("Esc 与点菜单外面都关掉菜单", async () => {
@@ -751,8 +751,8 @@ describe("图片节点悬浮、保留入口与只读悬浮信息", () => {
 describe("只读画板（归档）", () => {
   it("工具栏置灰、编辑类动作不写画板、粘贴只提示只读", async () => {
     const harness = await renderCanvas({ readOnly: true, toolbarSlot: slot });
-    expect(buttonByText(slot, "＋ 提示词").getAttribute("aria-disabled")).toBe("true");
-    expect(slot.querySelector<HTMLSelectElement>('select[aria-label="新建任务模型"]')!.disabled).toBe(true);
+    expect([...slot.querySelectorAll("button")].every((b) => b.getAttribute("aria-disabled") === "true")).toBe(true);
+    expect(slot.querySelector("select")).toBeNull();
     expect(flowProps().nodesDraggable).toBe(false);
     expect(flowProps().nodesConnectable).toBe(false);
     // 画板不能改，Delete 键也不交给 React Flow。

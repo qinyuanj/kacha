@@ -321,8 +321,7 @@ describe("工作台外壳的接线", () => {
     expect(slot()?.querySelector('[role="toolbar"]')).toBeNull();
     await show(createFakePort(), { view: viewOf({ openState: "none" }) });
     expect(slot()?.querySelector('[role="toolbar"]')?.getAttribute("aria-label")).toBe("画板工具栏");
-    const prompt = [...(slot()?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.includes("＋ 提示词"));
-    expect(prompt?.getAttribute("aria-disabled")).toBe("true");
+    // 工具栏的具体入口由 BoardToolbar 契约守护；这里只确认无画板时仍有公共槽位。
   });
 
   it("没有数据根时画板包菜单按钮禁用，有则可用", async () => {

@@ -39,6 +39,11 @@ interface ShortcutContext {
   selectedCount: number;
 }
 
+export function isMenuShortcut(e: ShortcutInput): boolean {
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  return (e.shiftKey && e.key === "F10") || e.key === "ContextMenu" || e.key === "Apps";
+}
+
 /** 一条快捷键命令；null = 这个按键不归画板管。 */
 export type ShortcutCommand = { kind: "undo" } | { kind: "redo" } | { kind: "copy" };
 

@@ -144,6 +144,7 @@ describe("复制（端口驱动）", () => {
       dialogOpen: { current: false },
       onUndo: vi.fn(),
       onRedo: vi.fn(),
+      onOpenMenu: vi.fn(),
       toast: (message) => toasts.push(message),
       port,
     });

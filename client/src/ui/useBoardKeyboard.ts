@@ -10,7 +10,7 @@ import type { ShellPort } from "../shell/port";
 import { PASTE_TEXT } from "./boardText";
 import { copyOutcome } from "./copySelection";
 import { imageCopyFailureText } from "./copyText";
-import { shortcutCommand, writeClipboard, type ShortcutCommand } from "./canvasKeyboard";
+import { isMenuShortcut, shortcutCommand, writeClipboard, type ShortcutCommand } from "./canvasKeyboard";
 
 interface Options {
   /** 画布根元素：还没挂上 / 已卸载时快捷键不作用（画板正在换掉的那一刻）。 */
@@ -23,6 +23,8 @@ interface Options {
   dialogOpen: RefObject<boolean>;
   onUndo: () => void;
   onRedo: () => void;
+  /** Shift+F10 / 菜单键：在画布中心打开画板菜单。 */
+  onOpenMenu: (client: { x: number; y: number }) => void;
   toast: (message: string) => void;
   /** 壳端口：系统剪贴板读写与图片地址。 */
   port: ShellPort;
@@ -105,15 +107,25 @@ function runShortcut(cmd: ShortcutCommand, e: KeyboardEvent, opts: Options): voi
  * Ctrl / ⌘+Z 撤销，Ctrl / ⌘+Shift+Z、Ctrl / ⌘+Y 重做；文本框聚焦时交给原生撤销。
  * Ctrl / ⌘+V 不在这里处理：粘贴由页面级 paste 接管（见 canvasPaste）。
  */
-export function useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen, onUndo, onRedo, toast, port }: Options): void {
+export function useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen, onUndo, onRedo, onOpenMenu, toast, port }: Options): void {
   useEffect(() => {
-    const opts: Options = { wrapper, boardRef, selectedRef, dialogOpen, onUndo, onRedo, toast, port };
+    const opts: Options = { wrapper, boardRef, selectedRef, dialogOpen, onUndo, onRedo, onOpenMenu, toast, port };
     const onKey = (e: KeyboardEvent) => {
-      const cmd = shortcutCommand(keyInputOf(e), shortcutContextOf(e, opts));
+      const input = keyInputOf(e);
+      const ctx = shortcutContextOf(e, opts);
+      if (isMenuShortcut(input) && !ctx.editable && ctx.connected && !ctx.dialogOpen) {
+        e.preventDefault();
+        const el = opts.wrapper.current!;
+        el.focus();
+        const rect = el.getBoundingClientRect();
+        opts.onOpenMenu({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+        return;
+      }
+      const cmd = shortcutCommand(input, ctx);
       if (cmd === null) return;
       runShortcut(cmd, e, opts);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onUndo, onRedo, toast, wrapper, boardRef, selectedRef, dialogOpen, port]);
+  }, [onUndo, onRedo, onOpenMenu, toast, wrapper, boardRef, selectedRef, dialogOpen, port]);
 }
