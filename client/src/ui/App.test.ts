@@ -89,7 +89,7 @@ describe("工作台", () => {
     port.board.list = async () => listing();
     await show(port, { version: "1.2.3" });
     expect(container.textContent).toContain("画板包");
-    expect(container.textContent).toContain("Kacha 1.2.3");
+    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "1.2.3")).toBe(true);
   });
 
   it("画板包菜单只有导入与导出：整板结果下载不再出现（#262）", async () => {
@@ -369,7 +369,7 @@ describe("工作台", () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     await show(port, { version: "1.2.3" });
-    const versionButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Kacha 1.2.3"));
+    const versionButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "1.2.3");
     await act(async () => versionButton?.click());
     const close = [...container.querySelectorAll("button")].find((button) => button.getAttribute("aria-label") === "关闭");
     await act(async () => close?.click());
