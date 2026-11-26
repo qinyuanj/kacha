@@ -1,5 +1,5 @@
 // 浅色米色语义表面（#266）：在真实浏览器里读计算色，不靠搜索 CSS 文本或全局替换白色。
-// 这里守的是用户真正看见的层级：外壳、工具栏、节点、控件、菜单、弹窗与输入控件；
+// 这里守的是用户真正看见的层级：外壳、工具栏、节点、控件、右键菜单、浮层、预览侧栏、弹窗与输入控件；
 // 画布底色 #dedeba、连线与区域指示由 edge-repro / token 契约各自守，不在本文件重复断言。
 import { expect, test } from "@playwright/test";
 
@@ -86,6 +86,45 @@ test("浅色工作台的计算色是分层米色，深色关键色未被改动",
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
 
+  // 任务节点的模型说明浮层：.popover 用的也是抬升表面 token。
+  await page.getByRole("button", { name: "模型说明" }).click();
+  const modelPopover = page.locator(".popover");
+  await expect(modelPopover).toBeVisible();
+  const modelPopoverColor = await modelPopover.evaluate((el) => getComputedStyle(el).backgroundColor);
+  await modelPopover.getByRole("button", { name: "关闭" }).click();
+  await expect(modelPopover).toHaveCount(0);
+
+  // 画板列表是锚定浮层，不是模态框：同样取真实计算色。
+  await page.locator(".board-toolbar-right").getByRole("button", { name: "画板列表", exact: true }).click();
+  const listPopover = page.locator(".board-list-popover");
+  await expect(listPopover).toBeVisible();
+  const listPopoverColor = await listPopover.evaluate((el) => getComputedStyle(el).backgroundColor);
+
+  // 打开带图层的结果画板，进入放大预览：真实侧栏 .preview-side 也是抬升表面。
+  await listPopover.locator(".board-list-open", { hasText: "米色预览" }).click();
+  await expect(page.locator(".react-flow__node .node")).toHaveCount(1);
+  await page.locator(".react-flow__node").first().click({ button: "right" });
+  await menu.getByRole("menuitem", { name: "放大预览" }).click();
+  const preview = page.getByRole("dialog", { name: "result.png" });
+  await expect(preview).toBeVisible();
+  const previewSidebar = page.locator(".preview-side");
+  await expect(previewSidebar).toBeVisible();
+  const previewColors = await previewSidebar.evaluate((el) => {
+    const muted = el.querySelector(".muted");
+    if (!muted) throw new Error("预览侧栏没有次级文字");
+    // 侧栏自身刻意透明，实际表面由最近的祖先提供；沿祖先链读第一层真实底色。
+    const effectiveBackground = (): string => {
+      for (let node: Element | null = el; node !== null; node = node.parentElement) {
+        const color = getComputedStyle(node).backgroundColor;
+        if (color !== "rgba(0, 0, 0, 0)" && color !== "transparent") return color;
+      }
+      throw new Error("预览侧栏没有可计算的实际底色");
+    };
+    return { background: effectiveBackground(), mutedText: getComputedStyle(muted).color };
+  });
+  await preview.getByRole("button", { name: "关闭", exact: true }).first().click();
+  await expect(preview).toHaveCount(0);
+
   await page.getByRole("button", { name: /高级设置/ }).click();
   const dialog = page.locator(".settings-dialog");
   await expect(dialog).toBeVisible();
@@ -110,6 +149,9 @@ test("浅色工作台的计算色是分层米色，深色关键色未被改动",
     ["节点", menuColors.node],
     ["控件", menuColors.control],
     ["右键菜单", menuColors.menu],
+    ["模型说明浮层", modelPopoverColor],
+    ["画板列表浮层", listPopoverColor],
+    ["预览图层侧栏", previewColors.background],
     ["弹窗", dialogColors.modal],
     ["输入控件", dialogColors.input],
   ];
@@ -125,6 +167,7 @@ test("浅色工作台的计算色是分层米色，深色关键色未被改动",
 
   expect(contrast(parseRgb(menuColors.nodeText), parseRgb(menuColors.node)), "节点正文对其实际背景").toBeGreaterThanOrEqual(4.5);
   expect(contrast(parseRgb(dialogColors.secondaryText), parseRgb(dialogColors.modal)), "弹窗次级文字对其实际背景").toBeGreaterThanOrEqual(4.5);
+  expect(contrast(parseRgb(previewColors.mutedText), parseRgb(previewColors.background)), "预览侧栏次级文字对其实际背景").toBeGreaterThanOrEqual(4.5);
 
   // 深色关键色是回归护栏：浅色 token 调整不得改变既有暗色外观。
   await page.evaluate(() => {

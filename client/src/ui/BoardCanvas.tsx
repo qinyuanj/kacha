@@ -107,7 +107,7 @@ interface Props {
   toolbarSlot: HTMLElement | null;
   /** 运行指示跳转：居中并选中该节点；nonce 变化即再跳一次。 */
   focus: { nodeId: string; nonce: number } | null;
-  /** 归档画板（#90）：能看、放大、下载结果，不能编辑（不拖动、不连线、不删、菜单只剩查看与下载）。 */
+  /** 归档画板（#90）：能看、放大、另存单张结果，不能编辑（不拖动、不连线、不删，菜单只剩查看与另存）。 */
   readOnly?: boolean;
   /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框）：粘贴放行给它们，不落到背后的画板（#96）。 */
   modalOpen?: boolean;
@@ -265,7 +265,7 @@ export function BoardCanvas({
     (client: { x: number; y: number }) => overlays.openMenu({ clientX: client.x, clientY: client.y, preventDefault: () => undefined }, { kind: "pane" }),
     [overlays.openMenu],
   );
-  useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen: overlays.dialogOpenRef, onUndo, onRedo, onOpenMenu: openKeyboardMenu, toast, port });
+  useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen: overlays.dialogOpenRef, modalOpen, onUndo, onRedo, onOpenMenu: openKeyboardMenu, toast, port });
   useCanvasDrop({ wrapper, boardRef, screenToFlowPosition: (client) => flow.screenToFlowPosition(client), apply, toast, userRoot, readOnly, port });
   // 页面级粘贴接管（#96）：分派在 core/pageInput（纯逻辑），这里只把落点、模态与图片导入接上。
   useCanvasPaste({

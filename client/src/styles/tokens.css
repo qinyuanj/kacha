@@ -1,14 +1,14 @@
-/* Design Tokens（#221）：暗色 Dark Studio（默认）与浅色 Light Studio 两套完整语义变量。
+/* Design Tokens（#221）：暗色 Dark Studio 与浅色 Light Studio 两套完整语义变量；产品默认是浅色。
  *
  * 层级约定（层叠顺序由 styles/index.css 固定）：
  *   tokens → base → shell → canvas → dialogs
  * 主题由文档根上的 data-theme="dark" | "light" 选择（core/theme.ts 的 THEME_ATTRIBUTE 是唯一属性名来源）。
- * 没有属性时就是暗色：冷启动首帧由 ui/startDesktop 在挂载前写入。
+ * 没有属性时的 :root 取值只是 CSS 兜底，仅供首帧前极端情况；正常启动由 ui/startDesktop 在挂载前写入固定的浅色 / 暗色档位。
  *
  * 域模块只引用这里的变量，不再写具体色号；新增变量请追加到文件末尾的「补充」小节。
  */
 
-/* ---- 暗色（Dark Studio）：产品默认，也是没有 data-theme 时的取值 ---- */
+/* ---- 暗色（Dark Studio）：显式深档，以及没有 data-theme 时的 CSS 兜底取值 ---- */
 :root,
 :root[data-theme="dark"] {
   color-scheme: dark;

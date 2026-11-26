@@ -19,8 +19,10 @@ interface Options {
   boardRef: RefObject<Board>;
   /** 选区的同步视图：Ctrl / ⌘+C 复制它。 */
   selectedRef: RefObject<ReadonlySet<string>>;
-  /** 弹窗（预览、上下文菜单）开着时快捷键不作用于背后的画板。 */
+  /** 画布内弹层（预览、上下文菜单）开着时快捷键不作用于背后的画板。 */
   dialogOpen: RefObject<boolean>;
+  /** 页面级模态（设置、画板列表、确认框等）开着时同样不作用于背后的画板（#268）。 */
+  modalOpen?: boolean;
   onUndo: () => void;
   onRedo: () => void;
   /** Shift+F10 / 菜单键：在画布中心打开画板菜单。 */
@@ -42,13 +44,14 @@ function keyInputOf(e: KeyboardEvent) {
   };
 }
 
-/** 判定上下文：焦点在不在输入区、画布是否还挂着、弹窗、选区大小。 */
+/** 判定上下文：焦点在不在输入区、画布是否还挂着、两类弹层、选区大小。 */
 function shortcutContextOf(e: KeyboardEvent, opts: Options) {
   const connected = !!opts.wrapper.current?.isConnected;
   return {
     editable: opts.port.ui.isEditableTarget(e.target),
     connected,
     dialogOpen: opts.dialogOpen.current,
+    modalOpen: opts.modalOpen ?? false,
     selectedCount: opts.selectedRef.current.size,
   };
 }
@@ -107,9 +110,9 @@ function runShortcut(cmd: ShortcutCommand, e: KeyboardEvent, opts: Options): voi
  * Ctrl / ⌘+Z 撤销，Ctrl / ⌘+Shift+Z、Ctrl / ⌘+Y 重做；文本框聚焦时交给原生撤销。
  * Ctrl / ⌘+V 不在这里处理：粘贴由页面级 paste 接管（见 canvasPaste）。
  */
-export function useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen, onUndo, onRedo, onOpenMenu, toast, port }: Options): void {
+export function useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen, modalOpen, onUndo, onRedo, onOpenMenu, toast, port }: Options): void {
   useEffect(() => {
-    const opts: Options = { wrapper, boardRef, selectedRef, dialogOpen, onUndo, onRedo, onOpenMenu, toast, port };
+    const opts: Options = { wrapper, boardRef, selectedRef, dialogOpen, modalOpen, onUndo, onRedo, onOpenMenu, toast, port };
     const onKey = (e: KeyboardEvent) => {
       const input = keyInputOf(e);
       const ctx = shortcutContextOf(e, opts);
@@ -127,5 +130,5 @@ export function useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen, o
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onUndo, onRedo, onOpenMenu, toast, wrapper, boardRef, selectedRef, dialogOpen, port]);
+  }, [onUndo, onRedo, onOpenMenu, toast, wrapper, boardRef, selectedRef, dialogOpen, modalOpen, port]);
 }

@@ -65,7 +65,7 @@ export function UsageLimitBar({
   );
 }
 
-/** 归档画板的只读横条：能看、能放大、能下载结果与导出画板包。 */
+/** 归档画板的只读横条：能看、能放大、能另存单张结果，也能取消归档与复制为新画板。 */
 export function ArchivedBar({ onUnarchive, onCopy }: { onUnarchive(): void; onCopy(): void }) {
   return (
     <div className="bar bar-info archived-notice" role="status">

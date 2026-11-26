@@ -13,11 +13,11 @@ const norm = (p: string) => p.replace(/\\/g, "/").toLowerCase();
 /** 该画板文件在归档子目录里（归档画板只读）。 */
 export const isArchivedPath = (userRoot: string, path: string) => norm(dirname(path)) === norm(archiveDir(userRoot));
 
-/** 归档画板上仍可用的动作：放大预览与下载结果（另存为）。 */
+/** 归档画板上仍可用的动作：放大预览与另存单张结果。 */
 const READ_ONLY_ACTIONS: ReadonlySet<BoardAction> = new Set(["preview", "saveAs"]);
 
 export const isReadOnlyAction = (action: BoardAction) => READ_ONLY_ACTIONS.has(action);
 
-/** 归档画板的上下文菜单 / 悬浮动作条：去掉一切编辑类条目，首条不画分隔线。 */
+/** 归档画板的右键菜单 / 节点按钮：去掉一切编辑类条目，首条不画分隔线。 */
 export const readOnlyMenu = (items: MenuItem[]): MenuItem[] =>
   items.filter((i) => isReadOnlyAction(i.action)).map(({ separatorBefore: _, ...i }, n) => (n > 0 && _ ? { ...i, separatorBefore: true } : i));

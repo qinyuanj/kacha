@@ -132,7 +132,7 @@ export interface EditResult {
   selection?: string[];
 }
 
-/** 以此继续编辑的变更：拖线建节点（带 at）只接拖出的这一张；菜单 / 悬浮动作条 / 预览发起时，触发节点在选区内则沿用多选。 */
+/** 以此继续编辑的变更：拖线建节点（带 at）只接拖出的这一张；右键菜单 / 节点按钮 / 预览发起时，触发节点在选区内则沿用多选。 */
 export function continueEditingChange(selected: ReadonlySet<string>, nodeId: string, sourceLayer: number | null = null, at: Pos | null = null): BoardChange {
   return { kind: "continueEditing", sources: !at && selected.has(nodeId) ? [...selected] : [nodeId], trigger: nodeId, sourceLayer, at };
 }

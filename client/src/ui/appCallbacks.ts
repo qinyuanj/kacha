@@ -53,7 +53,7 @@ export function boardOpenState(session: Session | undefined, userRoot: string | 
   return "ok";
 }
 
-/** 归档画板只读：能看、能放大、能下载结果与导出画板包。 */
+/** 归档画板只读：能看、能放大、能另存单张结果；这里只判路径。 */
 export function archivedPath(session: Session | undefined, userRoot: string | null): string | null {
   if (session?.status !== "ok" || !userRoot) return null;
   return isArchivedPath(userRoot, session.path) ? session.path : null;

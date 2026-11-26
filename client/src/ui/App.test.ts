@@ -4,6 +4,8 @@ import { act, createElement } from "react";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardListing } from "../shell/types";
+import { newBoard, serializeBoard, type Board } from "../core/board";
+import type { BoardChange } from "../core/edit";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { emptySnapshot, type UpdateSnapshot } from "../core/update";
 import { THEME_MIRROR_KEY } from "../core/theme";
@@ -15,13 +17,34 @@ import { App } from "../App";
 
 // 画布太重（React Flow），测试里替掉：断言工作台这一层的接线。
 // 替身同时记下收到的 props —— 「App 把解析后的有效主题交给画布」这条链只能在这里观测。
-const canvas = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
+const canvas = vi.hoisted(() => ({ props: null as Record<string, unknown> | null, undoCalls: 0, redoCalls: 0 }));
 vi.mock("./BoardCanvas", async () => {
-  const { createElement: h } = await import("react");
+  const { createElement: h, useRef } = await import("react");
+  const { newBoard: freshBoard } = await import("../core/board");
+  const { useShell } = await import("./shell");
+  const { useBoardKeyboard } = await import("./useBoardKeyboard");
   return {
     BoardCanvas: (props: Record<string, unknown>) => {
       canvas.props = props;
-      return h("div", { className: "canvas" });
+      // 替身只替掉 React Flow 的重画布；真实键盘挂载点照旧接线，才能用真键盘事件验页面级模态隔离。
+      const wrapper = useRef<HTMLDivElement | null>(null);
+      const boardRef = useRef(freshBoard("测试画布"));
+      const selectedRef = useRef<ReadonlySet<string>>(new Set<string>());
+      const dialogOpen = useRef(false);
+      const port = useShell();
+      useBoardKeyboard({
+        wrapper,
+        boardRef,
+        selectedRef,
+        dialogOpen,
+        modalOpen: Boolean(props.modalOpen),
+        onUndo: () => { canvas.undoCalls += 1; (props.onUndo as () => void)(); },
+        onRedo: () => { canvas.redoCalls += 1; (props.onRedo as () => void)(); },
+        onOpenMenu: () => undefined,
+        toast: () => undefined,
+        port,
+      });
+      return h("div", { className: "canvas", ref: wrapper });
     },
   };
 });
@@ -30,6 +53,9 @@ let container: HTMLDivElement;
 let dom: ReactRoot;
 
 beforeEach(() => {
+  canvas.props = null;
+  canvas.undoCalls = 0;
+  canvas.redoCalls = 0;
   container = document.createElement("div");
   document.body.append(container);
   dom = createRoot(container);
@@ -74,6 +100,13 @@ async function clickTrigger(button: HTMLElement): Promise<void> {
     button.focus();
     button.click();
   });
+}
+
+/** 真派发一次 keydown（window 是快捷键挂载点，document 用来走弹层的 Escape）。 */
+async function pressKey(target: EventTarget, init: KeyboardEventInit): Promise<KeyboardEvent> {
+  const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+  await act(async () => { target.dispatchEvent(event); });
+  return event;
 }
 
 describe("工作台", () => {
@@ -196,18 +229,42 @@ describe("工作台", () => {
     expect(document.activeElement).toBe(toggle);
   });
 
-  it("画板列表弹层打开时画布收到快捷键阻断信号", async () => {
-    const port = createFakePort();
-    port.board.list = async () => listing();
+  it("画板列表弹层打开时真实 Ctrl+Z / Y 不穿梭背后的画板历史（#268）", async () => {
+    const board = newBoard("历史");
+    const port = createFakePort({ boards: [{ path: "/~/history.ugcboard.json", main: serializeBoard(board), version: "v1" }] });
     await show(port);
-    const modalOpen = () => (canvas.props as { modalOpen?: boolean } | null)?.modalOpen;
-    expect(modalOpen()).toBe(false);
-    const toggle = boardListToggle();
-    await clickTrigger(toggle);
+    await clickTrigger(boardListToggle());
     await vi.waitFor(() => expect(boardListDialog()).not.toBeNull());
-    expect(modalOpen()).toBe(true);
-    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
-    expect(modalOpen()).toBe(false);
+    await act(async () => boardListDialog()!.querySelector<HTMLButtonElement>(".board-list-open")!.click());
+    await vi.waitFor(() => expect((canvas.props!.board as Board).nodes.length).toBe(0));
+
+    // 先真的落一个撤销步；后面以画板内容与回调次数同时判断历史有没有被穿梭。
+    await act(async () => (canvas.props!.apply as (change: BoardChange) => void)({ kind: "newPrompt", at: [100, 100] }));
+    await vi.waitFor(() => expect((canvas.props!.board as Board).nodes.length).toBe(1));
+    expect(canvas.undoCalls).toBe(0);
+    expect(canvas.redoCalls).toBe(0);
+
+    await clickTrigger(boardListToggle());
+    await vi.waitFor(() => expect(boardListDialog()).not.toBeNull());
+    expect(canvas.props!.modalOpen).toBe(true);
+
+    const undoEvent = await pressKey(window, { key: "z", ctrlKey: true });
+    const redoEvent = await pressKey(window, { key: "y", ctrlKey: true });
+    const shiftRedoEvent = await pressKey(window, { key: "z", ctrlKey: true, shiftKey: true });
+    expect([undoEvent, redoEvent, shiftRedoEvent].every((e) => e.defaultPrevented)).toBe(true);
+    expect(canvas.undoCalls).toBe(0);
+    expect(canvas.redoCalls).toBe(0);
+    expect((canvas.props!.board as Board).nodes.length).toBe(1);
+
+    // 关掉弹层后同一组按键必须到达，证明监听一直挂着，刚才是页面级模态挡住的。
+    await pressKey(document, { key: "Escape" });
+    expect(canvas.props!.modalOpen).toBe(false);
+    await pressKey(window, { key: "z", ctrlKey: true });
+    await vi.waitFor(() => expect((canvas.props!.board as Board).nodes.length).toBe(0));
+    expect(canvas.undoCalls).toBe(1);
+    await pressKey(window, { key: "y", ctrlKey: true });
+    await vi.waitFor(() => expect((canvas.props!.board as Board).nodes.length).toBe(1));
+    expect(canvas.redoCalls).toBe(1);
   });
 
   it("用量提醒的「管理画板」复用同一个锚定弹层", async () => {

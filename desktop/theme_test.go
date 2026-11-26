@@ -34,14 +34,32 @@ func TestThemeSourceOf(t *testing.T) {
 	}
 }
 
-// 冷启动底色必须匹配当前固定主题，不再按系统外观自动切换。
-func TestWindowBackgroundColorIsLightDark(t *testing.T) {
+// windowBackgroundColors 拆出 light-dark 的亮 / 暗两个色值；格式坏了就在这里失败。
+func windowBackgroundColors(t *testing.T) (string, string) {
+	t.Helper()
 	if !strings.HasPrefix(windowBackgroundColor, "light-dark(") || !strings.HasSuffix(windowBackgroundColor, ")") {
 		t.Fatalf("窗口底色 %q 不是 light-dark(亮, 暗) 形式：冷启动会按单一色闪一下", windowBackgroundColor)
 	}
 	inner := strings.TrimSuffix(strings.TrimPrefix(windowBackgroundColor, "light-dark("), ")")
-	if parts := strings.Split(inner, ", "); len(parts) != 2 {
+	parts := strings.Split(inner, ", ")
+	if len(parts) != 2 {
 		t.Fatalf("窗口底色应该正好两个色值（亮, 暗），实际 %q", inner)
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+}
+
+// 冷启动底色必须逐字匹配当前固定主题对应的 CSS --app-bg（#265/#266）。
+// 只验 light-dark(...) 形状不够：任意改一处颜色而另一处没跟上，这里都要失败。
+func TestWindowBackgroundColorMatchesThemeTokens(t *testing.T) {
+	body, err := os.ReadFile("../client/src/styles/tokens.css")
+	if err != nil {
+		t.Fatalf("读 client/src/styles/tokens.css: %v", err)
+	}
+	css := string(body)
+	lightToken, darkToken := tokensAppBg(t, css, "light"), tokensAppBg(t, css, "dark")
+	lightGo, darkGo := windowBackgroundColors(t)
+	if lightGo != lightToken || darkGo != darkToken {
+		t.Fatalf("windowBackgroundColor 的亮 / 暗分量是 %q / %q，tokens.css 的 --app-bg 是 %q / %q：\n改了 client/src/styles/tokens.css 的 --app-bg 就要同步 desktop/theme.go 的 windowBackgroundColor（两处是同一契约）。", lightGo, darkGo, lightToken, darkToken)
 	}
 }
 
@@ -129,33 +147,10 @@ func tokensAppBg(t *testing.T, css, theme string) string {
 	}
 }
 
-// 窗口底色与前端 --app-bg 是同一契约的两处写法（#221）：tokens.css 改了而这里没跟上，
-// 冷启动到首帧之间就会闪一下另一种底色。值仍由 tokens.css 决定，这里只拦住漂移。
-func TestWindowBackgroundColorMatchesTokens(t *testing.T) {
-	body, err := os.ReadFile("../client/src/styles/tokens.css")
-	if err != nil {
-		t.Fatalf("读 client/src/styles/tokens.css: %v", err)
-	}
-	css := string(body)
-	light, dark := tokensAppBg(t, css, "light"), tokensAppBg(t, css, "dark")
-	want := "light-dark(" + light + ", " + dark + ")"
-	if windowBackgroundColor != want {
-		t.Fatalf("windowBackgroundColor = %q，tokens.css 的 --app-bg 拼出来是 %q：\n改了 client/src/styles/tokens.css 的 --app-bg 就要同步 desktop/theme.go 的 windowBackgroundColor（两处是同一契约）。", windowBackgroundColor, want)
-	}
-}
-
 // 冷启动的浅色底色必须是米色家族（#266）：页面首绘前不能闪回旧冷灰。
-// 两色同步与暗色分量仍由 TestWindowBackgroundColorMatchesTokens 守，这里只钉住亮色分量的色族。
+// 两色同步与暗色分量仍由 TestWindowBackgroundColorMatchesThemeTokens 守，这里只钉住亮色分量的色族。
 func TestLightColdStartBackgroundIsBeige(t *testing.T) {
-	if !strings.HasPrefix(windowBackgroundColor, "light-dark(") || !strings.HasSuffix(windowBackgroundColor, ")") {
-		t.Fatalf("窗口底色 %q 不是 light-dark(...) 形式", windowBackgroundColor)
-	}
-	inside := strings.TrimSuffix(strings.TrimPrefix(windowBackgroundColor, "light-dark("), ")")
-	parts := strings.Split(inside, ",")
-	if len(parts) != 2 {
-		t.Fatalf("窗口底色 %q 没有亮 / 暗两个分量", windowBackgroundColor)
-	}
-	light := strings.TrimSpace(parts[0])
+	light, _ := windowBackgroundColors(t)
 	if len(light) != 7 || light[0] != '#' {
 		t.Fatalf("浅色底色 %q 不是 #rrggbb", light)
 	}

@@ -240,7 +240,7 @@
   align-items: center;
   gap: 4px;
 }
-/* 组分隔线：新建类 / 撤销重做 / 运行 三组层次分明。 */
+/* 组分隔线：撤销重做 / 运行 两组层次分明。 */
 .toolbar-group + .toolbar-group {
   margin-left: 4px;
   padding-left: 12px;
@@ -251,19 +251,6 @@
   width: 28px;
   padding: 0;
   font-size: 15px;
-}
-/* 「＋ 生成任务」与模型下拉拼成一体 */
-.toolbar-pair {
-  display: inline-flex;
-  align-items: stretch;
-}
-.toolbar-pair > button {
-  border-radius: var(--radius-md) 0 0 var(--radius-md);
-}
-.toolbar-pair > .toolbar-model {
-  max-width: 200px;
-  margin-left: -1px;
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
 }
 /* 右侧组：放不下时整组落到第二行并靠右；自己一行也放不下时内部再换行。 */
 .board-toolbar-right {

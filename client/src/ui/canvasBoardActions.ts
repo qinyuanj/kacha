@@ -1,4 +1,4 @@
-// 画布动作（BoardActions）的构造：上下文菜单、悬浮动作条、节点按钮与放大预览共用的迭代、草稿、
+// 画布动作（BoardActions）的构造：右键菜单、节点按钮与放大预览共用的迭代、草稿、
 // 预览、区域编辑、变体与重新定位。每个动作一个模块顶层工厂函数，画布组件只把 ref、本地状态 setter
 // 与写入入口接进来；行为、文案与日志字段与拆分前逐字一致。
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
@@ -189,7 +189,7 @@ function relocateAction(deps: CanvasBoardActionsDeps): BoardActions["relocate"] 
     })();
 }
 
-/** 画布动作：上下文菜单、悬浮动作条、节点按钮与放大预览共用的一套写入口。 */
+/** 画布动作：右键菜单、节点按钮与放大预览共用的一套写入口。 */
 export function canvasBoardActions(deps: CanvasBoardActionsDeps): BoardActions {
   return {
     perform: (action, target, at) => deps.performRef.current(action, target, at),

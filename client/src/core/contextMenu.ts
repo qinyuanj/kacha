@@ -1,5 +1,5 @@
-// 画板上下文菜单：按右键对象给条目（动作 + 文案 + 置灰原因）。执行由画布按 action 分派到与工具栏 / 节点按钮相同的逻辑；
-// 悬浮动作条、拖线建节点的多候选菜单复用同一组 action。
+// 画板上下文菜单：按右键对象给条目（动作 + 文案 + 置灰原因）。执行由画布按 action 分派到与节点按钮相同的逻辑；
+// 拖线建节点的多候选菜单复用同一组 action；节点按钮与放大预览也是现行入口。
 import type { Board, BoardEdge, BoardNode, TaskNode } from "./board";
 import { findModel, type CapabilityTable } from "./capabilities";
 import { imagePortIndex } from "./graph";

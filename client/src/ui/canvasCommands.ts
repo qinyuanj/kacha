@@ -1,4 +1,4 @@
-// 画板动作的分派表：上下文菜单、悬浮动作条、节点按钮与拖线建节点共用一套 BoardAction 语义。
+// 画板动作的分派表：右键菜单、节点按钮与拖线建节点共用一套 BoardAction 语义。
 // 原来这些判定堆在 BoardCanvas 的 performAction 里；这里给每个动作一个模块顶层的小函数，画布侧只查表调用。
 // 只读画板的前置（readOnly && !isReadOnlyAction(action) → ARCHIVE_TEXT.readOnly）留在查表层 guard() 里：
 // 每个动作入口都先过这一层，顺序与今天的 performAction 首行逐字一致。
@@ -12,7 +12,7 @@ import { ARCHIVE_TEXT } from "./boardText";
 import { edgeIdOf } from "./canvasPoint";
 import type { BoardActions } from "./context";
 
-/** 一个画板动作：target = 右键 / 悬浮动作条指向的对象，at = 新建类动作的落点（画布坐标，缺省 = 视口中央）。 */
+/** 一个画板动作：target = 右键 / 节点按钮指向的对象，at = 新建类动作的落点（画布坐标，缺省 = 视口中央）。 */
 type CanvasCommand = (target: MenuTarget, at?: { x: number; y: number }) => void;
 
 /** 以 action 查表：画布不处理的动作（标签页上的导出 / 下载 / 导入画板包）为 undefined。 */

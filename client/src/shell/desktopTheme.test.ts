@@ -46,7 +46,7 @@ describe("原生主题同步（#265）", () => {
     await expect(port.ui.setNativeTheme("dark")).resolves.toBeUndefined();
   });
 
-  it("内存替身同形：只记两态档位", async () => {
+  it("内存替身只记录一次宿主主题通知档位", async () => {
     const fake = createFakePort();
     await fake.ui.setNativeTheme("light");
     expect(fake.calls.nativeTheme).toEqual(["light"]);
