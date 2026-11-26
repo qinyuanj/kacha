@@ -13,8 +13,6 @@ interface Props {
   onClose: (key: string) => void;
   onRename: (key: string, title: string) => void;
   onCreate: () => void;
-  /** 打开本机画板列表，重新打开已关闭的画板。 */
-  onOpenList?: () => void;
   onExportPack: (key: string) => void;
 }
 
@@ -88,7 +86,7 @@ function TabMenu(props: { session: Session; at: { x: number; y: number }; onExpo
   );
 }
 
-export function TabBar({ sessions, activeKey, onActivate, onClose, onRename, onCreate, onOpenList, onExportPack }: Props) {
+export function TabBar({ sessions, activeKey, onActivate, onClose, onRename, onCreate, onExportPack }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<{ key: string; at: { x: number; y: number } } | null>(null);
@@ -124,11 +122,6 @@ export function TabBar({ sessions, activeKey, onActivate, onClose, onRename, onC
       <button className="tab-new" title="新建画板" onClick={onCreate}>
         ＋
       </button>
-      {onOpenList && (
-        <button className="tab-list" title="列出本机存储已有画板并打开" onClick={onOpenList}>
-          画板列表
-        </button>
-      )}
       {menuSession && menu && (
         <TabMenu session={menuSession} at={menu.at} onExport={() => onExportPack(menuSession.key)} onClose={closeMenu} />
       )}

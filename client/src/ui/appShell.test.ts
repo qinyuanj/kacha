@@ -138,7 +138,6 @@ describe("顶栏", () => {
           onClose: vi.fn(),
           onRename: vi.fn(),
           onCreate: vi.fn(),
-          onOpenList: vi.fn(),
           onExportPack: vi.fn(),
           updateNotice: "1.2.0",
           onOpenChangelog: vi.fn(),
@@ -188,7 +187,9 @@ describe("工具栏", () => {
           runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
           packMenuOpen: false,
           packMenuDisabled: false,
+          boardListOpen: false,
           onTogglePackMenu: vi.fn(),
+          onOpenList: vi.fn(),
           version: "1.0",
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
@@ -211,7 +212,9 @@ describe("工具栏", () => {
           runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
           packMenuOpen: false,
           packMenuDisabled: false,
+          boardListOpen: false,
           onTogglePackMenu: vi.fn(),
+          onOpenList: vi.fn(),
           version: "1.6.6",
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
@@ -236,7 +239,9 @@ describe("工具栏", () => {
           runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
           packMenuOpen: false,
           packMenuDisabled: false,
+          boardListOpen: false,
           onTogglePackMenu: vi.fn(),
+          onOpenList: vi.fn(),
           version: "1.6.6",
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
@@ -315,7 +320,7 @@ describe("工作台外壳的接线", () => {
   });
 
   it("没有数据根时画板包菜单按钮禁用，有则可用", async () => {
-    const toggle = () => container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    const toggle = () => container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
     await show(createFakePort(), { userRoot: null });
     expect(toggle().disabled).toBe(true);
     await show(createFakePort(), { userRoot: "/root" });
@@ -323,7 +328,7 @@ describe("工作台外壳的接线", () => {
   });
 
   it("菜单开合反映在 aria-expanded 上", async () => {
-    const toggle = () => container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    const toggle = () => container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
     await show(createFakePort(), { packMenu: { x: 1, y: 2 } });
     expect(toggle().getAttribute("aria-expanded")).toBe("true");
     await show(createFakePort(), { packMenu: null });

@@ -1,6 +1,6 @@
 // 工作台的界面外壳（#137）：从 src/App.tsx 拆出的子组件。
 // App 只留状态与接线，界面外壳在这里按各区块渲染。
-import type { ComponentProps } from "react";
+import { useCallback, useRef, useState, type ComponentProps } from "react";
 import { AppBoardList, AppPackMenu, AppToolbar, AppTopBar, AppWorkspace } from "./appPanels";
 import { AppNotices } from "./appNotices";
 import type { AppView } from "./appView";
@@ -74,6 +74,21 @@ export function AppShell(props: {
   onToolbarSlot(slot: HTMLElement | null): void;
 }) {
   const { view, sessions, activeKey, userRoot, ready } = props;
+  const [boardListAnchor, setBoardListAnchor] = useState<{ x: number; y: number } | null>(null);
+  const boardListTrigger = useRef<HTMLElement | null>(null);
+  const openBoardListAt = useCallback((trigger: HTMLElement, manage: boolean) => {
+    const rect = trigger.getBoundingClientRect();
+    boardListTrigger.current = trigger;
+    setBoardListAnchor({ x: rect.left, y: rect.bottom + 2 });
+    if (manage) props.onManageBoards();
+    else props.onOpenList();
+  }, [props.onManageBoards, props.onOpenList]);
+  const closeBoardList = useCallback(() => {
+    props.onCloseBoardList();
+    const trigger = boardListTrigger.current;
+    boardListTrigger.current = null;
+    if (trigger?.isConnected) trigger.focus();
+  }, [props.onCloseBoardList]);
   return (
     <div className="app">
       <AppTopBar
@@ -83,32 +98,20 @@ export function AppShell(props: {
         onClose={props.onCloseTab}
         onRename={props.onRename}
         onCreate={props.onCreate}
-        onOpenList={props.onOpenList}
         onExportPack={props.onExportPack}
         updateNotice={props.updateNotice}
         onOpenChangelog={props.onOpenChangelog}
         onCloseUpdateNotice={props.onCloseUpdateNotice}
       />
-      {props.boardListOpen && userRoot && (
-        <AppBoardList
-          openPaths={sessions.map((s) => s.path)}
-          manage={props.manageBoards}
-          onOpen={props.onOpenListItem}
-          onDelete={props.onDeleteBoard}
-          onArchive={props.onArchiveBoard}
-          onUnarchive={props.onUnarchiveBoard}
-          onCopy={props.onCopyBoard}
-          onExport={props.onExportBoard}
-          onClose={props.onCloseBoardList}
-        />
-      )}
       <AppToolbar
         setToolbarSlot={props.onToolbarSlot}
         canvasReady={view.openState === "ok"}
         runIndicator={props.runIndicator}
         packMenuOpen={props.packMenu !== null}
         packMenuDisabled={!userRoot}
+        boardListOpen={props.boardListOpen}
         onTogglePackMenu={props.onTogglePackMenu}
+        onOpenList={(trigger) => openBoardListAt(trigger, false)}
         version={props.version}
         onOpenChangelog={props.onOpenChangelog}
         onOpenFeedback={props.onOpenFeedback}
@@ -118,6 +121,21 @@ export function AppShell(props: {
         update={props.update}
         theme={props.theme}
       />
+      {props.boardListOpen && userRoot && (
+        <AppBoardList
+          openPaths={sessions.map((s) => s.path)}
+          manage={props.manageBoards}
+          at={boardListAnchor}
+          trigger={boardListTrigger.current}
+          onOpen={props.onOpenListItem}
+          onDelete={props.onDeleteBoard}
+          onArchive={props.onArchiveBoard}
+          onUnarchive={props.onUnarchiveBoard}
+          onCopy={props.onCopyBoard}
+          onExport={props.onExportBoard}
+          onClose={closeBoardList}
+        />
+      )}
       {props.packMenu && (
         <AppPackMenu
           at={props.packMenu}
@@ -139,7 +157,7 @@ export function AppShell(props: {
         onDeferUpdate={props.onDeferUpdate}
         onDismissTableError={props.onDismissTableError}
         onOpenSettings={props.onOpenSettings}
-        onManageBoards={props.onManageBoards}
+        onManageBoards={(trigger) => openBoardListAt(trigger, true)}
         onDismissUsage={props.onDismissUsage}
         onUnarchive={props.onUnarchive}
         onCopyArchived={props.onCopyArchived}

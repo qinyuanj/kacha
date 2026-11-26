@@ -139,9 +139,8 @@
 .tab-bad.tab-active {
   box-shadow: inset 0 2px 0 var(--danger);
 }
-/* 标签栏右端的两个轻量入口：与标签同高，去掉原生按钮外观，不抢激活态。 */
-.tabs .tab-new,
-.tabs .tab-list {
+/* 标签栏右端的新建入口：与标签同高，去掉原生按钮外观，不抢激活态。 */
+.tabs .tab-new {
   display: flex;
   align-items: center;
   padding: 0 8px;
@@ -151,15 +150,9 @@
   color: var(--text-2);
   white-space: nowrap;
 }
-.tabs .tab-new:hover,
-.tabs .tab-list:hover {
+.tabs .tab-new:hover {
   background: var(--control-hover);
   color: var(--text-1);
-}
-/* 「画板列表」入口比标签小一号，并与最后一个标签留一点间距（原写在 dialogs.css，归外壳）。 */
-.tabs .tab-list {
-  margin-left: 6px;
-  font-size: 12px;
 }
 .tab-close {
   flex: none;

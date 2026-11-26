@@ -33,7 +33,7 @@ export interface AppNoticesProps {
   updateStatus: UpdateStatusView;
   onDismissTableError(): void;
   onOpenSettings(): void;
-  onManageBoards(): void;
+  onManageBoards(trigger: HTMLElement): void;
   onDismissUsage(): void;
   onUnarchive(): void;
   onCopyArchived(): void;
