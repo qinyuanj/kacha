@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
     "e2e": "playwright test",
+    "e2e:beige": "playwright test --config playwright.beige.config.ts",
     "e2e:headed": "playwright test --headed",
     "lint:dead": "knip && knip --production"
   },
