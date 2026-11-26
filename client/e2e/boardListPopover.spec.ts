@@ -1,4 +1,5 @@
 // 画板列表弹层在真实浏览器里的几何边界：960px 最小窗口、长名称与标签多行都不溢出。
+import { mkdirSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
 test("画板列表弹层锚定在第二行，窄窗口与长名称都不溢出", async ({ page }) => {
@@ -28,4 +29,8 @@ test("画板列表弹层锚定在第二行，窄窗口与长名称都不溢出",
   expect(clipped.scroll).toBeGreaterThan(clipped.client);
   const nameBox = await name.boundingBox();
   expect(nameBox!.x + nameBox!.width).toBeLessThanOrEqual(960);
+
+  // 当前能力截图：第二行右侧入口与锚定非模态弹层。
+  mkdirSync("../docs/screenshots", { recursive: true });
+  await page.screenshot({ path: "../docs/screenshots/app-canvas-popover.png", animations: "disabled" });
 });

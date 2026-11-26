@@ -16,6 +16,10 @@ test("真实浏览器：精简工具栏与画板菜单键盘链路", async ({ pa
   await expect(page.locator(".app")).toBeVisible();
   await expect(page.locator(".fatal")).toHaveCount(0);
 
+  // 当前能力截图：最终精简后的工作台外观。
+  mkdirSync("../docs/screenshots", { recursive: true });
+  await page.screenshot({ path: "../docs/screenshots/app-canvas.png", animations: "disabled" });
+
   const canvas = page.locator(".canvas");
   await expect(canvas).toBeVisible();
   await expect(canvas.locator(".react-flow")).toBeVisible();
