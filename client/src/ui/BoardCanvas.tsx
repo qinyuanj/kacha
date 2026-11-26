@@ -189,8 +189,8 @@ export function BoardCanvas({
     [board, table, userRoot, selectedNodes, measured, highlighted, drag, focusPrompt, promptDrafts, canvasData.missing, canvasData.imageInfos, canvasData.alphaByNode, discovery, concurrency, expanded, locked, canvasData.runStateOf, canvasData.statusOf, menuFacts],
   );
   const edges = useMemo<Edge[]>(
-    () => canvasEdges({ board, selectedEdges, selectedNodes, lineageEdges: highlighted.edges, dragging, expanded }),
-    [board.edges, selectedEdges, selectedNodes, highlighted, dragging, expanded],
+    () => canvasEdges({ board, selectedEdges, selectedNodes, lineageEdges: highlighted.edges, dragging }),
+    [board.edges, selectedEdges, selectedNodes, highlighted, dragging],
   );
 
   // 跨渲染记账：拖动 / 缩放的合并编号与「先取消再删除」的确认（画布事件之间记住，见 canvasFlowHandlers）。

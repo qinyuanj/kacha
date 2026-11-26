@@ -64,8 +64,8 @@
   /* 卡片自己不裁剪：端口手柄、参数浮层与比例下拉列表要露到卡片外（#223）。 */
   overflow: visible;
 }
-/* Light Studio（#226）：卡片面与画布底同为 #ffffff，1px 描边独自承担边界。
- * --border-3 对白 3.037:1，达到 3:1；暗色沿用 --border，不动。
+/* Light Studio（#226）：白色卡片与米色画布之间仍保留独立的 1px 边界。
+ * --border-3 对画布 #dedeba 为 3.34:1，达到 3:1；暗色沿用 --border，不动。
  * 警告 / 错误态有自己的 2px 彩色边框，这里用 :not 排除，不改它们的语义色。 */
 :root[data-theme="light"] .node:not(.node-warn):not(.node-error) {
   border-color: var(--border-3);
