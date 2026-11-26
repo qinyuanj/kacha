@@ -24,22 +24,20 @@ INSTALL_RECORD = CLIENT / "node_modules" / ".package-lock.json"
 INSTALL_HINT = "npm --prefix client ci"
 REPORTED_PACKAGES = 3
 
-# #214：token 归属的唯一事实——用户自带、服务端不持有统一写 token、核心画板离线。
+# #260：token 归属与传输边界——用户自带、桌面直连 Gitea、权限受限、核心画板离线。
 TOKEN_DOC_REQUIREMENTS = {
-    "adr": ("用户自带", "不保存", "权限", "离线"),
-    "glossary": ("用户自带", "权限", "服务端不持有"),
-    "readme": ("用户自带", "权限", "服务端不持有", "离线"),
+    "adr": ("用户自带", "直连 Gitea", "权限", "离线"),
+    "glossary": ("用户自带", "权限", "直接用于 Gitea API"),
+    "readme": ("用户自带", "权限", "直连 Gitea", "离线"),
 }
 # 服务端统一写 token 的要求已经作废：文档里再出现「服务端……必须/需要……token」就是回归。
 SERVER_TOKEN_REQUIREMENT = re.compile(r"(?:服务端|服务器|中继)[^。\n]{0,16}?(?:必须|需要|要求)[^。\n]{0,16}token", re.IGNORECASE)
 LEGACY_TOKEN_NAMES = ("FEEDBACK_GITEA_TOKEN",)
 TOKEN_SOURCE_FILES = (
     Path("client/src/core/feedback.ts"),
-    Path("desktop/cmd/feedbackrelay/main.go"),
-    Path("desktop/internal/feedbackrelay/feedbackrelay.go"),
     Path("desktop/internal/feedbackservice/feedbackservice.go"),
+    Path("desktop/internal/feedbackservice/gitea.go"),
     Path("packaging/build_desktop.py"),
-    Path("packaging/deploy_feedbackrelay.py"),
     Path("packaging/publish_release.py"),
 )
 QUALITY = [sys.executable, "packaging/quality.py"]
@@ -199,10 +197,10 @@ def documentation_problems(root: Path) -> list[str]:
     else:
         adr_text = adr_files[0].read_text(encoding="utf-8")
         for phrase, label in (
-            ("反馈中继", "反馈中继"),
+            ("直连 Gitea", "桌面直连 Gitea"),
             ("可选", "可选联网能力"),
             ("离线", "核心画板离线可用"),
-            ("远端应用服务", "不新增远端应用服务依赖"),
+            ("远端应用服务", "不依赖远端应用服务"),
         ):
             if phrase not in adr_text:
                 problems.append(f"ADR 0027 未说明{label}")
@@ -213,7 +211,7 @@ def documentation_problems(root: Path) -> list[str]:
         problems.append("缺少 GLOSSARY.md")
     else:
         glossary_text = glossary.read_text(encoding="utf-8")
-        for term in ("反馈", "反馈中继"):
+        for term in ("反馈", "用户自带 token"):
             if re.search(rf"\*\*{term}\*\*[\s\S]*?_Avoid_[:：]", glossary_text) is None:
                 problems.append(f"GLOSSARY.md 缺少「{term}」及避免使用的近义词")
 
@@ -232,9 +230,9 @@ def documentation_problems(root: Path) -> list[str]:
 
 def token_boundary_problems(root: Path, adr_text: str, glossary_text: str, readme_text: str,
                             changelog_section: list[str] | None) -> list[str]:
-    """#214：文档与代码都不能再要求服务端统一写 token。
+    """#260：文档与代码都不能要求统一服务端 token 或远端中继。
 
-    文档必须同时说清三件事：token 由用户自带、服务端不持有统一写 token、核心画板仍离线可用；
+    文档必须说清 token 由用户自带、桌面直连 Gitea、权限范围与核心画板离线；
     出现「服务端……必须/需要……token」这类旧要求即判失败。
     """
     problems: list[str] = []

@@ -11,19 +11,9 @@ import (
 
 // 桌面壳的能力开关：画板包导出、本机用量与单份生成都已接通。
 func TestDesktopFeatures(t *testing.T) {
-	f := DesktopFeatures(true, true)
-	if !f.Generation || !f.Usage || !f.PackExport || !f.Archive || !f.Update {
-		t.Fatalf("features = %+v, want generation/usage/pack_export/archive/update on", f)
-	}
-}
-
-// 反馈是可选联网能力：只有配置了中继地址才开放，不能把领域意愿当成已接通。
-func TestFeedbackFeatureOnlyWhenRelayConfigured(t *testing.T) {
-	if !DesktopFeatures(true, true).Feedback {
-		t.Fatal("配置了中继地址时 feedback 必须为 true")
-	}
-	if DesktopFeatures(true, false).Feedback {
-		t.Fatal("没有中继地址时 feedback 必须为 false")
+	f := DesktopFeatures(true)
+	if !f.Generation || !f.Usage || !f.PackExport || !f.Archive || !f.Update || !f.Feedback {
+		t.Fatalf("features = %+v, want generation/usage/pack_export/archive/update/feedback on", f)
 	}
 }
 
@@ -55,7 +45,6 @@ func TestInfoReportsRootsAndCreatesBoardRoot(t *testing.T) {
 		t.Fatalf("features = %+v, want generation/usage/pack_export on", info.Features)
 	}
 }
-
 
 // 迁移切换数据根之后，壳信息报的是新位置，画板目录也建在新位置：重启后页面读到同一份。
 func TestShellFollowsSwitchedRoot(t *testing.T) {

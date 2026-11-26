@@ -334,7 +334,7 @@ export interface DesktopDataRootBridge {
   move(target: string): Promise<DesktopDataRootOutcome>;
 }
 
-/** Go 侧反馈服务（Feedback.Send）：把文字反馈交给配置的中继。 */
+/** Go 侧反馈服务（Feedback.Send）：使用本机授权直连 Gitea。 */
 export interface DesktopFeedbackBridge {
   send(spec: FeedbackSpec): Promise<FeedbackOutcome>;
   authStatus(): Promise<FeedbackAuthStatus>;
@@ -362,7 +362,7 @@ export interface DesktopBridge {
   update?: DesktopUpdateBridge;
   /** 本机数据位置迁移（#161）；没有这一项时能力关闭、入口不出现。 */
   dataRoot?: DesktopDataRootBridge;
-  /** 反馈（#205）；没有这一项或 Go 没配中继时能力关闭。 */
+  /** 反馈（#260）；没有这一项或 Go 声明不可用时能力关闭。 */
   feedback?: DesktopFeedbackBridge;
 }
 
@@ -518,7 +518,7 @@ export function desktopFeatures(bridge: DesktopBridge, info: DesktopInfo): Shell
     update: bridge.update !== undefined && (info.features.update ?? false),
     // 数据位置迁移（#161）：桥上有真实 Storage 服务才开放，否则入口不出现。
     dataRoot: bridge.dataRoot !== undefined,
-    // 反馈（#205）：桥上有服务还不够，Go 侧必须明确配置了中继地址。
+    // 反馈（#260）：桥上有真实服务且 Go 侧声明可用即可，发送不再依赖中继配置。
     feedback: bridge.feedback !== undefined && (info.features.feedback ?? false),
   };
 }

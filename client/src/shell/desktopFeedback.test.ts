@@ -11,10 +11,10 @@ const INFO: DesktopInfo = {
   features: { generation: false, usage: false, pack_export: false, archive: true, feedback: true },
 };
 
-function bridgeFor(outcome: FeedbackOutcome, hasBridge = true, relayConfigured = true) {
+function bridgeFor(outcome: FeedbackOutcome, hasBridge = true, feedbackAvailable = true) {
   let seen: FeedbackSpec | undefined;
   const bridge: DesktopBridge = {
-    info: async () => ({ ...INFO, features: { ...INFO.features, feedback: relayConfigured } }),
+    info: async () => ({ ...INFO, features: { ...INFO.features, feedback: feedbackAvailable } }),
     local: {} as DesktopLocalBridge,
     ...(hasBridge ? { feedback: {
       send: async (spec: FeedbackSpec) => {
@@ -43,8 +43,8 @@ feedbackPortContract("桌面壳", async (outcome) => {
   return { port, lastSpec };
 });
 
-describe("反馈能力开关（#205）", () => {
-  it("Go 说没配中继地址时 features.feedback 为 false", async () => {
+describe("反馈能力开关（#260）", () => {
+  it("Go 声明反馈不可用时 features.feedback 为 false", async () => {
     const { bridge } = bridgeFor(FEEDBACK_SUCCESS, true, false);
     const { port } = await createDesktopPort(bridge);
     expect(port.features.feedback).toBe(false);
@@ -57,7 +57,7 @@ describe("反馈能力开关（#205）", () => {
     await expect(port.feedback.send(FEEDBACK_SPEC)).resolves.toEqual({
       ok: false,
       kind: "unavailable",
-      message: "反馈暂不可用：未配置中继地址",
+      message: "反馈暂不可用",
       number: undefined,
       url: undefined,
     });

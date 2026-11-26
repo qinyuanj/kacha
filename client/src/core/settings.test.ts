@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { BUILTIN_TABLE } from "./capabilities";
 import {
   availableModels,
-  DEFAULT_FEEDBACK_RELAY_URL,
   DEFAULT_SETTINGS,
   defaultEditModel,
   defaultTaskModel,
@@ -14,14 +13,12 @@ import {
   parseModelsCache,
   parseSettings,
   refreshModels,
-  resolveFeedbackRelayAddress,
   saveSettings,
   serializeModelsCache,
   serializeSettings,
   SETTINGS_FORMAT_VERSION,
   settingsFromForm,
   validateBaseUrl,
-  validateFeedbackRelayUrl,
   type SettingsPorts,
 } from "./settings";
 
@@ -74,7 +71,7 @@ describe("高级设置 settings.json", () => {
     const parsed = parseSettings('{"format_version":1,"base_url":"https://gw.example","concurrency":6,"theme":"auto","future":1}');
     expect(parsed).toEqual({
       kind: "ok",
-      settings: { format_version: 1, base_url: "https://gw.example", feedback_relay_url: "", concurrency: 6, theme: "dark", extra: { future: 1 } },
+      settings: { format_version: 1, base_url: "https://gw.example", concurrency: 6, theme: "dark", extra: { future: 1 } },
     });
   });
 
@@ -436,37 +433,33 @@ describe("刷新模型列表", () => {
   });
 });
 
-describe("反馈中继地址（#209）", () => {
-  it("内置默认地址是 lzxsvn 的 3005 服务，但默认设置不把它当显式覆盖", () => {
-    expect(DEFAULT_FEEDBACK_RELAY_URL).toBe("http://lzxsvn:3005");
-    expect(DEFAULT_SETTINGS.feedback_relay_url).toBe("");
-    expect(resolveFeedbackRelayAddress(DEFAULT_SETTINGS)).toBe("");
+describe("已移除的反馈中继设置（#260）", () => {
+  it("读取旧设置时显式丢弃中继字段，保留其他已知与未知字段，保存时不写回", () => {
+    const parsed = parseSettings(JSON.stringify({
+      format_version: 1,
+      base_url: "https://gw.example",
+      feedback_relay_url: "http://relay.test:3005",
+      concurrency: 6,
+      theme: "dark",
+      future: { keep: true },
+    }));
+    expect(parsed).toEqual({
+      kind: "ok",
+      settings: {
+        format_version: 1,
+        base_url: "https://gw.example",
+        concurrency: 6,
+        theme: "dark",
+        extra: { future: { keep: true } },
+      },
+    });
+    if (parsed.kind !== "ok") throw new Error("旧设置应可读取");
+    const serialized = serializeSettings(parsed.settings);
+    expect(serialized).not.toContain("feedback_relay_url");
+    expect(serialized).toContain("future");
   });
 
-  it("只有显式且非默认的合法覆盖才发给端口；空白、非法与相同默认值都不覆盖", () => {
-    expect(resolveFeedbackRelayAddress({ ...DEFAULT_SETTINGS, feedback_relay_url: " http://relay.test:3105/ " })).toBe("http://relay.test:3105");
-    expect(resolveFeedbackRelayAddress({ ...DEFAULT_SETTINGS, feedback_relay_url: "" })).toBe("");
-    expect(resolveFeedbackRelayAddress({ ...DEFAULT_SETTINGS, feedback_relay_url: "不是地址" })).toBe("");
-    expect(resolveFeedbackRelayAddress({ ...DEFAULT_SETTINGS, feedback_relay_url: DEFAULT_FEEDBACK_RELAY_URL })).toBe("");
-  });
-
-  it("覆盖值随高级设置往返保存", () => {
-    const saved = { ...DEFAULT_SETTINGS };
-    const next = settingsFromForm(saved, { baseUrl: saved.base_url, concurrencyDraft: "4", feedbackRelayUrl: "  http://relay.test:3105/ " });
-    expect(next.feedback_relay_url).toBe("http://relay.test:3105");
-    expect(parseSettings(serializeSettings(next))).toEqual({ kind: "ok", settings: next });
-    expect(settingsFromForm(saved, { baseUrl: saved.base_url, concurrencyDraft: "4", feedbackRelayUrl: "" }).feedback_relay_url).toBe("");
-  });
-
-  it("覆盖地址校验：空白表示默认，只接受无凭据的 http / https URL", () => {
-    expect(validateFeedbackRelayUrl("")).toBeNull();
-    expect(validateFeedbackRelayUrl("http://relay.test:3005")).toBeNull();
-    expect(validateFeedbackRelayUrl("https://relay.test/")).toBeNull();
-    expect(validateFeedbackRelayUrl("ftp://relay.test")).not.toBeNull();
-    expect(validateFeedbackRelayUrl("http://user:secret@relay.test")).not.toBeNull();
-  });
-
-  it("类型错误的覆盖字段按损坏设置处理", () => {
-    expect(parseSettings(JSON.stringify({ format_version: 1, feedback_relay_url: 12 }))).toMatchObject({ kind: "corrupt" });
+  it("旧中继字段即使类型错误也只丢弃，不把整份设置判为损坏", () => {
+    expect(parseSettings(JSON.stringify({ format_version: 1, feedback_relay_url: 12 }))).toEqual({ kind: "ok", settings: DEFAULT_SETTINGS });
   });
 });

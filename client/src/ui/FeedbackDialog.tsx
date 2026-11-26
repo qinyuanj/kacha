@@ -84,8 +84,6 @@ export interface FeedbackDialogProps {
   version: string;
   build: string;
   boardName: string;
-  /** #211：由设置解析器算出的中继地址；每次发送都随 spec 进端口。 */
-  relayUrl?: string;
   onClose(): void;
 }
 
@@ -99,7 +97,6 @@ interface FeedbackSpecInput {
   version: string;
   build: string;
   boardName: string;
-  relayUrl?: string;
   contact: string;
   screenshots: FeedbackAttachment[];
   diagnosticsPack: FeedbackAttachment | null;
@@ -116,7 +113,6 @@ function feedbackSpecOf(input: FeedbackSpecInput): FeedbackSpec {
     build: input.build,
     os: navigator.userAgent,
     board_name: feedbackBoardName(input.boardName),
-    ...(input.relayUrl ? { relay_url: input.relayUrl } : {}),
     ...(contact ? { contact } : {}),
     ...(input.screenshots.length ? { screenshots: input.screenshots } : {}),
     ...(input.diagnosticsPack ? { diagnostics_pack: input.diagnosticsPack } : {}),
@@ -380,7 +376,7 @@ function FeedbackReceipt(props: FeedbackReceiptProps) {
 }
 
 /** 首屏反馈表单（#206 / #207 / #208）：预览可改，失败不丢内容，按 kind 给不同结局。 */
-export function FeedbackDialog({ version, build, boardName, relayUrl, onClose }: FeedbackDialogProps) {
+export function FeedbackDialog({ version, build, boardName, onClose }: FeedbackDialogProps) {
   const port = useShell();
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<string>(FEEDBACK_CATEGORIES[0].code);
@@ -401,7 +397,7 @@ export function FeedbackDialog({ version, build, boardName, relayUrl, onClose }:
     closeRef.current?.focus();
   }, []);
 
-  const spec = feedbackSpecOf({ title, category, body, version, build, boardName, relayUrl, contact, screenshots, diagnosticsPack });
+  const spec = feedbackSpecOf({ title, category, body, version, build, boardName, contact, screenshots, diagnosticsPack });
   const attachmentSummary = [
     screenshots.length ? `截图 ${screenshots.length} 张（${screenshots.map((a) => a.name).join('、')}）` : '截图 0 张（无）',
     `诊断包 ${diagnosticsPack?.name ?? '未附带'}`,

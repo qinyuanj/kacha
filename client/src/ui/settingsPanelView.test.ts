@@ -47,11 +47,4 @@ describe("高级设置面板", () => {
     expect(discoveryText({ source: "live", fetchedAt: new Date(0).toISOString() })).toContain("已从网关获取");
     expect(discoveryText({ source: "cached", fetchedAt: new Date(0).toISOString() })).toContain("离线，使用缓存");
   });
-
-  it("反馈中继覆盖非法时保存置灰", () => {
-    expect(settingsPanelView({ ...base, feedbackRelayUrl: "http://relay.test:3005" }).canSave).toBe(true);
-    const invalid = settingsPanelView({ ...base, feedbackRelayUrl: "不是地址" });
-    expect(invalid.feedbackRelayUrlError).toBeTruthy();
-    expect(invalid.canSave).toBe(false);
-  });
 });

@@ -24,7 +24,7 @@ type Features struct {
 	// Update 是可信自动更新（#164）：Go 侧真实验签并交给真实安装器。
 	// 只有内置发布者公钥的发布构建才为 true；开发构建为 false，入口按「尚不可用」处理。
 	Update bool `json:"update"`
-	// Feedback 是可选联网反馈（#205）：只有配置了中继地址才为 true。
+	// Feedback 是可选联网反馈（#260）：桌面端使用本机授权直连 Gitea。
 	Feedback bool `json:"feedback"`
 }
 
@@ -32,8 +32,8 @@ type Features struct {
 //
 // Update 由 hasPublisherKey 决定：没有内置发布者公钥的构建不能验证更新签名，
 // 宁可让入口显示「尚不可用」，也不能放开一条无法验签的更新路径。
-func DesktopFeatures(hasPublisherKey bool, feedbackRelayConfigured bool) Features {
-	return Features{Generation: true, Usage: true, PackExport: true, Archive: true, Update: hasPublisherKey, Feedback: feedbackRelayConfigured}
+func DesktopFeatures(hasPublisherKey bool) Features {
+	return Features{Generation: true, Usage: true, PackExport: true, Archive: true, Update: hasPublisherKey, Feedback: true}
 }
 
 // Info 是界面启动时读一次的壳信息。
@@ -56,8 +56,6 @@ type Shell struct {
 	roots *dataroot.Roots
 	// hasPublisherKey 表示这次构建内置了发布者公钥（能验证更新签名）。
 	hasPublisherKey bool
-	// feedbackRelayURL 是本次构建配置的中继地址；为空时反馈能力明确不可用。
-	feedbackRelayURL string
 }
 
 // New 用应用版本与已定好的数据根造一个 Shell。
@@ -76,12 +74,6 @@ func NewFollowing(version string, roots *dataroot.Roots) *Shell {
 // 更新入口必须显示「尚不可用」，而不是放开一条无法验证发布者的路径。
 func (s *Shell) WithPublisherKey(ok bool) *Shell {
 	s.hasPublisherKey = ok
-	return s
-}
-
-// WithFeedbackRelay 告诉壳这次运行配置了哪个中继地址；空地址表示反馈不可用。
-func (s *Shell) WithFeedbackRelay(address string) *Shell {
-	s.feedbackRelayURL = address
 	return s
 }
 
@@ -109,6 +101,6 @@ func (s *Shell) Info() (Info, error) {
 		Version:      s.version,
 		UserDataRoot: root,
 		BoardRoot:    boardRoot,
-		Features:     DesktopFeatures(s.hasPublisherKey, s.feedbackRelayURL != ""),
+		Features:     DesktopFeatures(s.hasPublisherKey),
 	}, nil
 }

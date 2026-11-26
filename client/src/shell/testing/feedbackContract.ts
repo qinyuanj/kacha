@@ -11,7 +11,6 @@ export const FEEDBACK_SPEC: FeedbackSpec = {
   os: "Windows 11",
   board_name: "角色设定",
   contact: "artist@example.com",
-  relay_url: "http://relay.test",
   screenshots: [{ name: "画面.png", content_type: "image/png", data: "iVBORw0KGgo=" }],
   diagnostics_pack: { name: "diagnostics.zip", content_type: "application/zip", data: "UEsDBA==" },
 };
@@ -27,7 +26,7 @@ export const FEEDBACK_SUCCESS: FeedbackOutcome = {
 export const FEEDBACK_FAILURE: FeedbackOutcome = {
   ok: false,
   kind: "unreachable",
-  message: "反馈中继不可达，请稍后再试",
+  message: "Gitea 不可达，请稍后再试",
   number: undefined,
   url: undefined,
 };
@@ -59,7 +58,7 @@ export function feedbackPortContract(name: string, createHarness: (outcome: Feed
       }
     });
 
-    it("send(spec) 把标题、分类、正文、环境、画板名、联系方式与覆盖地址原样交下去", async () => {
+    it("send(spec) 把标题、分类、正文、环境、画板名、联系方式与附件原样交下去", async () => {
       const harness = await createHarness(FEEDBACK_SUCCESS);
       await harness.port.feedback.send(FEEDBACK_SPEC);
       expect(harness.lastSpec()).toEqual(FEEDBACK_SPEC);
