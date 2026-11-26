@@ -21,10 +21,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// #221：挂载前（这里连壳端口都没就绪）就按首帧镜像把主题写到文档根，启动不闪反向主题。
-it("挂载前先按首帧镜像写文档根主题", async () => {
+// #265：挂载前按首帧镜像写文档根主题；旧 system 镜像直接落浅色，系统配色监听器不起作用。
+it("首帧镜像是旧 system 时按浅色写文档根，不监听系统配色", async () => {
+  const subscribe = vi.fn();
   localStorage.setItem("kacha.theme", "system");
-  vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: () => undefined, removeEventListener: () => undefined }));
+  vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: subscribe, removeEventListener: vi.fn() }));
+  const container = document.createElement("div");
+  document.body.append(container);
+  await act(async () => startDesktop(container));
+  expect(document.documentElement.dataset.theme).toBe("light");
+  expect(document.documentElement.style.colorScheme).toBe("light");
+  expect(subscribe).not.toHaveBeenCalled();
+  container.remove();
+});
+
+it("首帧镜像是显式深色时保持深色", async () => {
+  localStorage.setItem("kacha.theme", "dark");
   const container = document.createElement("div");
   document.body.append(container);
   await act(async () => startDesktop(container));
