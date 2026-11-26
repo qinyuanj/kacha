@@ -46,8 +46,6 @@ export interface CanvasBoardActionsDeps {
   requestPromptFocus: (promptId: string | null) => void;
   setPromptDrafts: Dispatch<SetStateAction<ReadonlyMap<string, string>>>;
   setExpandOverrides: Dispatch<SetStateAction<ExpandOverrides>>;
-  /** 图片节点卸载（离开视口、被删）：收起它的悬浮动作条。 */
-  unhoverNode: (nodeId: string) => void;
   /** 打开放大预览弹窗（画布组件负责 nonce 递增）。 */
   showPreview: (req: PreviewRequest) => void;
   /** 读到的图片信息进缓存：刚重定位的图片不等下一轮批量读取。 */
@@ -203,7 +201,6 @@ export function canvasBoardActions(deps: CanvasBoardActionsDeps): BoardActions {
     continueEditing: continueEditingAction(deps),
     setPromptDraft: setPromptDraftAction(deps),
     takePromptFocus: takePromptFocusAction(deps),
-    nodeUnmounted: (nodeId) => deps.unhoverNode(nodeId),
     addAsReference: (resultId, sourceLayer = null) => void deps.apply({ kind: "addAsReference", resultId, selected: [...deps.selectedRef.current], sourceLayer }),
     previewNode: previewNodeAction(deps),
     editRegion: editRegionAction(deps),

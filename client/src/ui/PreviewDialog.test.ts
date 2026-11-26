@@ -46,7 +46,6 @@ function actions(patch: Partial<BoardActions> = {}): BoardActions {
     perform: vi.fn(),
     setPromptDraft: vi.fn(),
     takePromptFocus: () => false,
-    nodeUnmounted: vi.fn(),
     ...patch,
   };
 }
