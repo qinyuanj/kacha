@@ -179,11 +179,11 @@ describe("切换主题", () => {
     const writes: string[] = [];
     const current = { ...initialSettingsState(), loaded: true, settings: { ...DEFAULT_SETTINGS, base_url: "http://gw.example:3001" } };
 
-    await setThemeState(ports(writes), current, "system");
+    await setThemeState(ports(writes), current, "dark");
 
     expect(writes).toHaveLength(1);
     const written = JSON.parse(writes[0]);
-    expect(written.theme).toBe("system");
+    expect(written.theme).toBe("dark");
     expect(written.format_version).toBe(1);
     expect(written.base_url).toBe("http://gw.example:3001");
   });

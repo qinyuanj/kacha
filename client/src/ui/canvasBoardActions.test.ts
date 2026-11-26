@@ -71,7 +71,6 @@ interface Harness {
   onRegenerate: ReturnType<typeof vi.fn>;
   primeImageInfo: ReturnType<typeof vi.fn>;
   requestPromptFocus: ReturnType<typeof vi.fn>;
-  unhoverNode: ReturnType<typeof vi.fn>;
   setPromptDrafts: ReturnType<typeof vi.fn>;
   setExpandOverrides: ReturnType<typeof vi.fn>;
   performRef: { current: CanvasBoardActionsDeps["performRef"]["current"] };
@@ -98,7 +97,6 @@ function harness(patch: Partial<CanvasBoardActionsDeps> = {}): Harness {
     onRegenerate: vi.fn(),
     primeImageInfo: vi.fn(),
     requestPromptFocus: vi.fn(),
-    unhoverNode: vi.fn(),
     setPromptDrafts: vi.fn(),
     setExpandOverrides: vi.fn(),
   };
@@ -117,7 +115,6 @@ function harness(patch: Partial<CanvasBoardActionsDeps> = {}): Harness {
     requestPromptFocus: fns.requestPromptFocus,
     setPromptDrafts: fns.setPromptDrafts,
     setExpandOverrides: fns.setExpandOverrides,
-    unhoverNode: fns.unhoverNode,
     showPreview: fns.showPreview,
     primeImageInfo: fns.primeImageInfo,
     onRegenerate: fns.onRegenerate,
