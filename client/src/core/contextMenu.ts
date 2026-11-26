@@ -29,8 +29,6 @@ export type BoardAction =
   | "disconnect"
   | "editRegion"
   | "exportPack"
-  /** 将整板生成结果打包下载；是否可用由桌面能力决定。 */
-  | "downloadResults"
   | "importPack";
 
 export interface MenuItem {
