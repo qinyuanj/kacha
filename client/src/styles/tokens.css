@@ -111,38 +111,41 @@
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --app-bg: #f6f7f9;
+  /* #266：同族米色的语义层级。画布保持 #dedeba；其余表面按
+   * 外壳 → 画布 → 内凹 → 工具栏 → 控件 → 普通表面 → 抬升浮层逐层提亮，
+   * 只有中性表面进入米色体系，语义状态色与图片内容色不在此列。 */
+  --app-bg: #d5d5ad;
   --canvas-bg: #dedeba;
-  --canvas-dot: #d0d7de;
-  --app-chrome: #e6e9ee;
-  --app-chrome-soft: #eef2f7;
-  --toolbar-bg: #f6f8fa;
-  --surface: #ffffff;
-  --surface-raised: #ffffff;
-  --surface-sunken: #f6f8fa;
-  --control-bg: #ffffff;
-  --control-hover: #f3f4f6;
-  --control-active: #e9ecef;
+  --canvas-dot: #c9c9a4;
+  --app-chrome: #d0d0a5;
+  --app-chrome-soft: #deddb8;
+  --toolbar-bg: #e7e7c9;
+  --surface: #f3f3e1;
+  --surface-raised: #f7f7e8;
+  --surface-sunken: #e2e2bf;
+  --control-bg: #eeeed6;
+  --control-hover: #e6e6c5;
+  --control-active: #d9d9b4;
 
-  --border-1: #d0d7de;
-  --border-2: #b6bec7;
-  --border-3: #6e7681;
+  --border-1: #c6c69e;
+  --border-2: #7d7c56;
+  --border-3: #6f7050;
 
   --text-1: #1f2328;
-  --text-2: #57606a;
-  --text-3: #8c959f;
+  --text-2: #4f523c;
+  --text-3: #585a41;
   --text-on-accent: #ffffff;
 
-  --accent: #0969da;
-  --accent-hover: #0860c4;
-  --accent-active: #0550a8;
+  --accent: #0858ad;
+  --accent-hover: #0754a8;
+  --accent-active: #06468f;
   --accent-soft: #ddf4ff;
   /* 浅色下它只供框选虚线描边使用（#247）：描边压在框选填充上要 ≥3:1，
    * 原 #7cc0ff 在白底填充上只有 1.71:1；浅色主色对米色上的填充为 3.40:1、画布为 3.77:1。 */
   --accent-border: #0969da;
   --accent-strong: #1f8fff;
-  --link: #0969da;
-  --focus-ring: #0969da;
+  --link: #0858ad;
+  --focus-ring: #0858ad;
 
   --success: #1a7f37;
   --success-fill: #1f883d;
@@ -158,7 +161,7 @@
   --danger-fill-hover: #a40e26;
   --danger-soft: #ffebe9;
   --danger-soft-weak: #fff5f5;
-  --danger-text: #c0392b;
+  --danger-text: #a32b20;
   /* 内联危险文字：浅色用专用 token，4.5:1 达标（#242）。 */
   --danger-inline-text: var(--danger-text);
 
@@ -179,9 +182,9 @@
   --shadow-popover: 0 4px 12px rgb(0 0 0 / 12%);
   --shadow-modal: 0 12px 32px rgb(0 0 0 / 25%);
   --scrim: rgb(31 35 40 / 45%);
-  --toast-bg: #24292f;
-  --toast-text: #ffffff;
-  --scrollbar-thumb: #c9d1d9;
+  --toast-bg: #f7f7e8;
+  --toast-text: #1f2328;
+  --scrollbar-thumb: #c4c49b;
   --scrollbar-track: transparent;
 
   --rf-minimap-mask: rgb(31 35 40 / 30%);

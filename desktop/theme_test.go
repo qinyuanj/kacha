@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -140,5 +141,37 @@ func TestWindowBackgroundColorMatchesTokens(t *testing.T) {
 	want := "light-dark(" + light + ", " + dark + ")"
 	if windowBackgroundColor != want {
 		t.Fatalf("windowBackgroundColor = %q，tokens.css 的 --app-bg 拼出来是 %q：\n改了 client/src/styles/tokens.css 的 --app-bg 就要同步 desktop/theme.go 的 windowBackgroundColor（两处是同一契约）。", windowBackgroundColor, want)
+	}
+}
+
+// 冷启动的浅色底色必须是米色家族（#266）：页面首绘前不能闪回旧冷灰。
+// 两色同步与暗色分量仍由 TestWindowBackgroundColorMatchesTokens 守，这里只钉住亮色分量的色族。
+func TestLightColdStartBackgroundIsBeige(t *testing.T) {
+	if !strings.HasPrefix(windowBackgroundColor, "light-dark(") || !strings.HasSuffix(windowBackgroundColor, ")") {
+		t.Fatalf("窗口底色 %q 不是 light-dark(...) 形式", windowBackgroundColor)
+	}
+	inside := strings.TrimSuffix(strings.TrimPrefix(windowBackgroundColor, "light-dark("), ")")
+	parts := strings.Split(inside, ",")
+	if len(parts) != 2 {
+		t.Fatalf("窗口底色 %q 没有亮 / 暗两个分量", windowBackgroundColor)
+	}
+	light := strings.TrimSpace(parts[0])
+	if len(light) != 7 || light[0] != '#' {
+		t.Fatalf("浅色底色 %q 不是 #rrggbb", light)
+	}
+	channel := func(at int) int {
+		value, err := strconv.ParseUint(light[at:at+2], 16, 8)
+		if err != nil {
+			t.Fatalf("浅色底色 %q 的通道无法解析：%v", light, err)
+		}
+		return int(value)
+	}
+	r, g, b := channel(1), channel(3), channel(5)
+	difference := r - g
+	if difference < 0 {
+		difference = -difference
+	}
+	if r < 200 || g < 195 || b < 150 || g-b < 18 || difference > 10 {
+		t.Fatalf("浅色冷启动底色 %q 不在米色家族（红绿近似相等且明显高于蓝）", light)
 	}
 }
