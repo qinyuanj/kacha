@@ -233,6 +233,37 @@ describe("工具栏", () => {
     expect(entry?.textContent).toContain("检查更新");
   });
 
+  // #264：齿轮按钮本身是入口契约；尺寸与焦点环沿用共享 .icon-button，弹窗流程由 App 层守。
+  it("高级设置入口只有齿轮图标，仍有无障碍名称、提示与焦点", async () => {
+    await act(async () =>
+      dom.render(
+        createElement(ShellProvider, { port: createFakePort(), children: createElement(AppToolbar, {
+          setToolbarSlot: vi.fn(),
+          canvasReady: false,
+          runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
+          packMenuOpen: false,
+          packMenuDisabled: false,
+          onTogglePackMenu: vi.fn(),
+          version: "1.6.6",
+          ready: true,
+          onOpenChangelog: vi.fn(),
+          settingsLoaded: true,
+          onOpenSettings: vi.fn(),
+          onOpenFeedback: vi.fn(), update: updateControl(), theme: themeControl(),
+        }) }),
+      ),
+    );
+    const button = container.querySelector<HTMLButtonElement>("button[aria-label='高级设置']");
+    expect(button).not.toBeNull();
+    expect(button?.textContent?.trim()).toBe("⚙");
+    expect(button?.getAttribute("title")).toBe("高级设置");
+    expect(button?.classList.contains("icon-button")).toBe(true);
+    expect(button?.disabled).toBe(false);
+    expect(button?.tabIndex).toBe(0);
+    button?.focus();
+    expect(document.activeElement).toBe(button);
+  });
+
 });
 
 // #184：AppShell 本体此前从未被渲染，6 个变异点全是 uncovered。下面几条按「外壳把哪个开关
