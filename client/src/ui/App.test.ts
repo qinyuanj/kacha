@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardListing } from "../shell/types";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { emptySnapshot, type UpdateSnapshot } from "../core/update";
-import { THEME_CHOICES, THEME_MIRROR_KEY } from "../core/theme";
+import { THEME_MIRROR_KEY } from "../core/theme";
 import { ShellProvider } from "./shell";
 import { App } from "../App";
 
@@ -413,11 +413,10 @@ describe("工作台", () => {
     await vi.waitFor(() => expect(container.textContent).toContain("已归档"));
   });
 
-// #221：顶栏主题切换入口——即时生效、首帧镜像、通知宿主壳、写回设置，且不覆盖受保护的设置文件。
+// #265：顶栏主题切换入口——两态直接切换，旧 system 迁浅色，不监听系统配色。
 });
 
 describe("主题切换", () => {
-  /** 文档根与本地存储都没有全局 reset：本组用例自己清，别串到别的用例。 */
   function clearThemeState(): void {
     localStorage.clear();
     delete document.documentElement.dataset.theme;
@@ -430,7 +429,6 @@ describe("主题切换", () => {
     vi.unstubAllGlobals();
   });
 
-  /** 等设置载入完成：高级设置按钮解禁就是信号（主题的宿主同步也在这一刻之后）。 */
   async function settingsReady(): Promise<void> {
     await vi.waitFor(() => {
       const button = container.querySelector<HTMLButtonElement>("button[aria-label='高级设置']");
@@ -438,68 +436,78 @@ describe("主题切换", () => {
     });
   }
 
-  /** 主题入口是一个三态图标按钮：点它循环切换，直到 aria-label 落到目标档位。 */
-  function option(label: string): { click(): Promise<void> } {
-    const target = label === "暗色" ? "dark" : label === "浅色" ? "light" : "system";
-    return {
-      async click() {
-        for (let i = 0; i < THEME_CHOICES.length; i++) {
-          const button = container.querySelector<HTMLButtonElement>(".theme-switch");
-          if (!button) throw new Error("没有找到主题切换按钮");
-          if (button.getAttribute("aria-label") === label) return;
-          await act(async () => button.click());
-        }
-        throw new Error("切不到主题档位：" + label + "（期望 data-theme-choice=" + target + "）");
-      },
-    };
+  /** 主题入口是单按钮：从当前档位一击切到另一档。 */
+  function switchButton(): HTMLButtonElement {
+    const button = container.querySelector<HTMLButtonElement>(".theme-switch");
+    if (!button) throw new Error("没有找到主题切换按钮");
+    return button;
   }
 
-  /** 记下写进 settings.json 的原文（替身默认也写内存，这里换成可断言的记录）。 */
   function recordSettingsWrites(port: FakePort): string[] {
     const writes: string[] = [];
     port.core.settingsPorts.writeSettings = async (text) => void writes.push(text);
     return writes;
   }
 
-  it("三档常驻在顶栏，不用打开高级设置", async () => {
+  it("顶栏只有一个两态按钮，不用打开高级设置，新用户默认浅色", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     await show(port);
     await settingsReady();
-    // 一个三态图标按钮取代三档文字分段控件，点击循环切档，不用打开高级设置。
-    const buttons = container.querySelectorAll(".theme-switch");
-    expect(buttons.length).toBe(1);
-    expect(buttons[0].getAttribute("aria-label")).toBe("暗色");
+    // 一个两态图标按钮取代三档文字分段控件，不用打开高级设置。
+    expect(container.querySelectorAll(".theme-switch").length).toBe(1);
+    expect(switchButton().getAttribute("aria-label")).toBe("切到暗色");
+    await vi.waitFor(() => expect(port.calls.nativeTheme).toEqual(["light"]));
     // 没有打开设置面板。
     expect(container.querySelector("[role='dialog'][aria-label='高级设置']")).toBeNull();
   });
 
-  it("点浅色：文档根、首帧镜像、宿主壳与设置文件都跟着变", async () => {
+  it("点一下从浅色切到深色：文档根、镜像、宿主壳与设置文件都跟着变", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     const writes = recordSettingsWrites(port);
     await show(port);
     await settingsReady();
-    // 拿到设置后先同步一次真源档位（默认暗色）。
-    await vi.waitFor(() => expect(port.calls.nativeTheme).toEqual(["dark"]));
+    await vi.waitFor(() => expect(port.calls.nativeTheme).toEqual(["light"]));
     const boardWrites = port.calls.write.length;
 
-    await act(async () => option("浅色").click());
+    await act(async () => switchButton().click());
 
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(document.documentElement.style.colorScheme).toBe("light");
-    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
-    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["light"]));
-    expect(port.calls.nativeTheme.at(-1)).toBe("light");
-    // 主题字段写进 v1 设置文件，不升格式版本。
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(document.documentElement.style.colorScheme).toBe("dark");
+    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("dark");
+    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["dark"]));
+    expect(port.calls.nativeTheme.at(-1)).toBe("dark");
     expect(JSON.parse(writes[0]).format_version).toBe(1);
-    // 切主题不碰画板：壳端口没有多出任何画板写入（也就不进撤销栈）。
     expect(port.calls.write.length).toBe(boardWrites);
   });
 
-  it("跟随系统：系统配色变化时界面跟着变，宿主拿到的是 system 而不是被钉死的暗色", async () => {
+  it("显式深色重启后保持深色，再点一下回到浅色", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    port.core.settingsPorts.readSettings = async () => JSON.stringify({ format_version: 1, base_url: "http://gw.example:3001", theme: "dark" });
+    await show(port);
+    await settingsReady();
+    await vi.waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
+    await act(async () => switchButton().click());
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
+  });
+
+  it("旧 system 偏好在设置读取边界迁为浅色", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    port.core.settingsPorts.readSettings = async () => JSON.stringify({ format_version: 1, base_url: "http://gw.example:3001", theme: "system" });
+    await show(port);
+    await settingsReady();
+    await vi.waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
+    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
+    await vi.waitFor(() => expect(port.calls.nativeTheme.at(-1)).toBe("light"));
+    expect(canvas.props?.theme).toBe("light");
+  });
+
+  it("系统配色变化不再改变应用主题", async () => {
     const listeners: ((event: { matches: boolean }) => void)[] = [];
-    // jsdom 没有 matchMedia：注入一个可控的媒体查询，系统配色变化由本用例触发。
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: false,
       media: query,
@@ -510,40 +518,16 @@ describe("主题切换", () => {
     port.board.list = async () => listing();
     await show(port);
     await settingsReady();
-
-    await act(async () => option("跟随系统").click());
-    expect(document.documentElement.dataset.theme).toBe("light");
-
+    expect(listeners).toEqual([]);
     await act(async () => {
       for (const listener of listeners) listener({ matches: true });
     });
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(port.calls.nativeTheme.at(-1)).toBe("system");
-    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("system");
-  });
-
-  it("跟随系统 + 系统深色：画布拿到的是解析后的有效主题，不是档位", async () => {
-    // jsdom 没有 matchMedia：系统配色钉成深色。
-    vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: true,
-      media: query,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-    }));
-    const port = createFakePort();
-    port.core.settingsPorts.readSettings = async () => JSON.stringify({ format_version: 1, base_url: "http://gw.example:3001", theme: "system" });
-    await show(port);
-    await settingsReady();
-
-    await vi.waitFor(() => expect(canvas.props?.theme).toBe("dark"));
-    // 交给画布的是有效主题（暗色），不是三档里的 system。
-    expect(canvas.props?.theme).not.toBe("system");
+    expect(document.documentElement.dataset.theme).toBe("light");
   });
 
   it("设置还没读到就切换：先不动磁盘，读到设置后补写一条", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
-    // 把读设置停在半路：切换发生在「磁盘内容还未知」的那一段。
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     const readSettings = port.core.settingsPorts.readSettings;
@@ -554,16 +538,13 @@ describe("主题切换", () => {
     const writes = recordSettingsWrites(port);
     await show(port);
 
-    // 不等设置载入：这时界面照常可切，但不能拿默认值去覆盖用户真实的设置文件。
-    await act(async () => option("浅色").click());
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
+    await act(async () => switchButton().click());
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("dark");
     expect(writes).toEqual([]);
 
     await act(async () => release());
-
-    // 载入完成后补写一次：写的是读到的设置加上本次选的档位。
-    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["light"]));
+    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["dark"]));
     expect(JSON.parse(writes[0]).format_version).toBe(1);
   });
 
@@ -574,11 +555,10 @@ describe("主题切换", () => {
     await show(port);
     await settingsReady();
 
-    await act(async () => option("浅色").click());
+    await act(async () => switchButton().click());
 
-    expect(document.documentElement.dataset.theme).toBe("light");
-    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["light"]));
-    expect(port.calls.nativeTheme.at(-1)).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["dark"]));
     expect(container.querySelector(".bar-error")).toBeNull();
   });
 
@@ -590,11 +570,11 @@ describe("主题切换", () => {
     await show(port);
     await settingsReady();
 
-    await act(async () => option("浅色").click());
+    await act(async () => switchButton().click());
 
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
-    await vi.waitFor(() => expect(port.calls.nativeTheme.at(-1)).toBe("light"));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("dark");
+    await vi.waitFor(() => expect(port.calls.nativeTheme.at(-1)).toBe("dark"));
     expect(writes).toEqual([]);
   });
 
@@ -608,15 +588,14 @@ describe("主题切换", () => {
     await show(port);
     await settingsReady();
 
-    await act(async () => option("暗色").click());
+    await act(async () => switchButton().click());
 
     expect(document.documentElement.dataset.theme).toBe("dark");
     await vi.waitFor(() => expect(port.calls.nativeTheme.at(-1)).toBe("dark"));
     expect(writes).toEqual([]);
   });
 
-  it("设置说浅色而首帧镜像为空：载入后补写镜像，下次首帧不再从暗色翻过来", async () => {
-    // 迁移配置目录 / 清过本地存储：settings.json 说浅色，镜像却是空的。
+  it("设置说浅色而首帧镜像为空：载入后补写镜像", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     port.core.settingsPorts.readSettings = async () => JSON.stringify({ format_version: 1, base_url: "http://gw.example:3001", theme: "light" });
@@ -627,39 +606,19 @@ describe("主题切换", () => {
     expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
   });
 
-  it("设置还没读到、用户也没选过：不往镜像里写默认值", async () => {
-    const port = createFakePort();
-    port.board.list = async () => listing();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => (release = resolve));
-    const readSettings = port.core.settingsPorts.readSettings;
-    port.core.settingsPorts.readSettings = async () => {
-      await gate;
-      return readSettings();
-    };
-    await show(port);
-
-    // 此刻界面按默认暗色显示，但磁盘上是什么还不知道：写下去就成了与设置冲突的猜测值。
-    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBeNull();
-
-    await act(async () => release());
-    await settingsReady();
-    // 载入后才写：写的是设置里的档位（默认设置的暗色）。
-    await vi.waitFor(() => expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("dark"));
-  });
-
-  it("点当前已选的档位：值没变就不重复写盘", async () => {
+  it("两次点击回到原档：第二次补写回浅色，不留下中间态", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     const writes = recordSettingsWrites(port);
     await show(port);
     await settingsReady();
+    await act(async () => switchButton().click());
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
 
-    // 设置里本来就是暗色（默认），再点一次暗色没有要改的东西。
-    await act(async () => option("暗色").click());
+    await act(async () => switchButton().click());
 
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("dark");
-    expect(writes).toEqual([]);
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
+    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["dark", "light"]));
   });
 });
