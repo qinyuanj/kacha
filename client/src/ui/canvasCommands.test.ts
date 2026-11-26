@@ -91,7 +91,6 @@ function harness(options: HarnessOptions = {}) {
     perform: vi.fn(),
     setPromptDraft: vi.fn(),
     takePromptFocus: () => false,
-    nodeUnmounted: vi.fn(),
   };
   const deps: CanvasCommandDeps = {
     apply: spies.apply,

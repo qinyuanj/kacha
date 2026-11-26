@@ -186,11 +186,7 @@ export function ImageNode({
   hover: ReturnType<typeof useHover>;
   children: ReactNode;
 }) {
-  const { previewNode, nodeUnmounted } = useBoardActions();
-  // 离开视口卸载时收不到 mouseleave：收起本节点的悬浮动作条，回到视口时不无故弹出。只在卸载时调用，不随 actions 重建。
-  const onUnmount = useRef(nodeUnmounted);
-  onUnmount.current = nodeUnmounted;
-  useEffect(() => () => onUnmount.current(id), [id]);
+  const { previewNode } = useBoardActions();
   const aspect = width && height ? height / width : null;
   return (
     <div className={`node node-image ${className}`} {...hover}>

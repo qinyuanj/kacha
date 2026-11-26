@@ -17,14 +17,12 @@ import {
   connectionLineStyle,
   dragFromOf,
   edgeHoverMove,
-  hoveredActionBarOf,
   menuEntriesOf,
   menuViewFor,
   openEdgeMenu,
   openNodeContextMenu,
   openPaneContextMenu,
   openSelectionContextMenu,
-  pickActionBarAction,
   pickMenuAction,
   pickReferencesOf,
   saveNodeAsOf,
@@ -253,14 +251,13 @@ describe("选图加参考图", () => {
   });
 });
 
-describe("菜单 / 动作条的点击分派", () => {
+describe("菜单的点击分派", () => {
   const command = vi.fn();
   const commands = { delete: command } as unknown as CommandTable;
 
   it("菜单关着（或动作条没有悬浮节点）时不执行", () => {
     command.mockClear();
     pickMenuAction("delete", null, commands);
-    pickActionBarAction("delete", null, commands);
     expect(command).not.toHaveBeenCalled();
   });
 
@@ -270,16 +267,9 @@ describe("菜单 / 动作条的点击分派", () => {
     expect(command).toHaveBeenCalledWith({ kind: "pane" }, { x: 1, y: 2 });
   });
 
-  it("动作条点选的目标是悬浮的那个节点", () => {
-    command.mockClear();
-    pickActionBarAction("delete", "n1", commands);
-    expect(command).toHaveBeenCalledWith({ kind: "node", nodeId: "n1" });
-  });
-
   it("画布不管的动作（表里没有）不出错", () => {
     command.mockClear();
     pickMenuAction("exportPack", paneMenu, commands);
-    pickActionBarAction("exportPack", "n1", commands);
     expect(command).not.toHaveBeenCalled();
   });
 });
@@ -320,23 +310,3 @@ describe("右键入口", () => {
     expect(openMenu).not.toHaveBeenCalled();
   });
 });
-
-describe("悬浮动作条的显示条件", () => {
-  const show = vi.fn();
-
-  it("只有参考图与结果节点悬浮时显示", () => {
-    show.mockClear();
-    hoveredActionBarOf(show, { id: "r", type: "reference" });
-    hoveredActionBarOf(show, { id: "x", type: "result" });
-    expect(show.mock.calls).toEqual([["r"], ["x"]]);
-  });
-
-  it("提示词 / 任务节点不显示", () => {
-    show.mockClear();
-    hoveredActionBarOf(show, { id: "p", type: "prompt" });
-    hoveredActionBarOf(show, { id: "t", type: "task" });
-    hoveredActionBarOf(show, { id: "u" });
-    expect(show).not.toHaveBeenCalled();
-  });
-});
-

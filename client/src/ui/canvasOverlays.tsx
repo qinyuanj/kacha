@@ -1,10 +1,7 @@
-// 画布上浮在 React Flow 之上的几层：上下文菜单、放大预览弹窗、共享的悬浮信息层（挂在画布根 div 里，
-// 这些浮层是 position:fixed / 绝对定位，不能进 React Flow 的变换容器），以及悬浮动作条（必须挂在 React Flow 内部，
-// NodeToolbar 靠它的 store 定位）。每个浮层各自判空（没开 / 没有条目就 return null），调用方只按顺序摆放。
-import { NodeToolbar, Position } from "@xyflow/react";
+// 画布上浮在 React Flow 之上的几层：上下文菜单、放大预览弹窗与共享的悬浮信息层，都挂在画布根 div 里；
+// 这些浮层是 position:fixed / 绝对定位，不进 React Flow 的变换容器。每层各自判空，调用方只按顺序摆放。
 import type { ReactNode } from "react";
 import type { BoardAction, MenuItem } from "../core/contextMenu";
-import { ActionBar } from "./ActionBar";
 import { ContextMenu } from "./ContextMenu";
 import { PreviewDialog } from "./PreviewDialog";
 import type { CanvasMenuState, CanvasPreviewState } from "./useCanvasOverlaysState";
@@ -31,28 +28,6 @@ export function CanvasOverlays(props: CanvasOverlaysProps) {
       <PreviewOverlay preview={props.preview} toast={props.toast} onClose={props.onClosePreview} />
       {props.hoverLayer}
     </>
-  );
-}
-
-export interface CanvasActionBarProps {
-  /** 有节点在悬浮 / 动作条该显示：false 时不出。 */
-  present: boolean;
-  /** 动作条对应的节点 id（多选内的节点悬浮时给整个选区）。 */
-  nodes: string[];
-  /** 动作条条目：空时不出。 */
-  items: MenuItem[];
-  onPick: (action: BoardAction) => void;
-  onPointerEnter: () => void;
-  onPointerLeave: () => void;
-}
-
-/** 悬浮动作条：由画布放进 React Flow 内（NodeToolbar 需要它的 store）；固定屏幕像素、不随缩放。 */
-export function CanvasActionBar({ present, nodes, items, onPick, onPointerEnter, onPointerLeave }: CanvasActionBarProps) {
-  if (!present || items.length === 0) return null;
-  return (
-    <NodeToolbar nodeId={nodes} isVisible position={Position.Top}>
-      <ActionBar items={items} onPick={onPick} onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave} />
-    </NodeToolbar>
   );
 }
 
