@@ -23,7 +23,7 @@
 
 ## 富文本 OCR（5.5 拆分专属）
 
-官方文档口径，尚无网关夹具与真机证据：#178 只有单元测试里的内联 fetch 桩与合成响应，没有回放夹具，也没有真机跑过。能力表里 5.5 的 `text_recognition` 与 `layer_decomposition` 一样标 `untested`，因此界面上开关可见但暂不可点；网关是否透传 `layer_decomposition_options` 待 #179 整体验收确认。
+官方文档口径，仓库内没有 5.5 OCR 的独立回放夹具；#178 当时只有单元测试里的内联 fetch 桩与合成响应。5.5 的 `text_recognition` 已随 #179 真机验收放开，界面开关可点；仍未取得可复查的原始网关夹具，因此不把合成响应写成新的真实网关或视觉证据。
 
 拆分时在 `layer_decomposition_options` 里发 `{"text_recognition":true}`，关掉开关时请求体里不出现这个键。返回里文字图层的 `text_recognition` 带整段 `text`、逐行 `bounding_box` 与 `runs[].style`（`similar_font_family`、`foreground_color`、`bold`、`italic`、`underline`、`strikethrough`、`shadow`、`translucent`）。非文字层、艺术字、手写体不返回；形状不完整或空结果按「没拿到」处理，不影响已经出好的图。识别结果随图层元数据写入 `layers.json`，只在预览侧栏展示。
 

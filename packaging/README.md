@@ -22,7 +22,7 @@ python packaging\build_desktop.py --debug --skip-install
 python packaging\build_desktop.py
 ~~~
 
-输出为 `build/windows-amd64/Kacha.exe`、MyGo 当前用户 NSIS 安装器 `kacha-setup-<版本>-amd64.exe` 与 `build-info.json`。debug 仍用 `-skip-installer`，不生成安装器。发布构建不上传 Release；签名、Gitea 发布与更新描述门禁见 [安装器与发布链](RELEASE_163.md)。`build-info.json` 记录应用版本、profile、MyGo / Go / WebView2 版本、安装器与产物路径。WebView2 Runtime 版本读不到时记 null。
+输出为 `build/windows-amd64/Kacha.exe`、MyGo 当前用户 NSIS 安装器 `kacha-setup-<版本>-amd64.exe` 与 `build-info.json`。debug 仍用 `-skip-installer`，不生成安装器。发布构建不上传 Release；签名密钥配对检查、Gitea 发布与更新描述门禁见 [安装器与发布链](RELEASE_163.md) 和 [可信自动更新与安全重启安装](RELEASE_164.md)。`build-info.json` 记录应用版本、profile、MyGo / Go / WebView2 版本、安装器与产物路径。WebView2 Runtime 版本读不到时记 null。
 
 两个 profile 都先检查版本与更新说明：`mygo.config.ts` 是唯一产品版本源；`docs/release/changelog.md` 必须包含与它同号的一级标题，且该节「新增 / 改进 / 修复」至少一组下有条目。当前版本在最前，历史版本可查并保留当时语境，历史恢复来源见 `docs/release/changelog-sources.md`；完整索引与弹窗可见范围由前端守护测试检查。检查失败即退出，不运行构建命令。MyGo CLI 随后执行配置中的前端 `buildCommand`，再将 `client/dist` 嵌入程序；Go 模块位于仓库根，源码入口为 `./desktop`。
 
@@ -64,7 +64,7 @@ python packaging\verify.py --base origin/main
 
 `-race` 那一步只覆盖诊断导出与日志记录的并发安全（#229 的并发证据），定向到 `desktop/internal/diagnostics` 一个包：整仓跑 `-race` 太慢，本机内存也有限。`-race` 需要 cgo，所以执行前先看工具链（`CGO_ENABLED=1` 且 `go env CC` 指名的编译器在 PATH 上）：有工具链就真跑，没有就打印「未运行 -race」并在汇总里标成未运行——只说明未运行，不静默跳过，也不因此判定失败。本机 Windows 只装了 Go、没有 gcc，因此这里通常看到的是「未运行」；CI 的 `windows-latest` 自带 MinGW，会真正执行。不会安装 Chromium，也不运行 e2e。旧的 --e2e 参数会被拒绝。`--quality` 只标注「这是发版门禁用例」：它跑的质量步骤与默认验证相同，不再追加变异测试（见下文「变异测试未启用」）。
 
-Go 单测覆盖本地存储、路径边界、导入、剪贴板契约与服务绑定；前端单测使用壳端口替身。它们不能替代 Windows 已解锁交互会话里的真实剪贴板、外部软件粘贴、窗口激活与打包产物检查。debug 构建只证明程序可构建，不宣称这些交互验收通过。
+Go 单测覆盖本地存储、路径边界、导入、剪贴板契约与服务绑定；前端单测使用壳端口替身。它们不能替代 Windows 已解锁交互会话里的真实剪贴板、外部软件粘贴、窗口激活与打包产物检查。debug 构建只证明程序可构建，不宣称这些交互验收通过。完整验证顺序与质量门禁前置条件见 [verify.py](verify.py) 的 `commands()` 与依赖预检；`--quality` 默认比较当前分支与目标分支的 merge-base，目标引用缺失或历史不足会失败。
 
 非 Draft PR 的 Windows CI 使用同一 `verify.py` 入口（不带 `--quality`，但质量步骤相同），质量基线为 PR 的实际目标分支；目标引用缺失、历史不足或没有共同祖先会失败。PR 更新取消过期运行，直接 push 不触发该 workflow。CI 与本机门禁都不运行 mutator。PR CI 在本机门禁之外，另在同一 workflow 里安装 Playwright Chromium 并单独跑一遍 `npm --prefix client run e2e`（见 `.github/workflows/pr-verification.yml`）；本机 `python packaging\verify.py` 不跑 e2e。
 
@@ -104,4 +104,4 @@ PR CI 从 npm 官方 registry 取得固定 `@dsh-uml-viewer/win32-x64@1.0.0`，�
 
 ## 首日验收记录
 
-首日整体验收（#165）的通过项、隔离测试发行证据与仍然阻塞的外部条件见 [ACCEPTANCE-165.md](../docs/release/ACCEPTANCE-165.md)。那里分别记录自动测试、构建产物、隔离测试发行、受控网关替身与人工交互证据，不用构建成功或回放替代真实网关与真机安装。
+首日验收（#165）及其后续自主 e2e / 真机结论见 [发行验收记录](../docs/release/ACCEPTANCE-165.md)，包括外部阻塞与证据边界；不要以构建成功或回放替代真实网关与真机安装。
