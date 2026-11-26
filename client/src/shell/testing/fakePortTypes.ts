@@ -97,7 +97,6 @@ export interface FakeCalls {
   messages?: string[];
   openExternal?: string[];
   downloadImage?: string[];
-  downloadBoardResults?: string[];
   writeNewFile?: { absPath: string; bytes: Uint8Array }[];
   exportDiagnostics: number;
   /** 反馈授权按钮点击次数。 */

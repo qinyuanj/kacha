@@ -1,9 +1,6 @@
 package localservice
 
 import (
-	"path/filepath"
-	"strings"
-
 	"github.com/egoist/mygo"
 
 	"github.com/qinyuanj/kacha/desktop/internal/localstore"
@@ -31,33 +28,13 @@ func (s *Service) SaveResult(path string) (Outcome, error) {
 	return Outcome{OK: true}, nil
 }
 
-// SaveBoardResults 把画板上的全部结果（含图层）打成一个 zip 存到用户选的位置。
-func (s *Service) SaveBoardResults(path string) (Outcome, error) {
-	stem := strings.TrimSuffix(filepath.Base(path), ".ugcboard.json")
-	target, err := saveDialog(mygo.SaveDialogOptions{
-		Title:       "保存整板结果",
-		DefaultPath: stem + "-结果.zip",
-		Filters:     []mygo.FileFilter{{Name: "结果包", Extensions: []string{"zip"}}},
-	})
-	if err != nil {
-		return Outcome{}, err
-	}
-	if target == "" {
-		return Outcome{Kind: "cancelled", Message: "已取消保存"}, nil
-	}
-	if failure := resultsave.SaveBoardResults(s.store.Root(), path, target); failure != nil {
-		return saveFailure(failure.Kind, failure.Message), nil
-	}
-	return Outcome{OK: true}, nil
-}
-
 // saveFailure 把结果保存的类别折成 Local 的结局类别；界面据此给出缺图 / 写失败的说明。
 func saveFailure(kind, message string) Outcome {
 	outcome := Outcome{OK: false, Kind: localstore.KindFailed, Message: message}
 	switch kind {
 	case resultsave.KindMissing:
 		outcome.Kind = "missing"
-	case resultsave.KindForbidden, resultsave.KindCorrupt:
+	case resultsave.KindForbidden:
 		outcome.Kind = localstore.KindInvalid
 	}
 	return outcome

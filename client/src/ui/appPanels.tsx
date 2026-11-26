@@ -179,12 +179,11 @@ export function AppToolbar({
   );
 }
 
-/** 画板包菜单：导入、导出、下载整板结果。 */
+/** 画板包菜单：导入与导出。 */
 export function AppPackMenu({
   at,
   importDisabledReason,
   exportDisabledReason,
-  downloadDisabledReason,
   onPick,
   onClose,
 }: {
@@ -192,8 +191,7 @@ export function AppPackMenu({
   /** 导入画板包的置灰原因（端口说这项能力还没有时非空）。 */
   importDisabledReason: string | null;
   exportDisabledReason: string | null;
-  downloadDisabledReason: string | null;
-  onPick(action: "importPack" | "exportPack" | "downloadResults"): void;
+  onPick(action: "importPack" | "exportPack"): void;
   onClose(): void;
 }) {
   return (
@@ -202,9 +200,8 @@ export function AppPackMenu({
       items={[
         { action: "importPack", label: importDisabledReason ? "导入画板包…（" + UNAVAILABLE_TEXT + "）" : "导入画板包…", disabledReason: importDisabledReason },
         { action: "exportPack", label: "导出画板包…", disabledReason: exportDisabledReason },
-        { action: "downloadResults" as const, label: "下载整板结果（zip）", disabledReason: downloadDisabledReason },
       ]}
-      onPick={(action) => onPick(action as "importPack" | "exportPack" | "downloadResults")}
+      onPick={(action) => onPick(action as "importPack" | "exportPack")}
       onClose={onClose}
     />
   );
