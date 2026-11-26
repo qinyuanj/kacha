@@ -1,37 +1,18 @@
 // @vitest-environment jsdom
-// 画布浮层：上下文菜单、放大预览弹窗、悬浮信息层与动作条——各自判空（没开 / 没有条目就不渲染）、
+// 画布浮层：上下文菜单、放大预览弹窗与悬浮信息层——各自判空（没开就不渲染）、
 // 位置取自菜单状态、弹窗按 nonce 重挂、条目点击与关闭都接上回调。
-// vitest 的 include 只收 *.test.ts，所以用 createElement 而不是 JSX；@xyflow/react 的 NodeToolbar 用替身，
-// 预览弹窗用替身（它自己要画布上下文与图片信息，那是它自己的测试范围）。
+// vitest 的 include 只收 *.test.ts，所以用 createElement 而不是 JSX；预览弹窗用替身（它自己要画布上下文与图片信息）。
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MenuItem } from "../core/contextMenu";
 import { createFakePort } from "../shell/testing/fakePort";
-import { CanvasActionBar, CanvasOverlays, type CanvasActionBarProps, type CanvasOverlaysProps } from "./canvasOverlays";
+import { CanvasOverlays, type CanvasOverlaysProps } from "./canvasOverlays";
 import { ShellProvider } from "./shell";
 import type { CanvasMenuState, CanvasPreviewState } from "./useCanvasOverlaysState";
 
 // React 19 的 act() 要在测试环境里显式打开。
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-vi.mock("@xyflow/react", async () => {
-  const { createElement: h } = await import("react");
-  return {
-    NodeToolbar: (props: { nodeId?: string | string[]; isVisible?: boolean; position?: string; children?: unknown }) =>
-      h(
-        "div",
-        {
-          "data-testid": "node-toolbar",
-          "data-ids": Array.isArray(props.nodeId) ? props.nodeId.join(",") : String(props.nodeId ?? ""),
-          "data-visible": String(props.isVisible),
-          "data-position": props.position,
-        },
-        props.children as never,
-      ),
-    Position: { Left: "left", Right: "right", Top: "top" },
-  };
-});
 
 // 预览弹窗替身：记下收到的 props 与挂载次数（nonce 作 key，换 nonce 应重新挂载）。
 const dialog = vi.hoisted(() => ({
@@ -79,10 +60,6 @@ const MENU_ITEMS: MenuItem[] = [
   { action: "preview", label: "放大预览", disabledReason: null },
   { action: "delete", label: "删除", disabledReason: null, separatorBefore: true },
 ];
-const BAR_ITEMS: MenuItem[] = [
-  { action: "preview", label: "放大预览", disabledReason: null },
-  { action: "saveAs", label: "另存为…", disabledReason: null },
-];
 
 function overlays(overrides: Partial<CanvasOverlaysProps> = {}): CanvasOverlaysProps {
   return {
@@ -94,18 +71,6 @@ function overlays(overrides: Partial<CanvasOverlaysProps> = {}): CanvasOverlaysP
     onClosePreview: vi.fn(),
     toast: vi.fn(),
     hoverLayer: null,
-    ...overrides,
-  };
-}
-
-function actionBar(overrides: Partial<CanvasActionBarProps> = {}): CanvasActionBarProps {
-  return {
-    present: true,
-    nodes: ["r1"],
-    items: BAR_ITEMS,
-    onPick: vi.fn(),
-    onPointerEnter: vi.fn(),
-    onPointerLeave: vi.fn(),
     ...overrides,
   };
 }
@@ -163,43 +128,4 @@ describe("CanvasOverlays", () => {
     expect(container.querySelector('[data-testid="preview-dialog"]')).toBeNull();
   });
 
-});
-
-describe("CanvasActionBar", () => {
-  it("没有悬浮目标或没有条目时什么都不渲染", async () => {
-    await show(createElement(CanvasActionBar, actionBar({ present: false })));
-    expect(container.querySelector('[data-testid="node-toolbar"]')).toBeNull();
-    await show(createElement(CanvasActionBar, actionBar({ items: [] })));
-    expect(container.querySelector('[data-testid="node-toolbar"]')).toBeNull();
-  });
-
-  it("NodeToolbar 固定在节点上方，条目点击交给画布执行", async () => {
-    const props = actionBar({ nodes: ["r1", "r2"] });
-    await show(createElement(CanvasActionBar, props));
-    const toolbar = container.querySelector<HTMLElement>('[data-testid="node-toolbar"]')!;
-    expect(toolbar.getAttribute("data-ids")).toBe("r1,r2");
-    expect(toolbar.getAttribute("data-visible")).toBe("true");
-    expect(toolbar.getAttribute("data-position")).toBe("top");
-    expect(container.querySelector(".action-bar")!.getAttribute("role")).toBe("toolbar");
-    // 图标按钮的 aria-label 是条目文案，显示的是图标。
-    const [preview, saveAs] = buttons(".action-bar button");
-    expect(preview.getAttribute("aria-label")).toBe("放大预览");
-    expect(saveAs.getAttribute("aria-label")).toBe("另存为…");
-    expect(preview.textContent).toBe("⤢");
-    await act(async () => preview.click());
-    expect(props.onPick).toHaveBeenCalledWith("preview");
-    await act(async () => saveAs.click());
-    expect(props.onPick).toHaveBeenCalledWith("saveAs");
-  });
-
-  it("指针进出动作条：交给画布收起 / 保持动作条", async () => {
-    const props = actionBar();
-    await show(createElement(CanvasActionBar, props));
-    const bar = container.querySelector(".action-bar")!;
-    // React 的 pointerenter / pointerleave 由 pointerover / pointerout 合成。
-    await act(async () => bar.dispatchEvent(new MouseEvent("pointerover", { bubbles: true })));
-    expect(props.onPointerEnter).toHaveBeenCalledTimes(1);
-    await act(async () => bar.dispatchEvent(new MouseEvent("pointerout", { bubbles: true })));
-    expect(props.onPointerLeave).toHaveBeenCalledTimes(1);
-  });
 });

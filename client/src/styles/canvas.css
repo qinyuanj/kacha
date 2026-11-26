@@ -641,27 +641,6 @@ body[data-port-drag="ok"] * {
   color: var(--text-3);
   font-size: 11px;
 }
-/* ---- 悬浮动作条（NodeToolbar 内，固定屏幕像素） ---- */
-.action-bar {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: var(--shadow-2);
-}
-.action-bar button {
-  min-width: 26px;
-  height: 26px;
-  padding: 0 4px;
-  font-size: 15px;
-  border-radius: 4px;
-}
-.action-bar button:hover:not([aria-disabled="true"]) {
-  background: var(--control-hover);
-}
-
 /* ---- 悬浮信息（窗口坐标，不随画布缩放） ---- */
 .hover-info {
   position: fixed;
