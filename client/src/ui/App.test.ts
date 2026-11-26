@@ -59,6 +59,23 @@ async function show(port: FakePort, props: { version?: string | null } = {}): Pr
   await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(App, { ...props }) })));
 }
 
+function boardListToggle(): HTMLButtonElement {
+  const button = [...container.querySelectorAll<HTMLButtonElement>(".board-toolbar-right button")].find((b) => b.textContent?.trim() === "画板列表");
+  if (!button) throw new Error("第二行右侧没有画板列表入口");
+  return button;
+}
+
+function boardListDialog(): HTMLElement | null {
+  return container.querySelector('[role="dialog"][aria-label="画板列表"], [role="dialog"][aria-label="管理画板"]');
+}
+
+async function clickTrigger(button: HTMLElement): Promise<void> {
+  await act(async () => {
+    button.focus();
+    button.click();
+  });
+}
+
 describe("工作台", () => {
   it("启动后新建一块画板：标签页上有它", async () => {
     const port = createFakePort();
@@ -126,13 +143,83 @@ describe("工作台", () => {
     expect(container.querySelector("[aria-label='高级设置']")).toBeNull();
   });
 
-  it("画板列表：点开列表后显示画板", async () => {
+  it("画板列表：入口在第二行右侧，打开的是锚定弹层", async () => {
     const port = createFakePort();
     port.board.list = async () => listing([{ name: "a.ugcboard.json", path: "/~/a.ugcboard.json", archived: false, bytes: 10 }]);
     await show(port);
-    const listButton = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("画板"));
-    await act(async () => listButton?.click());
-    await vi.waitFor(() => expect(container.textContent).toContain("a"));
+    const tabs = container.querySelector(".tabs")!;
+    expect(tabs.textContent).not.toContain("画板列表");
+    const toggle = boardListToggle();
+    expect(toggle.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    await clickTrigger(toggle);
+    await vi.waitFor(() => expect(boardListDialog()).not.toBeNull());
+    expect(boardListDialog()?.getAttribute("aria-label")).toBe("画板列表");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const dialog = boardListDialog()!;
+    expect(dialog.closest(".modal-backdrop")).toBeNull();
+    expect(container.textContent).toContain("a");
+  });
+
+  it("画板列表弹层：Esc 与外部点击关闭并把焦点还给入口", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing([{ name: "a.ugcboard.json", path: "/~/a.ugcboard.json", archived: false, bytes: 10 }]);
+    await show(port);
+    const toggle = boardListToggle();
+    await clickTrigger(toggle);
+    await vi.waitFor(() => expect(boardListDialog()).not.toBeNull());
+
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(boardListDialog()).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+
+    await clickTrigger(toggle);
+    await vi.waitFor(() => expect(boardListDialog()).not.toBeNull());
+    await act(async () => boardListDialog()!.querySelector("button")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+    expect(boardListDialog()).not.toBeNull();
+    await act(async () => document.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+    expect(boardListDialog()).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it("画板列表弹层打开时画布收到快捷键阻断信号", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    await show(port);
+    const modalOpen = () => (canvas.props as { modalOpen?: boolean } | null)?.modalOpen;
+    expect(modalOpen()).toBe(false);
+    const toggle = boardListToggle();
+    await clickTrigger(toggle);
+    await vi.waitFor(() => expect(boardListDialog()).not.toBeNull());
+    expect(modalOpen()).toBe(true);
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(modalOpen()).toBe(false);
+  });
+
+  it("用量提醒的「管理画板」复用同一个锚定弹层", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    port.usage.usage = async () => ({
+      total_bytes: 200,
+      boards_bytes: 100,
+      meta_bytes: 100,
+      last_access: 0,
+      by_date: [],
+      unreferenced: null,
+      unreadable_board: null,
+      limit_bytes: 100,
+      limit_level: "alert",
+    });
+    await show(port);
+    await vi.waitFor(() => expect(container.textContent).toContain("用量已满"));
+    const manage = [...container.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "管理画板")!;
+    await clickTrigger(manage);
+    await vi.waitFor(() => expect(boardListDialog()?.getAttribute("aria-label")).toBe("管理画板"));
+    const dialog = boardListDialog()!;
+    expect(dialog.closest(".modal-backdrop")).toBeNull();
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(boardListDialog()).toBeNull();
+    expect(document.activeElement).toBe(manage);
   });
 
   it("更新已就绪：主界面提示条就看得见，不用进高级设置（#180）", async () => {
@@ -253,8 +340,7 @@ describe("工作台", () => {
     const port = createFakePort();
     port.board.list = async () => listing([{ name: "old.ugcboard.json", path: "/~/old.ugcboard.json", archived: true, bytes: 10 }]);
     await show(port);
-    const listButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("画板列表"));
-    await act(async () => listButton?.click());
+    await clickTrigger(boardListToggle());
     await vi.waitFor(() => expect(container.textContent).toContain("old"));
     for (const label of ["取消归档", "复制为新画板"]) {
       const button = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(label));
@@ -279,7 +365,7 @@ describe("工作台", () => {
 
   /** 打开画板列表，等到第一行出来。 */
   async function openBoardList(): Promise<void> {
-    await act(async () => container.querySelector<HTMLElement>(".tab-list")?.click());
+    await clickTrigger(boardListToggle());
     await vi.waitFor(() => expect(container.querySelector(".board-list-open")).not.toBeNull());
   }
 

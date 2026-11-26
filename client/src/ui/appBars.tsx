@@ -51,13 +51,13 @@ export function UsageLimitBar({
   level: SizeTier;
   total: number;
   limit: number;
-  onManage(): void;
+  onManage(trigger: HTMLElement): void;
   onDismiss(): void;
 }) {
   return (
     <div className={`bar ${level === "alert" ? "bar-alert" : "bar-warn"} usage-limit-notice`} role="status" data-usage-level={level}>
       <span>{usageLimitText(level, total, limit)}</span>
-      <button onClick={onManage}>{MANAGE_BOARDS_TEXT}</button>
+      <button onClick={(e) => onManage(e.currentTarget)}>{MANAGE_BOARDS_TEXT}</button>
       <button className="link" aria-label="关闭用量提醒" onClick={onDismiss}>
         关闭
       </button>
