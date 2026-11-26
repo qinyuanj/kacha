@@ -168,8 +168,16 @@ export function AppToolbar({
         </button>
         {/* 主题切换（#221）：常驻紧凑入口，点击即时生效，不进设置面板。 */}
         <ThemeSwitch choice={theme.choice} onChoose={theme.choose} />
-        <button className="topbar-button" onClick={onOpenSettings} disabled={!settingsLoaded}>
-          ⚙ 高级设置
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="高级设置"
+          title="高级设置"
+          aria-haspopup="dialog"
+          onClick={onOpenSettings}
+          disabled={!settingsLoaded}
+        >
+          ⚙
         </button>
       </div>
     </div>
