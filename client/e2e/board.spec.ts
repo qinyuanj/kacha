@@ -9,7 +9,7 @@ test("画板在真实浏览器里启动：顶栏版本、画布根元素与真�
   await page.goto("/e2e.html");
 
   // 顶栏版本按钮由 Root 拿到的 port.ui.version() 决定，替身固定返回 9.9.9。
-  await expect(page.getByRole("button", { name: "Kacha 9.9.9" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /当前版本 9\.9\.9/ })).toBeVisible();
 
   // 工作台外壳挂起来了（没有停在"正在加载…"或致命错误）。
   await expect(page.locator(".app")).toBeVisible();

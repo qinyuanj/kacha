@@ -113,7 +113,6 @@ export function AppShell(props: {
         onTogglePackMenu={props.onTogglePackMenu}
         onOpenList={(trigger) => openBoardListAt(trigger, false)}
         version={props.version}
-        ready={ready}
         onOpenChangelog={props.onOpenChangelog}
         onOpenFeedback={props.onOpenFeedback}
         feedbackAvailable={props.feedbackAvailable ?? true}
