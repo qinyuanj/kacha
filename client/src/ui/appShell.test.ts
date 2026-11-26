@@ -151,20 +151,18 @@ describe("顶栏", () => {
 });
 
 describe("画板包菜单", () => {
-  it("没有画板：导出与下载都置灰", async () => {
+  it("没有画板：导出置灰", async () => {
     const onPick = vi.fn();
-    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: null, exportDisabledReason: "没有打开的画板", downloadDisabledReason: "没有打开的画板", onPick, onClose: vi.fn() })));
+    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: null, exportDisabledReason: "没有打开的画板", onPick, onClose: vi.fn() })));
     const items = () => [...container.querySelectorAll('[role="menuitem"]')];
-    for (const action of ["导出画板包", "下载整板结果"]) {
-      const button = items().find((b) => b.textContent?.includes(action));
-      expect(button?.getAttribute("aria-disabled")).toBe("true");
-      await act(async () => (button as HTMLButtonElement | undefined)?.click());
-    }
+    const button = items().find((b) => b.textContent?.includes("导出画板包"));
+    expect(button?.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => (button as HTMLButtonElement | undefined)?.click());
     expect(onPick).not.toHaveBeenCalled();
   });
 
   it("端口没有导入能力：导入标「尚不可用」并置灰", async () => {
-    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: "画板包导入" + UNAVAILABLE_TEXT, exportDisabledReason: null, downloadDisabledReason: null, onPick: vi.fn(), onClose: vi.fn() })));
+    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: "画板包导入" + UNAVAILABLE_TEXT, exportDisabledReason: null, onPick: vi.fn(), onClose: vi.fn() })));
     const importButton = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("导入画板包"));
     expect(importButton?.textContent).toContain(UNAVAILABLE_TEXT);
     // 置灰态用 aria-disabled 表示（与画布菜单同一口径）。
@@ -173,7 +171,7 @@ describe("画板包菜单", () => {
 
   it("有画板：导出可用", async () => {
     const onPick = vi.fn();
-    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: null, exportDisabledReason: null, downloadDisabledReason: null, onPick, onClose: vi.fn() })));
+    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: null, exportDisabledReason: null, onPick, onClose: vi.fn() })));
     const exportButton = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("导出"));
     await act(async () => exportButton?.click());
     expect(onPick).toHaveBeenCalledWith("exportPack");
@@ -233,6 +231,37 @@ describe("工具栏", () => {
     expect(entry?.textContent).toContain("检查更新");
   });
 
+  // #264：齿轮按钮本身是入口契约；尺寸与焦点环沿用共享 .icon-button，弹窗流程由 App 层守。
+  it("高级设置入口只有齿轮图标，仍有无障碍名称、提示与焦点", async () => {
+    await act(async () =>
+      dom.render(
+        createElement(ShellProvider, { port: createFakePort(), children: createElement(AppToolbar, {
+          setToolbarSlot: vi.fn(),
+          canvasReady: false,
+          runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
+          packMenuOpen: false,
+          packMenuDisabled: false,
+          onTogglePackMenu: vi.fn(),
+          version: "1.6.6",
+          ready: true,
+          onOpenChangelog: vi.fn(),
+          settingsLoaded: true,
+          onOpenSettings: vi.fn(),
+          onOpenFeedback: vi.fn(), update: updateControl(), theme: themeControl(),
+        }) }),
+      ),
+    );
+    const button = container.querySelector<HTMLButtonElement>("button[aria-label='高级设置']");
+    expect(button).not.toBeNull();
+    expect(button?.textContent?.trim()).toBe("⚙");
+    expect(button?.getAttribute("title")).toBe("高级设置");
+    expect(button?.classList.contains("icon-button")).toBe(true);
+    expect(button?.disabled).toBe(false);
+    expect(button?.tabIndex).toBe(0);
+    button?.focus();
+    expect(document.activeElement).toBe(button);
+  });
+
 });
 
 // #184：AppShell 本体此前从未被渲染，6 个变异点全是 uncovered。下面几条按「外壳把哪个开关
@@ -241,7 +270,7 @@ describe("工作台外壳的接线", () => {
   const viewOf = (patch: Partial<AppView> = {}): AppView => ({
     active: undefined, openState: "ok", activeArchived: false, archived: null, failures: [],
     undoLabel: null, redoLabel: null, boardNotice: null, exportDisabled: null,
-    downloadDisabled: null, importDisabled: null, titleOf: () => "a", ...patch,
+    importDisabled: null, titleOf: () => "a", ...patch,
   });
   const indicator = { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() };
 

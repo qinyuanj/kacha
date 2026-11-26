@@ -55,7 +55,7 @@ export function AppShell(props: {
   onCopyBoard(path: string): Promise<string | null>;
   onExportBoard(path: string): void;
   onTogglePackMenu(at: { x: number; y: number }): void;
-  onPackMenuPick(action: "importPack" | "exportPack" | "downloadResults"): void;
+  onPackMenuPick(action: "importPack" | "exportPack"): void;
   onPackMenuClose(): void;
   onDismissTableError(): void;
   onOpenSettings(): void;
@@ -124,7 +124,6 @@ export function AppShell(props: {
           at={props.packMenu}
           importDisabledReason={props.importDisabled}
           exportDisabledReason={view.exportDisabled}
-          downloadDisabledReason={view.downloadDisabled}
           onPick={props.onPackMenuPick}
           onClose={props.onPackMenuClose}
         />

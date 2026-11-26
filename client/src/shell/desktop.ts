@@ -69,8 +69,6 @@ export interface DesktopLocalBridge {
   saveCopyAs(path: string): Promise<DesktopOutcome>;
   /** 单结果保存（带图层打 zip）；目标由 Go 弹系统对话框。 */
   saveResult(path: string): Promise<DesktopOutcome>;
-  /** 整板结果保存；目标由 Go 弹系统对话框。 */
-  saveBoardResults(path: string): Promise<DesktopOutcome>;
   isFile(path: string): Promise<boolean>;
   listDir(path: string): Promise<{ name: string; is_dir: boolean }[]>;
   fileSha256(path: string): Promise<string>;
@@ -439,7 +437,7 @@ async function saveCopyAsThroughLocal(local: DesktopLocalBridge, absPath: string
   return saveThroughLocal(() => local.saveCopyAs(absPath));
 }
 
-/** 保存结果 / 整板结果：目标由 Go 弹系统对话框，取消不报成功，缺图与写失败带原因。 */
+/** 单结果保存：目标由 Go 弹系统对话框，取消不报成功，缺图与写失败带原因。 */
 async function saveThroughLocal(call: () => Promise<DesktopOutcome>): Promise<SaveCopyOutcome> {
   const outcome = await localRun(call);
   if (outcome.kind === "cancelled") return { kind: "cancelled" };
@@ -551,7 +549,6 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     copyImage: (absPath: string, format = ""): Promise<ImageCopyResult> => copyImageToSystemClipboard(bridge, absPath, format),
     saveCopyAs: (absPath: string): Promise<SaveCopyOutcome> => saveCopyAsThroughLocal(local, absPath),
     downloadImage: (absPath: string): Promise<SaveCopyOutcome> => saveThroughLocal(() => local.saveResult(absPath)),
-    downloadBoardResults: (boardPath: string): Promise<SaveCopyOutcome> => saveThroughLocal(() => local.saveBoardResults(boardPath)),
   };
 
   const pack = desktopPack.store;

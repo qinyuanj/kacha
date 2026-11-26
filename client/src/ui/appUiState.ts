@@ -40,11 +40,10 @@ export function modalOpenOf(state: {
   return state.settingsOpen || state.changelogOpen || state.boardListOpen || state.confirmOpen || state.sendTextOpen || state.packDialogOpen || state.feedbackOpen === true;
 }
 
-/** 画板包菜单里各条目的禁用原因：导出与下载各说各的。 */
-export function packMenuDisabled(active: { status: string } | undefined, action: "exportPack" | "downloadResults"): string | null {
-  if (active?.status === "ok") return null;
+/** 导出画板包的禁用原因：没打开或画板读不出来。 */
+export function packExportDisabled(active: { status: string } | undefined): string | null {
   if (!active) return "没有打开的画板";
-  return action === "exportPack" ? "画板无法打开，不能导出" : "画板无法打开，不能下载";
+  return active.status === "ok" ? null : "画板无法打开，不能导出";
 }
 
 /** 保存失败的画板顶部的说明与按钮：冲突、丢失、其它失败各有各的说法。 */

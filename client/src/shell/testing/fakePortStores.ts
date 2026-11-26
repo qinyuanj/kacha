@@ -234,10 +234,6 @@ export function fakeMediaStore(options: FakePortOptions, calls: FakeCalls, pickI
       calls.downloadImage = [...(calls.downloadImage ?? []), path];
       return { kind: "saved" as const };
     },
-    downloadBoardResults: async (boardPath) => {
-      calls.downloadBoardResults = [...(calls.downloadBoardResults ?? []), boardPath];
-      return { kind: "saved" as const };
-    },
   };
 }
 

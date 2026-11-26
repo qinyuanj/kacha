@@ -6,7 +6,6 @@ import type { RunTarget } from "../core/runner";
 import type { Session } from "./useBoardSessions";
 import { boardRenamedText } from "./appStartup";
 import { errorText } from "../core/errors";
-import { packMenuDisabled } from "./appUiState";
 import { isArchivedPath } from "../core/archive";
 import { redoLabel, undoLabel } from "../core/history";
 
@@ -58,11 +57,6 @@ export function boardOpenState(session: Session | undefined, userRoot: string | 
 export function archivedPath(session: Session | undefined, userRoot: string | null): string | null {
   if (session?.status !== "ok" || !userRoot) return null;
   return isArchivedPath(userRoot, session.path) ? session.path : null;
-}
-
-/** 画板包菜单的禁用原因：导出与下载各说各的。 */
-export function packMenuReason(session: Session | undefined, action: "exportPack" | "downloadResults"): string | null {
-  return packMenuDisabled(session, action);
 }
 
 /** 画板变更的接线：提交与结果立即落盘（避免关页时丢）。 */
@@ -145,11 +139,10 @@ export function jumpToTask(setActiveKey: (key: string) => void, setFocus: (next:
 }
 
 /** 画板包菜单里点了一项之后该做什么。 */
-export function packMenuPick(action: "importPack" | "exportPack" | "downloadResults", session: Session | undefined, importPack: () => void, prepareExport: (key: string) => void, download: (path: string) => void): void {
+export function packMenuPick(action: "importPack" | "exportPack", session: Session | undefined, importPack: () => void, prepareExport: (key: string) => void): void {
   if (action === "importPack") return void importPack();
   if (session?.status !== "ok") return;
-  if (action === "exportPack") return void prepareExport(session.key);
-  void download(session.path);
+  void prepareExport(session.key);
 }
 
 /** 画板列表里打开一块画板：打不开时提示。 */
