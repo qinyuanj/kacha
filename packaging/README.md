@@ -60,7 +60,12 @@ python packaging\verify.py --quality
 python packaging\verify.py --base origin/main
 ~~~
 
-默认按顺序运行打包脚本单测、前端单测、类型检查、knip（普通与 production）、`go test ./...`、`go test -race ./desktop/internal/diagnostics/...`、桌面 debug 构建和前端质量门禁。各项跑完再汇总，任一失败即返回非零。
+验证按两阶段执行，最后按稳定顺序汇总每项状态与耗时，任一失败即返回非零：
+
+- **Phase 1（快速失败 + 内存隔离，同步顺序执行）**：`typecheck` → `lint:dead`（knip 普通与 production）。数秒内反馈类型或死代码错误，并把 `knip` 瞬时内存峰值与后续重负载彻底隔开（守住 ADR 0020 的 23,060 MB 红线）。
+- **Phase 2（受控并发，`max_workers=2`）**：分 2 条错峰链并行执行：
+  - 链 A：前端单测（产出 LCOV 覆盖率到 `client/target/coverage`）→ `quality.py --use-existing-coverage`（复用刚产出的覆盖率，不再重跑前端单测；若前端单测失败则不跑质量门禁，并在汇总中明确标为「未运行（前置失败）」，绝不静默通过）。
+  - 链 B：打包脚本单测（`unittest discover -s packaging/tests`，先与前端单测错峰执行以避开 Go 满核编译争用）→ `go test ./...` → `go test -race ./desktop/internal/diagnostics/...` → 桌面 debug 构建。
 
 `-race` 那一步只覆盖诊断导出与日志记录的并发安全（#229 的并发证据），定向到 `desktop/internal/diagnostics` 一个包：整仓跑 `-race` 太慢，本机内存也有限。`-race` 需要 cgo，所以执行前先看工具链（`CGO_ENABLED=1` 且 `go env CC` 指名的编译器在 PATH 上）：有工具链就真跑，没有就打印「未运行 -race」并在汇总里标成未运行——只说明未运行，不静默跳过，也不因此判定失败。本机 Windows 只装了 Go、没有 gcc，因此这里通常看到的是「未运行」；CI 的 `windows-latest` 自带 MinGW，会真正执行。不会安装 Chromium，也不运行 e2e。旧的 --e2e 参数会被拒绝。`--quality` 只标注「这是发版门禁用例」：它跑的质量步骤与默认验证相同，不再追加变异测试（见下文「变异测试未启用」）。
 
@@ -81,7 +86,7 @@ icacls client\target /setintegritylevel '(OI)(CI)M'
 
 ## 前端质量门禁
 
-`packaging/quality.py` 只测 `uml-quality.json` 中声明的 `client/src` TypeScript / TSX。默认比较 `origin/main` 的 merge-base 以来的改动（含未提交与未跟踪源码），`--base` 可换基线。CRAP 超过 10、CRAP 覆盖率缺失、改动文件涉及相似度至少 0.8 的重复配对都会失败。`--mutate` 仍是可选开关，会额外拒绝存活与未覆盖变异点，但 `verify.py` 不再传它，当前没有调用方（见下文「变异测试未启用」）。
+`packaging/quality.py` 只测 `uml-quality.json` 中声明的 `client/src` TypeScript / TSX。默认比较 `origin/main` 的 merge-base 以来的改动（含未提交与未跟踪源码），`--base` 可换基线；`--use-existing-coverage` 供 `verify.py` 复用前端单测已产出的 LCOV 覆盖率报告（默认关闭，直接运行 `quality.py` 行为不变）。CRAP 超过 10、CRAP 覆盖率缺失、改动文件涉及相似度至少 0.8 的重复配对都会失败。`--mutate` 仍是可选开关，会额外拒绝存活与未覆盖变异点，但 `verify.py` 不再传它，当前没有调用方（见下文「变异测试未启用」）。
 
 **Go 的 CRAP、DRY 与 mutation 尚未接入。** 当前 Go 验证为 `go test ./...`，不能声称整个桌面客户端通过这三项质量指标。架构图示例也只声明前端 TypeScript，不伪造 Go 图或覆盖率。
 

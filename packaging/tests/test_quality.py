@@ -19,8 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import quality  # noqa: E402
 from quality import (VIEWER_BINARY_NAME, ViewerMissing, Package, Scope, changed_files,  # noqa: E402
-                     copy_supported, crap_unmeasured, dry_offenders, in_scope, mutation_command, mutation_uncovered,
-                     packages, tool_command, uncovered_sites, viewer_binary)
+                     copy_supported, crap_command, crap_unmeasured, dry_offenders, in_scope, mutation_command,
+                     mutation_uncovered, packages, tool_command, uncovered_sites, viewer_binary)
 
 BINARY = Path("/opt/uml-viewer")
 
@@ -79,6 +79,14 @@ class ToolCommandTest(unittest.TestCase):
                          [str(BINARY), "crap", "--root", "client", "-s", "src", "--threshold", "10", "src/a.ts"])
         self.assertEqual(tool_command(BINARY, "dry", [*client.tool_args(), "--threshold", "0.8"]),
                          [str(BINARY), "dry", "--root", "client", "-s", "src", "--threshold", "0.8"])
+
+    def test_crap_command_appends_use_existing_coverage_only_when_requested(self):
+        client = Package(root="client", source="src", excludes=())
+        self.assertEqual(crap_command(BINARY, client, ["src/a.ts"]),
+                         [str(BINARY), "crap", "--root", "client", "-s", "src", "--threshold", "10", "src/a.ts"])
+        self.assertEqual(crap_command(BINARY, client, ["src/a.ts"], use_existing_coverage=True),
+                         [str(BINARY), "crap", "--root", "client", "-s", "src", "--threshold", "10",
+                          "--use-existing-coverage", "src/a.ts"])
 
 
 class MutationCommandTest(unittest.TestCase):
@@ -321,6 +329,37 @@ class QualityBaseTest(unittest.TestCase):
         self.assertIn("自 origin/pr-base", output.getvalue())
         self.assertIn("改动 1 个业务源码文件", output.getvalue())
         viewer.assert_called_once()
+
+    def test_use_existing_coverage_flag_is_forwarded_only_to_crap(self):
+        source = self.root / "client" / "src" / "change.ts"
+        source.parent.mkdir(parents=True)
+        source.write_text("export const change = 1;\n", encoding="utf-8")
+        self.commit_all("source")
+
+        ran: list[list[str]] = []
+
+        def fake_run(command: list[str]) -> subprocess.CompletedProcess:
+            ran.append(list(command))
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        with (
+            mock.patch.object(quality, "viewer_binary", return_value=BINARY),
+            mock.patch.object(quality, "_run", side_effect=fake_run),
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(quality.main(["--base", "origin/pr-base"]), 0)
+            self.assertEqual(quality.main(["--base", "origin/pr-base", "--use-existing-coverage"]), 0)
+
+        default_crap, default_dry, reused_crap, reused_dry = ran
+        self.assertEqual(default_crap[1], "crap")
+        self.assertNotIn("--use-existing-coverage", default_crap)
+        self.assertEqual(default_dry[1], "dry")
+        self.assertNotIn("--use-existing-coverage", default_dry)
+        self.assertEqual(reused_crap[1], "crap")
+        self.assertIn("--use-existing-coverage", reused_crap)
+        self.assertEqual(reused_dry[1], "dry")
+        self.assertNotIn("--use-existing-coverage", reused_dry)
 
 
 class ChangedFilesTest(unittest.TestCase):
