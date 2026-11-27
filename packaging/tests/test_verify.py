@@ -49,7 +49,7 @@ INSTALLED = {"node_modules/@playwright/test": {"version": "1.65.1"}}
 
 class VerificationCommandsTest(unittest.TestCase):
     def test_desktop_suite_runs_the_whole_ordered_gate(self):
-        """完整门禁顺序：Phase 1（typecheck -> knip 隔离先跑）+ Phase 2（链 A 前端覆盖率单测 -> quality 复用覆盖率；链 B go test -> -race -> debug 构建；链 C 打包单测）。
+        """完整门禁顺序：Phase 1（typecheck -> knip 隔离先跑）+ Phase 2（链 A 前端覆盖率单测 -> quality 复用覆盖率；链 B 打包单测 -> go test -> -race -> debug 构建）。
 
         断言整条有序清单（不是子集）：删、改或挪动任一步都会在这里挂掉，才抓得到门禁漂移。
         """
@@ -59,13 +59,12 @@ class VerificationCommandsTest(unittest.TestCase):
             [
                 "npm", "--prefix", "client", "test", "--",
                 "--coverage", "--coverage.reporter=lcov", "--coverage.reportsDirectory=target/coverage",
-                "--maxWorkers=4",
             ],
             [sys.executable, "packaging/quality.py", "--use-existing-coverage"],
+            [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"],
             ["go", "test", "./..."],
             list(RACE),
             [sys.executable, "packaging/build_desktop.py", "--debug", "--skip-install"],
-            [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"],
         ])
 
     def test_phase1_isolates_typecheck_and_knip_before_phase2_starts(self):
@@ -122,7 +121,7 @@ class VerificationCommandsTest(unittest.TestCase):
                     active += 1
                     peak = max(peak, active)
             try:
-                if key in (CLIENT_TEST[1:], GO_TEST[1:]):
+                if key in (CLIENT_TEST[1:], PACKAGING_TESTS[1:]):
                     barrier.wait()
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
             finally:

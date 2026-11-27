@@ -46,7 +46,8 @@ TOKEN_SOURCE_FILES = (
 )
 TYPECHECK = ["npm", "--prefix", "client", "run", "typecheck"]
 LINT_DEAD = ["npm", "--prefix", "client", "run", "lint:dead"]
-# 前端单测直接产出 LCOV 覆盖率供 quality.py 复用，并限制 worker 数避免并发时与 go test 抢核。
+# 前端单测直接产出 LCOV 覆盖率供 quality.py 复用；Phase 2 让轻量 unittest 先与它并行，
+# 避开 vitest 与 go test 满核编译迎头争用。
 CLIENT_TEST = [
     "npm",
     "--prefix",
@@ -56,7 +57,6 @@ CLIENT_TEST = [
     "--coverage",
     "--coverage.reporter=lcov",
     "--coverage.reportsDirectory=target/coverage",
-    "--maxWorkers=4",
 ]
 QUALITY = [sys.executable, "packaging/quality.py", "--use-existing-coverage"]
 GO_TEST = ["go", "test", "./..."]
@@ -75,12 +75,12 @@ PHASE1_COMMANDS = (
     TYPECHECK,
     LINT_DEAD,
 )
-# Phase 2 受控并发（max_workers=2）：链 A 覆盖率复用，链 B Go 测试与构建，链 C 打包单测。
+# Phase 2 受控并发（max_workers=2）：链 A 前端覆盖率单测 -> 质量门禁；
+# 链 B 轻量打包单测 -> Go 测试 -> -race -> debug 构建（与前端单测错峰，避免满核编译争用）。
 PHASE2_MAX_WORKERS = 2
 PHASE2_CHAINS = (
     (CLIENT_TEST, QUALITY),
-    (GO_TEST, RACE, DEBUG_BUILD),
-    (PACKAGING_TESTS,),
+    (PACKAGING_TESTS, GO_TEST, RACE, DEBUG_BUILD),
 )
 COMMANDS = (
     *PHASE1_COMMANDS,
