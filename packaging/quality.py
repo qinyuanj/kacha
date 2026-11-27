@@ -8,7 +8,7 @@
 改动集 = merge-base(HEAD, --base 指定引用)..HEAD 的新增 / 修改 / 重命名文件，加上未提交与未跟踪的文件；默认基线为 origin/main。
 范围（源码根与排除）只在 uml-quality.json 一处声明；三个工具都是 dsh-uml-viewer 那个单一二进制的
 子命令（uml-viewer crap / dry / mutate），二进制从哪儿来找看 viewer_binary()。
-只依赖 Python 标准库。用法：python packaging\\quality.py [--mutate] [--base <Git 引用>]
+只依赖 Python 标准库。用法：python packaging\\quality.py [--mutate] [--use-existing-coverage] [--base <Git 引用>]
 """
 
 import argparse
@@ -158,6 +158,15 @@ def tool_command(binary: Path, subcommand: str, args: list[str]) -> list[str]:
     return [str(binary), subcommand, *args]
 
 
+def crap_command(binary: Path, package: Package, changed: list[str], *, use_existing_coverage: bool = False) -> list[str]:
+    """crapper 的命令行；--use-existing-coverage 复用已产出的 LCOV 覆盖率，避免重复跑前端单测。"""
+    args = [*package.tool_args(), "--threshold", CRAP_THRESHOLD]
+    if use_existing_coverage:
+        args.append("--use-existing-coverage")
+    args.extend(changed)
+    return tool_command(binary, "crap", args)
+
+
 def mutation_command(binary: Path, package: Package, changed: list[str]) -> list[str]:
     """mutator 的命令行：先是范围参数，再逐个 --copy（只有 mutator 有这个开关），最后是改动的文件。
 
@@ -256,10 +265,11 @@ def _run(command: list[str]) -> subprocess.CompletedProcess:
     return run
 
 
-def _check_package(binary: Path, package: Package, changed: list[str], mutate: bool) -> list[str]:
+def _check_package(binary: Path, package: Package, changed: list[str], mutate: bool, *,
+                   use_existing_coverage: bool = False) -> list[str]:
     """对一个包里的改动文件跑各工具，返回违规说明。工具出错（非约定退出码）同样算违规。"""
     failures = []
-    crap = _run(tool_command(binary, "crap", [*package.tool_args(), "--threshold", CRAP_THRESHOLD, *changed]))
+    crap = _run(crap_command(binary, package, changed, use_existing_coverage=use_existing_coverage))
     if crap.returncode == 2:
         failures.append(f"CRAP 超过 {CRAP_THRESHOLD}：拆分函数或补测试")
     elif crap.returncode:
@@ -286,6 +296,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base", default=BASE_REF, help="比较基线引用（默认：origin/main）")
     parser.add_argument("--mutate", action="store_true",
                         help="同时运行 mutator（默认不跑：2026-11-20 决定不做变异测试，当前没有调用方；见 docs/adr/0020）")
+    parser.add_argument("--use-existing-coverage", action="store_true",
+                        help="复用已生成的 LCOV 覆盖率报告，跳过 crapper 内部的覆盖率测试重跑")
     args = parser.parse_args(argv)
     scope = Scope.load(ROOT)
     print(GO_COVERAGE_NOTICE, flush=True)
@@ -311,7 +323,8 @@ def main(argv: list[str]) -> int:
               "请换用带 --copy 的 dsh-uml-viewer 构建（见 docs/adr/0022、#102）", file=sys.stderr)
         return 1
     failures = [failure for package in packages(scope) if package.own(changed)
-                for failure in _check_package(binary, package, package.own(changed), mutate=mutate)]
+                for failure in _check_package(binary, package, package.own(changed), mutate=mutate,
+                                              use_existing_coverage=args.use_existing_coverage)]
     for failure in failures:
         print(f"质量门禁失败：{failure}", file=sys.stderr)
     return 1 if failures else 0

@@ -7,18 +7,28 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import verify
 from verify import (
+    CLIENT_TEST,
+    DEBUG_BUILD,
+    GO_TEST,
     INSTALL_HINT,
     INSTALL_RECORD,
+    LINT_DEAD,
+    PACKAGING_TESTS,
+    PHASE2_MAX_WORKERS,
     QUALITY,
+    QUALITY_SKIPPED_NOTICE,
     RACE,
     RACE_NOTICE,
     ROOT,
+    TYPECHECK,
     commands,
     dependency_problems,
     dependencies_preflight,
@@ -39,20 +49,134 @@ INSTALLED = {"node_modules/@playwright/test": {"version": "1.65.1"}}
 
 class VerificationCommandsTest(unittest.TestCase):
     def test_desktop_suite_runs_the_whole_ordered_gate(self):
-        """README 默认验证的完整顺序：打包单测 → 前端单测 → 类型检查 → knip → go test → go test -race（定向 diagnostics）→ debug 构建 → 质量门禁。
+        """完整门禁顺序：Phase 1（typecheck -> knip 隔离先跑）+ Phase 2（链 A 前端覆盖率单测 -> quality 复用覆盖率；链 B go test -> -race -> debug 构建；链 C 打包单测）。
 
         断言整条有序清单（不是子集）：删、改或挪动任一步都会在这里挂掉，才抓得到门禁漂移。
         """
         self.assertEqual(commands([]), [
-            [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"],
-            ["npm", "--prefix", "client", "test"],
             ["npm", "--prefix", "client", "run", "typecheck"],
             ["npm", "--prefix", "client", "run", "lint:dead"],
+            [
+                "npm", "--prefix", "client", "test", "--",
+                "--coverage", "--coverage.reporter=lcov", "--coverage.reportsDirectory=target/coverage",
+                "--maxWorkers=4",
+            ],
+            [sys.executable, "packaging/quality.py", "--use-existing-coverage"],
             ["go", "test", "./..."],
             list(RACE),
             [sys.executable, "packaging/build_desktop.py", "--debug", "--skip-install"],
-            list(QUALITY),
+            [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"],
         ])
+
+    def test_phase1_isolates_typecheck_and_knip_before_phase2_starts(self):
+        """knip 瞬时内存高（ADR 0020 红线）：typecheck -> lint:dead 必须同步顺序跑完，再启动 Phase 2。"""
+        events: list[tuple[str, list[str]]] = []
+        lock = threading.Lock()
+
+        def fake_run(command, **kwargs):
+            key = list(command[1:])
+            with lock:
+                events.append(("start", key))
+            if key in (TYPECHECK[1:], LINT_DEAD[1:]):
+                time.sleep(0.02)
+            with lock:
+                events.append(("end", key))
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        with (
+            mock.patch.object(verify, "preflight", return_value=0),
+            mock.patch.object(verify, "dependencies_preflight", return_value=0),
+            mock.patch.object(verify, "documentation_preflight", return_value=0),
+            mock.patch.object(verify, "race_toolchain_available", return_value=True),
+            mock.patch.object(verify.shutil, "which", return_value="tool"),
+            mock.patch("subprocess.run", side_effect=fake_run),
+            mock.patch("sys.stdout", io.StringIO()),
+        ):
+            self.assertEqual(main([]), 0)
+
+        typecheck_end = events.index(("end", TYPECHECK[1:]))
+        knip_start = events.index(("start", LINT_DEAD[1:]))
+        knip_end = events.index(("end", LINT_DEAD[1:]))
+        self.assertLess(typecheck_end, knip_start)
+        phase2_starts = [
+            idx for idx, (kind, key) in enumerate(events)
+            if kind == "start" and key not in (TYPECHECK[1:], LINT_DEAD[1:])
+        ]
+        self.assertEqual(len(phase2_starts), 6)
+        self.assertTrue(all(idx > knip_end for idx in phase2_starts), events)
+
+    def test_phase2_runs_all_steps_with_bounded_concurrency(self):
+        """Phase 2 受控并发（max_workers=2）：全部步骤都会跑，并发度不超过上限，汇总顺序稳定。"""
+        barrier = threading.Barrier(PHASE2_MAX_WORKERS, timeout=5)
+        lock = threading.Lock()
+        active = 0
+        peak = 0
+        started: list[list[str]] = []
+
+        def fake_run(command, **kwargs):
+            nonlocal active, peak
+            key = list(command[1:])
+            with lock:
+                started.append(key)
+                if key not in (TYPECHECK[1:], LINT_DEAD[1:]):
+                    active += 1
+                    peak = max(peak, active)
+            try:
+                if key in (CLIENT_TEST[1:], GO_TEST[1:]):
+                    barrier.wait()
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            finally:
+                if key not in (TYPECHECK[1:], LINT_DEAD[1:]):
+                    with lock:
+                        active -= 1
+
+        out = io.StringIO()
+        with (
+            mock.patch.object(verify, "preflight", return_value=0),
+            mock.patch.object(verify, "dependencies_preflight", return_value=0),
+            mock.patch.object(verify, "documentation_preflight", return_value=0),
+            mock.patch.object(verify, "race_toolchain_available", return_value=True),
+            mock.patch.object(verify.shutil, "which", return_value="tool"),
+            mock.patch("subprocess.run", side_effect=fake_run),
+            mock.patch("sys.stdout", out),
+        ):
+            self.assertEqual(main([]), 0)
+
+        self.assertEqual(len(started), 8)
+        self.assertEqual(peak, PHASE2_MAX_WORKERS)
+        summary = out.getvalue().split("=== 汇总", 1)[1]
+        positions = [summary.index(" ".join(cmd)) for cmd in commands([])]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("总耗时", summary)
+
+    def test_vitest_failure_skips_quality_without_marking_it_passed(self):
+        """前端单测失败时，不跑依赖其覆盖率的 quality，且在汇总中明确标为未运行，绝不静默通过。"""
+        started: list[list[str]] = []
+
+        def fake_run(command, **kwargs):
+            key = list(command[1:])
+            started.append(key)
+            code = 1 if key == CLIENT_TEST[1:] else 0
+            return subprocess.CompletedProcess(command, code, stdout="", stderr="")
+
+        out = io.StringIO()
+        with (
+            mock.patch.object(verify, "preflight", return_value=0),
+            mock.patch.object(verify, "dependencies_preflight", return_value=0),
+            mock.patch.object(verify, "documentation_preflight", return_value=0),
+            mock.patch.object(verify, "race_toolchain_available", return_value=True),
+            mock.patch.object(verify.shutil, "which", return_value="tool"),
+            mock.patch("subprocess.run", side_effect=fake_run),
+            mock.patch("sys.stdout", out),
+        ):
+            self.assertEqual(main([]), 1)
+
+        report = out.getvalue()
+        self.assertNotIn(QUALITY[1:], started)
+        self.assertIn(QUALITY_SKIPPED_NOTICE, report)
+        self.assertIn(f"失败  {' '.join(CLIENT_TEST)}", report)
+        self.assertIn(f"未运行（前置失败）  {' '.join(QUALITY)}", report)
+        self.assertNotIn(f"通过  {' '.join(QUALITY)}", report)
 
     def test_no_argument_can_bring_mutation_back_into_the_gate(self):
         """#193：任何参数组合都不许再拼出 --mutate（本机 commit limit 只有 23,060 MB，跑它会整机崩溃）。

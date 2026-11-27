@@ -6,6 +6,8 @@
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -13,6 +15,8 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 
 import release_gate
 
@@ -40,26 +44,52 @@ TOKEN_SOURCE_FILES = (
     Path("packaging/build_desktop.py"),
     Path("packaging/publish_release.py"),
 )
-QUALITY = [sys.executable, "packaging/quality.py"]
+TYPECHECK = ["npm", "--prefix", "client", "run", "typecheck"]
+LINT_DEAD = ["npm", "--prefix", "client", "run", "lint:dead"]
+# 前端单测直接产出 LCOV 覆盖率供 quality.py 复用，并限制 worker 数避免并发时与 go test 抢核。
+CLIENT_TEST = [
+    "npm",
+    "--prefix",
+    "client",
+    "test",
+    "--",
+    "--coverage",
+    "--coverage.reporter=lcov",
+    "--coverage.reportsDirectory=target/coverage",
+    "--maxWorkers=4",
+]
+QUALITY = [sys.executable, "packaging/quality.py", "--use-existing-coverage"]
+GO_TEST = ["go", "test", "./..."]
 # #229 的验收要求用 -race 证明诊断导出与日志记录并发安全。定向到 diagnostics 一个包：
 # 整仓跑 -race 太慢，本机内存也有限。--race 需要 cgo，执行前先看工具链（见 race_toolchain_available）。
 RACE = ["go", "test", "-race", "./desktop/internal/diagnostics/..."]
+DEBUG_BUILD = [sys.executable, "packaging/build_desktop.py", "--debug", "--skip-install"]
+PACKAGING_TESTS = [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"]
 RACE_NOTICE = ("未运行 -race：本机没有可用的 C 工具链（-race 需要 cgo）。"
                "装上 gcc 后这条会真正执行；这里只说明未运行，不静默跳过。")
+QUALITY_SKIPPED_NOTICE = ("未运行质量门禁：前置前端单测失败，无法复用其 LCOV 覆盖率产物；"
+                          "这里明确标为未运行，绝不静默标通过。")
+# knip 单次瞬时飙升约 +6.7 GB Commit Charge（本机红线 23,060 MB，见 docs/adr/0020），
+# Phase 1 先同步跑完 typecheck -> lint:dead，既能 5s 内快速反馈，又与 Phase 2 重负载彻底隔离。
+PHASE1_COMMANDS = (
+    TYPECHECK,
+    LINT_DEAD,
+)
+# Phase 2 受控并发（max_workers=2）：链 A 覆盖率复用，链 B Go 测试与构建，链 C 打包单测。
+PHASE2_MAX_WORKERS = 2
+PHASE2_CHAINS = (
+    (CLIENT_TEST, QUALITY),
+    (GO_TEST, RACE, DEBUG_BUILD),
+    (PACKAGING_TESTS,),
+)
 COMMANDS = (
-    [sys.executable, "-m", "unittest", "discover", "-s", "packaging/tests"],
-    ["npm", "--prefix", "client", "test"],
-    ["npm", "--prefix", "client", "run", "typecheck"],
-    ["npm", "--prefix", "client", "run", "lint:dead"],
-    ["go", "test", "./..."],
-    RACE,
-    [sys.executable, "packaging/build_desktop.py", "--debug", "--skip-install"],
-    QUALITY,
+    *PHASE1_COMMANDS,
+    *(command for chain in PHASE2_CHAINS for command in chain),
 )
 
 
-def commands(argv: list[str]) -> list[list[str]]:
-    """只接受当前验证入口的参数，避免旧参数被静默忽略。"""
+def execution_plan(argv: list[str]) -> tuple[list[list[str]], list[list[list[str]]]]:
+    """解析验证参数，返回 (Phase 1 顺序命令列表, Phase 2 并发链列表)。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--quality", action="store_true",
@@ -71,7 +101,18 @@ def commands(argv: list[str]) -> list[list[str]]:
     quality = list(QUALITY)
     if args.base:
         quality += ["--base", args.base]
-    return [quality if command is QUALITY else command for command in COMMANDS]
+    phase1 = [list(command) for command in PHASE1_COMMANDS]
+    phase2 = [
+        [list(quality) if command is QUALITY else list(command) for command in chain]
+        for chain in PHASE2_CHAINS
+    ]
+    return phase1, phase2
+
+
+def commands(argv: list[str]) -> list[list[str]]:
+    """只接受当前验证入口的参数，返回按稳定顺序展开的全部验证命令。"""
+    phase1, phase2 = execution_plan(argv)
+    return [*phase1, *(command for chain in phase2 for command in chain)]
 
 
 def integrity_problems(root: Path) -> list[Path]:
@@ -301,29 +342,92 @@ def race_toolchain_available() -> bool:
     return bool(compiler) and shutil.which(compiler) is not None
 
 
+@dataclass(frozen=True)
+class StepResult:
+    command: list[str]
+    state: str
+    duration: float
+
+
+def _is_quality_command(command: list[str]) -> bool:
+    return command[:2] == QUALITY[:2]
+
+
+def _run_step(command: list[str], print_lock: threading.Lock) -> StepResult:
+    line = " ".join(command)
+    if command == RACE and not race_toolchain_available():
+        with print_lock:
+            print(f"\n=== {line}", flush=True)
+            print(RACE_NOTICE, flush=True)
+        return StepResult(command=command, state="未运行", duration=0.0)
+    executable = shutil.which(command[0])
+    if executable is None:
+        with print_lock:
+            print(f"\n=== {line} (0.0s)", flush=True)
+            print(f"找不到命令：{command[0]}", file=sys.stderr, flush=True)
+        return StepResult(command=command, state="失败", duration=0.0)
+    started = time.monotonic()
+    run = subprocess.run(
+        [executable, *command[1:]],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    duration = time.monotonic() - started
+    stdout = run.stdout or ""
+    stderr = run.stderr or ""
+    with print_lock:
+        print(f"\n=== {line} ({duration:.1f}s)", flush=True)
+        if stdout:
+            print(stdout, end="" if stdout.endswith("\n") else "\n", flush=True)
+        if stderr:
+            print(stderr, end="" if stderr.endswith("\n") else "\n", file=sys.stderr, flush=True)
+    return StepResult(command=command, state="通过" if run.returncode == 0 else "失败", duration=duration)
+
+
+def _run_chain(chain: list[list[str]], print_lock: threading.Lock) -> list[StepResult]:
+    results: list[StepResult] = []
+    previous_failed = False
+    for command in chain:
+        if _is_quality_command(command) and previous_failed:
+            line = " ".join(command)
+            with print_lock:
+                print(f"\n=== {line}", flush=True)
+                print(QUALITY_SKIPPED_NOTICE, flush=True)
+            results.append(StepResult(command=command, state="未运行（前置失败）", duration=0.0))
+            continue
+        result = _run_step(command, print_lock)
+        results.append(result)
+        previous_failed = result.state == "失败"
+    return results
+
+
 def main(argv: list[str]) -> int:
-    selected = commands(argv)
+    phase1, phase2 = execution_plan(argv)
     code = preflight(ROOT) or dependencies_preflight(ROOT) or documentation_preflight(ROOT)
     if code or "--preflight" in argv:
         return code
-    failed = []
-    skipped = []
-    for command in selected:
+    started = time.monotonic()
+    print_lock = threading.Lock()
+    results: dict[tuple[str, ...], StepResult] = {}
+    for command in phase1:
+        result = _run_step(command, print_lock)
+        results[tuple(command)] = result
+    with ThreadPoolExecutor(max_workers=PHASE2_MAX_WORKERS) as executor:
+        futures = [executor.submit(_run_chain, chain, print_lock) for chain in phase2]
+        for future in futures:
+            for result in future.result():
+                results[tuple(result.command)] = result
+    ordered = [*phase1, *(command for chain in phase2 for command in chain)]
+    print("\n=== 汇总", flush=True)
+    for command in ordered:
+        result = results[tuple(command)]
         line = " ".join(command)
-        print(f"\n=== {line}", flush=True)
-        if command == RACE and not race_toolchain_available():
-            print(RACE_NOTICE, flush=True)
-            skipped.append(line)
-            continue
-        executable = shutil.which(command[0])
-        if executable is None or subprocess.run([executable, *command[1:]], cwd=ROOT).returncode != 0:
-            failed.append(line)
-    print("\n=== 汇总")
-    for command in selected:
-        line = " ".join(command)
-        state = "失败" if line in failed else "未运行" if line in skipped else "通过"
-        print(f"{state}  {line}")
-    return 1 if failed else 0
+        print(f"{result.state}  {line} ({result.duration:.1f}s)", flush=True)
+    print(f"总耗时  {time.monotonic() - started:.1f}s", flush=True)
+    return 1 if any(result.state == "失败" for result in results.values()) else 0
 
 
 if __name__ == "__main__":
