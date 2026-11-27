@@ -31,12 +31,20 @@ interface ShortcutInput {
   preventDefault: () => void;
 }
 
-/** 判定用的上下文：焦点在不在输入区、画布还挂在文档上、弹窗开着、选区大小。 */
+/** 判定用的上下文：焦点在不在输入区、画布还挂在文档上、两类弹层、选区大小。 */
 interface ShortcutContext {
   editable: boolean;
   connected: boolean;
+  /** 画布内的预览 / 菜单。 */
   dialogOpen: boolean;
+  /** 页面级的设置 / 画板列表 / 确认框（#268）。 */
+  modalOpen: boolean;
   selectedCount: number;
+}
+
+export function isMenuShortcut(e: ShortcutInput): boolean {
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  return (e.shiftKey && e.key === "F10") || e.key === "ContextMenu" || e.key === "Apps";
 }
 
 /** 一条快捷键命令；null = 这个按键不归画板管。 */
@@ -69,17 +77,18 @@ function copyCommandOf(e: ShortcutInput, ctx: ShortcutContext): ShortcutCommand 
 /**
  * 画板快捷键判定（顺序与 preventDefault 时机照旧）：
  * - 必须带 Ctrl / ⌘、不带 Alt，焦点不在输入区，画布还挂在文档上（换掉画板的那一刻不响应）；
- * - 撤销 / 重做一律吞掉原生撤销，弹窗开着也吞（只是不作用于背后的画板）；
- * - 之后带 Shift 的组合与弹窗开着的按键都不再处理；
+ * - 撤销 / 重做一律吞掉原生撤销，任一层弹层开着也吞（只是不作用于背后的画板）；
+ * - 之后带 Shift 的组合与任一层弹层开着的按键都不再处理；
  * - 复制见 copyCommandOf；Ctrl / ⌘+V 完全不归这里管（粘贴由页面级 paste 接管）。
  */
 export function shortcutCommand(e: ShortcutInput, ctx: ShortcutContext): ShortcutCommand | null {
   if (!modifierOnly(e) || ctx.editable || !ctx.connected) return null;
+  const blocked = ctx.dialogOpen || ctx.modalOpen;
   const history = historyCommandOf(e.key.toLowerCase(), e.shiftKey);
   if (history) {
     e.preventDefault();
-    return ctx.dialogOpen ? null : history;
+    return blocked ? null : history;
   }
-  if (e.shiftKey || ctx.dialogOpen) return null;
+  if (e.shiftKey || blocked) return null;
   return copyCommandOf(e, ctx);
 }

@@ -9,7 +9,6 @@ import { useUsageLimit } from "./ui/useUsageLimit";
 import { useRunner } from "./ui/useRunner";
 import { useSettings } from "./ui/useSettings";
 import { useAppTheme } from "./ui/useAppTheme";
-import { resolveFeedbackRelayAddress } from "./core/settings";
 import { useBoardPack } from "./ui/useBoardPack";
 import { useRunCallbacks } from "./ui/appRunHooks";
 import { useBoardSessions } from "./ui/useBoardSessions";
@@ -21,7 +20,6 @@ import { updateStatusView } from "./ui/updateStatusView";
 import { modalOpenOf, uiStateOf, uiStateText } from "./ui/appUiState";
 import { AppOverlays } from "./ui/appDialogs";
 import type { DataRootActions } from "./ui/dataRootMove";
-import { downloadBoardResults } from "./ui/packMenu";
 import { AppShell } from "./ui/appShell";
 import { useAppState, useRestoreTabs, useStartupReads, useToastTimer, useUiStateWriter, useVersionNotice } from "./ui/useAppState";
 import {
@@ -419,7 +417,7 @@ export function App({ version }: AppProps) {
         onCopyBoard={boards.copyAsNewBoard}
         onExportBoard={(path) => void exportBoardAt(path).catch((e) => toast(errorText(e)))}
         onTogglePackMenu={(at) => store.setPackMenu(togglePackMenu(state.packMenu, at))}
-        onPackMenuPick={(action) => packMenuPick(action, view.active, () => void pack.importPack(), (k) => void pack.prepareExport(k), (p) => downloadBoardResults(port, p, toast))}
+        onPackMenuPick={(action) => packMenuPick(action, view.active, () => void pack.importPack(), (k) => void pack.prepareExport(k))}
         onPackMenuClose={() => store.setPackMenu(null)}
         onDismissTableError={() => store.setTableError(null)}
         onOpenSettings={() => store.setSettingsOpen(true)}
@@ -452,7 +450,6 @@ export function App({ version }: AppProps) {
         feedbackOpen={feedbackOpen}
         onFeedbackClose={() => setFeedbackOpen(false)}
         feedbackBoardName={activeKey ? view.titleOf(activeKey) : ""}
-        feedbackRelayUrl={resolveFeedbackRelayAddress(settings.settings)}
         confirm={state.confirm}
         onConfirmCancel={() => store.setConfirm(null)}
         onConfirm={(ids) => void runNow(state.confirm!.boardKey, state.confirm!.board, ids)}

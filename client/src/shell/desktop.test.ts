@@ -150,18 +150,6 @@ describe("桌面壳端口", () => {
     await expect(port.core.runDeps.fetch("http://gw/v1/models", { method: "GET", headers: {} })).rejects.toMatchObject({ kind: "unavailable", feature: "gateway" });
   });
 
-  it("整板结果保存走 Local 服务：取消不报成功", async () => {
-    const base = fakeBridge();
-    const local = new Proxy({} as DesktopLocalBridge, {
-      get: (_target, prop: string) =>
-        prop === "saveBoardResults"
-          ? () => Promise.resolve({ ok: false, kind: "cancelled", message: "已取消保存", version: "" })
-          : () => Promise.reject(new Error("没实现的本地调用")),
-    });
-    const { port } = await createDesktopPort({ ...base, local });
-    await expect(port.media.downloadBoardResults("/~/画板/a.ugcboard.json")).resolves.toEqual({ kind: "cancelled" });
-  });
-
   it("壳信息读不出来时直接失败，不静默降级", async () => {
     await expect(createDesktopPort(fakeBridge({}, new Error("数据根不可用")))).rejects.toThrow("数据根不可用");
   });

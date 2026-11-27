@@ -1,6 +1,6 @@
 // 画板包菜单的条目（#127）：按端口的能力开关给出标签与置灰原因。
 //
-// 桌面壳本切片没有画板包导出与生成：这些入口标「尚不可用」并置灰，不假装能跑。
+// 桌面壳本切片没有画板包导出：导出标「尚不可用」并置灰，不假装能跑。
 // 菜单只按端口声明的能力与画板状态决定可用性。
 //
 // 导入画板包不需要打开的画板：它的置灰原因只看端口的能力开关，不看画板状态。
@@ -13,9 +13,9 @@ interface PackMenuEntry {
   disabledReason: string | null;
 }
 
-/** 画板的状态：决定导出与下载能不能做（导入不看它）。 */
+/** 画板的状态：决定导出能不能做（导入不看它）。 */
 interface PackBoardState {
-  /** 画板打开着（能导出、能下载）。 */
+  /** 画板打开着（能导出）。 */
   open: boolean;
   /** 画板在但读不懂（status 不是 ok）。 */
   broken: boolean;
@@ -43,12 +43,7 @@ function packExportEntry(port: ShellPort, board: PackBoardState): PackMenuEntry 
   return needsBoard(port.features.packExport, "画板包导出" + UNAVAILABLE_TEXT, "导出画板包…", "导出", board);
 }
 
-/** 下载整板结果：要画板打开着；没有生成时标「尚不可用」。 */
-function packDownloadEntry(port: ShellPort, board: PackBoardState): PackMenuEntry {
-  return needsBoard(port.features.generation, "生成" + UNAVAILABLE_TEXT + "，没有结果可下载", "下载整板结果（zip）", "下载", board);
-}
-
-/** 画板包菜单的条目（顶部「画板包」菜单）：导入、导出、下载整板结果。 */
+/** 画板包菜单的条目（顶部「画板包」菜单）：导入与导出。 */
 export function packMenuEntries(port: ShellPort, board: PackBoardState): PackMenuEntry[] {
-  return [packImportEntry(port), packExportEntry(port, board), packDownloadEntry(port, board)];
+  return [packImportEntry(port), packExportEntry(port, board)];
 }

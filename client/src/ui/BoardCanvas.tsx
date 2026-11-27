@@ -35,20 +35,18 @@ import {
   deleteKeyCodeFor,
   dragFromOf,
   edgeHoverMove,
-  hoveredActionBarOf,
   menuEntriesOf,
   menuViewFor,
   openEdgeMenu,
   openNodeContextMenu,
   openPaneContextMenu,
   openSelectionContextMenu,
-  pickActionBarAction,
   pickMenuAction,
   pickReferencesOf,
   saveNodeAsOf,
 } from "./canvasFrame";
 import { canvasNodes } from "./canvasNodes";
-import { CanvasActionBar, CanvasOverlays } from "./canvasOverlays";
+import { CanvasOverlays } from "./canvasOverlays";
 import { useCanvasPaste } from "./canvasPaste";
 import { canvasClassName, posOf } from "./canvasPoint";
 import { canvasThemeProps } from "./canvasTheme";
@@ -61,7 +59,6 @@ import { edgeTypes } from "./edges";
 import { HoverProvider, useHoverLayer } from "./hoverInfo";
 import { nodeTypes } from "./nodes";
 import { DragContext } from "./ports";
-import { actionBarView, useActionBarHover } from "./useCanvasHover";
 import { useBoardKeyboard } from "./useBoardKeyboard";
 import { useCanvasApply } from "./useCanvasApply";
 import { useCanvasData } from "./useCanvasData";
@@ -110,7 +107,7 @@ interface Props {
   toolbarSlot: HTMLElement | null;
   /** 运行指示跳转：居中并选中该节点；nonce 变化即再跳一次。 */
   focus: { nodeId: string; nonce: number } | null;
-  /** 归档画板（#90）：能看、放大、下载结果，不能编辑（不拖动、不连线、不删、菜单只剩查看与下载）。 */
+  /** 归档画板（#90）：能看、放大、另存单张结果，不能编辑（不拖动、不连线、不删，菜单只剩查看与另存）。 */
   readOnly?: boolean;
   /** 页面级模态开着（设置、更新说明、画板列表、运行确认、发送文本、画板包对话框）：粘贴放行给它们，不落到背后的画板（#96）。 */
   modalOpen?: boolean;
@@ -162,7 +159,6 @@ export function BoardCanvas({
   const apply = useCanvasApply({ applyChange, toast, readOnly, setSelectedNodes, setSelectedEdges });
   const canvasData = useCanvasData({ board, boardFile, userRoot, table, locked, handled, runNodes, applyChange });
   const overlays = useCanvasOverlaysState({ flow, selectedRef, setSelectedNodes, clearPromptFocus: () => requestPromptFocus(null) });
-  const actionBar = useActionBarHover();
   const nav = useCanvasInteraction({ wrapper, boardRef, selection, dialogOpen: overlays.dialogOpenRef, apply, isEditableTarget: port.ui.isEditableTarget });
   const hover = useHoverLayer();
 
@@ -189,8 +185,8 @@ export function BoardCanvas({
     [board, table, userRoot, selectedNodes, measured, highlighted, drag, focusPrompt, promptDrafts, canvasData.missing, canvasData.imageInfos, canvasData.alphaByNode, discovery, concurrency, expanded, locked, canvasData.runStateOf, canvasData.statusOf, menuFacts],
   );
   const edges = useMemo<Edge[]>(
-    () => canvasEdges({ board, selectedEdges, selectedNodes, lineageEdges: highlighted.edges, dragging, expanded }),
-    [board.edges, selectedEdges, selectedNodes, highlighted, dragging, expanded],
+    () => canvasEdges({ board, selectedEdges, selectedNodes, lineageEdges: highlighted.edges, dragging }),
+    [board.edges, selectedEdges, selectedNodes, highlighted, dragging],
   );
 
   // 跨渲染记账：拖动 / 缩放的合并编号与「先取消再删除」的确认（画布事件之间记住，见 canvasFlowHandlers）。
@@ -212,9 +208,9 @@ export function BoardCanvas({
       canvasBoardActions({
         table, boardFile, userRoot, discovery, concurrency, apply, boardRef, selectedRef, lockedRef,
         focusPromptRef, requestPromptFocus, setPromptDrafts, setExpandOverrides,
-        unhoverNode: actionBar.unhoverNode, showPreview: overlays.openPreview, primeImageInfo, onRegenerate, toast, performRef, port,
+        showPreview: overlays.openPreview, primeImageInfo, onRegenerate, toast, performRef, port,
       }),
-    [table, boardFile, userRoot, discovery, concurrency, apply, requestPromptFocus, setPromptDrafts, setExpandOverrides, actionBar.unhoverNode, overlays.openPreview, onRegenerate, toast, port],
+    [table, boardFile, userRoot, discovery, concurrency, apply, requestPromptFocus, setPromptDrafts, setExpandOverrides, overlays.openPreview, onRegenerate, toast, port],
   );
 
   // 本机图片先上传到数据根的 导入参考图/，再按本机存储给出的路径导入（端口见 canvasDrop 的 ImagePorts）。
@@ -264,7 +260,12 @@ export function BoardCanvas({
   performRef.current = (action, target, at) => commands[action]?.(target, at);
   performDragCreateRef.current = canvasDragCreate(commandDeps);
 
-  useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen: overlays.dialogOpenRef, onUndo, onRedo, toast, port });
+  // 键盘菜单与右键空白菜单共用同一目标与落点判定；焦点先落在画布，关菜单后由菜单返还。
+  const openKeyboardMenu = useCallback(
+    (client: { x: number; y: number }) => overlays.openMenu({ clientX: client.x, clientY: client.y, preventDefault: () => undefined }, { kind: "pane" }),
+    [overlays.openMenu],
+  );
+  useBoardKeyboard({ wrapper, boardRef, selectedRef, dialogOpen: overlays.dialogOpenRef, modalOpen, onUndo, onRedo, onOpenMenu: openKeyboardMenu, toast, port });
   useCanvasDrop({ wrapper, boardRef, screenToFlowPosition: (client) => flow.screenToFlowPosition(client), apply, toast, userRoot, readOnly, port });
   // 页面级粘贴接管（#96）：分派在 core/pageInput（纯逻辑），这里只把落点、模态与图片导入接上。
   useCanvasPaste({
@@ -284,7 +285,6 @@ export function BoardCanvas({
 
   const menuView = menuViewFor(readOnly);
   const canvasTheme = canvasThemeProps(theme);
-  const barView = actionBarView({ hovered: actionBar.hovered, nodes: board.nodes, menuOpen: overlays.menu !== null, menuView, facts: menuFacts(selectedNodes) });
 
   return (
     <BoardContext.Provider value={actions}>
@@ -294,6 +294,7 @@ export function BoardCanvas({
           <div
             className={canvasClassName(dragging)}
             ref={wrapper}
+            tabIndex={-1}
             onContextMenu={(e) => blockNativeContextMenu(port.ui.isEditableTarget, e)}
             onPointerDownCapture={nav.onPointerDownCapture}
             onPointerUpCapture={nav.onPointerUpCapture}
@@ -301,14 +302,6 @@ export function BoardCanvas({
             <CanvasToolbar
               toolbarSlot={toolbarSlot}
               readOnly={readOnly}
-              board={board}
-              table={table}
-              discovery={discovery}
-              availableModels={actions.availableModels}
-              apply={apply}
-              onNewPrompt={() => addPrompt()}
-              onAddReferences={() => void pickReferences()}
-              onNewTask={() => addTask()}
               onUndo={onUndo}
               onRedo={onRedo}
               undoLabel={undoLabel}
@@ -348,8 +341,6 @@ export function BoardCanvas({
               onNodeContextMenu={(e, n) => openNodeContextMenu(overlays.openMenu, port.ui.isEditableTarget, e, n.id)}
               onSelectionContextMenu={(e, ns) => openSelectionContextMenu(overlays.openMenu, e, ns)}
               onEdgeContextMenu={(e, fe) => openEdgeMenu(overlays.openMenu, board, e, fe.id)}
-              onNodeMouseEnter={(_, n) => hoveredActionBarOf(actionBar.showActionBar, n)}
-              onNodeMouseLeave={actionBar.hideActionBarSoon}
               onEdgeMouseMove={(e, fe) => edgeHoverMove(e, fe, hover.controller)}
               onEdgeMouseLeave={(_, fe) => hover.controller.leave(`edge:${fe.id}`)}
               minZoom={0.1}
@@ -357,14 +348,6 @@ export function BoardCanvas({
               <Background {...canvasTheme.background} />
               <Controls />
               <MiniMap {...canvasTheme.minimap} />
-              <CanvasActionBar
-                present={barView.present}
-                nodes={barView.nodes}
-                items={barView.items}
-                onPick={(action) => pickActionBarAction(action, actionBar.hovered, commands)}
-                onPointerEnter={() => actionBar.showActionBar(actionBar.hovered)}
-                onPointerLeave={actionBar.hideActionBarSoon}
-              />
             </ReactFlow>
             <CanvasOverlays
               menu={overlays.menu}

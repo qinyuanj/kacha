@@ -51,13 +51,13 @@ export function UsageLimitBar({
   level: SizeTier;
   total: number;
   limit: number;
-  onManage(): void;
+  onManage(trigger: HTMLElement): void;
   onDismiss(): void;
 }) {
   return (
     <div className={`bar ${level === "alert" ? "bar-alert" : "bar-warn"} usage-limit-notice`} role="status" data-usage-level={level}>
       <span>{usageLimitText(level, total, limit)}</span>
-      <button onClick={onManage}>{MANAGE_BOARDS_TEXT}</button>
+      <button onClick={(e) => onManage(e.currentTarget)}>{MANAGE_BOARDS_TEXT}</button>
       <button className="link" aria-label="关闭用量提醒" onClick={onDismiss}>
         关闭
       </button>
@@ -65,7 +65,7 @@ export function UsageLimitBar({
   );
 }
 
-/** 归档画板的只读横条：能看、能放大、能下载结果与导出画板包。 */
+/** 归档画板的只读横条：能看、能放大、能另存单张结果，也能取消归档与复制为新画板。 */
 export function ArchivedBar({ onUnarchive, onCopy }: { onUnarchive(): void; onCopy(): void }) {
   return (
     <div className="bar bar-info archived-notice" role="status">

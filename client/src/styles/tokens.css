@@ -1,14 +1,14 @@
-/* Design Tokens（#221）：暗色 Dark Studio（默认）与浅色 Light Studio 两套完整语义变量。
+/* Design Tokens（#221）：暗色 Dark Studio 与浅色 Light Studio 两套完整语义变量；产品默认是浅色。
  *
  * 层级约定（层叠顺序由 styles/index.css 固定）：
  *   tokens → base → shell → canvas → dialogs
  * 主题由文档根上的 data-theme="dark" | "light" 选择（core/theme.ts 的 THEME_ATTRIBUTE 是唯一属性名来源）。
- * 没有属性时就是暗色：冷启动首帧由 ui/startDesktop 在挂载前写入。
+ * 没有属性时的 :root 取值只是 CSS 兜底，仅供首帧前极端情况；正常启动由 ui/startDesktop 在挂载前写入固定的浅色 / 暗色档位。
  *
  * 域模块只引用这里的变量，不再写具体色号；新增变量请追加到文件末尾的「补充」小节。
  */
 
-/* ---- 暗色（Dark Studio）：产品默认，也是没有 data-theme 时的取值 ---- */
+/* ---- 暗色（Dark Studio）：显式深档，以及没有 data-theme 时的 CSS 兜底取值 ---- */
 :root,
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -111,38 +111,41 @@
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --app-bg: #f6f7f9;
-  --canvas-bg: #ffffff;
-  --canvas-dot: #d0d7de;
-  --app-chrome: #e6e9ee;
-  --app-chrome-soft: #eef2f7;
-  --toolbar-bg: #f6f8fa;
-  --surface: #ffffff;
-  --surface-raised: #ffffff;
-  --surface-sunken: #f6f8fa;
-  --control-bg: #ffffff;
-  --control-hover: #f3f4f6;
-  --control-active: #e9ecef;
+  /* #266：同族米色的语义层级。画布保持 #dedeba；其余表面按
+   * 外壳 → 画布 → 内凹 → 工具栏 → 控件 → 普通表面 → 抬升浮层逐层提亮，
+   * 只有中性表面进入米色体系，语义状态色与图片内容色不在此列。 */
+  --app-bg: #d5d5ad;
+  --canvas-bg: #dedeba;
+  --canvas-dot: #c9c9a4;
+  --app-chrome: #d0d0a5;
+  --app-chrome-soft: #deddb8;
+  --toolbar-bg: #e7e7c9;
+  --surface: #f3f3e1;
+  --surface-raised: #f7f7e8;
+  --surface-sunken: #e2e2bf;
+  --control-bg: #eeeed6;
+  --control-hover: #e6e6c5;
+  --control-active: #d9d9b4;
 
-  --border-1: #d0d7de;
-  --border-2: #b6bec7;
-  --border-3: #8c959f;
+  --border-1: #c6c69e;
+  --border-2: #7d7c56;
+  --border-3: #6f7050;
 
   --text-1: #1f2328;
-  --text-2: #57606a;
-  --text-3: #8c959f;
+  --text-2: #4f523c;
+  --text-3: #585a41;
   --text-on-accent: #ffffff;
 
-  --accent: #0969da;
-  --accent-hover: #0860c4;
-  --accent-active: #0550a8;
+  --accent: #0858ad;
+  --accent-hover: #0754a8;
+  --accent-active: #06468f;
   --accent-soft: #ddf4ff;
-  /* 浅色下它只供框选虚线描边使用（#247）：描边压在 #eaf1ff 框选填充上要 ≥3:1，
-   * 原 #7cc0ff 只有 1.71:1；这里用浅色主色本身，对填充 4.58:1、裸白 5.19:1。 */
+  /* 浅色下它只供框选虚线描边使用（#247）：描边压在框选填充上要 ≥3:1，
+   * 原 #7cc0ff 在白底填充上只有 1.71:1；浅色主色对米色上的填充为 3.40:1、画布为 3.77:1。 */
   --accent-border: #0969da;
   --accent-strong: #1f8fff;
-  --link: #0969da;
-  --focus-ring: #0969da;
+  --link: #0858ad;
+  --focus-ring: #0858ad;
 
   --success: #1a7f37;
   --success-fill: #1f883d;
@@ -158,17 +161,18 @@
   --danger-fill-hover: #a40e26;
   --danger-soft: #ffebe9;
   --danger-soft-weak: #fff5f5;
-  --danger-text: #c0392b;
+  --danger-text: #a32b20;
   /* 内联危险文字：浅色用专用 token，4.5:1 达标（#242）。 */
   --danger-inline-text: var(--danger-text);
 
   --checker-a: #eeeeee;
   --checker-b: #ffffff;
 
-  --port-image: #0f9d8a;
+  /* 米色画布 #dedeba 上仍保留至少 3:1 的非文字对比度。 */
+  --port-image: #087f73;
   --port-positive: #5b5fd6;
   --port-negative: #c2359c;
-  --edge-system: #8c959f;
+  --edge-system: #6e7681;
   --lineage-glow: rgb(9 105 218 / 55%);
   --lineage-edge: rgb(9 105 218 / 35%);
 
@@ -178,9 +182,9 @@
   --shadow-popover: 0 4px 12px rgb(0 0 0 / 12%);
   --shadow-modal: 0 12px 32px rgb(0 0 0 / 25%);
   --scrim: rgb(31 35 40 / 45%);
-  --toast-bg: #24292f;
-  --toast-text: #ffffff;
-  --scrollbar-thumb: #c9d1d9;
+  --toast-bg: #f7f7e8;
+  --toast-text: #1f2328;
+  --scrollbar-thumb: #c4c49b;
   --scrollbar-track: transparent;
 
   --rf-minimap-mask: rgb(31 35 40 / 30%);
@@ -271,9 +275,9 @@
   --accent-soft-strong: rgb(221 244 255 / 90%);
   --border-subtle: rgb(140 149 159 / 6%);
   --warning-strong: #bc4c00;
-  /* 框选填充：12% 蓝叠在白画布上得 #eaf1ff（对白 1.13:1，框选区域本身仍可辨，
+  /* 框选填充：12% 蓝叠在米色画布上得 #ccd4c2（对画布 1.11:1，框选区域本身仍可辨，
    * 与暗色 1.24:1 同量级）；虚线描边取 --accent-border 的 #0969da，在该填充上
-   * 4.58:1、裸白 5.19:1，达到 WCAG 1.4.11 的 3:1（#247：原 #7cc0ff 只有 1.71:1）。 */
+   * 3.40:1、裸画布 3.77:1，达到 WCAG 1.4.11 的 3:1。 */
   --selection-fill: rgb(76 141 255 / 12%);
 }
 

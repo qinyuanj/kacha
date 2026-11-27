@@ -1,7 +1,5 @@
-// 反馈能力的共享契约：界面显示中文，提交与 Go/中继只认稳定英文 code。
-// Go 侧 desktop/internal/feedbackrelay 与 desktop/internal/feedbackservice 的对应常量
-// 由 packaging/tests/test_feedback_contract_sync.py 机械核对；改这里必须同步改 Go。
-export const DEFAULT_FEEDBACK_RELAY_URL = "http://lzxsvn:3005";
+// 反馈能力的共享契约：界面显示中文，提交与 Go 直连服务只认稳定英文 code。
+// Go 侧 desktop/internal/feedbackservice 的对应常量由 packaging/tests/test_feedback_contract_sync.py 机械核对。
 export const FEEDBACK_MAX_SCREENSHOTS = 5;
 export const FEEDBACK_MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024;
 
@@ -19,13 +17,13 @@ export function feedbackCategoryLabel(code: string): string {
 
 /** 失败文案的客户端单一来源；与 Go feedbackservice 的 Message* 常量逐字一致。 */
 export const FEEDBACK_FAILURE_MESSAGES = {
-  unreachable: "反馈中继不可达，请稍后再试",
+  unreachable: "Gitea 不可达，请稍后再试",
   unauthorized: "Gitea token 无效或权限不足",
-  rejected: "反馈被中继拒绝，请稍后再试",
+  rejected: "Gitea 提交失败，请稍后再试",
   invalid: "反馈内容不合法，请修改后重试",
   too_large: "反馈内容过大，请精简后重试",
   duplicate: "刚刚已提交过，请勿重复提交。",
-  unavailable: "反馈暂不可用：未配置中继地址",
+  unavailable: "反馈暂不可用",
 } as const;
 
 /** 预览只说明 token 的去向，不展示 token 值。 */

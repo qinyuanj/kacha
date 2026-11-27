@@ -9,9 +9,6 @@ export const BOARD_MISSING_TEXT = "该画板已不存在，可能已在别处改
 /** 原文件丢失时保留内存改动的恢复指引。 */
 export const MISSING_BOARD_RECOVERY_TEXT = "请勿关闭当前画板；请先恢复原文件路径后重试保存";
 
-/** 工具栏「新建任务模型」：默认模型 Flash 不在可用列表时的占位项。 */
-export const FLASH_UNAVAILABLE_TEXT = "Flash 不可用，请刷新模型列表";
-
 /** 画板位已用 / 总数（#89）。 */
 export interface Slots {
   used: number;
@@ -100,8 +97,6 @@ export const PASTE_TEXT = {
   unsupported: "剪贴板里的内容不受支持：请复制图片（PNG）或本应用的节点",
   /** 剪贴板正被别的程序占用（#129）：可重试，不要说得像永久失败。 */
   busy: "剪贴板正被其他程序占用，请稍后重试",
-  /** 工具栏「＋ 参考图…」的悬浮提示：粘贴没有按钮入口（内网 HTTP 下页面读不到剪贴板），只能用文案告诉用户。 */
-  toolbarHint: "选择图片文件加为参考图节点（也可以直接按 Ctrl+V 粘贴截图）",
 } as const;
 
 /** 读不出剪贴板内容时给用户的话（#129）：空、格式不支持、被占用（可重试）。 */

@@ -13,19 +13,14 @@ export function toolbarHint(disabled: boolean, text: string): string {
   return disabled ? NO_BOARD : text;
 }
 
-/** 新建生成任务按钮的后缀：生成尚不可用时标出来，否则空。 */
-export function newTaskSuffix(generationUnavailable: boolean): string {
+/** 生成不可用后缀：只给运行按钮用。 */
+function unavailableSuffix(generationUnavailable: boolean): string {
   return generationUnavailable ? `（${UNAVAILABLE_TEXT}）` : "";
-}
-
-/** 新建生成任务按钮的悬浮提示。 */
-export function newTaskHint(generationUnavailable: boolean): string {
-  return generationUnavailable ? "生成" + UNAVAILABLE_TEXT : "用右侧模型在视口中央新建一个生成任务节点";
 }
 
 /** 运行按钮的后缀：选中了就只跑选中的；生成不可用时标出来。 */
 export function runSuffix(selectedCount: number, generationUnavailable: boolean): string {
-  return `${selectedLabel(selectedCount)}${newTaskSuffix(generationUnavailable)}`;
+  return `${selectedLabel(selectedCount)}${unavailableSuffix(generationUnavailable)}`;
 }
 
 /** 「选中」后缀：选了才写。 */

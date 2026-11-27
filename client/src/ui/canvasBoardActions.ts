@@ -1,4 +1,4 @@
-// 画布动作（BoardActions）的构造：上下文菜单、悬浮动作条、节点按钮与放大预览共用的迭代、草稿、
+// 画布动作（BoardActions）的构造：右键菜单、节点按钮与放大预览共用的迭代、草稿、
 // 预览、区域编辑、变体与重新定位。每个动作一个模块顶层工厂函数，画布组件只把 ref、本地状态 setter
 // 与写入入口接进来；行为、文案与日志字段与拆分前逐字一致。
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
@@ -46,8 +46,6 @@ export interface CanvasBoardActionsDeps {
   requestPromptFocus: (promptId: string | null) => void;
   setPromptDrafts: Dispatch<SetStateAction<ReadonlyMap<string, string>>>;
   setExpandOverrides: Dispatch<SetStateAction<ExpandOverrides>>;
-  /** 图片节点卸载（离开视口、被删）：收起它的悬浮动作条。 */
-  unhoverNode: (nodeId: string) => void;
   /** 打开放大预览弹窗（画布组件负责 nonce 递增）。 */
   showPreview: (req: PreviewRequest) => void;
   /** 读到的图片信息进缓存：刚重定位的图片不等下一轮批量读取。 */
@@ -191,7 +189,7 @@ function relocateAction(deps: CanvasBoardActionsDeps): BoardActions["relocate"] 
     })();
 }
 
-/** 画布动作：上下文菜单、悬浮动作条、节点按钮与放大预览共用的一套写入口。 */
+/** 画布动作：右键菜单、节点按钮与放大预览共用的一套写入口。 */
 export function canvasBoardActions(deps: CanvasBoardActionsDeps): BoardActions {
   return {
     perform: (action, target, at) => deps.performRef.current(action, target, at),
@@ -203,7 +201,6 @@ export function canvasBoardActions(deps: CanvasBoardActionsDeps): BoardActions {
     continueEditing: continueEditingAction(deps),
     setPromptDraft: setPromptDraftAction(deps),
     takePromptFocus: takePromptFocusAction(deps),
-    nodeUnmounted: (nodeId) => deps.unhoverNode(nodeId),
     addAsReference: (resultId, sourceLayer = null) => void deps.apply({ kind: "addAsReference", resultId, selected: [...deps.selectedRef.current], sourceLayer }),
     previewNode: previewNodeAction(deps),
     editRegion: editRegionAction(deps),

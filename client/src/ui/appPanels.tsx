@@ -22,7 +22,6 @@ export function AppTopBar({
   onClose,
   onRename,
   onCreate,
-  onOpenList,
   onExportPack,
   updateNotice,
   onOpenChangelog,
@@ -34,7 +33,6 @@ export function AppTopBar({
   onClose(key: string): void;
   onRename(key: string, title: string): void;
   onCreate(): void;
-  onOpenList(): void;
   onExportPack(key: string): void;
   /** 有新版本且用户还没看过：显示更新提示条。 */
   updateNotice: string | null;
@@ -51,7 +49,6 @@ export function AppTopBar({
           onClose={onClose}
           onRename={onRename}
           onCreate={onCreate}
-          onOpenList={onOpenList}
           onExportPack={onExportPack}
         />
       </div>
@@ -70,6 +67,8 @@ export function AppTopBar({
 export function AppBoardList({
   openPaths,
   manage,
+  at,
+  trigger,
   onOpen,
   onDelete,
   onArchive,
@@ -80,6 +79,10 @@ export function AppBoardList({
 }: {
   openPaths: string[];
   manage: boolean;
+  /** 弹层锚点（触发按钮的左下角，视口坐标）。 */
+  at: { x: number; y: number } | null;
+  /** 触发元素；点它不算「点外部」，关闭后焦点回到这里。 */
+  trigger: HTMLElement | null;
   onOpen(path: string): void;
   onDelete(path: string): Promise<void>;
   onArchive(path: string): Promise<void>;
@@ -99,6 +102,8 @@ export function AppBoardList({
       onExport={onExport}
       onClose={onClose}
       manage={manage}
+      at={at}
+      trigger={trigger}
     />
   );
 }
@@ -110,9 +115,10 @@ export function AppToolbar({
   runIndicator,
   packMenuOpen,
   packMenuDisabled,
+  boardListOpen,
   onTogglePackMenu,
+  onOpenList,
   version,
-  ready,
   onOpenChangelog,
   settingsLoaded,
   onOpenSettings,
@@ -128,10 +134,13 @@ export function AppToolbar({
   packMenuOpen: boolean;
   /** 没有数据根时画板包入口不可用。 */
   packMenuDisabled: boolean;
+  /** 画板列表入口的展开态；弹层与入口共用同一份状态。 */
+  boardListOpen: boolean;
   /** 打开菜单时给它的位置（按钮下缘）。 */
   onTogglePackMenu(at: { x: number; y: number }): void;
+  /** 从第二行右侧入口打开画板列表弹层，传入触发元素供锚定与关闭后还焦点。 */
+  onOpenList(trigger: HTMLElement): void;
   version: string | null;
-  ready: boolean;
   onOpenChangelog(): void;
   settingsLoaded: boolean;
   onOpenSettings(): void;
@@ -151,6 +160,15 @@ export function AppToolbar({
         {!canvasReady && <BoardToolbar disabled />}
       </div>
       <div className="board-toolbar-right">
+        <button
+          className="topbar-button board-list-toggle"
+          aria-haspopup="dialog"
+          aria-expanded={boardListOpen}
+          title="列出本机存储已有画板并打开"
+          onClick={(e) => onOpenList(e.currentTarget)}
+        >
+          画板列表
+        </button>
         <RunIndicator {...runIndicator} />
         <button
           className="topbar-button"
@@ -164,27 +182,33 @@ export function AppToolbar({
         >
           画板包 ▾
         </button>
-        {version && <button className="topbar-button topbar-version" onClick={onOpenChangelog} disabled={!ready} aria-haspopup="dialog" title="查看更新内容">Kacha {version}</button>}
-        <UpdateToolbarControl {...update} />
+        {version && <UpdateToolbarControl {...update} version={version} onOpenChangelog={onOpenChangelog} />}
         <button className="topbar-button" onClick={onOpenFeedback} aria-haspopup="dialog" title={feedbackAvailable ? "提交反馈" : "反馈暂不可用，点击重试"}>
           {feedbackAvailable ? "反馈" : "反馈（暂不可用）"}
         </button>
         {/* 主题切换（#221）：常驻紧凑入口，点击即时生效，不进设置面板。 */}
         <ThemeSwitch choice={theme.choice} onChoose={theme.choose} />
-        <button className="topbar-button" onClick={onOpenSettings} disabled={!settingsLoaded}>
-          ⚙ 高级设置
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="高级设置"
+          title="高级设置"
+          aria-haspopup="dialog"
+          onClick={onOpenSettings}
+          disabled={!settingsLoaded}
+        >
+          ⚙
         </button>
       </div>
     </div>
   );
 }
 
-/** 画板包菜单：导入、导出、下载整板结果。 */
+/** 画板包菜单：导入与导出。 */
 export function AppPackMenu({
   at,
   importDisabledReason,
   exportDisabledReason,
-  downloadDisabledReason,
   onPick,
   onClose,
 }: {
@@ -192,8 +216,7 @@ export function AppPackMenu({
   /** 导入画板包的置灰原因（端口说这项能力还没有时非空）。 */
   importDisabledReason: string | null;
   exportDisabledReason: string | null;
-  downloadDisabledReason: string | null;
-  onPick(action: "importPack" | "exportPack" | "downloadResults"): void;
+  onPick(action: "importPack" | "exportPack"): void;
   onClose(): void;
 }) {
   return (
@@ -202,9 +225,8 @@ export function AppPackMenu({
       items={[
         { action: "importPack", label: importDisabledReason ? "导入画板包…（" + UNAVAILABLE_TEXT + "）" : "导入画板包…", disabledReason: importDisabledReason },
         { action: "exportPack", label: "导出画板包…", disabledReason: exportDisabledReason },
-        { action: "downloadResults" as const, label: "下载整板结果（zip）", disabledReason: downloadDisabledReason },
       ]}
-      onPick={(action) => onPick(action as "importPack" | "exportPack" | "downloadResults")}
+      onPick={(action) => onPick(action as "importPack" | "exportPack")}
       onClose={onClose}
     />
   );

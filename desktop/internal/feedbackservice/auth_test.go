@@ -1,6 +1,7 @@
 package feedbackservice
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/qinyuanj/kacha/desktop/internal/feedbackauth"
@@ -19,36 +20,41 @@ func (f *fakeAuth) Status() feedbackauth.Status { return f.status }
 func (f *fakeAuth) Start() feedbackauth.Start   { return f.start }
 func (f *fakeAuth) Reset() error                { f.reset++; return nil }
 
-func TestSendUsesStoredAuthToken(t *testing.T) {
-	server, capture := newFakeRelay(t, 200, Outcome{OK: true, Kind: "created", Message: "已提交"})
+func TestSendUsesStoredAuthTokenOnlyInGiteaAuthorization(t *testing.T) {
+	server, capture := newFakeGitea(t)
 	defer server.Close()
 	auth := &fakeAuth{token: "stored-oauth-token"}
-	svc := New(Config{RelayURL: server.URL, Auth: auth})
-	spec := sampleSpec()
-	spec.GiteaToken = "manual-token-must-be-overridden"
+	svc := New(Config{GiteaBase: server.URL, OwnerRepo: "o/r", Auth: auth})
 
-	outcome := svc.Send(spec)
+	outcome := svc.Send(sampleSpec())
 	if !outcome.OK {
 		t.Fatalf("Send() = %+v", outcome)
 	}
-	if got := capture().fields["gitea_token"]; got != "stored-oauth-token" {
-		t.Fatalf("relay got token %q", got)
+	got := capture()
+	if len(got.auth) == 0 {
+		t.Fatal("Gitea was not called")
+	}
+	for _, header := range got.auth {
+		if header != "token stored-oauth-token" {
+			t.Fatalf("Authorization = %q", header)
+		}
+	}
+	if strings.Contains(got.title+got.body+got.patched, auth.token) {
+		t.Fatal("token leaked into issue content")
 	}
 }
 
 func TestSendWithoutAuthorizationReturnsUnauthorized(t *testing.T) {
-	server, capture := newFakeRelay(t, 200, Outcome{OK: true, Kind: "created", Message: "ok"})
+	server, capture := newFakeGitea(t)
 	defer server.Close()
-	svc := New(Config{RelayURL: server.URL, Auth: &fakeAuth{}})
-	spec := sampleSpec()
-	spec.GiteaToken = ""
+	svc := New(Config{GiteaBase: server.URL, OwnerRepo: "o/r", Auth: &fakeAuth{}})
 
-	outcome := svc.Send(spec)
+	outcome := svc.Send(sampleSpec())
 	if outcome.Kind != KindUnauthorized {
 		t.Fatalf("Kind = %q", outcome.Kind)
 	}
-	if capture().calls != 0 {
-		t.Fatal("relay was called without authorization")
+	if len(capture().requests) != 0 {
+		t.Fatal("Gitea was called without authorization")
 	}
 }
 

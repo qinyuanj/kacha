@@ -2,7 +2,7 @@
 """把 MyGo Windows 发布资产幂等上传到 Gitea Release。
 
 只从环境变量读取 GITEA_TOKEN；私钥不进入本脚本、仓库或发行资产。
-上传前必须齐备安装器、发布者签名、版本化反馈中继、更新描述与校验值，更新描述最后上传。
+上传前必须齐备安装器、发布者签名、更新描述与校验值，更新描述最后上传。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from typing import Protocol
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from release_gate import desktop_version, release_notes_section, relay_asset_name, validate_release_assets  # noqa: E402
+from release_gate import desktop_version, release_notes_section, validate_release_assets  # noqa: E402
 import build_desktop  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -32,7 +32,6 @@ RELEASE_BUILD_DIR = build_desktop.OUT
 DEFAULT_BASE_URL = "http://lzxsvn:3000"
 OWNER_REPO = "qinyuanj/kacha-cd"
 INSTALLER = "kacha-setup-{version}-amd64.exe"
-RELAY = "kacha-feedbackrelay-{version}-windows-amd64.exe"
 DESCRIPTOR = "update-windows-amd64.json"
 CHECKSUMS = "SHA256SUMS"
 # 验签与客户端走同一条路径：内置公钥与 Ed25519 规则只在 Go 侧写一份。
@@ -40,7 +39,6 @@ RELEASE_TOOL = ("go", "run", "./desktop/cmd/verifyrelease")
 REQUIRED = (
     INSTALLER,
     INSTALLER + ".sig",
-    RELAY,
     DESCRIPTOR,
     CHECKSUMS,
 )

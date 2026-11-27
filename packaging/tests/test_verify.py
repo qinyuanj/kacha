@@ -174,19 +174,16 @@ class DocumentationGateTest(unittest.TestCase):
         (root / "docs" / "adr").mkdir(parents=True, exist_ok=True)
         if adr:
             adr_text = (
-                "# 0027\n反馈是可选联网能力，核心画板离线可用，不新增远端应用服务依赖；反馈中继只转发用户主动提交的内容。\n"
+                "# 0027\n反馈是可选联网能力，核心画板离线可用，不依赖远端应用服务；桌面使用本机授权直连 Gitea。\n"
             )
             if token_docs:
-                adr_text += "提交反馈时由用户自带 Gitea token，权限限于 kacha-feedback 仓库的建 issue、评论/标签与附件；中继只在本次请求里转交，不保存、不缓存、不复用，核心画板仍离线可用。\n"
+                adr_text += "提交反馈时由用户自带 Gitea token，权限限于 kacha-feedback 仓库的建 issue、评论/标签与附件；桌面直连 Gitea，核心画板仍离线可用。\n"
             (root / "docs" / "adr" / "0027-feedback-is-optional.md").write_text(adr_text, encoding="utf-8")
-        glossary_text = (
-            "# Kacha\n\n**反馈**：用户主动提交的内容。\n_Avoid_：工单、报障\n\n"
-            "**反馈中继**：转发反馈的可选服务。\n_Avoid_：反馈服务器、客服系统\n"
-        )
+        glossary_text = "# Kacha\n\n**反馈**：用户主动提交的内容。\n_Avoid_：工单、报障\n\n"
         if token_docs:
             glossary_text += (
                 "\n**用户自带 token**：用户本人的 Gitea 写凭据，权限限于 kacha-feedback 仓库的建 issue、"
-                "写评论/标签与上传附件；中继不保存、不缓存、不复用它，服务端不持有统一写 token。\n"
+                "写评论/标签与上传附件；只由桌面本机服务直接用于 Gitea API 鉴权。\n"
                 "_Avoid_：服务端 token、统一写凭据\n"
             )
         if not glossary:
@@ -196,7 +193,7 @@ class DocumentationGateTest(unittest.TestCase):
         if token_docs:
             readme_text += (
                 "提交反馈时使用用户自带的 Gitea token，需要它对 kacha-feedback 仓库有建 issue、"
-                "写评论/标签与上传附件的权限；中继只在这一次请求里转交，服务端不持有统一写 token，核心画板离线可用。\n"
+                "写评论/标签与上传附件的权限；桌面直连 Gitea，核心画板离线可用。\n"
             )
         if legacy_server_token:
             readme_text += "服务端必须配置统一写 token 才能接收反馈。\n"
@@ -226,7 +223,7 @@ class DocumentationGateTest(unittest.TestCase):
             self.assertTrue(any("反馈" in problem for problem in documentation_problems(root)))
 
     def test_missing_user_owned_token_statements_are_reported(self):
-        """#214：文档必须说清 token 由用户自带、服务端不持有、权限范围与核心仍离线。"""
+        """#260：文档必须说清 token 由用户自带、桌面直连、权限范围与核心仍离线。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self.make_tree(root, token_docs=False)

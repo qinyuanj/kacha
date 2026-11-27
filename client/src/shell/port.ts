@@ -21,7 +21,7 @@ export type { ImageInfo } from "./types";
 // 界面不再看 HTTP 状态码与错误码：端口把失败折成下面这些类别，分支只认类别（换实现时语义不变）。
 
 /** 可选能力：桌面壳还没有的，界面按 features 隐藏入口，调用时得到 unavailable。 */
-export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "downloadResults" | "diagnostics" | "update" | "dataRoot" | "feedback";
+export type FeatureId = "gateway" | "generation" | "usage" | "packExport" | "packImport" | "archive" | "relay" | "copyImage" | "copyText" | "saveImage" | "downloadImage" | "diagnostics" | "update" | "dataRoot" | "feedback";
 
 export interface ShellFeatures {
   /** 生成（网关调用）。 */
@@ -49,7 +49,7 @@ export interface ShellFeatures {
    * 未声明时按不可用处理——没有实现就不能出现「迁移」入口。
    */
   readonly dataRoot?: boolean;
-  /** 反馈（#205）：只有配置了中继地址才为 true；未声明时按不可用处理。 */
+  /** 反馈（#260）：桌面 Go 服务使用本机授权直连 Gitea。 */
   readonly feedback: boolean;
 }
 
@@ -136,7 +136,6 @@ export const FEATURE_LABELS: Record<FeatureId, string> = {
   copyText: "复制文本",
   saveImage: "另存为",
   downloadImage: "下载图片",
-  downloadResults: "下载整板结果",
   diagnostics: "诊断包导出",
   update: "自动更新",
   dataRoot: "本机数据位置",
@@ -232,8 +231,6 @@ export interface MediaStore {
   saveCopyAs(absPath: string): Promise<SaveCopyOutcome>;
   /** 单结果保存（带图层时打 zip）；目标由本机对话框选，取消时返回 cancelled。 */
   downloadImage(path: string, name?: string): Promise<SaveCopyOutcome>;
-  /** 整板结果保存；取消时返回 cancelled。 */
-  downloadBoardResults(boardPath: string): Promise<SaveCopyOutcome>;
 }
 
 /**
@@ -250,7 +247,7 @@ export interface PackStore {
 }
 
 /**
- * 反馈提交（#205）：输入是用户填写的文字与环境元数据，relayUrl 由接线层从设置解析后填入。
+ * 反馈提交（#260）：输入是用户填写的文字与环境元数据；token 只由桌面 Go 侧读取。
  * 桌面与内存替身用同一份形状，UI 只按 kind 分支。
  */
 export interface FeedbackAttachment {
@@ -275,10 +272,6 @@ export interface FeedbackSpec {
   os: string;
   board_name: string;
   contact?: string;
-  /** 本次提交自带的 Gitea token；只在本次请求中转交中继，不保存、不预览。 */
-  gitea_token?: string;
-  /** 高级设置的覆盖地址；空值走 Go 侧默认配置。 */
-  relay_url?: string;
   /** 0–5 张 PNG/JPG 截图；base64 字节经 Feedback.Send 原样交到 Go 服务。 */
   screenshots?: FeedbackAttachment[];
   /** 可选脱敏诊断包；由 Diagnostics.Bundle 生成，不写本机文件也随反馈一起上传。 */
@@ -297,7 +290,7 @@ export interface FeedbackOutcome {
   url?: string;
 }
 
-/** 没有 Feedback 绑定或没有配置中继地址时的统一结局。 */
+/** 没有 Feedback 绑定时的统一结局。 */
 export const FEEDBACK_UNAVAILABLE: FeedbackOutcome = {
   ok: false,
   kind: "unavailable",
@@ -432,6 +425,6 @@ export interface ShellPort {
   readonly core: CorePorts;
   /** 本机数据位置迁移（#161）；没有这一项的实现在 features.dataRoot 上明确关掉。 */
   readonly dataRoot: DataRootStore;
-  /** 反馈提交（#205）；没有绑定或没配中继时返回 unavailable 结局。 */
+  /** 反馈提交（#260）；没有绑定时返回 unavailable 结局。 */
   readonly feedback: FeedbackPort;
 }

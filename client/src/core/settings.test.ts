@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { BUILTIN_TABLE } from "./capabilities";
 import {
   availableModels,
-  DEFAULT_FEEDBACK_RELAY_URL,
   DEFAULT_SETTINGS,
   defaultEditModel,
   defaultTaskModel,
@@ -14,14 +13,13 @@ import {
   parseModelsCache,
   parseSettings,
   refreshModels,
-  resolveFeedbackRelayAddress,
   saveSettings,
   serializeModelsCache,
   serializeSettings,
   SETTINGS_FORMAT_VERSION,
   settingsFromForm,
   validateBaseUrl,
-  validateFeedbackRelayUrl,
+  type Settings,
   type SettingsPorts,
 } from "./settings";
 
@@ -54,36 +52,39 @@ describe("高级设置 settings.json", () => {
     expect(DEFAULT_SETTINGS).toMatchObject({ format_version: 1, base_url: "http://lzxsvn:3001", concurrency: 4 });
   });
 
-  // #221：主题档位是可选字段——没写该字段的旧配置平滑回退默认暗色，格式版本不动。
-  it("主题：未写时默认暗色，格式版本不升", () => {
+  // #265：主题两态；旧 system 在读取时迁为浅色，格式版本不动。
+  it("主题：未写时默认浅色，格式版本不升", () => {
     const parsed = parseSettings('{"format_version":1}');
     expect(parsed.kind).toBe("ok");
-    expect(parsed.settings.theme).toBe("dark");
+    expect(parsed.settings.theme).toBe("light");
     expect(SETTINGS_FORMAT_VERSION).toBe(1);
   });
 
-  it("主题：合法档位保留，三档都能往返", () => {
-    for (const theme of ["dark", "light", "system"] as const) {
+  it("主题：显式两态都能往返，旧 system 读取时迁为浅色", () => {
+    for (const theme of ["dark", "light"] as const) {
       const text = serializeSettings({ ...DEFAULT_SETTINGS, theme });
       expect(JSON.parse(text).theme, theme).toBe(theme);
       expect(parseSettings(text)).toEqual({ kind: "ok", settings: { ...DEFAULT_SETTINGS, theme } });
     }
+    expect(parseSettings('{"format_version":1,"theme":"system"}')).toEqual({ kind: "ok", settings: { ...DEFAULT_SETTINGS, theme: "light" } });
   });
 
-  it("主题：非法值回退默认暗色，其它字段不丢", () => {
+  it("主题：非法值回退浅色，其它字段不丢", () => {
     const parsed = parseSettings('{"format_version":1,"base_url":"https://gw.example","concurrency":6,"theme":"auto","future":1}');
     expect(parsed).toEqual({
       kind: "ok",
-      settings: { format_version: 1, base_url: "https://gw.example", feedback_relay_url: "", concurrency: 6, theme: "dark", extra: { future: 1 } },
+      settings: { format_version: 1, base_url: "https://gw.example", concurrency: 6, theme: "light", extra: { future: 1 } },
     });
   });
 
   it("主题：序列化写在顶层（不是未知字段），未知字段仍原样保留", () => {
-    const text = serializeSettings({ ...DEFAULT_SETTINGS, theme: "light", extra: { future: [1] } });
+    const settings: Settings = { ...DEFAULT_SETTINGS, theme: "dark", extra: { future: [1] } };
+    const text = serializeSettings(settings);
     const raw = JSON.parse(text);
-    expect(raw.theme).toBe("light");
+    expect(raw.theme).toBe("dark");
     expect(raw.future).toEqual([1]);
     expect(text).not.toContain('"extra"');
+    expect(parseSettings(text)).toEqual({ kind: "ok", settings });
   });
 
   it("往返并保留未知字段", () => {
@@ -122,6 +123,30 @@ describe("高级设置 settings.json", () => {
     expect(parseSettings('{"format_version":1,"concurrency":0}').kind).toBe("corrupt");
   });
 });
+  it("更新版本拒开：报告版本，给出默认值供本次运行", () => {
+    expect(parseSettings(JSON.stringify({ format_version: 2, base_url: "x" }))).toEqual({ kind: "newer", version: 2, settings: DEFAULT_SETTINGS });
+  });
+
+  it("更新版本优先于字段类型校验，当前版本的 null 设置值按缺省处理", () => {
+    expect(parseSettings('{"format_version":2,"base_url":3,"concurrency":99}')).toEqual({ kind: "newer", version: 2, settings: DEFAULT_SETTINGS });
+    expect(parseSettings('{"format_version":1,"base_url":null,"concurrency":null}')).toEqual({ kind: "ok", settings: DEFAULT_SETTINGS });
+  });
+
+  it("损坏报错并用默认值", () => {
+    for (const text of ["{oops", "[]", '{"format_version":1,"base_url":3}', '{"format_version":1,"concurrency":11}', '{"format_version":0}']) {
+      const parsed = parseSettings(text);
+      expect(parsed.kind, text).toBe("corrupt");
+      expect(parsed.settings).toEqual(DEFAULT_SETTINGS);
+    }
+  });
+
+  it("并发上限只接受 1～10 的整数", () => {
+    expect(parseSettings('{"format_version":1,"concurrency":1}').kind).toBe("ok");
+    expect(parseSettings('{"format_version":1,"concurrency":10}').kind).toBe("ok");
+    expect(parseSettings('{"format_version":1,"concurrency":11}').kind).toBe("corrupt");
+    expect(parseSettings('{"format_version":1,"concurrency":2.5}').kind).toBe("corrupt");
+    expect(parseSettings('{"format_version":1,"concurrency":0}').kind).toBe("corrupt");
+  });
 
 describe("并发上限输入框草稿", () => {
   it("解析成整数并钳到 1～10；空或无法解析时回退到原值", () => {
@@ -436,37 +461,33 @@ describe("刷新模型列表", () => {
   });
 });
 
-describe("反馈中继地址（#209）", () => {
-  it("内置默认地址是 lzxsvn 的 3005 服务，但默认设置不把它当显式覆盖", () => {
-    expect(DEFAULT_FEEDBACK_RELAY_URL).toBe("http://lzxsvn:3005");
-    expect(DEFAULT_SETTINGS.feedback_relay_url).toBe("");
-    expect(resolveFeedbackRelayAddress(DEFAULT_SETTINGS)).toBe("");
+describe("已移除的反馈中继设置（#260）", () => {
+  it("读取旧设置时显式丢弃中继字段，保留其他已知与未知字段，保存时不写回", () => {
+    const parsed = parseSettings(JSON.stringify({
+      format_version: 1,
+      base_url: "https://gw.example",
+      feedback_relay_url: "http://relay.test:3005",
+      concurrency: 6,
+      theme: "dark",
+      future: { keep: true },
+    }));
+    expect(parsed).toEqual({
+      kind: "ok",
+      settings: {
+        format_version: 1,
+        base_url: "https://gw.example",
+        concurrency: 6,
+        theme: "dark",
+        extra: { future: { keep: true } },
+      },
+    });
+    if (parsed.kind !== "ok") throw new Error("旧设置应可读取");
+    const serialized = serializeSettings(parsed.settings);
+    expect(serialized).not.toContain("feedback_relay_url");
+    expect(serialized).toContain("future");
   });
 
-  it("只有显式且非默认的合法覆盖才发给端口；空白、非法与相同默认值都不覆盖", () => {
-    expect(resolveFeedbackRelayAddress({ ...DEFAULT_SETTINGS, feedback_relay_url: " http://relay.test:3105/ " })).toBe("http://relay.test:3105");
-    expect(resolveFeedbackRelayAddress({ ...DEFAULT_SETTINGS, feedback_relay_url: "" })).toBe("");
-    expect(resolveFeedbackRelayAddress({ ...DEFAULT_SETTINGS, feedback_relay_url: "不是地址" })).toBe("");
-    expect(resolveFeedbackRelayAddress({ ...DEFAULT_SETTINGS, feedback_relay_url: DEFAULT_FEEDBACK_RELAY_URL })).toBe("");
-  });
-
-  it("覆盖值随高级设置往返保存", () => {
-    const saved = { ...DEFAULT_SETTINGS };
-    const next = settingsFromForm(saved, { baseUrl: saved.base_url, concurrencyDraft: "4", feedbackRelayUrl: "  http://relay.test:3105/ " });
-    expect(next.feedback_relay_url).toBe("http://relay.test:3105");
-    expect(parseSettings(serializeSettings(next))).toEqual({ kind: "ok", settings: next });
-    expect(settingsFromForm(saved, { baseUrl: saved.base_url, concurrencyDraft: "4", feedbackRelayUrl: "" }).feedback_relay_url).toBe("");
-  });
-
-  it("覆盖地址校验：空白表示默认，只接受无凭据的 http / https URL", () => {
-    expect(validateFeedbackRelayUrl("")).toBeNull();
-    expect(validateFeedbackRelayUrl("http://relay.test:3005")).toBeNull();
-    expect(validateFeedbackRelayUrl("https://relay.test/")).toBeNull();
-    expect(validateFeedbackRelayUrl("ftp://relay.test")).not.toBeNull();
-    expect(validateFeedbackRelayUrl("http://user:secret@relay.test")).not.toBeNull();
-  });
-
-  it("类型错误的覆盖字段按损坏设置处理", () => {
-    expect(parseSettings(JSON.stringify({ format_version: 1, feedback_relay_url: 12 }))).toMatchObject({ kind: "corrupt" });
+  it("旧中继字段即使类型错误也只丢弃，不把整份设置判为损坏", () => {
+    expect(parseSettings(JSON.stringify({ format_version: 1, feedback_relay_url: 12 }))).toEqual({ kind: "ok", settings: DEFAULT_SETTINGS });
   });
 });

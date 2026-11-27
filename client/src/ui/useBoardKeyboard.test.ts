@@ -71,6 +71,7 @@ beforeEach(async () => {
     dialogOpen: { current: false },
     onUndo,
     onRedo,
+    onOpenMenu: vi.fn(),
     toast,
     port,
   };

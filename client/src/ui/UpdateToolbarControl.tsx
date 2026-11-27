@@ -1,21 +1,26 @@
-// 首页版本号旁的更新入口（#164、#180、#181）：检查更新与下载安装。
+// 顶栏单一版本入口（#269）：常驻当前安装版本号，点开本地当前版及历史更新说明。
 //
 // 信任规则不在页面：选版、验签与真实安装器都在 Go 侧（desktop/internal/updateservice）。
-// 页面只做两件事：按快照显示状态；用户点安装时先走准备（等任务、严格保存）再调安装。
+// 页面只做三件事：固定显示当前版本；按快照表达状态；用户点安装时先走准备（等任务、严格保存）再调安装。
 // 读状态 / 排程与安装流程在 ui/useUpdate.ts，空闲自动安装在 core/updateAutoInstall.ts；
-// 工作台负责把那一份接线递给这里（#180 起主界面与本段共用同一份），这里只留 DOM。
-// #181 起入口放在首页版本号旁，不再藏在高级设置里。
+// 工作台负责把那一份接线递给这里，这里只留 DOM。
 import { useShell } from "./shell";
 import { updateButtonView } from "./updateButtonView";
 import { updateSectionView } from "./updateSectionView";
 import type { UpdateControl } from "./useUpdate";
 import type { UpdatePhase } from "../core/update";
 
-/** 快照与动作都从外面来，这一段不再自己起轮询与准备协调器。 */
-export type UpdateToolbarControlProps = UpdateControl;
+/** 快照与动作都从外面来；版本与打开说明也由工作台接线。 */
+export type UpdateToolbarControlProps = UpdateControl & {
+  version: string;
+  onOpenChangelog(): void;
+};
 
 /** 有更新可推进的阶段：只有这些阶段才摆安装按钮。 */
 const UPDATE_PHASES: ReadonlySet<UpdatePhase> = new Set(["available", "downloading", "ready", "installing"]);
+
+/** 进度、可安装提示和安装中需要文字说明；其余状态由提示与无障碍名称承担。 */
+const VISIBLE_STATUS_PHASES: ReadonlySet<UpdatePhase> = new Set(["downloading", "ready", "installing"]);
 
 /** 没有更新时不摆安装按钮，首页不要常驻一个灰按钮。 */
 function hasUpdate(phase: UpdatePhase): boolean {
@@ -35,31 +40,40 @@ function errorText(error: string, prepareError: string): string {
 }
 
 /**
- * 版本号旁的入口：能力没开时整段不显示；有新版本时多一个「下载并安装」。
- * 状态长句仍由主界面提示条负责，这里只留入口与失败原因；安装失败也只给原因，不给旁路下载。
+ * 版本号旁的唯一入口：能力关闭也保留版本号；任何状态下点击只打开本地更新说明。
+ * 状态长句由主界面提示条负责，这里只留必要的进度 / 就绪文字、失败原因与安装按钮。
  */
-export function UpdateToolbarControl({ snapshot, state, check, install }: UpdateToolbarControlProps) {
+export function UpdateToolbarControl({
+  snapshot,
+  state,
+  install,
+  version,
+  onOpenChangelog,
+}: UpdateToolbarControlProps) {
   const port = useShell();
-
-  if (!port.features.update) return null;
+  const updateEnabled = Boolean(port.features.update);
 
   const view = updateSectionView({ snapshot, preparing: state.preparing, prepareError: state.prepareError || state.installError });
-  const button = updateButtonView(snapshot);
+  const button = updateButtonView(snapshot, version, updateEnabled);
   const failed = snapshot.phase === "error";
   const reason = errorText(failed ? snapshot.error : "", view.prepareError);
+  const visibleStatus = updateEnabled && VISIBLE_STATUS_PHASES.has(snapshot.phase) ? view.status : "";
+  const accessibleName = `当前版本 ${version}，${button.status}，查看更新说明`;
 
   return (
     <div className="topbar-update" aria-label="更新入口">
       <button
-        className={`topbar-button topbar-update-btn topbar-update-${button.tone}`}
-        onClick={() => check()}
-        disabled={!view.canCheck}
-        title={view.status}
+        className={`topbar-button topbar-version topbar-update-btn topbar-update-${button.tone}`}
+        onClick={onOpenChangelog}
+        aria-haspopup="dialog"
+        aria-label={accessibleName}
+        title={accessibleName}
         data-update-tone={button.tone}
       >
-        {button.label}
+        {version}
       </button>
-      {hasUpdate(snapshot.phase) && (
+      {visibleStatus && <span className="topbar-update-status">{visibleStatus}</span>}
+      {updateEnabled && hasUpdate(snapshot.phase) && (
         <button
           className="topbar-button topbar-update-install"
           onClick={() => void install()}

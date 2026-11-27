@@ -69,8 +69,6 @@ export interface DesktopLocalBridge {
   saveCopyAs(path: string): Promise<DesktopOutcome>;
   /** 单结果保存（带图层打 zip）；目标由 Go 弹系统对话框。 */
   saveResult(path: string): Promise<DesktopOutcome>;
-  /** 整板结果保存；目标由 Go 弹系统对话框。 */
-  saveBoardResults(path: string): Promise<DesktopOutcome>;
   isFile(path: string): Promise<boolean>;
   listDir(path: string): Promise<{ name: string; is_dir: boolean }[]>;
   fileSha256(path: string): Promise<string>;
@@ -334,7 +332,7 @@ export interface DesktopDataRootBridge {
   move(target: string): Promise<DesktopDataRootOutcome>;
 }
 
-/** Go 侧反馈服务（Feedback.Send）：把文字反馈交给配置的中继。 */
+/** Go 侧反馈服务（Feedback.Send）：使用本机授权直连 Gitea。 */
 export interface DesktopFeedbackBridge {
   send(spec: FeedbackSpec): Promise<FeedbackOutcome>;
   authStatus(): Promise<FeedbackAuthStatus>;
@@ -362,7 +360,7 @@ export interface DesktopBridge {
   update?: DesktopUpdateBridge;
   /** 本机数据位置迁移（#161）；没有这一项时能力关闭、入口不出现。 */
   dataRoot?: DesktopDataRootBridge;
-  /** 反馈（#205）；没有这一项或 Go 没配中继时能力关闭。 */
+  /** 反馈（#260）；没有这一项或 Go 声明不可用时能力关闭。 */
   feedback?: DesktopFeedbackBridge;
 }
 
@@ -439,7 +437,7 @@ async function saveCopyAsThroughLocal(local: DesktopLocalBridge, absPath: string
   return saveThroughLocal(() => local.saveCopyAs(absPath));
 }
 
-/** 保存结果 / 整板结果：目标由 Go 弹系统对话框，取消不报成功，缺图与写失败带原因。 */
+/** 单结果保存：目标由 Go 弹系统对话框，取消不报成功，缺图与写失败带原因。 */
 async function saveThroughLocal(call: () => Promise<DesktopOutcome>): Promise<SaveCopyOutcome> {
   const outcome = await localRun(call);
   if (outcome.kind === "cancelled") return { kind: "cancelled" };
@@ -518,7 +516,7 @@ export function desktopFeatures(bridge: DesktopBridge, info: DesktopInfo): Shell
     update: bridge.update !== undefined && (info.features.update ?? false),
     // 数据位置迁移（#161）：桥上有真实 Storage 服务才开放，否则入口不出现。
     dataRoot: bridge.dataRoot !== undefined,
-    // 反馈（#205）：桥上有服务还不够，Go 侧必须明确配置了中继地址。
+    // 反馈（#260）：桥上有真实服务且 Go 侧声明可用即可，发送不再依赖中继配置。
     feedback: bridge.feedback !== undefined && (info.features.feedback ?? false),
   };
 }
@@ -551,7 +549,6 @@ export async function createDesktopPort(bridge: DesktopBridge): Promise<DesktopS
     copyImage: (absPath: string, format = ""): Promise<ImageCopyResult> => copyImageToSystemClipboard(bridge, absPath, format),
     saveCopyAs: (absPath: string): Promise<SaveCopyOutcome> => saveCopyAsThroughLocal(local, absPath),
     downloadImage: (absPath: string): Promise<SaveCopyOutcome> => saveThroughLocal(() => local.saveResult(absPath)),
-    downloadBoardResults: (boardPath: string): Promise<SaveCopyOutcome> => saveThroughLocal(() => local.saveBoardResults(boardPath)),
   };
 
   const pack = desktopPack.store;

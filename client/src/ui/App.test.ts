@@ -4,9 +4,11 @@ import { act, createElement } from "react";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardListing } from "../shell/types";
+import { newBoard, serializeBoard, type Board } from "../core/board";
+import type { BoardChange } from "../core/edit";
 import { createFakePort, type FakePort } from "../shell/testing/fakePort";
 import { emptySnapshot, type UpdateSnapshot } from "../core/update";
-import { THEME_CHOICES, THEME_MIRROR_KEY } from "../core/theme";
+import { THEME_MIRROR_KEY } from "../core/theme";
 import { ShellProvider } from "./shell";
 import { App } from "../App";
 
@@ -15,13 +17,34 @@ import { App } from "../App";
 
 // 画布太重（React Flow），测试里替掉：断言工作台这一层的接线。
 // 替身同时记下收到的 props —— 「App 把解析后的有效主题交给画布」这条链只能在这里观测。
-const canvas = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
+const canvas = vi.hoisted(() => ({ props: null as Record<string, unknown> | null, undoCalls: 0, redoCalls: 0 }));
 vi.mock("./BoardCanvas", async () => {
-  const { createElement: h } = await import("react");
+  const { createElement: h, useRef } = await import("react");
+  const { newBoard: freshBoard } = await import("../core/board");
+  const { useShell } = await import("./shell");
+  const { useBoardKeyboard } = await import("./useBoardKeyboard");
   return {
     BoardCanvas: (props: Record<string, unknown>) => {
       canvas.props = props;
-      return h("div", { className: "canvas" });
+      // 替身只替掉 React Flow 的重画布；真实键盘挂载点照旧接线，才能用真键盘事件验页面级模态隔离。
+      const wrapper = useRef<HTMLDivElement | null>(null);
+      const boardRef = useRef(freshBoard("测试画布"));
+      const selectedRef = useRef<ReadonlySet<string>>(new Set<string>());
+      const dialogOpen = useRef(false);
+      const port = useShell();
+      useBoardKeyboard({
+        wrapper,
+        boardRef,
+        selectedRef,
+        dialogOpen,
+        modalOpen: Boolean(props.modalOpen),
+        onUndo: () => { canvas.undoCalls += 1; (props.onUndo as () => void)(); },
+        onRedo: () => { canvas.redoCalls += 1; (props.onRedo as () => void)(); },
+        onOpenMenu: () => undefined,
+        toast: () => undefined,
+        port,
+      });
+      return h("div", { className: "canvas", ref: wrapper });
     },
   };
 });
@@ -30,6 +53,9 @@ let container: HTMLDivElement;
 let dom: ReactRoot;
 
 beforeEach(() => {
+  canvas.props = null;
+  canvas.undoCalls = 0;
+  canvas.redoCalls = 0;
   container = document.createElement("div");
   document.body.append(container);
   dom = createRoot(container);
@@ -59,6 +85,30 @@ async function show(port: FakePort, props: { version?: string | null } = {}): Pr
   await act(async () => dom.render(createElement(ShellProvider, { port, children: createElement(App, { ...props }) })));
 }
 
+function boardListToggle(): HTMLButtonElement {
+  const button = [...container.querySelectorAll<HTMLButtonElement>(".board-toolbar-right button")].find((b) => b.textContent?.trim() === "画板列表");
+  if (!button) throw new Error("第二行右侧没有画板列表入口");
+  return button;
+}
+
+function boardListDialog(): HTMLElement | null {
+  return container.querySelector('[role="dialog"][aria-label="画板列表"], [role="dialog"][aria-label="管理画板"]');
+}
+
+async function clickTrigger(button: HTMLElement): Promise<void> {
+  await act(async () => {
+    button.focus();
+    button.click();
+  });
+}
+
+/** 真派发一次 keydown（window 是快捷键挂载点，document 用来走弹层的 Escape）。 */
+async function pressKey(target: EventTarget, init: KeyboardEventInit): Promise<KeyboardEvent> {
+  const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+  await act(async () => { target.dispatchEvent(event); });
+  return event;
+}
+
 describe("工作台", () => {
   it("启动后新建一块画板：标签页上有它", async () => {
     const port = createFakePort();
@@ -67,13 +117,27 @@ describe("工作台", () => {
     await vi.waitFor(() => expect(container.textContent).toContain("未命名画板"));
   });
 
-  it("顶栏：画板包、设置与版本入口都在", async () => {
+  it("顶栏：画板包与版本入口都在", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     await show(port, { version: "1.2.3" });
     expect(container.textContent).toContain("画板包");
-    expect(container.textContent).toContain("高级设置");
-    expect(container.textContent).toContain("Kacha 1.2.3");
+    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "1.2.3")).toBe(true);
+  });
+
+  it("画板包菜单只有导入与导出：整板结果下载不再出现（#262）", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    await show(port);
+    await vi.waitFor(() => expect(container.querySelector(".canvas")).not.toBeNull());
+    const packButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("画板包"));
+    await act(async () => packButton?.click());
+    const items = [...container.querySelectorAll('[role="menuitem"]')];
+    expect(items.map((item) => (item.textContent ?? "").trim())).toEqual(["导入画板包…", "导出画板包…"]);
+    // 保留的相邻能力必须真能触发：点导入确实走到壳端口选包，而不是只剩空菜单。
+    const importItem = items.find((item) => item.textContent?.includes("导入画板包"));
+    await act(async () => (importItem as HTMLElement | undefined)?.click());
+    expect(port.calls.pickPackFile).toHaveLength(1);
   });
 
   it("用量提醒：到了上限时给出提醒与管理画板入口", async () => {
@@ -117,22 +181,116 @@ describe("工作台", () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     await show(port);
-    const settingsButton = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("高级设置"));
+    const settingsButton = container.querySelector<HTMLButtonElement>("button[aria-label='高级设置']");
     await act(async () => settingsButton?.click());
-    const settingsPanel = container.querySelector("[aria-label='高级设置']");
+    const settingsPanel = container.querySelector("[role='dialog'][aria-label='高级设置']");
     expect(settingsPanel).not.toBeNull();
     const close = [...(settingsPanel?.querySelectorAll("button") ?? [])].find((button) => button.getAttribute("aria-label") === "关闭");
     await act(async () => close?.click());
-    expect(container.querySelector("[aria-label='高级设置']")).toBeNull();
+    expect(container.querySelector("[role='dialog'][aria-label='高级设置']")).toBeNull();
   });
 
-  it("画板列表：点开列表后显示画板", async () => {
+  it("画板列表：入口在第二行右侧，打开的是锚定弹层", async () => {
     const port = createFakePort();
     port.board.list = async () => listing([{ name: "a.ugcboard.json", path: "/~/a.ugcboard.json", archived: false, bytes: 10 }]);
     await show(port);
-    const listButton = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("画板"));
-    await act(async () => listButton?.click());
-    await vi.waitFor(() => expect(container.textContent).toContain("a"));
+    const tabs = container.querySelector(".tabs")!;
+    expect(tabs.textContent).not.toContain("画板列表");
+    const toggle = boardListToggle();
+    expect(toggle.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    await clickTrigger(toggle);
+    await vi.waitFor(() => expect(boardListDialog()).not.toBeNull());
+    expect(boardListDialog()?.getAttribute("aria-label")).toBe("画板列表");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const dialog = boardListDialog()!;
+    expect(dialog.closest(".modal-backdrop")).toBeNull();
+    expect(container.textContent).toContain("a");
+  });
+
+  it("画板列表弹层：Esc 与外部点击关闭并把焦点还给入口", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing([{ name: "a.ugcboard.json", path: "/~/a.ugcboard.json", archived: false, bytes: 10 }]);
+    await show(port);
+    const toggle = boardListToggle();
+    await clickTrigger(toggle);
+    await vi.waitFor(() => expect(boardListDialog()).not.toBeNull());
+
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(boardListDialog()).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+
+    await clickTrigger(toggle);
+    await vi.waitFor(() => expect(boardListDialog()).not.toBeNull());
+    await act(async () => boardListDialog()!.querySelector("button")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+    expect(boardListDialog()).not.toBeNull();
+    await act(async () => document.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+    expect(boardListDialog()).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it("画板列表弹层打开时真实 Ctrl+Z / Y 不穿梭背后的画板历史（#268）", async () => {
+    const board = newBoard("历史");
+    const port = createFakePort({ boards: [{ path: "/~/history.ugcboard.json", main: serializeBoard(board), version: "v1" }] });
+    await show(port);
+    await clickTrigger(boardListToggle());
+    await vi.waitFor(() => expect(boardListDialog()).not.toBeNull());
+    await act(async () => boardListDialog()!.querySelector<HTMLButtonElement>(".board-list-open")!.click());
+    await vi.waitFor(() => expect((canvas.props!.board as Board).nodes.length).toBe(0));
+
+    // 先真的落一个撤销步；后面以画板内容与回调次数同时判断历史有没有被穿梭。
+    await act(async () => (canvas.props!.apply as (change: BoardChange) => void)({ kind: "newPrompt", at: [100, 100] }));
+    await vi.waitFor(() => expect((canvas.props!.board as Board).nodes.length).toBe(1));
+    expect(canvas.undoCalls).toBe(0);
+    expect(canvas.redoCalls).toBe(0);
+
+    await clickTrigger(boardListToggle());
+    await vi.waitFor(() => expect(boardListDialog()).not.toBeNull());
+    expect(canvas.props!.modalOpen).toBe(true);
+
+    const undoEvent = await pressKey(window, { key: "z", ctrlKey: true });
+    const redoEvent = await pressKey(window, { key: "y", ctrlKey: true });
+    const shiftRedoEvent = await pressKey(window, { key: "z", ctrlKey: true, shiftKey: true });
+    expect([undoEvent, redoEvent, shiftRedoEvent].every((e) => e.defaultPrevented)).toBe(true);
+    expect(canvas.undoCalls).toBe(0);
+    expect(canvas.redoCalls).toBe(0);
+    expect((canvas.props!.board as Board).nodes.length).toBe(1);
+
+    // 关掉弹层后同一组按键必须到达，证明监听一直挂着，刚才是页面级模态挡住的。
+    await pressKey(document, { key: "Escape" });
+    expect(canvas.props!.modalOpen).toBe(false);
+    await pressKey(window, { key: "z", ctrlKey: true });
+    await vi.waitFor(() => expect((canvas.props!.board as Board).nodes.length).toBe(0));
+    expect(canvas.undoCalls).toBe(1);
+    await pressKey(window, { key: "y", ctrlKey: true });
+    await vi.waitFor(() => expect((canvas.props!.board as Board).nodes.length).toBe(1));
+    expect(canvas.redoCalls).toBe(1);
+  });
+
+  it("用量提醒的「管理画板」复用同一个锚定弹层", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    port.usage.usage = async () => ({
+      total_bytes: 200,
+      boards_bytes: 100,
+      meta_bytes: 100,
+      last_access: 0,
+      by_date: [],
+      unreferenced: null,
+      unreadable_board: null,
+      limit_bytes: 100,
+      limit_level: "alert",
+    });
+    await show(port);
+    await vi.waitFor(() => expect(container.textContent).toContain("用量已满"));
+    const manage = [...container.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "管理画板")!;
+    await clickTrigger(manage);
+    await vi.waitFor(() => expect(boardListDialog()?.getAttribute("aria-label")).toBe("管理画板"));
+    const dialog = boardListDialog()!;
+    expect(dialog.closest(".modal-backdrop")).toBeNull();
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(boardListDialog()).toBeNull();
+    expect(document.activeElement).toBe(manage);
   });
 
   it("更新已就绪：主界面提示条就看得见，不用进高级设置（#180）", async () => {
@@ -240,10 +398,13 @@ describe("工作台", () => {
     });
     await show(port);
     await vi.waitFor(() => expect(container.textContent).toContain("管理画板"));
-    for (const label of ["管理画板", "高级设置", "反馈", "画板包", "检查更新"]) {
+    const clickByText = async (label: string): Promise<void> => {
       const button = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(label));
       await act(async () => button?.click());
-    }
+    };
+    await clickByText("管理画板");
+    await act(async () => container.querySelector<HTMLButtonElement>("button[aria-label='高级设置']")?.click());
+    for (const label of ["反馈", "画板包", "检查更新"]) await clickByText(label);
     for (const button of [...container.querySelectorAll<HTMLButtonElement>("button[aria-label*='关闭']")]) {
       await act(async () => button.click());
     }
@@ -253,8 +414,7 @@ describe("工作台", () => {
     const port = createFakePort();
     port.board.list = async () => listing([{ name: "old.ugcboard.json", path: "/~/old.ugcboard.json", archived: true, bytes: 10 }]);
     await show(port);
-    const listButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("画板列表"));
-    await act(async () => listButton?.click());
+    await clickTrigger(boardListToggle());
     await vi.waitFor(() => expect(container.textContent).toContain("old"));
     for (const label of ["取消归档", "复制为新画板"]) {
       const button = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(label));
@@ -266,7 +426,7 @@ describe("工作台", () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     await show(port, { version: "1.2.3" });
-    const versionButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Kacha 1.2.3"));
+    const versionButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "1.2.3");
     await act(async () => versionButton?.click());
     const close = [...container.querySelectorAll("button")].find((button) => button.getAttribute("aria-label") === "关闭");
     await act(async () => close?.click());
@@ -279,7 +439,7 @@ describe("工作台", () => {
 
   /** 打开画板列表，等到第一行出来。 */
   async function openBoardList(): Promise<void> {
-    await act(async () => container.querySelector<HTMLElement>(".tab-list")?.click());
+    await clickTrigger(boardListToggle());
     await vi.waitFor(() => expect(container.querySelector(".board-list-open")).not.toBeNull());
   }
 
@@ -310,11 +470,10 @@ describe("工作台", () => {
     await vi.waitFor(() => expect(container.textContent).toContain("已归档"));
   });
 
-// #221：顶栏主题切换入口——即时生效、首帧镜像、通知宿主壳、写回设置，且不覆盖受保护的设置文件。
+// #265：顶栏主题切换入口——两态直接切换，旧 system 迁浅色，不监听系统配色。
 });
 
 describe("主题切换", () => {
-  /** 文档根与本地存储都没有全局 reset：本组用例自己清，别串到别的用例。 */
   function clearThemeState(): void {
     localStorage.clear();
     delete document.documentElement.dataset.theme;
@@ -327,76 +486,85 @@ describe("主题切换", () => {
     vi.unstubAllGlobals();
   });
 
-  /** 等设置载入完成：高级设置按钮解禁就是信号（主题的宿主同步也在这一刻之后）。 */
   async function settingsReady(): Promise<void> {
     await vi.waitFor(() => {
-      const button = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes("高级设置"));
+      const button = container.querySelector<HTMLButtonElement>("button[aria-label='高级设置']");
       expect(button?.disabled).toBe(false);
     });
   }
 
-  /** 主题入口是一个三态图标按钮：点它循环切换，直到 aria-label 落到目标档位。 */
-  function option(label: string): { click(): Promise<void> } {
-    const target = label === "暗色" ? "dark" : label === "浅色" ? "light" : "system";
-    return {
-      async click() {
-        for (let i = 0; i < THEME_CHOICES.length; i++) {
-          const button = container.querySelector<HTMLButtonElement>(".theme-switch");
-          if (!button) throw new Error("没有找到主题切换按钮");
-          if (button.getAttribute("aria-label") === label) return;
-          await act(async () => button.click());
-        }
-        throw new Error("切不到主题档位：" + label + "（期望 data-theme-choice=" + target + "）");
-      },
-    };
+  /** 主题入口是单按钮：从当前档位一击切到另一档。 */
+  function switchButton(): HTMLButtonElement {
+    const button = container.querySelector<HTMLButtonElement>(".theme-switch");
+    if (!button) throw new Error("没有找到主题切换按钮");
+    return button;
   }
 
-  /** 记下写进 settings.json 的原文（替身默认也写内存，这里换成可断言的记录）。 */
   function recordSettingsWrites(port: FakePort): string[] {
     const writes: string[] = [];
     port.core.settingsPorts.writeSettings = async (text) => void writes.push(text);
     return writes;
   }
 
-  it("三档常驻在顶栏，不用打开高级设置", async () => {
+  it("顶栏只有一个两态按钮，不用打开高级设置，新用户默认浅色", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     await show(port);
     await settingsReady();
-    // 一个三态图标按钮取代三档文字分段控件，点击循环切档，不用打开高级设置。
-    const buttons = container.querySelectorAll(".theme-switch");
-    expect(buttons.length).toBe(1);
-    expect(buttons[0].getAttribute("aria-label")).toBe("暗色");
+    // 一个两态图标按钮取代三档文字分段控件，不用打开高级设置。
+    expect(container.querySelectorAll(".theme-switch").length).toBe(1);
+    expect(switchButton().getAttribute("aria-label")).toBe("切到暗色");
+    await vi.waitFor(() => expect(port.calls.nativeTheme).toEqual(["light"]));
     // 没有打开设置面板。
-    expect(container.querySelector("[aria-label='高级设置']")).toBeNull();
+    expect(container.querySelector("[role='dialog'][aria-label='高级设置']")).toBeNull();
   });
 
-  it("点浅色：文档根、首帧镜像、宿主壳与设置文件都跟着变", async () => {
+  it("点一下从浅色切到深色：文档根、镜像、宿主壳与设置文件都跟着变", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     const writes = recordSettingsWrites(port);
     await show(port);
     await settingsReady();
-    // 拿到设置后先同步一次真源档位（默认暗色）。
-    await vi.waitFor(() => expect(port.calls.nativeTheme).toEqual(["dark"]));
+    await vi.waitFor(() => expect(port.calls.nativeTheme).toEqual(["light"]));
     const boardWrites = port.calls.write.length;
 
-    await act(async () => option("浅色").click());
+    await act(async () => switchButton().click());
 
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(document.documentElement.style.colorScheme).toBe("light");
-    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
-    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["light"]));
-    expect(port.calls.nativeTheme.at(-1)).toBe("light");
-    // 主题字段写进 v1 设置文件，不升格式版本。
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(document.documentElement.style.colorScheme).toBe("dark");
+    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("dark");
+    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["dark"]));
+    expect(port.calls.nativeTheme.at(-1)).toBe("dark");
     expect(JSON.parse(writes[0]).format_version).toBe(1);
-    // 切主题不碰画板：壳端口没有多出任何画板写入（也就不进撤销栈）。
     expect(port.calls.write.length).toBe(boardWrites);
   });
 
-  it("跟随系统：系统配色变化时界面跟着变，宿主拿到的是 system 而不是被钉死的暗色", async () => {
+  it("显式深色重启后保持深色，再点一下回到浅色", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    port.core.settingsPorts.readSettings = async () => JSON.stringify({ format_version: 1, base_url: "http://gw.example:3001", theme: "dark" });
+    await show(port);
+    await settingsReady();
+    await vi.waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
+    await act(async () => switchButton().click());
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
+  });
+
+  it("旧 system 偏好在设置读取边界迁为浅色", async () => {
+    const port = createFakePort();
+    port.board.list = async () => listing();
+    port.core.settingsPorts.readSettings = async () => JSON.stringify({ format_version: 1, base_url: "http://gw.example:3001", theme: "system" });
+    await show(port);
+    await settingsReady();
+    await vi.waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
+    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
+    await vi.waitFor(() => expect(port.calls.nativeTheme.at(-1)).toBe("light"));
+    expect(canvas.props?.theme).toBe("light");
+  });
+
+  it("系统配色变化不再改变应用主题", async () => {
     const listeners: ((event: { matches: boolean }) => void)[] = [];
-    // jsdom 没有 matchMedia：注入一个可控的媒体查询，系统配色变化由本用例触发。
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: false,
       media: query,
@@ -407,40 +575,16 @@ describe("主题切换", () => {
     port.board.list = async () => listing();
     await show(port);
     await settingsReady();
-
-    await act(async () => option("跟随系统").click());
-    expect(document.documentElement.dataset.theme).toBe("light");
-
+    expect(listeners).toEqual([]);
     await act(async () => {
       for (const listener of listeners) listener({ matches: true });
     });
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(port.calls.nativeTheme.at(-1)).toBe("system");
-    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("system");
-  });
-
-  it("跟随系统 + 系统深色：画布拿到的是解析后的有效主题，不是档位", async () => {
-    // jsdom 没有 matchMedia：系统配色钉成深色。
-    vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: true,
-      media: query,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-    }));
-    const port = createFakePort();
-    port.core.settingsPorts.readSettings = async () => JSON.stringify({ format_version: 1, base_url: "http://gw.example:3001", theme: "system" });
-    await show(port);
-    await settingsReady();
-
-    await vi.waitFor(() => expect(canvas.props?.theme).toBe("dark"));
-    // 交给画布的是有效主题（暗色），不是三档里的 system。
-    expect(canvas.props?.theme).not.toBe("system");
+    expect(document.documentElement.dataset.theme).toBe("light");
   });
 
   it("设置还没读到就切换：先不动磁盘，读到设置后补写一条", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
-    // 把读设置停在半路：切换发生在「磁盘内容还未知」的那一段。
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     const readSettings = port.core.settingsPorts.readSettings;
@@ -451,16 +595,13 @@ describe("主题切换", () => {
     const writes = recordSettingsWrites(port);
     await show(port);
 
-    // 不等设置载入：这时界面照常可切，但不能拿默认值去覆盖用户真实的设置文件。
-    await act(async () => option("浅色").click());
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
+    await act(async () => switchButton().click());
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("dark");
     expect(writes).toEqual([]);
 
     await act(async () => release());
-
-    // 载入完成后补写一次：写的是读到的设置加上本次选的档位。
-    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["light"]));
+    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["dark"]));
     expect(JSON.parse(writes[0]).format_version).toBe(1);
   });
 
@@ -471,11 +612,10 @@ describe("主题切换", () => {
     await show(port);
     await settingsReady();
 
-    await act(async () => option("浅色").click());
+    await act(async () => switchButton().click());
 
-    expect(document.documentElement.dataset.theme).toBe("light");
-    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["light"]));
-    expect(port.calls.nativeTheme.at(-1)).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["dark"]));
     expect(container.querySelector(".bar-error")).toBeNull();
   });
 
@@ -487,11 +627,11 @@ describe("主题切换", () => {
     await show(port);
     await settingsReady();
 
-    await act(async () => option("浅色").click());
+    await act(async () => switchButton().click());
 
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
-    await vi.waitFor(() => expect(port.calls.nativeTheme.at(-1)).toBe("light"));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("dark");
+    await vi.waitFor(() => expect(port.calls.nativeTheme.at(-1)).toBe("dark"));
     expect(writes).toEqual([]);
   });
 
@@ -505,15 +645,14 @@ describe("主题切换", () => {
     await show(port);
     await settingsReady();
 
-    await act(async () => option("暗色").click());
+    await act(async () => switchButton().click());
 
     expect(document.documentElement.dataset.theme).toBe("dark");
     await vi.waitFor(() => expect(port.calls.nativeTheme.at(-1)).toBe("dark"));
     expect(writes).toEqual([]);
   });
 
-  it("设置说浅色而首帧镜像为空：载入后补写镜像，下次首帧不再从暗色翻过来", async () => {
-    // 迁移配置目录 / 清过本地存储：settings.json 说浅色，镜像却是空的。
+  it("设置说浅色而首帧镜像为空：载入后补写镜像", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     port.core.settingsPorts.readSettings = async () => JSON.stringify({ format_version: 1, base_url: "http://gw.example:3001", theme: "light" });
@@ -524,39 +663,19 @@ describe("主题切换", () => {
     expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
   });
 
-  it("设置还没读到、用户也没选过：不往镜像里写默认值", async () => {
-    const port = createFakePort();
-    port.board.list = async () => listing();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => (release = resolve));
-    const readSettings = port.core.settingsPorts.readSettings;
-    port.core.settingsPorts.readSettings = async () => {
-      await gate;
-      return readSettings();
-    };
-    await show(port);
-
-    // 此刻界面按默认暗色显示，但磁盘上是什么还不知道：写下去就成了与设置冲突的猜测值。
-    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBeNull();
-
-    await act(async () => release());
-    await settingsReady();
-    // 载入后才写：写的是设置里的档位（默认设置的暗色）。
-    await vi.waitFor(() => expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("dark"));
-  });
-
-  it("点当前已选的档位：值没变就不重复写盘", async () => {
+  it("两次点击回到原档：第二次补写回浅色，不留下中间态", async () => {
     const port = createFakePort();
     port.board.list = async () => listing();
     const writes = recordSettingsWrites(port);
     await show(port);
     await settingsReady();
+    await act(async () => switchButton().click());
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
 
-    // 设置里本来就是暗色（默认），再点一次暗色没有要改的东西。
-    await act(async () => option("暗色").click());
+    await act(async () => switchButton().click());
 
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("dark");
-    expect(writes).toEqual([]);
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(localStorage.getItem(THEME_MIRROR_KEY)).toBe("light");
+    await vi.waitFor(() => expect(writes.map((text) => JSON.parse(text).theme)).toEqual(["dark", "light"]));
   });
 });

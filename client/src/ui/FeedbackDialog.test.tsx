@@ -31,8 +31,8 @@ function byText<T extends Element>(selector: string, text: string): T {
   return el;
 }
 
-async function show(port: FakePort, onClose: () => void = () => undefined, relayUrl?: string): Promise<void> {
-  await act(async () => root.render(createElement(ShellProvider, { port, children: createElement(FeedbackDialog, { version: "1.8.0", build: "42", boardName: "/tmp/boards/项目 A.kacha", relayUrl, onClose }) })));
+async function show(port: FakePort, onClose: () => void = () => undefined): Promise<void> {
+  await act(async () => root.render(createElement(ShellProvider, { port, children: createElement(FeedbackDialog, { version: "1.8.0", build: "42", boardName: "/tmp/boards/项目 A.kacha", onClose }) })));
 }
 
 async function setInput(label: string, value: string): Promise<void> {
@@ -160,25 +160,6 @@ describe("反馈对话框（#206）", () => {
     expect(port.calls.feedback[0]).toEqual(expect.objectContaining({ category: "feature" }));
   });
 
-  it("没有显式高级覆盖时不向 Feedback 端口发送 relay_url", async () => {
-    const port = createFakePort();
-    await show(port);
-    await setInput("正文", "使用 Go 默认中继");
-    await click("预览");
-    await click("确认发送");
-    expect(port.calls.feedback[0]).not.toHaveProperty("relay_url");
-  });
-
-  it("高级设置解析出的反馈中继地址随每次发送进入 Feedback 端口", async () => {
-    const port = createFakePort();
-    await show(port, undefined, "http://relay.test:3105");
-    await setInput("正文", "无法生成");
-    await click("预览");
-    await click("确认发送");
-    expect(port.calls.feedback).toHaveLength(1);
-    expect(port.calls.feedback[0]).toEqual(expect.objectContaining({ relay_url: "http://relay.test:3105" }));
-  });
-
   it("选择截图后预览列出图片并随 Feedback 端口发送", async () => {
     const shot = new File([new Uint8Array([137, 80, 78, 71])], "画面.png", { type: "image/png" });
     const port = createFakePort({ pickImages: [[shot]] });
@@ -274,9 +255,9 @@ describe("反馈预览、结局与重试（#208）", () => {
     url: "https://gitea.test/kacha-feedback/issues/17",
   };
   const FAILURE_CASES = [
-    { kind: "unreachable" as const, expected: "反馈中继不可达" },
+    { kind: "unreachable" as const, expected: "Gitea 不可达" },
     { kind: "unauthorized" as const, expected: "Gitea token 无效或权限不足" },
-    { kind: "rejected" as const, expected: "反馈被中继拒绝" },
+    { kind: "rejected" as const, expected: "Gitea 提交失败" },
     { kind: "invalid" as const, expected: "反馈内容不合法" },
     { kind: "too_large" as const, expected: "反馈内容过大" },
     { kind: "duplicate" as const, expected: "刚刚已提交过 #17" },
@@ -339,7 +320,7 @@ describe("反馈预览、结局与重试（#208）", () => {
     expect(container.textContent).toContain("画面.png");
     expect(container.textContent).toContain("diagnostics.zip");
     await click("确认发送");
-    expect(container.textContent).toContain("反馈中继不可达");
+    expect(container.textContent).toContain("Gitea 不可达");
 
     await click("返回修改");
     expect((await field("标题") as HTMLInputElement).value).toBe("原样标题");
@@ -445,6 +426,7 @@ describe("Gitea 一键授权（#242）", () => {
     await click("确认发送");
     expect(port.calls.feedback).toHaveLength(1);
     expect(port.calls.feedback[0]).not.toHaveProperty("gitea_token");
+    expect(port.calls.feedback[0]).not.toHaveProperty("relay_url");
   });
 
   it("一键授权失败时显示可操作原因，不进入等待状态", async () => {

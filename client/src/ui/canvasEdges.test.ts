@@ -1,10 +1,8 @@
 // 画布连线数据的派生：id / 端点 / 选中 / 区域徽标 / 系统连线 / 谱系高亮与去强调，以及悬浮信息。
 import { describe, expect, it } from "vitest";
-import type { Board, BoardEdge, TaskNode } from "../core/board";
+import type { Board, BoardEdge } from "../core/board";
 import { REGION_TEXT } from "./boardText";
 import { canvasEdges, type CanvasEdgeInput } from "./canvasEdges";
-
-const SPEC_2K = { tier: "2K", ratio: "16:9", width: null, height: null };
 
 function board(edges: BoardEdge[]): Board {
   return { format_version: 2, title: "t", viewport: { zoom: 1, x: 0, y: 0 }, nodes: [], edges, extra: {} };
@@ -14,12 +12,8 @@ function edge(from: [string, string], to: [string, string], patch: Partial<Board
   return { from, to, source_layer: null, region: null, system: false, extra: {}, ...patch };
 }
 
-function task(id: string): TaskNode {
-  return { id, type: "task", pos: [0, 0], size: [280, 260], extra: {}, model: "qwen-image-3.0", size_spec: SPEC_2K, image_ports: 0, layer_decomposition: false, transparent_background: false, last_submitted: null };
-}
-
 function input(edges: BoardEdge[], patch: Partial<CanvasEdgeInput> = {}): CanvasEdgeInput {
-  return { board: board(edges), selectedEdges: new Set(), selectedNodes: new Set(), lineageEdges: new Set(), dragging: false, expanded: new Set(), ...patch };
+  return { board: board(edges), selectedEdges: new Set(), selectedNodes: new Set(), lineageEdges: new Set(), dragging: false, ...patch };
 }
 
 describe("连线的基本字段", () => {
@@ -92,25 +86,5 @@ describe("选中、谱系高亮与去强调", () => {
       input([e, edge(["p2", "out"], ["t1", "negative"])], { selectedNodes: new Set(["p1"]), lineageEdges: new Set([e]) }),
     );
     expect(edges.map((x) => x.className)).toEqual(["edge-positive edge-lineage", "edge-negative dimmed"]);
-  });
-});
-
-describe("任务节点展开态与连线", () => {
-  const positive = edge(["p1", "out"], ["t1", "positive"]);
-  const image = edge(["ref1", "out"], ["t1", "image:0"], { system: true });
-  const trunk = edge(["t1", "result"], ["r1", "in"], { system: true });
-  const edges = [positive, image, trunk];
-  const withTask = (expanded: ReadonlySet<string>): CanvasEdgeInput => ({
-    ...input(edges, { expanded }),
-    board: { ...board(edges), nodes: [task("t1")] },
-  });
-
-  it("收起时只留主干输出连线，展开后内部连线恢复", () => {
-    expect(canvasEdges(withTask(new Set())).map((e) => e.id)).toEqual(["t1:result->r1:in"]);
-    expect(canvasEdges(withTask(new Set(["t1"]))).map((e) => e.id)).toEqual([
-      "p1:out->t1:positive",
-      "ref1:out->t1:image:0",
-      "t1:result->r1:in",
-    ]);
   });
 });

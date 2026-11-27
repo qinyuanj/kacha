@@ -1,5 +1,5 @@
-// 画板上下文菜单：按右键对象给条目（动作 + 文案 + 置灰原因）。执行由画布按 action 分派到与工具栏 / 节点按钮相同的逻辑；
-// 悬浮动作条、拖线建节点的多候选菜单复用同一组 action。
+// 画板上下文菜单：按右键对象给条目（动作 + 文案 + 置灰原因）。执行由画布按 action 分派到与节点按钮相同的逻辑；
+// 拖线建节点的多候选菜单复用同一组 action；节点按钮与放大预览也是现行入口。
 import type { Board, BoardEdge, BoardNode, TaskNode } from "./board";
 import { findModel, type CapabilityTable } from "./capabilities";
 import { imagePortIndex } from "./graph";
@@ -29,8 +29,6 @@ export type BoardAction =
   | "disconnect"
   | "editRegion"
   | "exportPack"
-  /** 将整板生成结果打包下载；是否可用由桌面能力决定。 */
-  | "downloadResults"
   | "importPack";
 
 export interface MenuItem {
@@ -82,7 +80,7 @@ function paneMenuItems(facts: MenuFacts): MenuItem[] {
   );
 }
 
-// 加为参考图的目标是选区里恰好一个任务；悬浮动作条同样保留当前选区。
+// 加为参考图的目标是选区里恰好一个任务；右键菜单同样保留当前选区。
 function addAsReferenceItem({ board, selected, locked }: MenuFacts): MenuItem {
   const refTarget = addAsReferenceTarget(board, [...selected]);
   return item("addAsReference", "加为参考图", refTarget.ok ? (locked.has(refTarget.taskId) ? LOCKED_HINT : null) : refTarget.reason);
@@ -141,20 +139,6 @@ function edgeMenuItems(edge: BoardEdge, facts: MenuFacts): MenuItem[] {
   const task = facts.board.nodes.find((n) => n.id === edge.to[0]);
   const regionable = imagePortIndex(edge.to[1]) !== null && task?.type === "task" && effectiveRegionRender(findModel(facts.table, task.model)) !== null;
   return grouped(regionable ? [item("editRegion", "框选修改区域", reason)] : [], [item("disconnect", "断开", reason)]);
-}
-
-/** 动作条自有顺序（放大预览在最前），不跟菜单的常用程度排序；也不画分隔线。 */
-const ACTION_BAR_ACTIONS: readonly BoardAction[] = ["preview", "saveAs", "continueEditing", "addAsReference", "generateVariant"];
-
-/**
- * 悬浮动作条：图片节点的放大预览与迭代动作，取自同一节点的菜单条目（同一组置灰原因）。
- * 悬浮不改选区：悬浮在多选内的节点上给多选条目，否则按单个节点给（加为参考图仍以当前选中的任务为目标）。
- */
-export function actionBarItems(nodeId: string, facts: MenuFacts): MenuItem[] {
-  const node = facts.board.nodes.find((n) => n.id === nodeId);
-  if (node?.type !== "reference" && node?.type !== "result") return [];
-  const items = menuItems({ kind: "node", nodeId }, facts);
-  return ACTION_BAR_ACTIONS.flatMap((a) => items.filter((i) => i.action === a).map(({ separatorBefore: _, ...i }) => i));
 }
 
 /** 右键落在未选中节点上先把选区换成该节点；落在选区内保持原选区。 */

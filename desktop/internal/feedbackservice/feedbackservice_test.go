@@ -6,68 +6,84 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/qinyuanj/kacha/desktop/internal/feedbackrelay"
+	"time"
 )
 
-type relayCapture struct {
-	method          string
-	path            string
-	idempotencyKey  string
-	fields          map[string]string
-	files           map[string][]byte
-	diagnosticNames []string
-	calls           int
+type giteaCapture struct {
+	requests   []string
+	auth       []string
+	issueCalls int
+	title      string
+	body       string
+	labels     []int64
+	patched    string
+	assets     map[string][]byte
 }
 
-func newFakeRelay(t *testing.T, status int, outcome Outcome) (*httptest.Server, func() relayCapture) {
+func newFakeGitea(t *testing.T) (*httptest.Server, func() giteaCapture) {
 	t.Helper()
 	var mu sync.Mutex
-	var captured relayCapture
+	var captured giteaCapture
+	captured.assets = map[string][]byte{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseMultipartForm(8 << 20); err != nil {
-			t.Errorf("ParseMultipartForm: %v", err)
-		}
-		fields := map[string]string{}
-		for _, key := range []string{"title", "category", "body", "version", "build", "os", "board_name", "contact", "gitea_token"} {
-			fields[key] = r.FormValue(key)
-		}
-		files := map[string][]byte{}
-		var diagnosticNames []string
-		for field, headers := range r.MultipartForm.File {
-			for _, header := range headers {
-				f, err := header.Open()
-				if err == nil {
-					data, readErr := io.ReadAll(f)
-					_ = f.Close()
-					if readErr == nil {
-						files[header.Filename] = data
-						if field == "diagnostics_pack" {
-							diagnosticNames = append(diagnosticNames, header.Filename)
-						}
-					}
-				}
-			}
-		}
 		mu.Lock()
-		captured = relayCapture{
-			method:          r.Method,
-			path:            r.URL.Path,
-			idempotencyKey:  r.Header.Get("Idempotency-Key"),
-			fields:          fields,
-			files:           files,
-			diagnosticNames: diagnosticNames,
-			calls:           captured.calls + 1,
-		}
+		captured.requests = append(captured.requests, r.Method+" "+r.URL.Path)
+		captured.auth = append(captured.auth, r.Header.Get("Authorization"))
 		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(outcome)
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/o/r/labels":
+			_, _ = io.WriteString(w, `[{"id":1,"name":"type/bug"},{"id":2,"name":"type/feature"},{"id":3,"name":"type/suggestion"},{"id":4,"name":"type/other"},{"id":5,"name":"source/app"}]`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/o/r/issues":
+			var issue struct {
+				Title  string  `json:"title"`
+				Body   string  `json:"body"`
+				Labels []int64 `json:"labels"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&issue); err != nil {
+				t.Errorf("decode issue: %v", err)
+			}
+			mu.Lock()
+			captured.issueCalls++
+			number := captured.issueCalls
+			captured.title, captured.body, captured.labels = issue.Title, issue.Body, issue.Labels
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": number, "html_url": "http://gitea.test/issues/" + strconv.Itoa(number)})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/assets"):
+			if err := r.ParseMultipartForm(8 << 20); err != nil {
+				t.Errorf("ParseMultipartForm: %v", err)
+			}
+			file, header, err := r.FormFile("attachment")
+			if err != nil {
+				t.Errorf("FormFile: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			data, readErr := io.ReadAll(file)
+			_ = file.Close()
+			if readErr != nil {
+				t.Errorf("read attachment: %v", readErr)
+			}
+			mu.Lock()
+			captured.assets[header.Filename] = data
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]string{"browser_download_url": "http://gitea.test/assets/" + header.Filename})
+		case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/v1/repos/o/r/issues/"):
+			var patch map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&patch)
+			mu.Lock()
+			captured.patched = patch["body"]
+			mu.Unlock()
+			_, _ = io.WriteString(w, `{}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
-	return server, func() relayCapture {
+	return server, func() giteaCapture {
 		mu.Lock()
 		defer mu.Unlock()
 		return captured
@@ -76,434 +92,196 @@ func newFakeRelay(t *testing.T, status int, outcome Outcome) (*httptest.Server, 
 
 func sampleSpec() Spec {
 	return Spec{
-		Title:      "登录失败",
-		Category:   "bug",
-		Body:       "点登录后没有反应",
-		Version:    "1.6.8",
-		Build:      "20261121",
-		OS:         "Windows 11",
-		BoardName:  "战斗草稿",
-		Contact:    "artist@example.com",
-		GiteaToken: "alice",
+		Title: "登录失败", Category: "bug", Body: "点登录后没有反应",
+		Version: "1.7.3", Build: "20261126", OS: "Windows 11",
+		BoardName: "战斗草稿", Contact: "artist@example.com",
 	}
 }
 
-func TestSendMapsFakeRelayOutcomesToStableKinds(t *testing.T) {
-	cases := []struct {
-		name   string
-		status int
-		relay  Outcome
-		want   Outcome
-	}{
-		{
-			name:   "ok",
-			status: http.StatusOK,
-			relay:  Outcome{OK: true, Kind: "created", Message: "已提交 #17", Number: 17, URL: "https://gitea.example/feedback/issues/17"},
-			want:   Outcome{OK: true, Kind: "ok", Message: "已提交 #17", Number: 17, URL: "https://gitea.example/feedback/issues/17"},
-		},
-		{
-			name:   "duplicate",
-			status: http.StatusOK,
-			relay:  Outcome{OK: true, Kind: "duplicate", Message: "刚刚已提交过 #17", Number: 17, URL: "https://gitea.example/feedback/issues/17"},
-			want:   Outcome{OK: true, Kind: "duplicate", Message: "刚刚已提交过 #17", Number: 17, URL: "https://gitea.example/feedback/issues/17"},
-		},
-		{
-			name:   "invalid",
-			status: http.StatusBadRequest,
-			relay:  Outcome{Kind: "invalid", Message: "不支持的分类"},
-			want:   Outcome{Kind: "invalid", Message: "反馈内容不合法，请修改后重试"},
-		},
-		{
-			name:   "too_large",
-			status: http.StatusRequestEntityTooLarge,
-			relay:  Outcome{Kind: "too_large", Message: "请求体过大"},
-			want:   Outcome{Kind: "too_large", Message: "反馈内容过大，请精简后重试"},
-		},
-		{
-			name:   "unauthorized",
-			status: http.StatusUnauthorized,
-			relay:  Outcome{Kind: "unauthorized", Message: "Gitea token 无效或权限不足"},
-			want:   Outcome{Kind: "unauthorized", Message: "Gitea token 无效或权限不足"},
-		},
-		{
-			name:   "rejected",
-			status: http.StatusBadGateway,
-			relay:  Outcome{Kind: "failed", Message: "创建 issue 失败：服务器无法写入 Gitea"},
-			want:   Outcome{Kind: "rejected", Message: "反馈被中继拒绝，请稍后再试"},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			server, captured := newFakeRelay(t, tc.status, tc.relay)
-			defer server.Close()
-
-			got := New(Config{RelayURL: server.URL}).Send(sampleSpec())
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("Send outcome = %+v, want %+v", got, tc.want)
-			}
-			req := captured()
-			if req.calls != 1 || req.method != http.MethodPost || req.path != "/api/feedback" {
-				t.Fatalf("relay got %d requests, last %s %s", req.calls, req.method, req.path)
-			}
-			if req.idempotencyKey == "" {
-				t.Fatal("relay did not receive an Idempotency-Key")
-			}
-		})
-	}
-}
-
-func TestSendForwardsRequestGiteaToken(t *testing.T) {
-	server, captured := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "已提交 #1", Number: 1, URL: "http://fake/1"})
+func TestSendDirectCreatesIssueUploadsAttachmentsAndRedacts(t *testing.T) {
+	server, capture := newFakeGitea(t)
 	defer server.Close()
-
+	auth := &fakeAuth{token: "stored-oauth-token"}
+	svc := New(Config{GiteaBase: server.URL, OwnerRepo: "o/r", Auth: auth})
 	spec := sampleSpec()
-	spec.GiteaToken = "alice"
-	got := New(Config{RelayURL: server.URL}).Send(spec)
-	if !got.OK || got.Kind != "ok" {
-		t.Fatalf("Send outcome = %+v", got)
-	}
-	req := captured()
-	if req.fields["gitea_token"] != "alice" {
-		t.Fatalf("relay gitea_token = %q", req.fields["gitea_token"])
-	}
-	for key, value := range req.fields {
-		if key != "gitea_token" && strings.Contains(value, "alice") {
-			t.Fatalf("token leaked into field %s: %q", key, value)
-		}
-	}
-}
-
-func TestUnauthorizedThenRetryUsesFreshRequestToken(t *testing.T) {
-	var calls int
-	var tokens []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseMultipartForm(8 << 20); err != nil {
-			t.Errorf("ParseMultipartForm: %v", err)
-		}
-		tokens = append(tokens, r.FormValue("gitea_token"))
-		calls++
-		w.Header().Set("Content-Type", "application/json")
-		if calls == 1 {
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = io.WriteString(w, `{"ok":false,"kind":"unauthorized","message":"Gitea token 无效或权限不足"}`)
-			return
-		}
-		_, _ = io.WriteString(w, `{"ok":true,"kind":"created","message":"已提交 #18","number":18,"url":"https://example.test/18"}`)
-	}))
-	defer server.Close()
-
-	svc := New(Config{RelayURL: server.URL})
-	first := sampleSpec()
-	first.GiteaToken = "expired-token"
-	got := svc.Send(first)
-	if got.Kind != KindUnauthorized || got.Message != MessageUnauthorized {
-		t.Fatalf("first outcome = %+v, want unauthorized", got)
-	}
-
-	retry := first
-	retry.GiteaToken = "fresh-token"
-	got = svc.Send(retry)
-	if !got.OK || got.Kind != KindOK || got.Number != 18 {
-		t.Fatalf("retry outcome = %+v, want created #18", got)
-	}
-	if calls != 2 || len(tokens) != 2 || tokens[0] != "expired-token" || tokens[1] != "fresh-token" {
-		t.Fatalf("relay calls=%d tokens=%v, want fresh per-request token on retry", calls, tokens)
-	}
-}
-
-func TestSendWithoutRelayAddressIsExplicitlyUnavailable(t *testing.T) {
-	got := New(Config{}).Send(sampleSpec())
-	want := Outcome{Kind: "unavailable", Message: "反馈暂不可用：未配置中继地址"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Send outcome = %+v, want %+v", got, want)
-	}
-}
-
-func TestSendUnreachableRelayIsStable(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	address := server.URL
-	server.Close()
-
-	got := New(Config{RelayURL: address}).Send(sampleSpec())
-	want := Outcome{Kind: "unreachable", Message: "反馈中继不可达，请稍后再试"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Send outcome = %+v, want %+v", got, want)
-	}
-}
-
-func TestSendUploadsScreenshotsAndDiagnosticsPack(t *testing.T) {
-	server, captured := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "已提交 #1", Number: 1, URL: "https://example.test/1"})
-	defer server.Close()
-
-	spec := sampleSpec()
+	spec.Title = `草稿 C:\Users\me\draft.md 上的错误 ` + bareHexTokenFixture
+	spec.Body = "api_key=hunter2 " + barePlaceholderFixture
 	spec.Screenshots = []Attachment{
 		{Name: "画面.png", ContentType: "image/png", Data: []byte{0x89, 'P', 'N', 'G', 1}},
 		{Name: "另一张.jpg", ContentType: "image/jpeg", Data: []byte{0xff, 0xd8, 0xff, 1}},
 	}
 	spec.DiagnosticsPack = &Attachment{Name: "diagnostics.zip", ContentType: "application/zip", Data: []byte{'P', 'K', 3, 4}}
-	if out := New(Config{RelayURL: server.URL}).Send(spec); !out.OK {
-		t.Fatalf("Send failed: %+v", out)
-	}
 
-	req := captured()
-	for name, want := range map[string][]byte{
-		"画面.png":          {0x89, 'P', 'N', 'G', 1},
-		"另一张.jpg":         {0xff, 0xd8, 0xff, 1},
-		"diagnostics.zip": {'P', 'K', 3, 4},
-	} {
-		got, ok := req.files[name]
-		if !ok || !reflect.DeepEqual(got, want) {
-			t.Fatalf("attachment %q = %v (present=%v), want %v", name, got, ok, want)
+	out := svc.Send(spec)
+	if !out.OK || out.Kind != KindOK || out.Number != 1 {
+		t.Fatalf("Send() = %+v", out)
+	}
+	got := capture()
+	if got.issueCalls != 1 || !reflect.DeepEqual(got.labels, []int64{1, 5}) {
+		t.Fatalf("issue calls=%d labels=%v", got.issueCalls, got.labels)
+	}
+	for _, secret := range []string{"hunter2", bareHexTokenFixture, barePlaceholderFixture, `C:\Users\me`} {
+		if strings.Contains(got.title+got.body, secret) {
+			t.Fatalf("issue still contains secret/path %q: title=%q body=%q", secret, got.title, got.body)
 		}
 	}
-	if len(req.diagnosticNames) != 1 || req.diagnosticNames[0] != "diagnostics.zip" {
-		t.Fatalf("diagnostics_pack files = %v", req.diagnosticNames)
+	if !strings.Contains(got.body, "[REDACTED]") || !strings.Contains(got.body, "_由 Kacha 直接提交_") {
+		t.Fatalf("issue body missing redaction/direct marker: %q", got.body)
+	}
+	for name, want := range map[string][]byte{
+		"画面.png": {0x89, 'P', 'N', 'G', 1}, "另一张.jpg": {0xff, 0xd8, 0xff, 1}, "diagnostics.zip": {'P', 'K', 3, 4},
+	} {
+		if data := got.assets[name]; !reflect.DeepEqual(data, want) {
+			t.Fatalf("asset %q = %v, want %v", name, data, want)
+		}
+	}
+	for _, link := range []string{"![画面.png]", "![另一张.jpg]", "[diagnostics.zip]"} {
+		if !strings.Contains(got.patched, link) {
+			t.Fatalf("patched body missing %q: %q", link, got.patched)
+		}
+	}
+	for _, request := range got.requests {
+		if strings.Contains(request, "/api/feedback") {
+			t.Fatalf("request still targets relay: %q", request)
+		}
 	}
 }
 
-func TestCategoryCodeReachesRelayAsChineseLabel(t *testing.T) {
-	// 只保留缺陷一行：证明 client multipart 的 category code 经真中继生成中文标题（#232）。
-	// 其余 code/label 映射由 feedbackrelay.TestCategoryLabels 与 Python sync 覆盖。
+func TestCategoryCodesBecomeChineseTitlesAndLabels(t *testing.T) {
 	cases := []struct {
 		code  string
 		label string
 		id    int64
-	}{
-		{"bug", "缺陷", 1},
-	}
+	}{{"bug", "缺陷", 1}, {"feature", "需求", 2}, {"suggestion", "建议", 3}, {"other", "其他", 4}}
 	for _, tc := range cases {
-		t.Run(tc.code+"->"+tc.label, func(t *testing.T) {
-			var issueTitle string
-			var issueLabels []int64
-			gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch {
-				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/o/r/labels":
-					_, _ = io.WriteString(w, `[{"id":1,"name":"type/bug"},{"id":2,"name":"type/feature"},{"id":3,"name":"type/suggestion"},{"id":4,"name":"type/other"},{"id":5,"name":"source/app"}]`)
-				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/o/r/issues":
-					var issue struct {
-						Title  string  `json:"title"`
-						Labels []int64 `json:"labels"`
-					}
-					_ = json.NewDecoder(r.Body).Decode(&issue)
-					issueTitle, issueLabels = issue.Title, issue.Labels
-					_, _ = io.WriteString(w, `{"number":7,"html_url":"http://gitea.test/issues/7"}`)
-				case strings.HasSuffix(r.URL.Path, "/assets"):
-					_, _ = io.WriteString(w, `{"browser_download_url":"http://gitea.test/assets/x"}`)
-				default:
-					w.WriteHeader(http.StatusNotFound)
-				}
-			}))
-			defer gitea.Close()
-
-			relay := httptest.NewServer(feedbackrelay.New(feedbackrelay.Config{
-				GiteaBase: gitea.URL,
-				OwnerRepo: "o/r",
-			}).Handler())
-			defer relay.Close()
-
+		t.Run(tc.code, func(t *testing.T) {
+			server, capture := newFakeGitea(t)
+			defer server.Close()
 			spec := sampleSpec()
-			spec.Category = tc.code
-			spec.Title = "" // 中继生成的标题应使用对应的中文分类标签
-			out := New(Config{RelayURL: relay.URL}).Send(spec)
-			if !out.OK || out.Number != 7 {
-				t.Fatalf("Send outcome = %+v", out)
+			spec.Title, spec.Category = "", tc.code
+			out := New(Config{GiteaBase: server.URL, OwnerRepo: "o/r", Auth: &fakeAuth{token: "token"}}).Send(spec)
+			if !out.OK {
+				t.Fatalf("Send() = %+v", out)
 			}
-			if !strings.HasPrefix(issueTitle, "["+tc.label+"]") {
-				t.Fatalf("issue title = %q, want label %q", issueTitle, tc.label)
-			}
-			if !reflect.DeepEqual(issueLabels, []int64{tc.id, 5}) {
-				t.Fatalf("issue labels = %v, want [%d 5]", issueLabels, tc.id)
+			got := capture()
+			if !strings.HasPrefix(got.title, "["+tc.label+"]") || !reflect.DeepEqual(got.labels, []int64{tc.id, 5}) {
+				t.Fatalf("title=%q labels=%v", got.title, got.labels)
 			}
 		})
 	}
 }
 
-func TestSendRejectsInvalidAttachmentsBeforeRelay(t *testing.T) {
+func TestSendRejectsInvalidInputBeforeNetwork(t *testing.T) {
 	cases := []struct {
 		name string
 		mut  func(*Spec)
 		want Outcome
 	}{
-		{
-			name: "format",
-			mut: func(s *Spec) {
-				s.Screenshots = []Attachment{{Name: "说明.txt", ContentType: "text/plain", Data: []byte("x")}}
-			},
-			want: Outcome{Kind: KindInvalid, Message: "截图只支持 PNG/JPG 格式，请转换后重试"},
-		},
-		{
-			name: "size",
-			mut: func(s *Spec) {
-				s.Screenshots = []Attachment{{Name: "很大.png", ContentType: "image/png", Data: make([]byte, MaxScreenshotBytes+1)}}
-			},
-			want: Outcome{Kind: KindTooLarge, Message: "单张截图超过 10MB，请压缩后重试"},
-		},
-		{
-			name: "count",
-			mut: func(s *Spec) {
-				for i := 0; i <= MaxScreenshots; i++ {
-					s.Screenshots = append(s.Screenshots, Attachment{Name: "shot.png", ContentType: "image/png", Data: []byte("x")})
-				}
-			},
-			want: Outcome{Kind: KindInvalid, Message: "截图最多 5 张，请删掉多余的再发送"},
-		},
-		{
-			name: "diagnostics",
-			mut: func(s *Spec) {
-				s.DiagnosticsPack = &Attachment{Name: "diagnostics.zip", ContentType: "application/zip", Data: make([]byte, maxDiagnosticsPackBytes+1)}
-			},
-			want: Outcome{Kind: KindTooLarge, Message: "诊断包过大，请重新生成后再发送"},
-		},
+		{name: "body", mut: func(s *Spec) { s.Body = " " }, want: Outcome{Kind: KindInvalid, Message: MessageInvalid}},
+		{name: "category", mut: func(s *Spec) { s.Category = "unknown" }, want: Outcome{Kind: KindInvalid, Message: MessageInvalid}},
+		{name: "format", mut: func(s *Spec) {
+			s.Screenshots = []Attachment{{Name: "说明.txt", ContentType: "text/plain", Data: []byte("x")}}
+		}, want: Outcome{Kind: KindInvalid, Message: MessageFormat}},
+		{name: "size", mut: func(s *Spec) {
+			s.Screenshots = []Attachment{{Name: "很大.png", ContentType: "image/png", Data: make([]byte, MaxScreenshotBytes+1)}}
+		}, want: Outcome{Kind: KindTooLarge, Message: MessageBigShot}},
+		{name: "count", mut: func(s *Spec) {
+			for i := 0; i <= MaxScreenshots; i++ {
+				s.Screenshots = append(s.Screenshots, Attachment{Name: "shot.png", ContentType: "image/png"})
+			}
+		}, want: Outcome{Kind: KindInvalid, Message: MessageTooMany}},
+		{name: "diagnostics", mut: func(s *Spec) {
+			s.DiagnosticsPack = &Attachment{Name: "diagnostics.zip", ContentType: "application/zip", Data: make([]byte, maxDiagnosticsPackBytes+1)}
+		}, want: Outcome{Kind: KindTooLarge, Message: MessageBigPack}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			server, captured := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Number: 1})
+			server, capture := newFakeGitea(t)
 			defer server.Close()
 			spec := sampleSpec()
 			tc.mut(&spec)
-			got := New(Config{RelayURL: server.URL}).Send(spec)
+			got := New(Config{GiteaBase: server.URL, OwnerRepo: "o/r", Auth: &fakeAuth{token: "token"}}).Send(spec)
 			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("Send outcome = %+v, want %+v", got, tc.want)
+				t.Fatalf("Send() = %+v, want %+v", got, tc.want)
 			}
-			if captured().calls != 0 {
-				t.Fatalf("invalid attachment should not reach relay, got %d calls", captured().calls)
+			if len(capture().requests) != 0 {
+				t.Fatalf("invalid input reached Gitea: %v", capture().requests)
 			}
 		})
 	}
 }
 
-// #229 的裸凭据夹具：与 redaction 包的测试同一组值，两端都不许漏。
-// 占位符按片段拼出来，运行时得到的才是这段字面量，不会先被替换成别的值。
+func TestSendMapsGiteaFailures(t *testing.T) {
+	cases := []struct {
+		status int
+		want   Outcome
+	}{
+		{http.StatusUnauthorized, Outcome{Kind: KindUnauthorized, Message: MessageUnauthorized}},
+		{http.StatusForbidden, Outcome{Kind: KindUnauthorized, Message: MessageUnauthorized}},
+		{http.StatusBadRequest, Outcome{Kind: KindInvalid, Message: MessageInvalid}},
+		{http.StatusUnprocessableEntity, Outcome{Kind: KindInvalid, Message: MessageInvalid}},
+		{http.StatusRequestEntityTooLarge, Outcome{Kind: KindTooLarge, Message: MessageTooLarge}},
+		{http.StatusInternalServerError, Outcome{Kind: KindRejected, Message: MessageRejected}},
+	}
+	for _, tc := range cases {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/repos/o/r/labels" {
+					_, _ = io.WriteString(w, `[]`)
+					return
+				}
+				w.WriteHeader(tc.status)
+			}))
+			defer server.Close()
+			got := New(Config{GiteaBase: server.URL, OwnerRepo: "o/r", Auth: &fakeAuth{token: "token"}}).Send(sampleSpec())
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("Send() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSendUnreachableGiteaIsStable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	address := server.URL
+	server.Close()
+	got := New(Config{GiteaBase: address, OwnerRepo: "o/r", Auth: &fakeAuth{token: "token"}}).Send(sampleSpec())
+	want := Outcome{Kind: KindUnreachable, Message: MessageUnreachable}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Send() = %+v, want %+v", got, want)
+	}
+}
+
+func TestSendDeduplicatesByTokenAndContentForTwoMinutes(t *testing.T) {
+	server, capture := newFakeGitea(t)
+	defer server.Close()
+	auth := &fakeAuth{token: "alice"}
+	svc := New(Config{GiteaBase: server.URL, OwnerRepo: "o/r", Auth: auth})
+	now := time.Now()
+	svc.now = func() time.Time { return now }
+
+	first := svc.Send(sampleSpec())
+	second := svc.Send(sampleSpec())
+	if !first.OK || second.Kind != KindDuplicate || second.Number != first.Number || capture().issueCalls != 1 {
+		t.Fatalf("first=%+v second=%+v issue calls=%d", first, second, capture().issueCalls)
+	}
+	changed := sampleSpec()
+	changed.Body = "改过的正文"
+	if out := svc.Send(changed); out.Kind != KindOK || capture().issueCalls != 2 {
+		t.Fatalf("changed content: %+v, issue calls=%d", out, capture().issueCalls)
+	}
+	auth.token = "bob"
+	if out := svc.Send(sampleSpec()); out.Kind != KindOK || capture().issueCalls != 3 {
+		t.Fatalf("different token: %+v, issue calls=%d", out, capture().issueCalls)
+	}
+	now = now.Add(dedupWindow + time.Second)
+	if out := svc.Send(sampleSpec()); out.Kind != KindOK || capture().issueCalls != 4 {
+		t.Fatalf("after dedup window: %+v, issue calls=%d", out, capture().issueCalls)
+	}
+}
+
+// 裸凭据夹具：与 redaction 包同一组值，两端都不许漏。
 const (
 	bareHexTokenFixture    = "0123456789abcdef0123456789abcdef01234567"
 	barePlaceholderFixture = "{{SECRET" + "_fixture}}"
 )
-
-func TestSendRedactsSecretsAndLocalPaths(t *testing.T) {
-	server, captured := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "已提交 #1", Number: 1, URL: "https://example.test/1"})
-	defer server.Close()
-
-	spec := sampleSpec()
-	spec.Title = "草稿 C:\\Users\\me\\draft.md 上的错误 " + bareHexTokenFixture
-	spec.Body = "api_key=hunter2 gateway_key=gw-synthetic ghp_synthetic1234567890 ghp_synthetic1234567890 api_key=user-api-key-abc C:\\\\Users\\\\me\\\\secret\\\\board.md \\\\\\\\lzxsvn\\\\share\\\\draft.png 令牌 " + barePlaceholderFixture
-	out := New(Config{RelayURL: server.URL}).Send(spec)
-	if !out.OK {
-		t.Fatalf("Send unexpectedly failed: %+v", out)
-	}
-
-	req := captured()
-	for _, key := range []string{
-		"hunter2", "gw-synthetic ghp_synthetic1234567890", "ghp_synthetic1234567890", "user-api-key-abc", "C:\\\\Users\\\\me", "\\\\lzxsvn\\\\share",
-		// #229：没有 key= 前缀的裸 40 位 token 与裸占位符同样不许出现在发往中继的字段里。
-		bareHexTokenFixture, barePlaceholderFixture,
-	} {
-		if strings.Contains(req.fields["body"], key) || strings.Contains(req.fields["title"], key) {
-			t.Fatalf("redacted text still contains %q: title=%q body=%q", key, req.fields["title"], req.fields["body"])
-		}
-	}
-	// 标题脱敏必须真的发生：原始路径是单反斜杠，旧的双反斜杠检查串永远匹配不到（#232）。
-	if strings.Contains(req.fields["title"], `C:\Users\me`) {
-		t.Fatalf("title still contains local path: %q", req.fields["title"])
-	}
-	if !strings.Contains(req.fields["title"], "[REDACTED]") {
-		t.Fatalf("title redaction placeholder missing: %q", req.fields["title"])
-	}
-	// 共享脱敏实现统一用 [REDACTED]（diagnostics 与 feedbackservice 同一语义，#216 项4）。
-	if !strings.Contains(req.fields["body"], "[REDACTED]") {
-		t.Fatalf("redaction placeholder missing: body=%q", req.fields["body"])
-	}
-	for _, key := range []string{"title", "category", "version", "build", "os", "board_name", "contact"} {
-		if req.fields[key] == "" {
-			t.Fatalf("multipart field %q missing", key)
-		}
-	}
-}
-
-func TestSendUsesStableContentIdempotencyKey(t *testing.T) {
-	server, captured := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "已提交 #1", Number: 1, URL: "https://example.test/1"})
-	defer server.Close()
-	svc := New(Config{RelayURL: server.URL})
-
-	if out := svc.Send(sampleSpec()); !out.OK {
-		t.Fatalf("first Send failed: %+v", out)
-	}
-	first := captured().idempotencyKey
-
-	if out := svc.Send(sampleSpec()); !out.OK {
-		t.Fatalf("second Send failed: %+v", out)
-	}
-	if again := captured().idempotencyKey; again != first {
-		t.Fatalf("same content produced different keys: %q != %q", again, first)
-	}
-
-	changed := sampleSpec()
-	changed.Body = "改过的正文"
-	if out := svc.Send(changed); !out.OK {
-		t.Fatalf("changed Send failed: %+v", out)
-	}
-	if key := captured().idempotencyKey; key == first {
-		t.Fatalf("different content reused idempotency key %q", key)
-	}
-
-	overridden := sampleSpec()
-	overridden.RelayURL = server.URL
-	if out := svc.Send(overridden); !out.OK {
-		t.Fatalf("override Send failed: %+v", out)
-	}
-	if key := captured().idempotencyKey; key != first {
-		t.Fatalf("relay override changed content key: %q != %q", key, first)
-	}
-}
-
-func TestSendRelayUrlOverridesConfiguredAddress(t *testing.T) {
-	// 地址优先级表：配置与本次覆盖各自独立生效，覆盖优先；两者都空则明确不可用（#232）。
-	cases := []struct {
-		name       string
-		configured bool
-		override   bool
-		wantKind   string
-		wantServer string // "default" / "override" / ""
-	}{
-		{name: "neither configured nor overridden", wantKind: KindUnavailable},
-		{name: "configured only", configured: true, wantKind: KindOK, wantServer: "default"},
-		{name: "override only", override: true, wantKind: KindOK, wantServer: "override"},
-		{name: "both, override wins", configured: true, override: true, wantKind: KindOK, wantServer: "override"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			defaultServer, defaultCapture := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "默认中继", Number: 1, URL: "https://example.test/1"})
-			defer defaultServer.Close()
-			overrideServer, overrideCapture := newFakeRelay(t, http.StatusOK, Outcome{OK: true, Kind: "created", Message: "覆盖中继", Number: 2, URL: "https://example.test/2"})
-			defer overrideServer.Close()
-
-			cfg := Config{}
-			if tc.configured {
-				cfg.RelayURL = defaultServer.URL
-			}
-			spec := sampleSpec()
-			if tc.override {
-				spec.RelayURL = overrideServer.URL
-			}
-			got := New(cfg).Send(spec)
-			if got.Kind != tc.wantKind {
-				t.Fatalf("Send outcome = %+v, want kind %q", got, tc.wantKind)
-			}
-			defaultCalls, overrideCalls := defaultCapture().calls, overrideCapture().calls
-			switch tc.wantServer {
-			case "default":
-				if defaultCalls != 1 || overrideCalls != 0 {
-					t.Fatalf("calls: default=%d override=%d, want default only", defaultCalls, overrideCalls)
-				}
-			case "override":
-				if defaultCalls != 0 || overrideCalls != 1 {
-					t.Fatalf("calls: default=%d override=%d, want override only", defaultCalls, overrideCalls)
-				}
-			case "":
-				if defaultCalls != 0 || overrideCalls != 0 {
-					t.Fatalf("calls: default=%d override=%d, want no relay", defaultCalls, overrideCalls)
-				}
-			}
-		})
-	}
-}

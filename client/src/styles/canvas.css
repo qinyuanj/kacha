@@ -64,8 +64,8 @@
   /* 卡片自己不裁剪：端口手柄、参数浮层与比例下拉列表要露到卡片外（#223）。 */
   overflow: visible;
 }
-/* Light Studio（#226）：卡片面与画布底同为 #ffffff，1px 描边独自承担边界。
- * --border-3 对白 3.037:1，达到 3:1；暗色沿用 --border，不动。
+/* Light Studio（#226）：白色卡片与米色画布之间仍保留独立的 1px 边界。
+ * --border-3 对画布 #dedeba 为 3.71:1，达到 3:1；暗色沿用 --border，不动。
  * 警告 / 错误态有自己的 2px 彩色边框，这里用 :not 排除，不改它们的语义色。 */
 :root[data-theme="light"] .node:not(.node-warn):not(.node-error) {
   border-color: var(--border-3);
@@ -641,27 +641,6 @@ body[data-port-drag="ok"] * {
   color: var(--text-3);
   font-size: 11px;
 }
-/* ---- 悬浮动作条（NodeToolbar 内，固定屏幕像素） ---- */
-.action-bar {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: var(--shadow-2);
-}
-.action-bar button {
-  min-width: 26px;
-  height: 26px;
-  padding: 0 4px;
-  font-size: 15px;
-  border-radius: 4px;
-}
-.action-bar button:hover:not([aria-disabled="true"]) {
-  background: var(--control-hover);
-}
-
 /* ---- 悬浮信息（窗口坐标，不随画布缩放） ---- */
 .hover-info {
   position: fixed;

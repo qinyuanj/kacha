@@ -115,12 +115,6 @@ export function pickMenuAction(action: BoardAction, menu: CanvasMenuState | null
   commands[action]?.(menu.target, menu.at);
 }
 
-/** 悬浮动作条里点一条：目标就是悬浮的那个节点（多选时动作条在选区上方，但目标仍是悬浮节点）。 */
-export function pickActionBarAction(action: BoardAction, hovered: string | null, commands: CommandTable): void {
-  if (hovered === null) return;
-  commands[action]?.({ kind: "node", nodeId: hovered });
-}
-
 /** 动作分派表：由 canvasCommands 生成，这里只按 action 取（画布不管的动作是 undefined）。 */
 export type CommandTable = Readonly<Record<BoardAction, ((target: MenuTarget, at?: { x: number; y: number }) => void) | undefined>>;
 
@@ -152,9 +146,4 @@ export function openSelectionContextMenu(openMenu: OpenMenu, e: MenuEvent, ids: 
 export function openEdgeMenu(openMenu: OpenMenu, board: Board, e: MenuEvent, edgeId: string): void {
   const target = board.edges.find((be) => edgeIdOf(be) === edgeId);
   if (target) openMenu(e, { kind: "edge", edge: target });
-}
-
-/** 悬浮到图片节点上才显示动作条（提示词 / 任务节点没有这套动作）。 */
-export function hoveredActionBarOf(showActionBar: (id: string) => void, node: { id: string; type?: string }): void {
-  if (node.type === "reference" || node.type === "result") showActionBar(node.id);
 }

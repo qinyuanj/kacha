@@ -1,5 +1,5 @@
 // 画布连线：画板连线逐条展开成 React Flow 的边数据（id、端点、选中、区域徽标与类名）。
-// 只做派生，不写盘；选中与拖线态由画布组件给。
+// 只做派生，不写盘；任务收起只隐藏参数，已有输入端口与连线仍然显示。
 import type { Edge } from "@xyflow/react";
 import type { Board, BoardEdge } from "../core/board";
 import { edgeHoverInfo } from "../core/hoverInfo";
@@ -10,8 +10,6 @@ import { edgeIdOf } from "./canvasPoint";
 /** 画布连线派生要用的事实：画板连线与当前选区 / 谱系 / 拖线态。 */
 export interface CanvasEdgeInput {
   board: Board;
-  /** 原地展开的任务节点：收起的节点只留主干端口，内部端口上的边不渲染。 */
-  expanded: ReadonlySet<string>;
   /** 当前选中的连线 id（见 edgeIdOf）。 */
   selectedEdges: ReadonlySet<string>;
   /** 当前选中的节点：有选中时非谱系连线去强调。 */
@@ -20,13 +18,6 @@ export interface CanvasEdgeInput {
   lineageEdges: ReadonlySet<BoardEdge>;
   /** 正在拖线：所有连线去强调。 */
   dragging: boolean;
-}
-
-/** 收起的生成任务只保留主干端口；连到其内部端口的边不渲染。 */
-function hiddenByCollapsedTask(input: CanvasEdgeInput, e: BoardEdge): boolean {
-  if (input.expanded.has(e.to[0])) return false;
-  const target = input.board.nodes.find((n) => n.id === e.to[0]);
-  return target?.type === "task" && e.to[1] !== "result";
 }
 
 /** 一条画板连线：id 与画板端点一一对应，系统连线不可删、不可选，带区域的显示「N 区域」徽标。 */
@@ -48,5 +39,5 @@ function edgeOf(input: CanvasEdgeInput, e: BoardEdge): Edge {
 
 /** 画布连线列表：顺序与画板连线一致（系统连线也在内）。 */
 export function canvasEdges(input: CanvasEdgeInput): Edge[] {
-  return input.board.edges.filter((e) => !hiddenByCollapsedTask(input, e)).map((e) => edgeOf(input, e));
+  return input.board.edges.map((e) => edgeOf(input, e));
 }

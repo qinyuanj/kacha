@@ -45,6 +45,17 @@ describe("Light Studio 未选中节点卡片的边界契约（#226）", () => {
   })
 })
 
+describe("浅色画布配色与连线边界", () => {
+  it("画布使用反馈指定的 #dedeba，各连线对画布至少 3:1", () => {
+    const canvasBg = lightToken("--canvas-bg")
+    expect(canvasBg).toBe("#dedeba")
+    for (const name of ["--port-image", "--port-positive", "--port-negative", "--edge-system"]) {
+      const colour = lightToken(name)
+      expect(contrastOf(colour, canvasBg), `${name} ${colour} 对米色画布 ${canvasBg} 的对比度不足 3:1`).toBeGreaterThanOrEqual(3)
+    }
+  })
+})
+
 describe("内联危险色文字契约（#242）", () => {
   it("浅色用 --danger-text 达到 4.5:1，暗色仍解析到 --danger，观感不变", () => {
     expect(contrastOf(lightToken("--danger-text"), lightToken("--surface"))).toBeGreaterThanOrEqual(4.5)

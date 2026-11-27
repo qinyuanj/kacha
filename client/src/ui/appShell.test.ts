@@ -138,7 +138,6 @@ describe("顶栏", () => {
           onClose: vi.fn(),
           onRename: vi.fn(),
           onCreate: vi.fn(),
-          onOpenList: vi.fn(),
           onExportPack: vi.fn(),
           updateNotice: "1.2.0",
           onOpenChangelog: vi.fn(),
@@ -151,20 +150,18 @@ describe("顶栏", () => {
 });
 
 describe("画板包菜单", () => {
-  it("没有画板：导出与下载都置灰", async () => {
+  it("没有画板：导出置灰", async () => {
     const onPick = vi.fn();
-    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: null, exportDisabledReason: "没有打开的画板", downloadDisabledReason: "没有打开的画板", onPick, onClose: vi.fn() })));
+    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: null, exportDisabledReason: "没有打开的画板", onPick, onClose: vi.fn() })));
     const items = () => [...container.querySelectorAll('[role="menuitem"]')];
-    for (const action of ["导出画板包", "下载整板结果"]) {
-      const button = items().find((b) => b.textContent?.includes(action));
-      expect(button?.getAttribute("aria-disabled")).toBe("true");
-      await act(async () => (button as HTMLButtonElement | undefined)?.click());
-    }
+    const button = items().find((b) => b.textContent?.includes("导出画板包"));
+    expect(button?.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => (button as HTMLButtonElement | undefined)?.click());
     expect(onPick).not.toHaveBeenCalled();
   });
 
   it("端口没有导入能力：导入标「尚不可用」并置灰", async () => {
-    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: "画板包导入" + UNAVAILABLE_TEXT, exportDisabledReason: null, downloadDisabledReason: null, onPick: vi.fn(), onClose: vi.fn() })));
+    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: "画板包导入" + UNAVAILABLE_TEXT, exportDisabledReason: null, onPick: vi.fn(), onClose: vi.fn() })));
     const importButton = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("导入画板包"));
     expect(importButton?.textContent).toContain(UNAVAILABLE_TEXT);
     // 置灰态用 aria-disabled 表示（与画布菜单同一口径）。
@@ -173,7 +170,7 @@ describe("画板包菜单", () => {
 
   it("有画板：导出可用", async () => {
     const onPick = vi.fn();
-    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: null, exportDisabledReason: null, downloadDisabledReason: null, onPick, onClose: vi.fn() })));
+    await act(async () => dom.render(createElement(AppPackMenu, { at: { x: 10, y: 20 }, importDisabledReason: null, exportDisabledReason: null, onPick, onClose: vi.fn() })));
     const exportButton = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("导出"));
     await act(async () => exportButton?.click());
     expect(onPick).toHaveBeenCalledWith("exportPack");
@@ -190,9 +187,10 @@ describe("工具栏", () => {
           runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
           packMenuOpen: false,
           packMenuDisabled: false,
+          boardListOpen: false,
           onTogglePackMenu: vi.fn(),
+          onOpenList: vi.fn(),
           version: "1.0",
-          ready: true,
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
           onOpenSettings: vi.fn(),
@@ -204,8 +202,8 @@ describe("工具栏", () => {
     expect(container.textContent).toContain("画板包");
   });
 
-  // #181：更新入口在首页版本号旁边，不再藏在高级设置里。
-  it("版本号旁边有检查更新入口", async () => {
+  // #269：版本号与更新入口合并为同一个可点按钮。
+  it("版本号就是更新入口", async () => {
     await act(async () =>
       dom.render(
         createElement(ShellProvider, { port: createFakePort(), children: createElement(AppToolbar, {
@@ -214,9 +212,10 @@ describe("工具栏", () => {
           runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
           packMenuOpen: false,
           packMenuDisabled: false,
+          boardListOpen: false,
           onTogglePackMenu: vi.fn(),
+          onOpenList: vi.fn(),
           version: "1.6.6",
-          ready: true,
           onOpenChangelog: vi.fn(),
           settingsLoaded: true,
           onOpenSettings: vi.fn(),
@@ -224,13 +223,42 @@ describe("工具栏", () => {
         }) }),
       ),
     );
-    const version = container.querySelector(".topbar-version");
-    const entry = container.querySelector(".topbar-update");
-    expect(version).not.toBeNull();
-    expect(entry).not.toBeNull();
-    // 入口紧挨着版本号：两者在同一个工具栏右侧容器里，版本号在前。
-    expect(container.textContent?.indexOf("1.6.6")).toBeLessThan(container.textContent?.indexOf("检查更新") ?? Infinity);
-    expect(entry?.textContent).toContain("检查更新");
+    const entry = container.querySelector<HTMLElement>(".topbar-version");
+    expect(entry?.textContent).toBe("1.6.6");
+    expect(entry?.getAttribute("aria-label")).toContain("当前版本 1.6.6");
+    expect(container.querySelectorAll(".topbar-update-btn")).toHaveLength(1);
+  });
+
+  // #264：齿轮按钮本身是入口契约；尺寸与焦点环沿用共享 .icon-button，弹窗流程由 App 层守。
+  it("高级设置入口只有齿轮图标，仍有无障碍名称、提示与焦点", async () => {
+    await act(async () =>
+      dom.render(
+        createElement(ShellProvider, { port: createFakePort(), children: createElement(AppToolbar, {
+          setToolbarSlot: vi.fn(),
+          canvasReady: false,
+          runIndicator: { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() },
+          packMenuOpen: false,
+          packMenuDisabled: false,
+          boardListOpen: false,
+          onTogglePackMenu: vi.fn(),
+          onOpenList: vi.fn(),
+          version: "1.6.6",
+          onOpenChangelog: vi.fn(),
+          settingsLoaded: true,
+          onOpenSettings: vi.fn(),
+          onOpenFeedback: vi.fn(), update: updateControl(), theme: themeControl(),
+        }) }),
+      ),
+    );
+    const button = container.querySelector<HTMLButtonElement>("button[aria-label='高级设置']");
+    expect(button).not.toBeNull();
+    expect(button?.textContent?.trim()).toBe("⚙");
+    expect(button?.getAttribute("title")).toBe("高级设置");
+    expect(button?.classList.contains("icon-button")).toBe(true);
+    expect(button?.disabled).toBe(false);
+    expect(button?.tabIndex).toBe(0);
+    button?.focus();
+    expect(document.activeElement).toBe(button);
   });
 
 });
@@ -241,7 +269,7 @@ describe("工作台外壳的接线", () => {
   const viewOf = (patch: Partial<AppView> = {}): AppView => ({
     active: undefined, openState: "ok", activeArchived: false, archived: null, failures: [],
     undoLabel: null, redoLabel: null, boardNotice: null, exportDisabled: null,
-    downloadDisabled: null, importDisabled: null, titleOf: () => "a", ...patch,
+    importDisabled: null, titleOf: () => "a", ...patch,
   });
   const indicator = { active: [], activity: { busy: false, pending: 0, reading: 0, waiting: 0, running: 0, backoff: 0, boards: [] }, titleOf: () => "", onJump: vi.fn(), onCancelCopy: vi.fn(), onCancelWaiting: vi.fn() };
 
@@ -287,12 +315,11 @@ describe("工作台外壳的接线", () => {
     expect(slot()?.querySelector('[role="toolbar"]')).toBeNull();
     await show(createFakePort(), { view: viewOf({ openState: "none" }) });
     expect(slot()?.querySelector('[role="toolbar"]')?.getAttribute("aria-label")).toBe("画板工具栏");
-    const prompt = [...(slot()?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.includes("＋ 提示词"));
-    expect(prompt?.getAttribute("aria-disabled")).toBe("true");
+    // 工具栏的具体入口由 BoardToolbar 契约守护；这里只确认无画板时仍有公共槽位。
   });
 
   it("没有数据根时画板包菜单按钮禁用，有则可用", async () => {
-    const toggle = () => container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    const toggle = () => container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
     await show(createFakePort(), { userRoot: null });
     expect(toggle().disabled).toBe(true);
     await show(createFakePort(), { userRoot: "/root" });
@@ -300,7 +327,7 @@ describe("工作台外壳的接线", () => {
   });
 
   it("菜单开合反映在 aria-expanded 上", async () => {
-    const toggle = () => container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    const toggle = () => container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
     await show(createFakePort(), { packMenu: { x: 1, y: 2 } });
     expect(toggle().getAttribute("aria-expanded")).toBe("true");
     await show(createFakePort(), { packMenu: null });

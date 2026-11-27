@@ -1,38 +1,73 @@
-// 画板在真实浏览器里启动：断言的是「用户看得见的画布」，不只是外壳。
-// 外壳出现但画布没挂载，正是加载失败或整页白屏的样子；这里要求画布根元素与真实节点都渲染出来。
+// 画板在真实浏览器里启动，并验证精简工具栏后的键盘菜单链路（#261 / #267）。
+// 这里只跑用户可观察行为：没有新建按钮，Shift+F10 打开菜单，方向键导航、回车建真实节点，Esc 返回焦点。
+import { mkdirSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
-test("画板在真实浏览器里启动：顶栏版本、画布根元素与真实节点都可见", async ({ page }) => {
+test("真实浏览器：精简工具栏与画板菜单键盘链路", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
 
   await page.goto("/e2e.html");
 
   // 顶栏版本按钮由 Root 拿到的 port.ui.version() 决定，替身固定返回 9.9.9。
-  await expect(page.getByRole("button", { name: "Kacha 9.9.9" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /当前版本 9\.9\.9/ })).toBeVisible();
 
   // 工作台外壳挂起来了（没有停在"正在加载…"或致命错误）。
   await expect(page.locator(".app")).toBeVisible();
   await expect(page.locator(".fatal")).toHaveCount(0);
 
-  // 画布真的挂上了：根元素可见，React Flow 的视口也在。
-  // 只断言 .app 时，画布没挂载（白屏的下半截）照样能绿；这两条才是「画布存在」的证据。
+  // 当前能力截图：最终精简后的工作台外观。
+  mkdirSync("../docs/screenshots", { recursive: true });
+  await page.screenshot({ path: "../docs/screenshots/app-canvas.png", animations: "disabled" });
+
   const canvas = page.locator(".canvas");
   await expect(canvas).toBeVisible();
   await expect(canvas.locator(".react-flow")).toBeVisible();
-
-  // 样式表真的加载了。只断言元素存在时，整页零样式（CSS 崩溃、白屏、忘记引入样式）照样能绿：
-  // .canvas 的 position 来自 src/styles.css，.react-flow__node 的 position 来自
-  // @xyflow/react/dist/style.css；两个样式表缺一个，下面两条就会退回 static。
   await expect(canvas).toHaveCSS("position", "absolute");
 
-  // 新建一个提示词节点：画布不只是空壳，节点真的渲染出来且可见。
-  await page.getByRole("button", { name: "＋ 提示词" }).click();
+  const toolbar = page.getByRole("toolbar", { name: "画板工具栏" });
+  await expect(toolbar).toBeVisible();
+  await expect(toolbar.getByRole("button").first()).toHaveAttribute("aria-label", "撤销");
+  await expect(page.getByRole("button", { name: "＋ 提示词" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "＋ 参考图…" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /＋ 生成任务/ })).toHaveCount(0);
+  await expect(page.locator(".toolbar-model")).toHaveCount(0);
+
+  // 焦点落在画布后，Shift+F10 打开的是画板菜单；菜单首项自动聚焦。
+  await canvas.focus();
+  await expect(canvas).toBeFocused();
+  await page.keyboard.press("Shift+F10");
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  const newPrompt = page.getByRole("menuitem", { name: "新建提示词" });
+  const newTask = page.getByRole("menuitem", { name: "新建生成任务" });
+  await expect(newPrompt).toBeFocused();
+
+  await page.keyboard.press("ArrowDown");
+  await expect(newTask).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(page.getByRole("menuitem", { name: "添加参考图…" })).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(newPrompt).toBeFocused();
+  await page.keyboard.press("Enter");
+
+  await expect(menu).toHaveCount(0);
+  await expect(canvas).toBeFocused();
   const node = canvas.locator(".react-flow__node");
   await expect(node).toHaveCount(1);
   await expect(node).toBeVisible();
-  // 节点的 position 来自 @xyflow/react 的样式表：它没被加载时节点会退回 static，布局随之散架。
   await expect(node).toHaveCSS("position", "absolute");
+
+  // 当前能力截图：精简后的工具栏与键盘菜单创建的真实节点。
+  mkdirSync("../docs/screenshots", { recursive: true });
+  await page.screenshot({ path: "../docs/screenshots/workbench-toolbar.png", animations: "disabled" });
+
+  // Esc 关闭同一个键盘菜单，并把焦点还给画布。
+  await page.keyboard.press("Shift+F10");
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(canvas).toBeFocused();
 
   expect(errors).toEqual([]);
 });
