@@ -126,7 +126,11 @@ export function harness(opts: { concurrency?: number; imageCodec?: RunDeps["imag
   };
 }
 
-/** 让挂起的 promise 链（含 SHA-256 摘要）走完。 */
+/** 让挂起的 promise 链（含 SHA-256 摘要）走完；优先用 setImmediate 避免 Windows 15.6ms 定时器精度空转。 */
 export async function settle() {
-  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+  const yieldTick =
+    typeof setImmediate === "function"
+      ? (r: () => void) => setImmediate(r)
+      : (r: () => void) => setTimeout(r, 0);
+  for (let i = 0; i < 20; i++) await new Promise<void>(yieldTick);
 }
